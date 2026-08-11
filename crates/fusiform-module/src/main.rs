@@ -88,7 +88,7 @@ impl ModuleHandler for Fusiform {
             };
         };
 
-        match route::serve_catalog_get(&store, &body) {
+        match route::serve_tool_call(&store, &body) {
             Ok(response) => match serde_json::to_vec(&response) {
                 Ok(bytes) => HandlerOutcome::Response(bytes),
                 Err(e) => HandlerOutcome::Error {

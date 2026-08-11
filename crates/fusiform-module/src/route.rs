@@ -128,7 +128,74 @@ impl RouteError {
     }
 }
 
+/// The tool-call envelope a `ToolProvider` receives on the wire.
+///
+/// A tool call arrives as `{"name": "<tool>", "arguments": {...}}` and the
+/// module gets it intact — subc does not unwrap it. Verified against a live
+/// document rather than assumed: passing the envelope straight to the request
+/// parser is refused with `unknown field "name"`, because the request type
+/// denies unknown fields.
+///
+/// The library's own echo example parses the body directly as its request,
+/// which works only because its match falls through to a default arm. A type
+/// that refuses unknown fields — which is the behaviour worth having — makes
+/// the envelope mandatory.
+#[derive(Debug, Deserialize)]
+struct ToolCall {
+    name: String,
+    #[serde(default)]
+    arguments: serde_json::Value,
+}
+
+/// The tool this module serves.
+pub const TOOL_NAME: &str = "catalog.get";
+
+/// Serve one tool call, unwrapping the wire envelope.
+///
+/// This is what the daemon handler calls. The envelope is unwrapped here rather
+/// than in the handler so the wire contract is covered by a test that needs no
+/// socket.
+pub fn serve_tool_call(
+    store: &CatalogStore,
+    body: &[u8],
+) -> Result<CatalogGetResponse, RouteError> {
+    // An empty body is a bare call with no arguments.
+    if body.is_empty() {
+        return serve_catalog_get(store, b"");
+    }
+
+    let call: ToolCall = serde_json::from_slice(body).map_err(|e| {
+        RouteError::bad_request(format!(
+            "a tool call must be {{\"name\": \"{TOOL_NAME}\", \"arguments\": {{...}}}}: {e}"
+        ))
+    })?;
+
+    if call.name != TOOL_NAME {
+        // Named explicitly rather than served anyway. A module that answers to
+        // any tool name will keep answering after a consumer's typo, and the
+        // consumer will believe it called something else.
+        return Err(RouteError::bad_request(format!(
+            "unknown tool {:?}; fusiform serves {TOOL_NAME:?}",
+            call.name
+        )));
+    }
+
+    // `null` arguments and an absent `arguments` key both mean "no arguments".
+    let args = if call.arguments.is_null() {
+        Vec::new()
+    } else {
+        serde_json::to_vec(&call.arguments).map_err(|e| {
+            RouteError::bad_request(format!("tool arguments did not re-serialize: {e}"))
+        })?
+    };
+
+    serve_catalog_get(store, &args)
+}
+
 /// Serve one `catalog.get` request against the store.
+///
+/// Takes the ARGUMENTS object, not the tool-call envelope. Callers on the wire
+/// path want [`serve_tool_call`].
 pub fn serve_catalog_get(
     store: &CatalogStore,
     body: &[u8],

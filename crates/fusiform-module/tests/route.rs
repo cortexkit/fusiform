@@ -333,3 +333,59 @@ fn the_response_carries_the_catalog_version() {
 
     assert_eq!(get(&f, "{}").catalog_version, before + 1);
 }
+
+/// The wire envelope is unwrapped, and a wrong tool name is refused.
+///
+/// A tool call arrives as `{"name": ..., "arguments": {...}}` and the module
+/// receives it intact — subc does not unwrap it. Passing that straight to the
+/// request parser is refused with `unknown field "name"`, which is how this was
+/// found: the handler was wired to the argument parser and would have refused
+/// every real call.
+#[test]
+fn the_tool_call_envelope_is_unwrapped() {
+    let f = fixture();
+
+    let wrapped = fusiform_module::route::serve_tool_call(
+        &f.store,
+        br#"{"name": "catalog.get", "arguments": {}}"#,
+    )
+    .expect("a well-formed tool call must be served");
+    assert!(wrapped.model_count() > 10);
+
+    // Arguments inside the envelope are honoured, so the unwrap is real rather
+    // than the envelope being discarded.
+    let filtered = fusiform_module::route::serve_tool_call(
+        &f.store,
+        br#"{"name": "catalog.get", "arguments": {"fact_prefixes": ["rate."]}}"#,
+    )
+    .expect("arguments must pass through");
+    assert!(filtered.fact_count() < wrapped.fact_count());
+    for facts in filtered.models.values() {
+        for key in facts.keys() {
+            assert!(key.starts_with("rate."), "arguments were ignored: {key}");
+        }
+    }
+
+    // A bare call with no arguments key at all.
+    let bare = fusiform_module::route::serve_tool_call(&f.store, br#"{"name": "catalog.get"}"#)
+        .expect("a call with no arguments is a call for everything");
+    assert_eq!(bare.model_count(), wrapped.model_count());
+
+    // A different tool name is refused rather than served anyway: a module that
+    // answers to any name keeps answering after a consumer's typo.
+    let err = fusiform_module::route::serve_tool_call(
+        &f.store,
+        br#"{"name": "catalog.list", "arguments": {}}"#,
+    )
+    .expect_err("an unknown tool must be refused");
+    assert_eq!(err.code, "bad_request");
+    assert!(err.message.contains("catalog.list"), "{}", err.message);
+
+    // And a malformed argument inside a well-formed envelope still fails.
+    let err = fusiform_module::route::serve_tool_call(
+        &f.store,
+        br#"{"name": "catalog.get", "arguments": {"fact_prefix": ["rate."]}}"#,
+    )
+    .expect_err("a misspelled argument must still be refused");
+    assert_eq!(err.code, "bad_request");
+}
