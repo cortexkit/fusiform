@@ -66,7 +66,7 @@ Verified against the working tree at `1ff33f9`, section by section:
 | §7 Bootstrap | **built** — embedded snapshot, `scripts/refresh-seed.sh`, verified on a fresh install |
 | §8 Two hashes | **built** — split by audience, both recorded per observation |
 | §9 Store | **built** — managed SQLite from the HELLO_ACK descriptor |
-| §9 Engram enrollment | **not built** — no `engram-catalog.json` exists. The §9 text previously said this enrollment carried a `restore-with-monotonic-fence`; that mechanism does not exist in engram, and the counter it was supposed to protect is now restore-invariant by construction instead (§10). Enrolling remains worth doing for backup coverage; it is no longer load-bearing for correctness. |
+| §9 Engram enrollment | **built** — `crates/fusiform-module/data/engram-catalog.json`, validated in CI with engram's own parser, installed by `scripts/install-enrollment.sh`. See `docs/backup-enrollment.md`. Not load-bearing for the version counter: the §9 text once claimed a `restore-with-monotonic-fence` here, that mechanism does not exist, and the counter is restore-invariant by construction instead (§10). |
 | §10 Serve | **built** — `catalog.get`, `catalog.history`, `catalog.status` |
 | §10 Push | **not built** — no push code exists. Everything in that part of §10 (envelope shapes, discriminated acknowledgement, ordering, high-water re-sync) is specification, including the parts settled with consumers. |
 | §10 Payload boundary | **not built** — the served types have not moved to `cortexkit-model-catalog` |

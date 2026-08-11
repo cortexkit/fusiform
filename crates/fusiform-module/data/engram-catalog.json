@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "module_id": "fusiform",
+  "entries": [
+    {
+      "entry_id": "fusiform/store",
+      "class": "portable",
+      "mechanism": "whole-db",
+      "path": "store.db",
+      "writer_interaction": "backup-api-live"
+    }
+  ]
+}
