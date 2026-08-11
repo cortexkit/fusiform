@@ -12,6 +12,7 @@ pub mod fetch;
 pub mod health;
 pub mod loop_;
 pub mod route;
+pub mod seed;
 pub mod signals;
 
 use subc_protocol::manifest::{

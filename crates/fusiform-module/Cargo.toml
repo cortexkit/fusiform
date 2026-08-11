@@ -29,3 +29,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sy
 
 [dev-dependencies]
 tempfile = "3"
+# Verifies the compiled-in snapshot against the sha256 the refresh script
+# recorded. Must be sha256 specifically: checking a different hash would verify
+# the test's own arithmetic rather than what the script wrote.
+sha2 = "0.10"

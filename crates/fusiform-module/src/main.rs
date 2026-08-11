@@ -30,6 +30,7 @@ use fusiform_module::fetch::{Fetcher, SourceEndpoint};
 use fusiform_module::health;
 use fusiform_module::loop_::{tick, PollContext, POLL_INTERVAL_MS};
 use fusiform_module::route;
+use fusiform_module::seed;
 use fusiform_module::signals::Signals;
 
 #[tokio::main]
@@ -125,6 +126,34 @@ impl ModuleHandler for Fusiform {
         };
 
         self.signals.store_opened();
+
+        // Seed an empty store before anything reads it. A fresh install with no
+        // network must be able to answer, and an empty catalog is a wrong
+        // answer that looks like a legitimate one: a consumer receiving zero
+        // models cannot tell it from "the upstream describes nothing".
+        //
+        // Before the signal priming below, so the adopted instant is the
+        // snapshot's fetch time rather than nothing.
+        match seed::seed_if_empty(&store) {
+            Ok(seed::SeedOutcome::Seeded {
+                eras_written,
+                model_count,
+                fetched_at,
+            }) => eprintln!(
+                "fusiform: seeded {model_count} models ({eras_written} eras) from the \
+                 embedded snapshot fetched at {}",
+                fetched_at.0
+            ),
+            Ok(seed::SeedOutcome::AlreadyPopulated { existing_eras }) => {
+                eprintln!("fusiform: store already holds {existing_eras} eras; seed not applied")
+            }
+            Err(e) => {
+                // Not fatal. A module that cannot seed can still poll, and the
+                // first fetch will populate the store — but until then it
+                // serves nothing, so this must be loud rather than swallowed.
+                eprintln!("fusiform: could not seed the store: {e}");
+            }
+        }
 
         // Adopt the catalog's real age before the loop starts. The staleness
         // signal lives in an atomic, so a restart empties it — and a module

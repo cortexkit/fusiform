@@ -42,10 +42,16 @@ const SCHEMA_V1: &str = r#"
 -- One row per poll. Every poll, including failures and 304s.
 --
 -- `outcome` is the closed vocabulary from the domain: changed / unchanged /
--- not_modified / failed. A failed poll observed NOTHING, so it must never be
--- used as the near edge of an observation window; the distinction is stored
--- rather than derived because deriving it later requires knowing what a
+-- not_modified / failed / seeded. A failed poll observed NOTHING, so it must
+-- never be used as the near edge of an observation window; the distinction is
+-- stored rather than derived because deriving it later requires knowing what a
 -- historical failure meant.
+--
+-- `seeded` is not a poll. It records the instant the embedded snapshot was
+-- FETCHED by the refresh script, so the first real fetch that disagrees has an
+-- honest left edge to bound its window against. Without it that fetch has no
+-- prior observation and must be written as another seed boundary, which claims
+-- the store came into existence twice.
 CREATE TABLE observation (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     source            TEXT    NOT NULL,
@@ -76,7 +82,12 @@ CREATE INDEX observation_by_source_time
 -- predicate, so a caller cannot forget the distinction.
 CREATE INDEX observation_confirming
     ON observation (source, observed_at_ms DESC)
-    WHERE outcome IN ('changed', 'unchanged', 'not_modified');
+    WHERE outcome IN ('changed', 'unchanged', 'not_modified', 'seeded');
+-- This list is the third statement of one rule (the domain's
+-- CONFIRMING_OUTCOMES and the query built from it are the others). DDL cannot
+-- be built from a Rust constant, so `the_schema_index_matches_the_domain_list`
+-- holds the two together; without it, adding an outcome updates the query and
+-- silently leaves this index behind.
 
 -- One row per era: a fact held a value over an interval.
 --

@@ -273,16 +273,18 @@ impl CatalogStore {
         source: SourceId,
         instant: Timestamp,
     ) -> Result<Option<Timestamp>, CatalogError> {
+        let sql = format!(
+            "SELECT observed_at_ms FROM observation \
+             WHERE source = ?1 \
+               AND observed_at_ms < ?2 \
+               AND outcome IN ({}) \
+             ORDER BY observed_at_ms DESC LIMIT 1",
+            confirming_in_list()
+        );
         let ts = self.inner.with_conn(|conn| {
-            conn.query_row(
-                "SELECT observed_at_ms FROM observation \
-                 WHERE source = ?1 \
-                   AND observed_at_ms < ?2 \
-                   AND outcome IN ('changed', 'unchanged', 'not_modified') \
-                 ORDER BY observed_at_ms DESC LIMIT 1",
-                params![source.as_str(), instant.0],
-                |r| r.get::<_, i64>(0),
-            )
+            conn.query_row(&sql, params![source.as_str(), instant.0], |r| {
+                r.get::<_, i64>(0)
+            })
             .optional()
         })?;
         Ok(ts.map(Timestamp))
@@ -676,18 +678,30 @@ fn boundary_columns(kind: &BoundaryKind) -> (&'static str, Option<CorrectionColu
     }
 }
 
+/// The confirming outcomes as a SQL literal list.
+///
+/// Rendered from the domain's `CONFIRMING_OUTCOMES` rather than written out, so
+/// adding an outcome cannot leave the query behind. Safe to interpolate: every
+/// element is a compile-time constant from a closed enum, never user input.
+fn confirming_in_list() -> String {
+    fusiform_core::CONFIRMING_OUTCOMES
+        .iter()
+        .map(|o| format!("'{o}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn outcome_columns(outcome: &ObservationOutcome) -> (&'static str, Option<&'static str>) {
-    match outcome {
-        ObservationOutcome::Changed { .. } => ("changed", None),
-        ObservationOutcome::Unchanged => ("unchanged", None),
-        ObservationOutcome::NotModified => ("not_modified", None),
-        ObservationOutcome::Failed { class } => (
-            "failed",
-            Some(match class {
-                FailureClass::Network => "network",
-                FailureClass::HttpStatus => "http_status",
-                FailureClass::Parse => "parse",
-            }),
-        ),
-    }
+    // The outcome word comes from the domain's own spelling, so a new variant
+    // cannot be stored under a name the queries do not know. Only the failure
+    // class is decided here, because only a failure has one.
+    let failure_class = match outcome {
+        ObservationOutcome::Failed { class } => Some(match class {
+            FailureClass::Network => "network",
+            FailureClass::HttpStatus => "http_status",
+            FailureClass::Parse => "parse",
+        }),
+        _ => None,
+    };
+    (outcome.wire_str(), failure_class)
 }

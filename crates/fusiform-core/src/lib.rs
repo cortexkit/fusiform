@@ -347,6 +347,25 @@ pub enum ObservationOutcome {
     NotModified,
     /// Nothing was observed. This must not narrow any window.
     Failed { class: FailureClass },
+    /// The embedded snapshot was loaded into an empty store.
+    ///
+    /// Not a poll, and that is why it has its own name. The instant is when the
+    /// SNAPSHOT WAS FETCHED by the refresh script, not when the store was
+    /// seeded — the upstream's content is known as of the former, and claiming
+    /// the latter would assert fusiform looked at the upstream at install time.
+    ///
+    /// It confirms current values, so it can bound a window: the first real
+    /// fetch that disagrees genuinely changed somewhere between the snapshot
+    /// being cut and that poll. Without this the first disagreeing fetch has no
+    /// left edge and has to be recorded as another `Seed` boundary, which
+    /// claims the store came into existence twice and loses the link to the
+    /// observation that detected the change.
+    ///
+    /// A separate variant rather than `Changed` with a detail string, because
+    /// every other outcome is a POLL outcome. A consumer counting polls, or a
+    /// future health check asking whether the loop is alive, must not be able
+    /// to mistake a build-time fetch for a runtime one.
+    Seeded,
 }
 
 impl ObservationOutcome {
@@ -356,14 +375,42 @@ impl ObservationOutcome {
     /// The distinction is the whole point of recording failures separately: a
     /// poll that failed is not a poll that returned nothing.
     pub fn confirms_current_values(&self) -> bool {
-        matches!(
-            self,
-            ObservationOutcome::Changed { .. }
-                | ObservationOutcome::Unchanged
-                | ObservationOutcome::NotModified
-        )
+        CONFIRMING_OUTCOMES.contains(&self.wire_str())
+    }
+
+    /// The stored spelling of this outcome.
+    ///
+    /// One function rather than a match at each storage site: the wire string
+    /// is what the database holds and what every query compares against, so it
+    /// must have exactly one definition.
+    pub const fn wire_str(&self) -> &'static str {
+        match self {
+            ObservationOutcome::Changed { .. } => "changed",
+            ObservationOutcome::Unchanged => "unchanged",
+            ObservationOutcome::NotModified => "not_modified",
+            ObservationOutcome::Seeded => "seeded",
+            ObservationOutcome::Failed { .. } => "failed",
+        }
     }
 }
+
+/// The outcomes that CONFIRM the currently held values.
+///
+/// The single definition of the rule. Both the domain predicate above and the
+/// store's SQL are built from this array, because the alternative — a `matches!`
+/// in Rust and an `IN (...)` list in a query — is one belief written twice with
+/// nothing comparing the two. A mutation to the Rust half survived exactly that
+/// way: the helper was wrong and every test still passed, because the behaviour
+/// lived in the SQL.
+///
+/// Membership rule: an outcome belongs here when fusiform LOOKED and learned
+/// what the upstream currently says. A failed poll learned nothing. A seed
+/// learned it at build time, which is still learning it.
+pub const CONFIRMING_OUTCOMES: &[&str] = &["changed", "unchanged", "not_modified", "seeded"];
+
+/// Every outcome's wire string, so a test can assert the two lists partition
+/// the enum rather than drifting from it.
+pub const ALL_OUTCOMES: &[&str] = &["changed", "unchanged", "not_modified", "seeded", "failed"];
 
 /// Why an observation failed. Coarse on purpose: a consumer branches on the
 /// class, and producer detail travels alongside for diagnostics.

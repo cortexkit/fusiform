@@ -28,13 +28,16 @@ fn store(dir: &tempfile::TempDir) -> CatalogStore {
     .unwrap()
 }
 
-/// Seeding writes eras and records no observation.
+/// A `Seed` boundary written through the store primitive carries no window.
 ///
-/// The second half is the load-bearing one: a seed is not a poll. Recording an
-/// observation for it would claim fusiform looked at the upstream at that
-/// instant, when in fact someone ran a refresh script at build time.
+/// This exercises `plan_ingest` directly, below the module's seeding path. The
+/// module DOES record an observation when it seeds — stamped at the instant the
+/// snapshot was fetched, so a later disagreeing fetch has a left edge (see
+/// `fusiform-module/tests/bootstrap.rs`). What is checked here is narrower and
+/// still load-bearing: the era rows themselves claim no observation and no
+/// window, whatever wrote them.
 #[test]
-fn seeding_writes_eras_but_records_no_observation() {
+fn a_seed_boundary_claims_no_window() {
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
     let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
@@ -43,11 +46,10 @@ fn seeding_writes_eras_but_records_no_observation() {
     let written = store.append_eras(&plan.eras).unwrap();
     assert!(written > 100, "the seed must populate the store");
 
+    // Nothing recorded an observation here because nothing was asked to: this
+    // is the store primitive, below the module's seeding path.
     let polls = store.recent_observations(SourceId::ModelsDev, 10).unwrap();
-    assert!(
-        polls.is_empty(),
-        "a seed is not a poll and must record no observation"
-    );
+    assert!(polls.is_empty(), "plan_ingest does not record observations");
 
     // And the seeded eras carry no window, which is the honest answer: fusiform
     // has no prior observation of anything.
@@ -107,33 +109,35 @@ fn a_first_fetch_agreeing_with_the_seed_writes_nothing() {
     );
 }
 
-/// PROBE: what kind does a disagreeing fact get on the first fetch after a seed?
+/// Without a prior observation, a disagreeing fetch cannot claim a window.
 ///
-/// Prints rather than asserts. The point is to observe what the shipped code
-/// does before deciding whether it is right, because the decision writes
-/// history that a later fix can only reach through a Correction.
+/// The defect this file was written to find, kept as a regression guard. A
+/// store holding eras but NO observation leaves a later disagreeing fetch with
+/// no left edge, so an observed boundary at that instant is unwritable.
+///
+/// The module's seeding path avoids this by recording a `Seeded` observation
+/// (see `fusiform-module/tests/bootstrap.rs`). This asserts the underlying
+/// mechanism, so a change that stops recording that observation fails here with
+/// an explanation rather than silently producing a second seed boundary that
+/// claims the store came into existence twice.
 #[test]
-fn probe_what_a_disagreeing_first_fetch_produces() {
+fn eras_without_an_observation_leave_a_later_fetch_with_no_window() {
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
     let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
 
-    let seed = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
-    store.append_eras(&seed.eras).unwrap();
+    // Eras with no observation: what the module produced before it recorded a
+    // seeded observation.
+    let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
+    store.append_eras(&plan.eras).unwrap();
 
-    // The upstream moved between the snapshot being cut and this install
-    // running: a real case, since the seed is compiled in at release time.
-    let mut doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
-    doc.get_mut("anthropic")
-        .and_then(|p| p.get_mut("models"))
-        .and_then(|m| m.get_mut("claude-sonnet-4-5"))
-        .and_then(|m| m.get_mut("cost"))
-        .and_then(|c| c.as_object_mut())
-        .unwrap()
-        .insert("input".to_string(), serde_json::json!(2.5));
-    let moved = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
-        .unwrap()
-        .catalog;
+    let prior = store
+        .last_confirming_observation_before(SourceId::ModelsDev, Timestamp(5_000))
+        .unwrap();
+    assert_eq!(
+        prior, None,
+        "eras alone supply no window edge; only an observation can"
+    );
 
     let obs = store
         .record_observation(&NewObservation {
@@ -148,51 +152,127 @@ fn probe_what_a_disagreeing_first_fetch_produces() {
         })
         .unwrap();
 
-    // The rule the poll loop applies: no prior CONFIRMING observation strictly
-    // before this instant means no left edge, so the boundary is a Seed.
-    let prior = store
-        .last_confirming_observation_before(SourceId::ModelsDev, Timestamp(5_000))
-        .unwrap();
-    eprintln!("prior confirming observation before the first fetch: {prior:?}");
+    let mut doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    doc.get_mut("anthropic")
+        .and_then(|p| p.get_mut("models"))
+        .and_then(|m| m.get_mut("claude-sonnet-4-5"))
+        .and_then(|m| m.get_mut("cost"))
+        .and_then(|c| c.as_object_mut())
+        .unwrap()
+        .insert("input".to_string(), serde_json::json!(2.5));
+    let moved = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+        .unwrap()
+        .catalog;
 
-    let kind = if prior.is_some() {
-        BoundaryKind::Observed
-    } else {
-        BoundaryKind::Seed
-    };
-    eprintln!("boundary kind the loop would choose: {kind:?}");
-
+    // The observation at 5000 is not STRICTLY BEFORE itself, so it supplies no
+    // edge for a boundary at the same instant. An observed boundary is
+    // therefore refused rather than written with an empty window.
     let plan = plan_ingest(
         &store,
         &moved,
         Timestamp(5_000),
-        kind.clone(),
-        match kind {
-            BoundaryKind::Seed => None,
-            _ => Some(obs),
-        },
+        BoundaryKind::Observed,
+        Some(obs),
     )
     .unwrap();
-    eprintln!(
-        "eras written by the disagreeing fetch: {} (changed_facts={})",
-        plan.eras.len(),
-        plan.changed_facts
+    let result = store.append_eras(&plan.eras);
+    assert!(
+        result.is_err(),
+        "an observed boundary with no prior observation must be refused, not \
+         written with an empty window"
     );
-    store.append_eras(&plan.eras).unwrap();
+}
 
-    let history = store
-        .fact_history(
-            SourceId::ModelsDev,
-            "anthropic",
-            "claude-sonnet-4-5",
-            &FactKey::rate(TokenClass::Input),
-        )
-        .unwrap();
-    eprintln!("\nhistory of rate.input as an operator would read it:");
-    for row in &history {
-        eprintln!(
-            "  boundary={} kind={} window_from={:?} value={}",
-            row.boundary_at.0, row.boundary_kind, row.prior_observation_at, row.value_json
+/// The three statements of "which outcomes confirm current values" agree.
+///
+/// The rule lives in three places by necessity: the domain's
+/// `CONFIRMING_OUTCOMES`, the query built from it, and the schema's partial
+/// index — DDL that cannot be built from a Rust constant. The first two are now
+/// one source; this holds the third against it.
+///
+/// Found by a surviving mutation: making the domain predicate wrong changed no
+/// test result, because every real decision was made in SQL. One belief in
+/// three artifacts, with nothing comparing them.
+#[test]
+fn the_schema_index_matches_the_domain_list() {
+    let ddl = fusiform_store::schema::MIGRATIONS
+        .iter()
+        .map(|m| m.statements)
+        .collect::<String>();
+
+    let start = ddl
+        .find("CREATE INDEX observation_confirming")
+        .expect("the partial index must exist");
+    let clause = &ddl[start..];
+    let clause = &clause[..clause.find(';').expect("the statement must terminate")];
+
+    for outcome in fusiform_core::CONFIRMING_OUTCOMES {
+        assert!(
+            clause.contains(&format!("'{outcome}'")),
+            "the confirming index omits {outcome:?}, so a query using it would \
+             skip those rows:\n{clause}"
         );
     }
+
+    // And the reverse: an outcome in the index that is NOT confirming would
+    // make a failed poll act as a window edge.
+    for outcome in fusiform_core::ALL_OUTCOMES {
+        if fusiform_core::CONFIRMING_OUTCOMES.contains(outcome) {
+            continue;
+        }
+        assert!(
+            !clause.contains(&format!("'{outcome}'")),
+            "the confirming index includes {outcome:?}, which does not confirm \
+             anything:\n{clause}"
+        );
+    }
+}
+
+/// Every enum variant has a wire string, and the two lists partition it.
+///
+/// `ALL_OUTCOMES` is written by hand, so it can fall behind the enum. This
+/// walks real values through `wire_str` and checks the constant covers exactly
+/// what the code produces.
+#[test]
+fn the_outcome_lists_cover_every_variant() {
+    use fusiform_core::{FailureClass, ObservationOutcome};
+
+    let every = [
+        ObservationOutcome::Changed { snapshot_seq: 1 },
+        ObservationOutcome::Unchanged,
+        ObservationOutcome::NotModified,
+        ObservationOutcome::Seeded,
+        ObservationOutcome::Failed {
+            class: FailureClass::Network,
+        },
+    ];
+
+    let produced: Vec<&str> = every.iter().map(|o| o.wire_str()).collect();
+    assert_eq!(
+        produced.len(),
+        fusiform_core::ALL_OUTCOMES.len(),
+        "ALL_OUTCOMES has drifted from the enum: {produced:?}"
+    );
+    for wire in &produced {
+        assert!(
+            fusiform_core::ALL_OUTCOMES.contains(wire),
+            "{wire:?} is produced by the enum but missing from ALL_OUTCOMES"
+        );
+    }
+
+    // The predicate and the list agree for every variant.
+    for outcome in &every {
+        assert_eq!(
+            outcome.confirms_current_values(),
+            fusiform_core::CONFIRMING_OUTCOMES.contains(&outcome.wire_str()),
+            "the predicate and the list disagree about {:?}",
+            outcome.wire_str()
+        );
+    }
+
+    // A failed poll confirms nothing: the invariant the whole split exists for.
+    assert!(!ObservationOutcome::Failed {
+        class: FailureClass::Parse
+    }
+    .confirms_current_values());
 }
