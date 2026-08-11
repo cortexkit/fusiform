@@ -123,9 +123,19 @@ v1 ships no non-LLM source. Do not build speculative fetchers.
    pick the upstream then — no single catalog covers it today; expect
    multiple sources normalized into one schema (that is the domain argument
    that justified this module).
-3. **Astrocyte consolidation.** Astrocyte's models.dev price lane moves to
-   fusiform-served data when fusiform is stable; coordinate with ASTRO, do
-   not force.
+3. **Astrocyte consolidation and the retirement of `cortexkit-model-catalog`.**
+   Astrocyte's models.dev price lane moves to fusiform-served data when
+   fusiform is stable; coordinate with ASTRO, do not force. End state
+   (Ufuk, 2026-08-11): the commons crate `cortexkit-model-catalog` retires
+   in its CURRENT role (shared mirror of raw models.dev shapes) once both
+   of its consumers (broca, astrocyte) read fusiform-served data — but the
+   SLOT it fills persists: fusiform's push/read wire schema needs one
+   published type both consumers compile against (fleet cross-repo payload
+   rule), and the cheapest shape is a major-version turnover of that same
+   crate in commons rather than a new dependency edge. Retirement is the
+   TAIL of the consolidation, never a milestone on its own — broca's
+   no-network seed embed parses with the current types until the new ones
+   serve it.
 
 ## Non-goals
 
