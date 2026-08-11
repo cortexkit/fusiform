@@ -1,7 +1,11 @@
 # Fusiform — schema and store, design note 1
 
-Status: **draft for review**, 2026-08-11. Fusiform has no code yet; this note
-settles the data model before any is written.
+Status: **implemented in part**, last reconciled 2026-08-11 against commit
+`1ff33f9`. This note was written before any code existed and settled the data
+model first; most of what it specifies now runs. **Read §0.1 before citing any
+sentence here as a fact about the system** — the same sentence is a measured
+fact in one section and an unbuilt intention in another, and nothing in the
+prose distinguishes them.
 
 ### Who the parties are
 
@@ -37,20 +41,51 @@ their file and line inline so they can be re-checked in those repositories;
 they cannot be verified from inside fusiform alone. All are dated observations
 of systems that change, not constants.
 
-### Tense convention, and when it expires
+## 0.1 What is built, and what is still specification
 
-**Fusiform has no code.** Every statement about what fusiform does — parses,
-normalizes, serves, refuses — describes the design this note specifies, not
-shipped behavior. The present tense is used for legibility, as a
-specification, throughout. Where something *does* exist today it is named with
-its repository and commit.
+**This section replaces the note's original tense convention, which expired.**
 
-That convention is unambiguous only while there is no implementation. Once
-code exists, "fusiform normalizes X" acquires **two truth conditions where it
-had one**, and nothing in the sentence says which was meant. The dangerous
-period is not when they disagree — it is the stretch beforehand when they
-agree, because that is when the habit of not checking forms, at no cost, and
-is in place by the time it matters.
+The note opened by stating that fusiform had no code, making every sentence in
+it unambiguously a specification. That convention held for about six hours.
+Seventeen commits later the note predicted its own failure mode accurately
+enough that the prediction is quoted below, so this is the announced
+re-dating rather than a retrofit.
+
+Verified against the working tree at `1ff33f9`, section by section:
+
+| Section | State |
+| --- | --- |
+| §1 Identity | **built** — `ModelKey` is the (source, provider, model) triple |
+| §2 Observation vs era | **built** — both tables, with the confirming-outcome split |
+| §3 Eras are pure append | **built** — no `valid_to`, no `is_current`, no update path |
+| §3.1 `Corrected` | **type built, never written** — it round-trips through the store and no code path produces one. The vocabulary and extent rules are specification. |
+| §4 Rates | **partially built** — `PerMillionTokens` and the tiered conditions are produced from real documents. `PerImage`, `PerSecond`, `PerMinute`, `PerCharacter` are declared types with no producer, because models.dev publishes no unit for them. |
+| §5 Modality | **built** — carried, unknown values preserved |
+| §5.1 Byte-affecting fields | **built** — the zero-limit rule and the quarantine |
+| §6 Quarantine | **built** — parsed, flagged, never served; guarded by the fact-set test |
+| §7 Bootstrap | **built** — embedded snapshot, `scripts/refresh-seed.sh`, verified on a fresh install |
+| §8 Two hashes | **built** — split by audience, both recorded per observation |
+| §9 Store | **built** — managed SQLite from the HELLO_ACK descriptor |
+| §9 Engram enrollment | **not built** — no `engram-catalog.json` exists. The monotonic fence it describes protects the catalog version on restore, so this is a real gap rather than a formality. |
+| §10 Serve | **built** — `catalog.get`, `catalog.history`, `catalog.status` |
+| §10 Push | **not built** — no push code exists. Everything in that part of §10 (envelope shapes, discriminated acknowledgement, ordering, high-water re-sync) is specification, including the parts settled with consumers. |
+| §10 Payload boundary | **not built** — the served types have not moved to `cortexkit-model-catalog` |
+
+Two entries deserve emphasis because they are the ones most likely to be cited
+as facts: **nothing writes a `Corrected` era, and no push exists.** A consumer
+reasoning about how fusiform acknowledges a push is reasoning about a design.
+
+### Why the original convention expired, in its own words
+
+Retained because the mechanism it describes is what this section exists to
+prevent, and it was written before the failure it predicts:
+
+> That convention is unambiguous only while there is no implementation. Once
+> code exists, "fusiform normalizes X" acquires **two truth conditions where it
+> had one**, and nothing in the sentence says which was meant. The dangerous
+> period is not when they disagree — it is the stretch beforehand when they
+> agree, because that is when the habit of not checking forms, at no cost, and
+> is in place by the time it matters.
 
 This is the observed mechanism behind the two-versions-of-a-rule failure
 described in §4: nobody chooses the second version. A rule is stated once when
@@ -101,6 +136,28 @@ The remedy is not a retroactive sweep. Fusiform's own case makes a sweep look
 viable — everything it has said is uniformly `specified-and-pending`, so one
 announcement at first implementation would re-date the lot. That uniformity is
 an artifact of having no code, and it is temporary.
+
+> **What actually happened, recorded for the next reader.** The sweep above
+> (§0.1) *was* taken, at first implementation, exactly as this paragraph
+> describes — and the paragraph is still right that it does not generalise. It
+> worked here because the whole note had one tense and one author, and because
+> the state of each section was established by running `grep` and `ls` against
+> the working tree rather than by re-reading the prose.
+>
+> The finding worth carrying: two things this note describes in the present
+> tense have no producer at all — nothing writes a `Corrected` era, and no push
+> code exists. Both read as built to anyone skimming, because the surrounding
+> sections describe behaviour that is.
+>
+> A first draft of this paragraph claimed four corrections and named the
+> crate-version sequencing item as one of them. There were three changes, and
+> that item was never examined. The claim was written to give a sentence a
+> second example — which is the failure this whole section is about, committed
+> inside the correction for it, in the same edit. Caught by checking rather
+> than by re-reading, which is the only thing that catches it.
+>
+> The window closes now. From the next slice on, §0.1's table is what goes
+> stale, one row at a time, with nothing announcing it.
 
 A module with both shipped code and a pending specification has no such
 uniformity: adjacent sentences in one message can be a measured fact, behavior
