@@ -68,7 +68,7 @@ Verified against the working tree at `1ff33f9`, section by section:
 | §9 Store | **built** — managed SQLite from the HELLO_ACK descriptor |
 | §9 Engram enrollment | **built** — `crates/fusiform-module/data/engram-catalog.json`, validated in CI with engram's own parser, installed by `scripts/install-enrollment.sh`. See `docs/backup-enrollment.md`. Not load-bearing for the version counter: the §9 text once claimed a `restore-with-monotonic-fence` here, that mechanism does not exist, and the counter is restore-invariant by construction instead (§10). |
 | §10 Serve | **built** — `catalog.get`, `catalog.history`, `catalog.status` |
-| §10 Push | **not built** — no push code exists. Everything in that part of §10 (envelope shapes, discriminated acknowledgement, ordering, high-water re-sync) is specification, including the parts settled with consumers. |
+| §10 Push | **not built, and not buildable as specified** — see `docs/findings/2026-08-11-push-has-no-acknowledgement.md`. A push frame carries `corr: 0` and a module has no request frame, so the discriminated acknowledgement has no transport; and both consumer clients discard `FrameType::Push` outright. Envelope shapes, ordering and high-water re-sync remain specification; the acknowledgement needs a different design or a transport change that is not fusiform's to make. |
 | §10 Payload boundary | **not built** — the served types have not moved to `cortexkit-model-catalog` |
 
 Two entries deserve emphasis because they are the ones most likely to be cited
@@ -1619,6 +1619,31 @@ versus no-op-with-reason — so a sender distinguishes progress from
 acknowledgement without inferring it. A watermark comparison is a sender-side
 workaround for a receiver-side ambiguity, and it only fires for a sender that
 already knows to look.
+
+#### Measured 2026-08-11: this acknowledgement has no transport
+
+Everything below about the acknowledgement's shape stands as reasoning and
+cannot be built on the current push path. Three facts, read from source:
+
+- `ModuleHandle::push` emits `FrameType::Push` with `corr: 0`, and a module's
+  outbound vocabulary is `catalog_update`, `push`, and nothing else. There is
+  no module-initiated request, so no reply can come back.
+- `subc-client-rs/src/consumer.rs:3053` is `FrameType::Push => {}`. The shared
+  Rust consumer client reads push frames and drops them.
+- `broca-subc/src/connection.rs:867` and `:951` do the same, deliberately:
+  "interim progress — ignore".
+
+The daemon forwards pushes to the consumer socket, so the bytes arrive; both
+clients throw them away. What a consumer actually receives is `StreamData` on
+a held-open subscription, which the module emits from inside a live request —
+a pull-shaped relationship, with the consumer owning the lifecycle.
+
+The error worth naming: `broca-protocol`'s `ApprovalResponse` is real and does
+what this section says. A response TYPE existing was read as a response
+CHANNEL existing. The section argues at length about which arm names a partial
+apply and never says how the reply travels — **a design detailed about a
+message's contents and silent about its direction has not been walked end to
+end.**
 
 #### The shape already exists in the fleet; do not invent a third
 
