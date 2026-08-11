@@ -213,12 +213,36 @@ impl CatalogStore {
 
         let rows = self.point_in_time_rows(query.source, resolved_at)?;
 
+        // Corrections covering this instant, fetched once for the whole read.
+        //
+        // A fact inside a corrected interval must not appear with its recorded
+        // value: that value is known bad, and `value_at` refuses it. A bulk
+        // read that returned it anyway would make the honest surface the one
+        // nobody calls — consumers read catalogs, not single facts.
+        //
+        // The fact is OMITTED rather than replaced with a marker. A consumer
+        // that needs to know why asks `value_at`, which names the correction;
+        // putting a sentinel in the value position would mean every consumer
+        // parsing a rate has to recognise it, and the ones that do not would
+        // read it as data.
+        let corrections = self.all_corrections_covering(query.source, resolved_at)?;
+
         let mut by_model: BTreeMap<(String, String), BTreeMap<FactKey, String>> = BTreeMap::new();
         for (provider_id, model_id, fact_key, value_json) in rows {
+            let fact_key = FactKey::from_stored(fact_key);
+            if !corrections.is_empty()
+                && corrections.contains_key(&(
+                    provider_id.clone(),
+                    model_id.clone(),
+                    fact_key.clone(),
+                ))
+            {
+                continue;
+            }
             by_model
                 .entry((provider_id, model_id))
                 .or_default()
-                .insert(FactKey::from_stored(fact_key), value_json);
+                .insert(fact_key, value_json);
         }
 
         let mut models = Vec::with_capacity(by_model.len());

@@ -406,7 +406,17 @@ impl CatalogStore {
     /// Returns `None` when the instant precedes every era for the fact — which
     /// is a real answer ("the catalog did not know yet"), not an absence of
     /// data.
-    pub fn value_at(
+    /// What the store RECORDED for a fact at an instant.
+    ///
+    /// Selects by `boundary_at <= at` and nothing else, so a correction written
+    /// later is invisible to it by construction. That is the right answer to
+    /// "what did the store say at T" and the WRONG answer to "what was true at
+    /// T" — see [`Self::value_at`], which is the one a consumer wants.
+    ///
+    /// Public because the distinction is real: an auditor reconstructing what
+    /// fusiform believed at a past instant needs the recorded value even when
+    /// it is known bad. Named so no caller reaches it by accident.
+    pub fn recorded_value_at(
         &self,
         source: SourceId,
         provider_id: &str,
@@ -444,6 +454,136 @@ impl CatalogStore {
         })?;
 
         row.map(decode_era_row).transpose()
+    }
+
+    /// What was TRUE for a fact at an instant, or a refusal.
+    ///
+    /// The difference from [`Self::recorded_value_at`] is corrections. A
+    /// `Corrected` era says the value recorded across its
+    /// `affected_from..affected_until` interval was wrong. Selecting by
+    /// `boundary_at <= at` cannot see it — the correction is written AFTER the
+    /// interval it describes — so a plain point-in-time read lands on the bad
+    /// era and returns it with every appearance of confidence.
+    ///
+    /// So a read inside a corrected interval refuses. Returning the corrected
+    /// value instead would be the other wrong answer: fusiform does not know
+    /// what the upstream held at that instant, only that its own record was
+    /// bad. Returning the recorded value is how a consumer re-prices against a
+    /// rate that was never real.
+    ///
+    /// This is why [`Correction`] carries an interval rather than a timestamp.
+    /// Without one a corrected era is indistinguishable from a later change,
+    /// and the read has nothing to refuse on.
+    pub fn value_at(
+        &self,
+        source: SourceId,
+        provider_id: &str,
+        model_id: &str,
+        fact: &FactKey,
+        at: Timestamp,
+    ) -> Result<PointInTime, CatalogError> {
+        // Corrections are found by their EXTENT, not their boundary: one
+        // written at any later time invalidates reads inside the interval it
+        // names.
+        let corrections = self.corrections_covering(source, provider_id, model_id, fact, at)?;
+        if !corrections.is_empty() {
+            return Ok(PointInTime::Corrected { corrections });
+        }
+        match self.recorded_value_at(source, provider_id, model_id, fact, at)? {
+            Some(row) => Ok(PointInTime::Known(row)),
+            None => Ok(PointInTime::Unknown),
+        }
+    }
+
+    /// Every correction covering an instant, across all models and facts.
+    ///
+    /// One query rather than a lookup per fact. A bulk read resolves ~67,000
+    /// facts, and asking about each one separately would be 67,000 queries to
+    /// discover that corrections are rare — currently zero. This fetches the
+    /// whole (small) set once and the caller filters in memory.
+    pub fn all_corrections_covering(
+        &self,
+        source: SourceId,
+        at: Timestamp,
+    ) -> Result<BTreeMap<(String, String, FactKey), Vec<CorrectionRecord>>, CatalogError> {
+        let rows = self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT provider_id, model_id, fact_key, boundary_at_ms, \
+                        corrected_fields_json, affected_from_ms, affected_until_ms, \
+                        correction_reason \
+                 FROM era \
+                 WHERE source = ?1 AND boundary_kind = 'corrected' \
+                   AND affected_from_ms <= ?2 AND affected_until_ms >= ?2 \
+                 ORDER BY boundary_at_ms ASC",
+            )?;
+            let mapped = stmt.query_map(params![source.as_str(), at.0], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    FactKey::from_stored(r.get::<_, String>(2)?),
+                    CorrectionRecord {
+                        corrected_at: Timestamp(r.get(3)?),
+                        fields_json: r.get(4)?,
+                        affected_from: Timestamp(r.get(5)?),
+                        affected_until: Timestamp(r.get(6)?),
+                        reason: r.get(7)?,
+                    },
+                ))
+            })?;
+            mapped.collect::<rusqlite::Result<Vec<_>>>()
+        })?;
+
+        let mut by_fact: BTreeMap<(String, String, FactKey), Vec<CorrectionRecord>> =
+            BTreeMap::new();
+        for (provider_id, model_id, fact_key, record) in rows {
+            by_fact
+                .entry((provider_id, model_id, fact_key))
+                .or_default()
+                .push(record);
+        }
+        Ok(by_fact)
+    }
+
+    /// Corrections whose extent covers an instant, oldest first.
+    ///
+    /// The interval is closed at both ends. `affected_from` is a lower bound
+    /// that goes to the earliest plausible instant when the true start is
+    /// unknown, so over-inclusion is the intended direction: an unnecessary
+    /// refusal costs a consumer a question, a missed one costs them a wrong
+    /// number they cannot detect.
+    pub fn corrections_covering(
+        &self,
+        source: SourceId,
+        provider_id: &str,
+        model_id: &str,
+        fact: &FactKey,
+        at: Timestamp,
+    ) -> Result<Vec<CorrectionRecord>, CatalogError> {
+        let rows = self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT boundary_at_ms, corrected_fields_json, affected_from_ms, \
+                        affected_until_ms, correction_reason \
+                 FROM era \
+                 WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3 \
+                   AND fact_key = ?4 AND boundary_kind = 'corrected' \
+                   AND affected_from_ms <= ?5 AND affected_until_ms >= ?5 \
+                 ORDER BY boundary_at_ms ASC",
+            )?;
+            let mapped = stmt.query_map(
+                params![source.as_str(), provider_id, model_id, fact.as_str(), at.0],
+                |r| {
+                    Ok(CorrectionRecord {
+                        corrected_at: Timestamp(r.get(0)?),
+                        fields_json: r.get(1)?,
+                        affected_from: Timestamp(r.get(2)?),
+                        affected_until: Timestamp(r.get(3)?),
+                        reason: r.get(4)?,
+                    })
+                },
+            )?;
+            mapped.collect::<rusqlite::Result<Vec<_>>>()
+        })?;
+        Ok(rows)
     }
 
     /// Run a read against the connection.
@@ -606,6 +746,64 @@ impl CatalogStore {
         })?;
         Ok(issued)
     }
+}
+
+/// The answer to "what was true at T".
+///
+/// Three outcomes rather than an `Option`, because "the store has no record"
+/// and "the store's record here is known bad" are different facts and a
+/// consumer acts differently on each. Collapsing them into `None` would make a
+/// corrected interval look like a gap, which reads as "nothing was published"
+/// — a wrong answer that looks like a legitimate one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PointInTime {
+    /// The store holds a value for this instant and nothing has corrected it.
+    Known(EraRow),
+    /// No era covers this instant. The fact was not yet recorded.
+    Unknown,
+    /// The record covering this instant is known bad, and here is why.
+    ///
+    /// Carries every correction covering the instant rather than the newest:
+    /// two corrections to overlapping intervals are two separate statements
+    /// about what went wrong, and picking one would hide the other.
+    Corrected { corrections: Vec<CorrectionRecord> },
+}
+
+impl PointInTime {
+    /// The value, when one can honestly be given.
+    ///
+    /// `None` for both `Unknown` and `Corrected`. Callers that need to tell
+    /// them apart must match; this exists for the ones that only need a value
+    /// or nothing, and it is deliberately unable to leak a corrected value.
+    /// The era, when the answer is a known-good one.
+    ///
+    /// `None` for both `Unknown` and `Corrected`, so a corrected value cannot
+    /// reach a caller that did not explicitly match for it.
+    pub fn known(&self) -> Option<&EraRow> {
+        match self {
+            PointInTime::Known(row) => Some(row),
+            PointInTime::Unknown | PointInTime::Corrected { .. } => None,
+        }
+    }
+
+    pub fn value_json(&self) -> Option<&str> {
+        match self {
+            PointInTime::Known(row) => Some(&row.value_json),
+            PointInTime::Unknown | PointInTime::Corrected { .. } => None,
+        }
+    }
+}
+
+/// A correction, as stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CorrectionRecord {
+    /// When fusiform recorded the correction — always after the bad interval.
+    pub corrected_at: Timestamp,
+    /// The `FieldId` list, as stored JSON.
+    pub fields_json: String,
+    pub affected_from: Timestamp,
+    pub affected_until: Timestamp,
+    pub reason: String,
 }
 
 /// An era as stored, decoded back into the domain.

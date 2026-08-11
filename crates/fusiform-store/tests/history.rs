@@ -92,6 +92,8 @@ fn an_observed_era_carries_the_window_the_store_measured() {
             Timestamp(5_000),
         )
         .unwrap()
+        .known()
+        .cloned()
         .expect("the era must be found");
 
     // The window is arithmetic, not a disclaimer: the change happened somewhere
@@ -148,6 +150,8 @@ fn a_failed_poll_does_not_narrow_the_window() {
             Timestamp(5_000),
         )
         .unwrap()
+        .known()
+        .cloned()
         .unwrap();
 
     // 1000, not 1600. The failures are recorded and contribute nothing.
@@ -195,6 +199,8 @@ fn a_not_modified_response_does_narrow_the_window() {
             Timestamp(5_000),
         )
         .unwrap()
+        .known()
+        .cloned()
         .unwrap();
 
     assert_eq!(
@@ -242,6 +248,8 @@ fn an_observation_window_is_never_zero_width() {
             Timestamp(5_000),
         )
         .unwrap()
+        .known()
+        .cloned()
         .unwrap();
 
     let (near, far) = row
@@ -306,6 +314,8 @@ fn each_boundary_in_a_batch_gets_its_own_window() {
                 Timestamp(9_999),
             )
             .unwrap()
+            .known()
+            .cloned()
             .unwrap()
             .observation_window()
     };
@@ -340,6 +350,8 @@ fn a_seed_era_has_no_observation_window() {
             Timestamp(1_000),
         )
         .unwrap()
+        .known()
+        .cloned()
         .unwrap();
 
     assert_eq!(row.boundary_kind, BoundaryKind::Seed);
@@ -411,6 +423,8 @@ fn a_correction_round_trips_with_its_extent() {
             Timestamp(6_000),
         )
         .unwrap()
+        .known()
+        .cloned()
         .unwrap();
 
     let BoundaryKind::Corrected(read_back) = &row.boundary_kind else {
@@ -467,6 +481,8 @@ fn a_point_in_time_read_returns_the_era_in_force() {
                 Timestamp(at),
             )
             .unwrap()
+            .known()
+            .cloned()
     };
 
     // Before anything was known.
@@ -679,6 +695,7 @@ fn a_batch_of_eras_is_all_or_nothing() {
                     Timestamp(9_999),
                 )
                 .unwrap()
+                .known()
                 .is_none(),
             "a failed batch must leave no rows behind"
         );

@@ -88,6 +88,8 @@ fn the_first_tick_seeds() {
             Timestamp(2_000),
         )
         .unwrap()
+        .known()
+        .cloned()
         .unwrap();
     assert_eq!(row.boundary_kind, fusiform_core::BoundaryKind::Seed);
     assert_eq!(row.observation_window(), None);
@@ -169,6 +171,8 @@ fn a_not_modified_response_is_an_observation() {
             Timestamp(4_000),
         )
         .unwrap()
+        .known()
+        .cloned()
         .unwrap();
     assert_eq!(
         row.observation_window(),
@@ -218,6 +222,8 @@ fn a_failed_poll_records_the_attempt_and_nothing_more() {
             Timestamp(5_000),
         )
         .unwrap()
+        .known()
+        .cloned()
         .unwrap();
     // 1000, not 3000: the failures observed nothing.
     assert_eq!(

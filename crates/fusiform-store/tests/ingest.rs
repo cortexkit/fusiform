@@ -177,8 +177,10 @@ fn one_rate_change_opens_exactly_one_era() {
                 Timestamp(at),
             )
             .unwrap()
+            .known()
             .unwrap()
             .value_json
+            .clone()
     };
     assert!(
         read(2_500).contains("3000000000"),
@@ -239,7 +241,7 @@ fn a_disappeared_model_is_tombstoned_and_stays_readable() {
         )
         .unwrap();
     assert!(
-        old.is_some(),
+        old.known().is_some(),
         "a tombstoned model's history must survive its disappearance"
     );
 
@@ -254,8 +256,10 @@ fn a_disappeared_model_is_tombstoned_and_stays_readable() {
                 Timestamp(at),
             )
             .unwrap()
+            .known()
             .unwrap()
             .value_json
+            .clone()
     };
     assert!(existence(2_500).contains("present"));
     assert!(existence(3_500).contains("absent"));
@@ -324,8 +328,10 @@ fn a_returning_model_opens_a_new_existence_era() {
                 Timestamp(at),
             )
             .unwrap()
+            .known()
             .unwrap()
             .value_json
+            .clone()
     };
     assert!(existence(1_500).contains("present"));
     assert!(existence(3_500).contains("absent"));
@@ -452,8 +458,10 @@ fn a_withdrawn_rate_is_tombstoned_rather_than_left_current() {
                 Timestamp(at),
             )
             .unwrap()
+            .known()
             .unwrap()
             .value_json
+            .clone()
     };
 
     // Before the withdrawal: a stated zero, which is a real published price.
@@ -539,8 +547,10 @@ fn a_withdrawn_limit_becomes_null() {
             Timestamp(3_500),
         )
         .unwrap()
+        .known()
         .unwrap()
-        .value_json;
+        .value_json
+        .clone();
     assert_eq!(
         after, "null",
         "a withdrawn limit is null, not a rate tombstone"
@@ -557,8 +567,10 @@ fn a_withdrawn_limit_becomes_null() {
             Timestamp(2_500),
         )
         .unwrap()
+        .known()
         .unwrap()
-        .value_json;
+        .value_json
+        .clone();
     assert_eq!(before, "1000000");
 }
 
@@ -580,6 +592,8 @@ fn a_tiered_rate_has_its_own_fact_key() {
             Timestamp(2_000),
         )
         .unwrap()
+        .known()
+        .cloned()
         .expect("the base rate has its own era");
     let tiered = f
         .store
@@ -591,6 +605,8 @@ fn a_tiered_rate_has_its_own_fact_key() {
             Timestamp(2_000),
         )
         .unwrap()
+        .known()
+        .cloned()
         .expect("the tiered rate has its own era");
 
     assert_ne!(
