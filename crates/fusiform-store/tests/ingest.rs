@@ -1,0 +1,590 @@
+//! Ingest behaviour, driven by the real normalizer over real upstream bytes.
+//!
+//! The catalogs here are produced by `normalize_models_dev` from the fixture
+//! excerpt cut from a live fetch, then mutated at the JSON level to simulate an
+//! upstream change. Nothing constructs a `NormalizedModel` by hand: a
+//! hand-built catalog would encode this test author's belief about what the
+//! normalizer produces, and the assertions would then certify that belief
+//! rather than the code.
+
+use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
+use fusiform_store::ingest::plan_ingest;
+use fusiform_store::{CatalogStore, FactKey, NewObservation};
+
+use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+
+const FIXTURE: &str = include_str!("../../fusiform-core/fixtures/models-dev-excerpt.json");
+
+struct Fixture {
+    store: CatalogStore,
+    _dir: tempfile::TempDir,
+}
+
+fn fixture() -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("store.db");
+    let descriptor = StorageDescriptor {
+        module_id: "fusiform".to_string(),
+        storage_namespace: "default".to_string(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: path.to_string_lossy().to_string(),
+        },
+    };
+    Fixture {
+        store: CatalogStore::open(&descriptor).unwrap(),
+        _dir: dir,
+    }
+}
+
+fn observe(f: &Fixture, at: i64, outcome: ObservationOutcome) -> i64 {
+    f.store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(at),
+            outcome,
+            normalized_hash: Some(format!("h{at}")),
+            raw_hash: Some(format!("r{at}")),
+            etag: None,
+            duration_ms: None,
+            detail: None,
+        })
+        .unwrap()
+}
+
+/// Seed the store from the fixture as it stands, returning the era count.
+fn seed(f: &Fixture, at: i64) -> usize {
+    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let plan = plan_ingest(&f.store, &catalog, Timestamp(at), BoundaryKind::Seed, None).unwrap();
+    f.store.append_eras(&plan.eras).unwrap()
+}
+
+/// A first ingest writes every fact and counts nothing as a change.
+#[test]
+fn a_first_ingest_records_every_fact_as_new() {
+    let f = fixture();
+    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(1_000),
+        BoundaryKind::Seed,
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(plan.new_models, 13, "every model in the fixture is new");
+    assert_eq!(plan.disappeared_models, 0);
+    assert_eq!(
+        plan.changed_facts, 0,
+        "a first ingest has no changes; its facts are first values, and \
+         counting them as changes makes a fresh install look like a repricing"
+    );
+    assert!(plan.eras.len() > 13, "each model contributes several facts");
+
+    f.store.append_eras(&plan.eras).unwrap();
+}
+
+/// Re-ingesting an unchanged document produces nothing.
+///
+/// The property that makes the era table finite: polling every 30 minutes for a
+/// year must not write 17,520 identical rows per fact.
+#[test]
+fn re_ingesting_the_same_document_writes_nothing() {
+    let f = fixture();
+    seed(&f, 1_000);
+
+    observe(&f, 2_000, ObservationOutcome::Unchanged);
+    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        None,
+    )
+    .unwrap();
+
+    assert!(
+        plan.is_empty(),
+        "an unchanged document must produce no eras, got {}",
+        plan.eras.len()
+    );
+    assert_eq!(plan.new_models, 0);
+    assert_eq!(plan.changed_facts, 0);
+    assert_eq!(plan.disappeared_models, 0);
+}
+
+/// One rate moving opens exactly one era.
+///
+/// The granularity claim, tested rather than asserted: if a model were one
+/// fact, this would open an era for every field the model publishes and a
+/// consumer asking when the input price moved would get the answer for "when
+/// did anything about this model move".
+#[test]
+fn one_rate_change_opens_exactly_one_era() {
+    let f = fixture();
+    seed(&f, 1_000);
+    observe(&f, 2_000, ObservationOutcome::Unchanged);
+    let detecting = observe(&f, 3_000, ObservationOutcome::Changed { snapshot_seq: 1 });
+
+    // Anthropic's input rate goes from 3 to 4.
+    let mutated = FIXTURE.replace("\"input\": 3,", "\"input\": 4,");
+    assert_ne!(mutated, FIXTURE, "the mutation must actually apply");
+
+    let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        Some(detecting),
+    )
+    .unwrap();
+
+    assert_eq!(plan.changed_facts, 1, "exactly one fact moved");
+    assert_eq!(plan.eras.len(), 1);
+    assert_eq!(
+        plan.eras[0].fact_key,
+        FactKey::rate(fusiform_core::TokenClass::Input)
+    );
+    assert_eq!(plan.eras[0].provider_id, "anthropic");
+
+    f.store.append_eras(&plan.eras).unwrap();
+
+    // And the history is now readable at both instants.
+    let read = |at: i64| {
+        f.store
+            .value_at(
+                SourceId::ModelsDev,
+                "anthropic",
+                "claude-sonnet-4-5",
+                &FactKey::rate(fusiform_core::TokenClass::Input),
+                Timestamp(at),
+            )
+            .unwrap()
+            .unwrap()
+            .value_json
+    };
+    assert!(
+        read(2_500).contains("3000000000"),
+        "the old rate is retrievable"
+    );
+    assert!(
+        read(3_500).contains("4000000000"),
+        "the new rate is in force"
+    );
+}
+
+/// A model disappearing writes a tombstone, never a deletion.
+///
+/// The distinction is visible at read time: a deleted row makes a
+/// point-in-time query for an instant when the model DID exist return nothing,
+/// which reads identically to "never existed".
+#[test]
+fn a_disappeared_model_is_tombstoned_and_stays_readable() {
+    let f = fixture();
+    seed(&f, 1_000);
+    observe(&f, 2_000, ObservationOutcome::Unchanged);
+    let detecting = observe(&f, 3_000, ObservationOutcome::Changed { snapshot_seq: 1 });
+
+    // Remove the zhipuai provider's only model from the document.
+    let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    let mut doc = doc.as_object().unwrap().clone();
+    let zhipu = doc.get_mut("zhipuai").unwrap().as_object_mut().unwrap();
+    zhipu.insert("models".to_string(), serde_json::json!({}));
+    let mutated = serde_json::to_string(&doc).unwrap();
+
+    let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        Some(detecting),
+    )
+    .unwrap();
+
+    assert_eq!(plan.disappeared_models, 1);
+    assert_eq!(plan.eras.len(), 1);
+    assert_eq!(plan.eras[0].fact_key, FactKey::existence());
+    assert!(plan.eras[0].value_json.contains("absent"));
+
+    f.store.append_eras(&plan.eras).unwrap();
+
+    // The rate the model used to publish is still retrievable at the instant it
+    // was true. This is what a deletion would have destroyed.
+    let old = f
+        .store
+        .value_at(
+            SourceId::ModelsDev,
+            "zhipuai",
+            "glm-4.5-flash",
+            &FactKey::rate(fusiform_core::TokenClass::Input),
+            Timestamp(2_500),
+        )
+        .unwrap();
+    assert!(
+        old.is_some(),
+        "a tombstoned model's history must survive its disappearance"
+    );
+
+    // And existence reads correctly on both sides of the boundary.
+    let existence = |at: i64| {
+        f.store
+            .value_at(
+                SourceId::ModelsDev,
+                "zhipuai",
+                "glm-4.5-flash",
+                &FactKey::existence(),
+                Timestamp(at),
+            )
+            .unwrap()
+            .unwrap()
+            .value_json
+    };
+    assert!(existence(2_500).contains("present"));
+    assert!(existence(3_500).contains("absent"));
+}
+
+/// A model that disappears and comes back gets two existence eras, not one.
+#[test]
+fn a_returning_model_opens_a_new_existence_era() {
+    let f = fixture();
+    seed(&f, 1_000);
+    observe(&f, 2_000, ObservationOutcome::Unchanged);
+    let gone = observe(&f, 3_000, ObservationOutcome::Changed { snapshot_seq: 1 });
+
+    let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    let mut without = doc.as_object().unwrap().clone();
+    without
+        .get_mut("zhipuai")
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .insert("models".to_string(), serde_json::json!({}));
+    let removed = serde_json::to_string(&without).unwrap();
+
+    let catalog = normalize_models_dev(removed.as_bytes()).unwrap().catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        Some(gone),
+    )
+    .unwrap();
+    f.store.append_eras(&plan.eras).unwrap();
+
+    // It comes back, unchanged from its original form.
+    observe(&f, 4_000, ObservationOutcome::Unchanged);
+    let back = observe(&f, 5_000, ObservationOutcome::Changed { snapshot_seq: 2 });
+    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(5_000),
+        BoundaryKind::Observed,
+        Some(back),
+    )
+    .unwrap();
+
+    assert_eq!(plan.new_models, 1, "a returning model is new again");
+    let existence_eras = plan
+        .eras
+        .iter()
+        .filter(|e| e.fact_key == FactKey::existence())
+        .count();
+    assert_eq!(existence_eras, 1);
+    f.store.append_eras(&plan.eras).unwrap();
+
+    // Three existence eras now: present, absent, present. The middle one is
+    // what a delete-and-reinsert design would have lost.
+    let existence = |at: i64| {
+        f.store
+            .value_at(
+                SourceId::ModelsDev,
+                "zhipuai",
+                "glm-4.5-flash",
+                &FactKey::existence(),
+                Timestamp(at),
+            )
+            .unwrap()
+            .unwrap()
+            .value_json
+    };
+    assert!(existence(1_500).contains("present"));
+    assert!(existence(3_500).contains("absent"));
+    assert!(existence(5_500).contains("present"));
+}
+
+/// Reordering the upstream's modality array is not a capability change.
+///
+/// The array carries no ranking, so treating its order as information would
+/// manufacture change events on every reshuffle — and a consumer woken for a
+/// non-change learns to ignore the channel.
+#[test]
+fn reordering_a_modality_array_is_not_a_change() {
+    let f = fixture();
+    seed(&f, 1_000);
+    observe(&f, 2_000, ObservationOutcome::Unchanged);
+
+    let mutated = FIXTURE.replace(r#"["text","image","pdf"]"#, r#"["pdf","image","text"]"#);
+    let mutated = if mutated == FIXTURE {
+        // The fixture is pretty-printed; reorder through the parsed form
+        // instead of depending on its exact whitespace.
+        let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        let mut doc = doc.as_object().unwrap().clone();
+        let model = doc
+            .get_mut("anthropic")
+            .unwrap()
+            .get_mut("models")
+            .unwrap()
+            .get_mut("claude-sonnet-4-5")
+            .unwrap()
+            .get_mut("modalities")
+            .unwrap()
+            .get_mut("input")
+            .unwrap()
+            .as_array_mut()
+            .unwrap();
+        model.reverse();
+        serde_json::to_string(&doc).unwrap()
+    } else {
+        mutated
+    };
+
+    let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        None,
+    )
+    .unwrap();
+
+    assert!(
+        plan.is_empty(),
+        "a reordered modality array must not open an era, got {:?}",
+        plan.eras
+            .iter()
+            .map(|e| e.fact_key.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A withdrawn rate is tombstoned, so a stale price never stays current.
+///
+/// The gap this closes: a diff that only visits facts present in the new
+/// document never sees a withdrawn one. The last published value would stay
+/// current forever, and fusiform would serve a price the provider had stopped
+/// publishing. A stale number is worse than no number, because it is spendable.
+///
+/// The transition is also the one a spend cap must not miss: "free" becoming
+/// "we stopped publishing a price" is a real change, and rendering the two
+/// alike would hide it.
+#[test]
+fn a_withdrawn_rate_is_tombstoned_rather_than_left_current() {
+    let f = fixture();
+    seed(&f, 1_000);
+    observe(&f, 2_000, ObservationOutcome::Unchanged);
+    let detecting = observe(&f, 3_000, ObservationOutcome::Changed { snapshot_seq: 1 });
+
+    // zhipuai/glm-4.5-flash publishes all-zero rates. Remove the input rate
+    // entirely: the fact goes from a stated zero to not being published.
+    let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    let mut doc = doc.as_object().unwrap().clone();
+    doc.get_mut("zhipuai")
+        .unwrap()
+        .get_mut("models")
+        .unwrap()
+        .get_mut("glm-4.5-flash")
+        .unwrap()
+        .get_mut("cost")
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("input");
+    let mutated = serde_json::to_string(&doc).unwrap();
+
+    let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        Some(detecting),
+    )
+    .unwrap();
+
+    // The withdrawal is a change: exactly one fact moved.
+    assert_eq!(plan.changed_facts, 1, "the withdrawn rate is a change");
+    assert_eq!(plan.eras.len(), 1);
+    assert_eq!(
+        plan.eras[0].fact_key,
+        FactKey::rate(fusiform_core::TokenClass::Input)
+    );
+
+    f.store.append_eras(&plan.eras).unwrap();
+
+    let read = |at: i64| {
+        f.store
+            .value_at(
+                SourceId::ModelsDev,
+                "zhipuai",
+                "glm-4.5-flash",
+                &FactKey::rate(fusiform_core::TokenClass::Input),
+                Timestamp(at),
+            )
+            .unwrap()
+            .unwrap()
+            .value_json
+    };
+
+    // Before the withdrawal: a stated zero, which is a real published price.
+    let before = read(2_500);
+    assert!(
+        before.contains("stated_zero"),
+        "the old value must be a stated zero, got {before}"
+    );
+
+    // After: unpriced with a reason, never zero and never the stale value.
+    let after = read(3_500);
+    assert!(
+        after.contains("unpriced") && after.contains("missing_rate"),
+        "a withdrawn rate must be unpriced with a reason, got {after}"
+    );
+    assert!(
+        !after.contains("stated_zero"),
+        "the withdrawn rate must not still read as a stated zero"
+    );
+
+    // And a second poll with the rate still absent writes nothing more: the
+    // fact was withdrawn once, not once per poll.
+    observe(&f, 4_000, ObservationOutcome::Unchanged);
+    let again = plan_ingest(
+        &f.store,
+        &normalize_models_dev(mutated.as_bytes()).unwrap().catalog,
+        Timestamp(5_000),
+        BoundaryKind::Observed,
+        None,
+    )
+    .unwrap();
+    assert!(
+        again.is_empty(),
+        "a still-absent fact must not be tombstoned again, got {}",
+        again.eras.len()
+    );
+}
+
+/// A withdrawn limit becomes null, not a rate tombstone.
+///
+/// The withdrawal value depends on what kind of fact withdrew. `null` is the
+/// same value the normalizer emits for a limit that was never stated, so a
+/// withdrawal and a never-stated field agree instead of being two encodings of
+/// one condition.
+#[test]
+fn a_withdrawn_limit_becomes_null() {
+    let f = fixture();
+    seed(&f, 1_000);
+    observe(&f, 2_000, ObservationOutcome::Unchanged);
+    let detecting = observe(&f, 3_000, ObservationOutcome::Changed { snapshot_seq: 1 });
+
+    let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    let mut doc = doc.as_object().unwrap().clone();
+    doc.get_mut("anthropic")
+        .unwrap()
+        .get_mut("models")
+        .unwrap()
+        .get_mut("claude-sonnet-4-5")
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("limit");
+    let mutated = serde_json::to_string(&doc).unwrap();
+
+    let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        Some(detecting),
+    )
+    .unwrap();
+    f.store.append_eras(&plan.eras).unwrap();
+
+    let after = f
+        .store
+        .value_at(
+            SourceId::ModelsDev,
+            "anthropic",
+            "claude-sonnet-4-5",
+            &FactKey::limit("context"),
+            Timestamp(3_500),
+        )
+        .unwrap()
+        .unwrap()
+        .value_json;
+    assert_eq!(
+        after, "null",
+        "a withdrawn limit is null, not a rate tombstone"
+    );
+
+    // The old capacity is still retrievable at the instant it was true.
+    let before = f
+        .store
+        .value_at(
+            SourceId::ModelsDev,
+            "anthropic",
+            "claude-sonnet-4-5",
+            &FactKey::limit("context"),
+            Timestamp(2_500),
+        )
+        .unwrap()
+        .unwrap()
+        .value_json;
+    assert_eq!(before, "1000000");
+}
+
+/// Tiered rates get their own keys, so adding a tier does not rewrite the base
+/// rate's history.
+#[test]
+fn a_tiered_rate_has_its_own_fact_key() {
+    let f = fixture();
+    seed(&f, 1_000);
+
+    // gpt-5.6-luna publishes a base rate and a 272k tier.
+    let base = f
+        .store
+        .value_at(
+            SourceId::ModelsDev,
+            "openai",
+            "gpt-5.6-luna",
+            &FactKey::rate(fusiform_core::TokenClass::Input),
+            Timestamp(2_000),
+        )
+        .unwrap()
+        .expect("the base rate has its own era");
+    let tiered = f
+        .store
+        .value_at(
+            SourceId::ModelsDev,
+            "openai",
+            "gpt-5.6-luna",
+            &FactKey::rate_above_context(fusiform_core::TokenClass::Input, 272_000),
+            Timestamp(2_000),
+        )
+        .unwrap()
+        .expect("the tiered rate has its own era");
+
+    assert_ne!(
+        base.value_json, tiered.value_json,
+        "the two rates are different values under different keys"
+    );
+    assert!(base.value_json.contains("200000000"));
+    assert!(tiered.value_json.contains("400000000"));
+}

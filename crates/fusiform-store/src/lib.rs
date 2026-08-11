@@ -13,6 +13,7 @@
 //! with durable pragmas, and applies migrations. What this crate owns is the
 //! domain: the schema, the writes, and the reads.
 
+pub mod ingest;
 pub mod schema;
 
 use std::collections::BTreeMap;
@@ -137,6 +138,30 @@ impl FactKey {
     /// The key for a rate, per token class — never one key for "rates".
     pub fn rate(class: fusiform_core::TokenClass) -> Self {
         Self(format!("rate.{}", token_class_str(class)))
+    }
+
+    /// The key for a rate that applies above a context threshold.
+    ///
+    /// The threshold is part of the KEY rather than part of the value, so a
+    /// provider adding a tier opens an era on the new tier alone instead of
+    /// rewriting the base rate's history. It also means a point-in-time read
+    /// asks for exactly the rate it needs — no consumer has to fetch every rate
+    /// for a model and filter.
+    pub fn rate_above_context(class: fusiform_core::TokenClass, tokens: u64) -> Self {
+        Self(format!(
+            "rate.{}.above_context.{tokens}",
+            token_class_str(class)
+        ))
+    }
+
+    /// Rebuild a key from its stored text.
+    ///
+    /// Total by construction: the column is text and this crate is the only
+    /// writer, so an unrecognised key means someone edited the database by
+    /// hand. Preserving it verbatim keeps that visible instead of turning a
+    /// hand-edit into a parse error on an unrelated read.
+    pub fn from_stored(raw: String) -> Self {
+        Self(raw)
     }
 
     /// The key for a capability field.
@@ -398,6 +423,20 @@ impl CatalogStore {
         })?;
 
         row.map(decode_era_row).transpose()
+    }
+
+    /// Run a read against the connection.
+    ///
+    /// Reads only. Writes go through `with_conn_fenced`, which checks that this
+    /// process still holds the current writer lease before applying anything:
+    /// when one instance replaces another, the outgoing one can briefly still
+    /// have an open connection after losing the lease, and that check is what
+    /// stops its late writes from landing on top of its replacement's.
+    pub(crate) fn raw_conn<T>(
+        &self,
+        f: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, CatalogError> {
+        Ok(self.inner.with_conn(f)?)
     }
 
     /// The current catalog version.
