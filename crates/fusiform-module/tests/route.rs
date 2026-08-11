@@ -340,11 +340,15 @@ fn the_response_carries_the_catalog_version() {
             detail: None,
         })
         .unwrap();
-    f.store
-        .advance_catalog_version(before + 1, obs, Timestamp(2_000))
+    let issued = f
+        .store
+        .advance_catalog_version(obs, Timestamp(2_000))
         .unwrap();
 
-    assert_eq!(get(&f, "{}").catalog_version, before + 1);
+    // The store derives the version, so the assertion is that the response
+    // carries whatever was issued rather than a number computed here.
+    assert!(issued > before);
+    assert_eq!(get(&f, "{}").catalog_version, issued);
 }
 
 /// The wire envelope is unwrapped, and a wrong tool name is refused.

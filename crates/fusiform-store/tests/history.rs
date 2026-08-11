@@ -482,49 +482,65 @@ fn a_point_in_time_read_returns_the_era_in_force() {
     assert_eq!(read(9_999).unwrap().value_json, r#"{"units":6000000000}"#);
 }
 
-/// The catalog version refuses to move backwards or stand still.
+/// Every version issued is strictly greater than the last.
 ///
-/// A rewound version is silent at the producer and total at the consumer: every
-/// consumer correctly refuses every subsequent push, and nothing in fusiform
-/// looks wrong. Rejecting the write is what turns that into an error at the
-/// moment it happens rather than a mystery later.
+/// The store derives the value rather than accepting one, so a caller cannot
+/// supply a bad version at all — the old shape of this test, which asserted
+/// that backwards and sideways writes were refused, tested a call that can no
+/// longer be made. What remains checkable from outside is the property that
+/// matters to a consumer: the sequence never repeats and never regresses.
+///
+/// The internal `next <= current` guard still exists and is now unreachable
+/// from this side. It catches a bug in the store's own arithmetic, not a caller
+/// error, and it is honest to say no test here can trigger it.
 #[test]
-fn the_catalog_version_only_ever_advances() {
+fn every_issued_version_is_greater_than_the_last() {
     let f = fixture();
-    let obs = f
-        .store
-        .record_observation(&observation(
-            1_000,
-            ObservationOutcome::Changed { snapshot_seq: 1 },
-        ))
-        .unwrap();
-
     assert_eq!(f.store.catalog_version().unwrap(), 0);
 
-    f.store
-        .advance_catalog_version(1, obs, Timestamp(1_000))
-        .unwrap();
-    assert_eq!(f.store.catalog_version().unwrap(), 1);
+    let mut issued = Vec::new();
+    for at in [
+        1_786_000_000_000i64,
+        1_786_000_060_000,
+        1_786_000_120_000,
+        1_786_000_180_000,
+    ] {
+        let obs = f
+            .store
+            .record_observation(&observation(at, ObservationOutcome::Unchanged))
+            .unwrap();
+        let version = f.store.advance_catalog_version(obs, Timestamp(at)).unwrap();
+        issued.push(version);
+        assert_eq!(
+            f.store.catalog_version().unwrap(),
+            version,
+            "the stored version must be the one just issued"
+        );
+    }
 
-    // Backwards: refused.
-    assert!(f
+    assert!(
+        issued.windows(2).all(|w| w[0] < w[1]),
+        "versions must strictly increase: {issued:?}"
+    );
+
+    // Two ticks within the same millisecond must still produce distinct
+    // versions: the poll loop is not the only caller, and a wall-clock value
+    // alone would repeat.
+    let at = 1_786_000_240_000i64;
+    let a = f
         .store
-        .advance_catalog_version(0, obs, Timestamp(2_000))
-        .is_err());
-    // Sideways: also refused. An unchanged version with new content is the same
-    // corruption as a rewind, seen from the consumer.
-    assert!(f
-        .store
-        .advance_catalog_version(1, obs, Timestamp(2_000))
-        .is_err());
-
-    // And the refusals did not partially apply.
-    assert_eq!(f.store.catalog_version().unwrap(), 1);
-
-    f.store
-        .advance_catalog_version(2, obs, Timestamp(3_000))
+        .record_observation(&observation(at, ObservationOutcome::Unchanged))
         .unwrap();
-    assert_eq!(f.store.catalog_version().unwrap(), 2);
+    let first = f.store.advance_catalog_version(a, Timestamp(at)).unwrap();
+    let b = f
+        .store
+        .record_observation(&observation(at + 1, ObservationOutcome::Unchanged))
+        .unwrap();
+    let second = f.store.advance_catalog_version(b, Timestamp(at)).unwrap();
+    assert!(
+        second > first,
+        "two versions issued at the same instant must differ: {first}, {second}"
+    );
 }
 
 /// The schema itself refuses a window on a non-observed boundary.
@@ -667,4 +683,138 @@ fn a_batch_of_eras_is_all_or_nothing() {
             "a failed batch must leave no rows behind"
         );
     }
+}
+
+/// A restored store issues a version above everything it issued before.
+///
+/// The failure being prevented is silent at the producer and total at the
+/// consumer. A whole-db restore replaces the file, so a counter derived from
+/// its own previous value comes back at whatever the backup held; fusiform then
+/// issues versions that look fine locally while every consumer correctly
+/// refuses each one, until the counter re-crosses its old high-water. Nothing
+/// reports a fault, because every component is behaving as designed.
+///
+/// This simulates the restore the way it actually happens: the file is copied
+/// aside, the store keeps running, and the old file is put back.
+#[test]
+fn a_restore_cannot_rewind_the_catalog_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("store.db");
+    let descriptor = StorageDescriptor {
+        module_id: "fusiform".to_string(),
+        storage_namespace: "default".to_string(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: path.to_string_lossy().to_string(),
+        },
+    };
+
+    // A store that has been running for a while.
+    let store = CatalogStore::open(&descriptor).unwrap();
+    let mut issued = Vec::new();
+    for at in [1_786_000_000_000i64, 1_786_000_060_000, 1_786_000_120_000] {
+        let obs = store
+            .record_observation(&observation(
+                at,
+                ObservationOutcome::Changed { snapshot_seq: 1 },
+            ))
+            .unwrap();
+        issued.push(store.advance_catalog_version(obs, Timestamp(at)).unwrap());
+    }
+    let high_water = *issued.last().unwrap();
+    assert!(
+        issued.windows(2).all(|w| w[0] < w[1]),
+        "versions must be strictly increasing: {issued:?}"
+    );
+    drop(store);
+
+    // Back up the file at this point.
+    let backup = dir.path().join("backup.db");
+    std::fs::copy(&path, &backup).unwrap();
+
+    // More work happens after the backup.
+    let store = CatalogStore::open(&descriptor).unwrap();
+    for at in [1_786_000_180_000i64, 1_786_000_240_000] {
+        let obs = store
+            .record_observation(&observation(
+                at,
+                ObservationOutcome::Changed { snapshot_seq: 2 },
+            ))
+            .unwrap();
+        store.advance_catalog_version(obs, Timestamp(at)).unwrap();
+    }
+    let before_restore = store.catalog_version().unwrap();
+    assert!(before_restore > high_water);
+    drop(store);
+
+    // The restore: the older file replaces the current one.
+    std::fs::remove_file(&path).unwrap();
+    std::fs::copy(&backup, &path).unwrap();
+
+    let store = CatalogStore::open(&descriptor).unwrap();
+    assert_eq!(
+        store.catalog_version().unwrap(),
+        high_water,
+        "the restore genuinely rewound the stored counter, or this test proves nothing"
+    );
+
+    // The next version issued must still exceed everything ever issued.
+    let after = 1_786_000_300_000i64;
+    let obs = store
+        .record_observation(&observation(
+            after,
+            ObservationOutcome::Changed { snapshot_seq: 3 },
+        ))
+        .unwrap();
+    let reissued = store
+        .advance_catalog_version(obs, Timestamp(after))
+        .unwrap();
+
+    assert!(
+        reissued > before_restore,
+        "a restored store must not reissue a version a consumer has already \
+         seen: issued {reissued} after previously reaching {before_restore}"
+    );
+}
+
+/// The version also survives a clock that moves backwards.
+///
+/// The other half of `max(now_ms, current + 1)`. An NTP correction can move the
+/// system clock back, and a version derived only from the clock would repeat or
+/// regress — which is the same consumer-visible failure as a restore, arriving
+/// from the opposite direction.
+#[test]
+fn the_catalog_version_survives_a_backwards_clock() {
+    let f = fixture();
+
+    let obs = f
+        .store
+        .record_observation(&observation(
+            1_786_000_000_000,
+            ObservationOutcome::Unchanged,
+        ))
+        .unwrap();
+    let first = f
+        .store
+        .advance_catalog_version(obs, Timestamp(1_786_000_000_000))
+        .unwrap();
+
+    // The clock jumps back an hour.
+    let obs = f
+        .store
+        .record_observation(&observation(
+            1_785_996_400_000,
+            ObservationOutcome::Unchanged,
+        ))
+        .unwrap();
+    let second = f
+        .store
+        .advance_catalog_version(obs, Timestamp(1_785_996_400_000))
+        .unwrap();
+
+    assert!(
+        second > first,
+        "a backwards clock must not produce a non-advancing version: {first} -> {second}"
+    );
+    assert_eq!(second, first + 1, "the fallback is current + 1");
 }

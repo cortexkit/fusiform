@@ -66,7 +66,7 @@ Verified against the working tree at `1ff33f9`, section by section:
 | §7 Bootstrap | **built** — embedded snapshot, `scripts/refresh-seed.sh`, verified on a fresh install |
 | §8 Two hashes | **built** — split by audience, both recorded per observation |
 | §9 Store | **built** — managed SQLite from the HELLO_ACK descriptor |
-| §9 Engram enrollment | **not built** — no `engram-catalog.json` exists. The monotonic fence it describes protects the catalog version on restore, so this is a real gap rather than a formality. |
+| §9 Engram enrollment | **not built** — no `engram-catalog.json` exists. The §9 text previously said this enrollment carried a `restore-with-monotonic-fence`; that mechanism does not exist in engram, and the counter it was supposed to protect is now restore-invariant by construction instead (§10). Enrolling remains worth doing for backup coverage; it is no longer load-bearing for correctness. |
 | §10 Serve | **built** — `catalog.get`, `catalog.history`, `catalog.status` |
 | §10 Push | **not built** — no push code exists. Everything in that part of §10 (envelope shapes, discriminated acknowledgement, ordering, high-water re-sync) is specification, including the parts settled with consumers. |
 | §10 Payload boundary | **not built** — the served types have not moved to `cortexkit-model-catalog` |
@@ -1392,10 +1392,23 @@ assert (a) the boundary survived with its `boundary_kind` and
 returns the earlier value. A collapsed restore passes "the current rate
 matches" and fails this.
 
-Backup enrollment with `engram` (the fleet's backup module): whole-db capture,
-with `restore-with-monotonic-fence` declared for the observation sequence so a
-restore of an older capture cannot rewind the counter and reissue sequence
-numbers that were already used.
+Backup enrollment with `engram` (the fleet's backup module): whole-db capture.
+
+**Corrected 2026-08-11.** This paragraph previously declared
+`restore-with-monotonic-fence` for the observation sequence. No such mechanism
+exists. Engram's descriptor vocabulary is `class`, `mechanism`, `path`, `root`,
+`cursor_authority`, `writer_interaction`, `export_contract` and
+`validate_hook` (`engram-core/src/catalog.rs`); there is no restore policy of
+any kind, and `validate_hook` is declared in the catalog type but read by
+nothing in the restore path.
+
+The deeper problem is that no enrollment flag could have worked. A whole-db
+restore replaces the file, so a watermark stored inside the database is
+restored along with it. Engram protects its own sequences with monotonic
+watermark tables, but those defend against row deletion inside a live
+database — a different failure. **The rewind is unavoidable at the storage
+layer**, so the counter has to be immune to it instead: see §10, where the
+version is derived as `max(now_ms, current + 1)`.
 
 ## 10. Serve and push
 
@@ -1466,15 +1479,38 @@ high-water — which presents as a total, silent push outage after a recovery,
 with every component behaving exactly as designed.
 
 This is the one path where the ordering rule's correctness is the problem, so
-the rule is not complete without it. Two closures, both taken:
+the rule is not complete without it. Two closures:
 
-1. **`restore-with-monotonic-fence` declared in the engram enrollment**, so a
-   stale restore cannot rewind the counter in the first place. The fleet rule
-   exists for exactly this shape.
-2. **High-water re-sync on first push after boot.** Fusiform asks each
-   consumer for its last-seen version and refuses to serve below it. This also
-   covers the case the fence cannot: a *consumer* restoring from backup, where
-   fusiform's counter is intact and the consumer's high-water moved backwards.
+1. **The version is restore-invariant by construction** — `max(now_ms,
+   current + 1)`, built and mutation-proven. Wall-clock time does not rewind
+   when a file is restored, so the first version issued after a restore already
+   exceeds every version issued before it; the `current + 1` term covers the
+   opposite failure, an NTP correction moving the clock backwards.
+
+   **This replaces a mechanism that did not exist.** The original text declared
+   `restore-with-monotonic-fence` in the engram enrollment and called it a
+   fleet rule that "exists for exactly this shape". It does not exist — see §9
+   — and no enrollment flag could have supplied it, because a whole-db restore
+   replaces the file and takes any in-database watermark back with it.
+
+2. **High-water re-sync on first push after boot** (specification, no code).
+   Fusiform asks each consumer for its last-seen version and refuses to serve
+   below it. Still needed after closure 1, and for a case closure 1 cannot
+   reach: a *consumer* restoring from backup, where fusiform's counter is
+   intact and the consumer's high-water moved backwards.
+
+> **How the invented mechanism survived.** It was cited twice, in two sections,
+> in a form specific enough to look verified — a kebab-case flag name and the
+> phrase "the fleet rule exists for exactly this shape". Both citations came
+> from one belief, so cross-referencing them confirmed it. What exposed it was
+> going to write the enrollment file and reading engram's descriptor type,
+> which is the same instrument that has found every other defect in this
+> repository: run the real thing against the real artifact.
+>
+> The specific hazard worth naming: **a fabricated mechanism attributed to
+> another team's system is nearly unfalsifiable from inside your own.** Nothing
+> in fusiform can contradict it, the name reads as a quotation, and the
+> attribution makes checking feel redundant.
 
    **Measured, and it holds — with one ordering requirement.** A consumer
    restore rewinds its ingest cursor too, so it reports a last-seen version

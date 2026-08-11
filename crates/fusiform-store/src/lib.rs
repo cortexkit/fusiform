@@ -526,25 +526,48 @@ impl CatalogStore {
         Ok(v)
     }
 
-    /// Advance the catalog version, refusing to move it backwards or sideways.
+    /// Advance the catalog version to a restore-invariant value.
     ///
-    /// The refusal is the point. An engram restore rewinds this counter, and a
-    /// rewound version means every consumer correctly refuses every subsequent
-    /// push — so the failure is silent at the producer and total at the
-    /// consumer. Making the store reject a non-advancing write turns that into
-    /// an error at the moment it happens.
+    /// The version is `max(now_ms, current + 1)`, not `current + 1`. Both terms
+    /// are load-bearing and each covers what the other cannot:
+    ///
+    /// - **`now_ms`** survives a restore. A whole-db capture restores this
+    ///   counter along with everything else, so a counter derived only from its
+    ///   own previous value rewinds to whatever the backup held. Wall-clock time
+    ///   does not rewind, so the first version issued after a restore already
+    ///   exceeds every version issued before it.
+    /// - **`current + 1`** survives the clock. An NTP correction can move the
+    ///   system clock backwards, and a version derived only from the clock would
+    ///   then repeat or regress.
+    ///
+    /// Why this matters more than it looks: a rewound version is silent at the
+    /// producer and total at the consumer. Fusiform keeps issuing versions that
+    /// look fine locally, every consumer correctly refuses every one of them
+    /// until the counter re-crosses its old high-water, and nothing anywhere
+    /// reports a fault. Every component behaves exactly as designed.
+    ///
+    /// The rewind cannot be prevented at the storage layer, which is why the
+    /// value itself has to be immune. The fleet's backup module offers no
+    /// restore policy, and a whole-database restore replaces the file — so any
+    /// watermark kept inside the database is restored along with the counter it
+    /// was meant to protect.
+    ///
+    /// The guard below still rejects a non-advancing write. It does NOT catch a
+    /// restore — after a rewind to 5, writing 6 passes it — which is exactly why
+    /// the floor above is the actual protection. It catches a bug in fusiform's
+    /// own arithmetic, which is a different failure and worth catching.
     pub fn advance_catalog_version(
         &self,
-        next: i64,
         observation_id: i64,
         now: Timestamp,
-    ) -> Result<(), CatalogError> {
-        self.inner.with_conn_fenced(|tx| {
+    ) -> Result<i64, CatalogError> {
+        let issued = self.inner.with_conn_fenced(|tx| {
             let current: i64 = tx.query_row(
                 "SELECT version FROM catalog_version WHERE id = 1",
                 [],
                 |r| r.get(0),
             )?;
+            let next = now.0.max(current + 1);
             if next <= current {
                 // Signalled through the driver's error channel so the whole
                 // transaction rolls back; mapped to a domain error below.
@@ -561,9 +584,9 @@ impl CatalogStore {
                  WHERE id = 1",
                 params![next, observation_id, now.0],
             )?;
-            Ok(())
+            Ok(next)
         })?;
-        Ok(())
+        Ok(issued)
     }
 }
 

@@ -69,7 +69,12 @@ fn the_first_tick_seeds() {
     let TickOutcome::Changed { new_version } = report.outcome else {
         panic!("the first tick must be a change, got {:?}", report.outcome);
     };
-    assert_eq!(new_version, 1);
+    // The version is derived as max(now_ms, current + 1), so a first tick at
+    // instant 1000 issues 1000 rather than 1. Asserted as a property because
+    // the derivation is the store's, not this test's: what a consumer needs is
+    // that it advanced from nothing, not that it equals any particular number.
+    assert!(new_version > 0);
+    assert_eq!(f.store.catalog_version().unwrap(), new_version);
     assert!(report.eras_written > 13);
 
     // Every era from a first tick is a seed, and carries no window.
@@ -93,13 +98,14 @@ fn the_first_tick_seeds() {
 fn an_unchanged_body_records_the_look_and_nothing_else() {
     let f = fixture();
     run(&f, body(FIXTURE, Some("\"v1\"")), 1_000);
+    let after_first = f.store.catalog_version().unwrap();
 
     let report = run(&f, body(FIXTURE, Some("\"v1\"")), 2_000);
     assert_eq!(report.outcome, TickOutcome::Unchanged);
     assert_eq!(report.eras_written, 0);
     // The version does not move for a non-change: a consumer that refuses a
     // version it already holds must not be handed a new number for old content.
-    assert_eq!(f.store.catalog_version().unwrap(), 1);
+    assert_eq!(f.store.catalog_version().unwrap(), after_first);
 }
 
 /// Reformatted bytes are not a change.
@@ -261,7 +267,7 @@ fn an_unparseable_body_is_a_parse_failure_carrying_its_hash() {
 fn a_failure_does_not_advance_the_version() {
     let f = fixture();
     run(&f, body(FIXTURE, None), 1_000);
-    assert_eq!(f.store.catalog_version().unwrap(), 1);
+    let after_change = f.store.catalog_version().unwrap();
 
     run(
         &f,
@@ -274,7 +280,7 @@ fn a_failure_does_not_advance_the_version() {
     );
     assert_eq!(
         f.store.catalog_version().unwrap(),
-        1,
+        after_change,
         "a version bump with no new content would have consumers hold a \
          high-water mark for a catalog they never received"
     );
@@ -285,7 +291,7 @@ fn a_failure_does_not_advance_the_version() {
 fn the_version_advances_once_per_change() {
     let f = fixture();
     run(&f, body(FIXTURE, None), 1_000);
-    assert_eq!(f.store.catalog_version().unwrap(), 1);
+    let mut previous = f.store.catalog_version().unwrap();
 
     let text = String::from_utf8(FIXTURE.to_vec()).unwrap();
     for (i, (from, to)) in [
@@ -302,7 +308,15 @@ fn the_version_advances_once_per_change() {
             matches!(report.outcome, TickOutcome::Changed { .. }),
             "round {i} should be a change"
         );
-        assert_eq!(f.store.catalog_version().unwrap(), 2 + i as i64);
+        // Strictly greater each round. The literal values are the tick
+        // instants now, so what is checkable — and what a consumer relies on —
+        // is that the sequence advances exactly once per change.
+        let issued = f.store.catalog_version().unwrap();
+        assert!(
+            issued > previous,
+            "round {i}: version must advance, {previous} -> {issued}"
+        );
+        previous = issued;
     }
 }
 

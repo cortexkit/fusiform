@@ -275,9 +275,13 @@ pub fn apply(
             // published ahead of its content would have consumers refuse the
             // push that carried it, permanently: they would hold a high-water
             // mark for a catalog they never received.
-            let next_version = ctx.store.catalog_version().map_err(TickError::Store)? + 1;
-            ctx.store
-                .advance_catalog_version(next_version, observation_id, Timestamp(now_ms))
+            //
+            // The store derives the value rather than taking one from here: it
+            // is `max(now_ms, current + 1)` so a restore cannot rewind it, and
+            // that derivation belongs next to the counter it protects.
+            let next_version = ctx
+                .store
+                .advance_catalog_version(observation_id, Timestamp(now_ms))
                 .map_err(TickError::Store)?;
 
             Ok(TickReport {
