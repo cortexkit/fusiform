@@ -507,15 +507,7 @@ impl CatalogStore {
         at: Timestamp,
     ) -> Result<BTreeMap<(String, String, FactKey), Vec<CorrectionRecord>>, CatalogError> {
         let rows = self.raw_conn(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT provider_id, model_id, fact_key, boundary_at_ms, \
-                        corrected_fields_json, affected_from_ms, affected_until_ms, \
-                        correction_reason \
-                 FROM era \
-                 WHERE source = ?1 AND boundary_kind = 'corrected' \
-                   AND affected_from_ms <= ?2 AND affected_until_ms >= ?2 \
-                 ORDER BY boundary_at_ms ASC",
-            )?;
+            let mut stmt = conn.prepare(CORRECTIONS_COVERING_SQL)?;
             let mapped = stmt.query_map(params![source.as_str(), at.0], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
@@ -560,15 +552,7 @@ impl CatalogStore {
         at: Timestamp,
     ) -> Result<Vec<CorrectionRecord>, CatalogError> {
         let rows = self.raw_conn(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT boundary_at_ms, corrected_fields_json, affected_from_ms, \
-                        affected_until_ms, correction_reason \
-                 FROM era \
-                 WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3 \
-                   AND fact_key = ?4 AND boundary_kind = 'corrected' \
-                   AND affected_from_ms <= ?5 AND affected_until_ms >= ?5 \
-                 ORDER BY boundary_at_ms ASC",
-            )?;
+            let mut stmt = conn.prepare(CORRECTIONS_FOR_FACT_SQL)?;
             let mapped = stmt.query_map(
                 params![source.as_str(), provider_id, model_id, fact.as_str(), at.0],
                 |r| {
@@ -747,6 +731,30 @@ impl CatalogStore {
         Ok(issued)
     }
 }
+
+/// Corrections covering an instant, for every model and fact of one source.
+///
+/// Public so the query-plan test asserts on the SHIPPED query rather than a
+/// copy of it. A test holding its own transcription of the SQL proves that the
+/// copy is indexed.
+pub const CORRECTIONS_COVERING_SQL: &str =
+    "SELECT provider_id, model_id, fact_key, boundary_at_ms, \
+        corrected_fields_json, affected_from_ms, affected_until_ms, \
+        correction_reason \
+ FROM era \
+ WHERE source = ?1 AND boundary_kind = 'corrected' \
+   AND affected_from_ms <= ?2 AND affected_until_ms >= ?2 \
+ ORDER BY boundary_at_ms ASC";
+
+/// Corrections covering an instant, for one fact.
+pub const CORRECTIONS_FOR_FACT_SQL: &str =
+    "SELECT boundary_at_ms, corrected_fields_json, affected_from_ms, \
+        affected_until_ms, correction_reason \
+ FROM era \
+ WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3 \
+   AND fact_key = ?4 AND boundary_kind = 'corrected' \
+   AND affected_from_ms <= ?5 AND affected_until_ms >= ?5 \
+ ORDER BY boundary_at_ms ASC";
 
 /// The answer to "what was true at T".
 ///

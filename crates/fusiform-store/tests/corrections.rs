@@ -413,3 +413,89 @@ fn the_bulk_read_omits_a_corrected_fact() {
         "outside the corrected interval the fact reads normally"
     );
 }
+
+/// The correction lookup seeks an index rather than walking the era table.
+///
+/// Every point-in-time read asks whether a correction covers its instant, so
+/// this query runs on the hot path. Against a live 68,000-era store it was
+/// measured at 9ms — a full walk of the source's rows to discover that
+/// corrections are absent, paid on every read. With the partial index it is
+/// 0.005ms warm.
+///
+/// Asserted on the query plan rather than a timing bound, for the reason the
+/// steady-state test records: wall-clock thresholds tight enough to catch a
+/// regression fire on jitter, and loose enough to be stable pass the defect.
+/// The plan is deterministic.
+#[test]
+fn the_correction_lookup_seeks_its_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store(&dir);
+    corrected_history(&store);
+    let path = dir.path().join("store.db");
+    drop(store);
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let sql = format!(
+        "EXPLAIN QUERY PLAN {}",
+        fusiform_store::CORRECTIONS_COVERING_SQL
+    );
+    let mut stmt = conn.prepare(&sql).unwrap();
+    let steps: Vec<String> = stmt
+        .query_map(rusqlite::params!["models.dev", 6_000i64], |r| {
+            r.get::<_, String>(3)
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    let plan = steps.join(" | ");
+    eprintln!("plan: {plan}");
+
+    assert!(
+        plan.contains("era_corrections"),
+        "the correction lookup must use its partial index: {plan}"
+    );
+    // Naming the index is not enough — SQLite will scan one end to end. The
+    // constraint list is what proves it seeks.
+    assert!(
+        plan.contains("affected_from_ms<") || plan.contains("affected_from_ms<="),
+        "the index must be seekable on the interval, not merely used: {plan}"
+    );
+    assert!(
+        !plan.contains("SCAN era"),
+        "the correction lookup is walking the era table: {plan}"
+    );
+
+    // And the index is PARTIAL. Being used and seekable is not enough: a full
+    // index on the same columns satisfies both and would carry an entry for
+    // every era — 67,914 index writes during a single seed, for a set that
+    // holds one row. The WHERE clause is the whole point, and dropping it
+    // passes every assertion above.
+    let ddl: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name='era_corrections'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("the index must exist");
+    assert!(
+        ddl.contains("WHERE") && ddl.contains("corrected"),
+        "era_corrections must be partial or it indexes every era: {ddl}"
+    );
+
+    // The set it covers is exactly the corrected rows.
+    let indexed: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM era WHERE boundary_kind = 'corrected'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let total: i64 = conn
+        .query_row("SELECT COUNT(*) FROM era", [], |r| r.get(0))
+        .unwrap();
+    assert!(
+        indexed < total,
+        "the fixture must have non-corrected eras, or this proves nothing \
+         ({indexed} corrected of {total})"
+    );
+}

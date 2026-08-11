@@ -33,10 +33,16 @@ use cortexkit_store::Migration;
 pub const NAMESPACE: &str = "catalog";
 
 /// The ordered migration chain.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    statements: SCHEMA_V1,
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        statements: SCHEMA_V1,
+    },
+    Migration {
+        version: 2,
+        statements: SCHEMA_V2,
+    },
+];
 
 const SCHEMA_V1: &str = r#"
 -- One row per poll. Every poll, including failures and 304s.
@@ -209,4 +215,21 @@ CREATE TABLE catalog_version (
 
 INSERT INTO catalog_version (id, version, observation_id, updated_at_ms)
 VALUES (1, 0, NULL, 0);
+"#;
+
+// Every point-in-time read asks whether a correction covers the instant it is
+// resolving. Without an index for that question it is answered by walking all
+// of a source's eras — measured at 9ms against 68,000 rows, paid on every read,
+// to discover that corrections are almost always absent.
+//
+// A partial index holds ONLY corrected rows. Corrections are rare by nature:
+// each one is a defect fusiform found in its own record, so the index stays
+// tiny while the table grows past a hundred thousand rows. That asymmetry is
+// exactly what a partial index is for.
+//
+// Found by running a real read against a real store. The query looked fine.
+const SCHEMA_V2: &str = r#"
+CREATE INDEX era_corrections
+    ON era (source, affected_from_ms, affected_until_ms)
+    WHERE boundary_kind = 'corrected';
 "#;
