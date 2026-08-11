@@ -547,8 +547,24 @@ fact — an inference from co-occurrence and matching values, not something the
 upstream documents (`docs/upstream-models-dev-measured.md`).
 Fusiform normalizes to the general tier form and never serves both. It
 currently only ever co-occurs with `tiers`; that is an upstream convention,
-not a guarantee, so a `context_over_200k` without a matching tier is a
+not a guarantee, so a `context_over_200k` the tier rows do not corroborate is a
 normalizer error, not a silent drop.
+
+**Corroborated on RATES, never on the threshold.** The key's name is not its
+threshold. Measured across the 288 models carrying it: the tier size is exactly
+200,000 on 126, and 272,000 / 256,000 / 262,144 / 512,000 on the other 162; the
+whole document also carries 32,000 and 128,000 thresholds, both *below* the
+number the key names. What holds on all 288 with zero exceptions is that the
+legacy block's rate set equals some tier row's rate set. So the check is set
+equality on rates, and the legacy block contributes no rate of its own.
+
+This paragraph is more specific than it was, because the looser phrasing —
+"without a matching tier" — was implemented as *matching threshold* and
+rejected 162 of 288 real models. The threshold list four paragraphs up was
+already correct and was not consulted while writing the check. A design note
+sentence that admits two readings will be implemented as whichever one the
+implementer already believed, so the ambiguity is the defect, not the
+implementation.
 
 ### Money is integers, and the unit is stated
 
@@ -2036,3 +2052,35 @@ these modules are reviewed against), applied to this design:
   decision reads a field set that cannot include them. Two independent
   barriers, neither load-bearing alone — the right shape for a failure that is
   silent.
+
+- **A design note sentence that admits two readings gets implemented as
+  whichever one the implementer already believed.** This note said a
+  `context_over_200k` "without a matching tier" is an error. *Matching* had two
+  readings — matching threshold, matching rates — and the first shipped,
+  rejecting 162 of 288 real models. The correct threshold list sat four
+  paragraphs above the sentence and was not consulted, because the sentence did
+  not feel like it needed consulting.
+
+  So the ambiguity is the defect, not the implementation. An unambiguous
+  sentence is checkable against data by someone who does not share the author's
+  belief; an ambiguous one silently recruits that belief and produces agreement
+  with itself.
+
+  The general form, and the reason this is not merely an editing lesson:
+  **the sentence and the code were written by one person from one
+  understanding, so the code agreed with the note and the note agreed with the
+  code, and only the DATA disagreed with both.** Nothing internal to either
+  artifact could have surfaced it. This is the same defect the tier finding
+  records — fixture and parser sharing an author — arriving through prose
+  instead of a fixture.
+
+- **The parser written to prevent a defect reproduced it.** Reading
+  `tier.size` as a context threshold without checking `tier.type` is the
+  commons defect; reading `context_over_200k`'s NAME as its threshold is the
+  same act, and it shipped in the module whose purpose is to not do that,
+  guarded by a rule stated three times in this note.
+
+  Knowing a failure mode by name does not confer immunity to it, because
+  recognition operates on the version you have already labelled. The check that
+  caught it was not vigilance — it was running the parser against 6,253 real
+  rows, which is the same instrument that caught the original.
