@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 use fusiform_core::{SourceId, Timestamp};
 use fusiform_store::serve::{CatalogQuery, CatalogSnapshot, Presence};
-use fusiform_store::{CatalogError, CatalogStore};
+use fusiform_store::{CatalogError, CatalogStore, FactKey};
 use serde::{Deserialize, Serialize};
 
 /// A `catalog.get` request.
@@ -147,38 +147,129 @@ struct ToolCall {
     arguments: serde_json::Value,
 }
 
-/// The tool this module serves.
-pub const TOOL_NAME: &str = "catalog.get";
+/// The tools this module serves.
+pub const TOOL_GET: &str = "catalog.get";
+pub const TOOL_HISTORY: &str = "catalog.history";
+pub const TOOL_STATUS: &str = "catalog.status";
 
-/// Serve one tool call, unwrapping the wire envelope.
+/// Every tool name, so the dispatch and the manifest cannot disagree about
+/// which tools exist.
+pub const TOOLS: &[&str] = &[TOOL_GET, TOOL_HISTORY, TOOL_STATUS];
+
+/// What a served tool call produced.
+///
+/// One enum rather than three entry points, so the daemon handler dispatches
+/// once and every tool shares the same envelope unwrap and the same error
+/// mapping. A second handler path is a second place for those to drift.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum ToolResponse {
+    Catalog(CatalogGetResponse),
+    History(HistoryResponse),
+    Status(StatusResponse),
+}
+
+/// A `catalog.history` request: every era for one fact.
+///
+/// The fact is named explicitly rather than defaulting to "all facts for this
+/// model", because a model's full history is thousands of rows and an operator
+/// asking a question has one fact in mind.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HistoryRequest {
+    #[serde(default)]
+    pub source: Option<String>,
+    pub provider_id: String,
+    pub model_id: String,
+    /// A key in the served vocabulary: `rate.input`, `limit.context`,
+    /// `capability.reasoning`, `existence`.
+    pub fact_key: String,
+}
+
+/// One era, as an operator reads it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HistoryEra {
+    pub value: serde_json::Value,
+    pub boundary_at_ms: i64,
+    /// observed / asserted / seed / corrected.
+    pub boundary_kind: String,
+    /// The other edge of the observation window.
+    ///
+    /// Present only on an observed boundary. Its absence is the honest answer
+    /// for a seed or a correction: neither is an observation of an upstream
+    /// change, so neither has a window to report.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_from_ms: Option<i64>,
+}
+
+/// A `catalog.history` response.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HistoryResponse {
+    pub source: String,
+    pub provider_id: String,
+    pub model_id: String,
+    pub fact_key: String,
+    /// Oldest first: a history is read forwards.
+    pub eras: Vec<HistoryEra>,
+}
+
+/// A `catalog.status` request.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StatusRequest {
+    #[serde(default)]
+    pub source: Option<String>,
+    /// How many recent polls to include. Defaults to 10.
+    #[serde(default)]
+    pub polls: Option<u32>,
+}
+
+/// One recorded poll.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StatusPoll {
+    pub observed_at_ms: i64,
+    pub outcome: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_class: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+}
+
+/// A `catalog.status` response: what fusiform has been doing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StatusResponse {
+    pub source: String,
+    pub catalog_version: i64,
+    pub model_count: usize,
+    pub era_count: i64,
+    /// The most recent polls, newest first.
+    ///
+    /// Failures and 304s included. An operator asking what fusiform has been
+    /// doing needs the polls that changed nothing most of all: a source
+    /// returning 304 for a week and a source failing for a week are
+    /// indistinguishable from the catalog alone.
+    pub recent_polls: Vec<StatusPoll>,
+}
+
+/// Serve one tool call, unwrapping the wire envelope and dispatching by name.
 ///
 /// This is what the daemon handler calls. The envelope is unwrapped here rather
 /// than in the handler so the wire contract is covered by a test that needs no
 /// socket.
-pub fn serve_tool_call(
-    store: &CatalogStore,
-    body: &[u8],
-) -> Result<CatalogGetResponse, RouteError> {
-    // An empty body is a bare call with no arguments.
+pub fn serve_tool_call(store: &CatalogStore, body: &[u8]) -> Result<ToolResponse, RouteError> {
+    // An empty body is a bare `catalog.get` with no arguments: the read an
+    // operator means when they call the module with nothing.
     if body.is_empty() {
-        return serve_catalog_get(store, b"");
+        return serve_catalog_get(store, b"").map(ToolResponse::Catalog);
     }
 
     let call: ToolCall = serde_json::from_slice(body).map_err(|e| {
         RouteError::bad_request(format!(
-            "a tool call must be {{\"name\": \"{TOOL_NAME}\", \"arguments\": {{...}}}}: {e}"
+            "a tool call must be {{\"name\": \"<tool>\", \"arguments\": {{...}}}}: {e}"
         ))
     })?;
-
-    if call.name != TOOL_NAME {
-        // Named explicitly rather than served anyway. A module that answers to
-        // any tool name will keep answering after a consumer's typo, and the
-        // consumer will believe it called something else.
-        return Err(RouteError::bad_request(format!(
-            "unknown tool {:?}; fusiform serves {TOOL_NAME:?}",
-            call.name
-        )));
-    }
 
     // `null` arguments and an absent `arguments` key both mean "no arguments".
     let args = if call.arguments.is_null() {
@@ -189,7 +280,100 @@ pub fn serve_tool_call(
         })?
     };
 
-    serve_catalog_get(store, &args)
+    match call.name.as_str() {
+        TOOL_GET => serve_catalog_get(store, &args).map(ToolResponse::Catalog),
+        TOOL_HISTORY => serve_history(store, &args).map(ToolResponse::History),
+        TOOL_STATUS => serve_status(store, &args).map(ToolResponse::Status),
+        // Named explicitly rather than served anyway. A module that answers to
+        // any tool name keeps answering after a consumer's typo, and the
+        // consumer believes it called something else.
+        other => Err(RouteError::bad_request(format!(
+            "unknown tool {other:?}; fusiform serves {}",
+            TOOLS.join(", ")
+        ))),
+    }
+}
+
+/// Serve `catalog.history`: every era for one fact.
+pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse, RouteError> {
+    let request: HistoryRequest = serde_json::from_slice(body)
+        .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?;
+    let source = parse_source(request.source.as_deref())?;
+
+    let fact = FactKey::from_stored(request.fact_key.clone());
+    let rows = store
+        .fact_history(source, &request.provider_id, &request.model_id, &fact)
+        .map_err(|e| store_error(&e))?;
+
+    let eras = rows
+        .into_iter()
+        .map(|row| HistoryEra {
+            value: serde_json::from_str(&row.value_json)
+                .unwrap_or(serde_json::Value::String(row.value_json.clone())),
+            boundary_at_ms: row.boundary_at.0,
+            boundary_kind: row.boundary_kind,
+            window_from_ms: row.prior_observation_at.map(|t| t.0),
+        })
+        .collect();
+
+    Ok(HistoryResponse {
+        source: source.as_str().to_string(),
+        provider_id: request.provider_id,
+        model_id: request.model_id,
+        fact_key: request.fact_key,
+        eras,
+    })
+}
+
+/// Serve `catalog.status`: what fusiform has been doing.
+pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse, RouteError> {
+    let request: StatusRequest = if body.is_empty() {
+        StatusRequest::default()
+    } else {
+        serde_json::from_slice(body)
+            .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?
+    };
+    let source = parse_source(request.source.as_deref())?;
+
+    let polls = store
+        .recent_observations(source, request.polls.unwrap_or(10))
+        .map_err(|e| store_error(&e))?;
+    let era_count = store.era_count(source).map_err(|e| store_error(&e))?;
+    let catalog_version = store.catalog_version().map_err(|e| store_error(&e))?;
+
+    // The model count comes from the same read a consumer would get, so status
+    // and catalog.get cannot disagree about how many models exist.
+    let snapshot = store
+        .read_catalog(&CatalogQuery::current(source))
+        .map_err(|e| store_error(&e))?;
+
+    Ok(StatusResponse {
+        source: source.as_str().to_string(),
+        catalog_version,
+        model_count: snapshot.model_count(),
+        era_count,
+        recent_polls: polls
+            .into_iter()
+            .map(|p| StatusPoll {
+                observed_at_ms: p.observed_at.0,
+                outcome: p.outcome,
+                failure_class: p.failure_class,
+                detail: p.detail,
+                duration_ms: p.duration_ms,
+            })
+            .collect(),
+    })
+}
+
+/// Resolve a source name, refusing one fusiform does not have.
+fn parse_source(name: Option<&str>) -> Result<SourceId, RouteError> {
+    match name {
+        None | Some("models.dev") => Ok(SourceId::ModelsDev),
+        Some("seed") => Ok(SourceId::Seed),
+        Some(other) => Err(RouteError::bad_request(format!(
+            "unknown source {other:?}; fusiform serves \"models.dev\""
+        ))),
+    }
 }
 
 /// Serve one `catalog.get` request against the store.
@@ -209,15 +393,7 @@ pub fn serve_catalog_get(
             .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?
     };
 
-    let source = match request.source.as_deref() {
-        None | Some("models.dev") => SourceId::ModelsDev,
-        Some("seed") => SourceId::Seed,
-        Some(other) => {
-            return Err(RouteError::bad_request(format!(
-                "unknown source {other:?}; fusiform serves \"models.dev\""
-            )))
-        }
-    };
+    let source = parse_source(request.source.as_deref())?;
 
     if request.model_id.is_some() && request.provider_id.is_none() {
         // A bare model id is ambiguous by construction, and answering with the

@@ -43,6 +43,19 @@ fn get(f: &Fixture, body: &str) -> CatalogGetResponse {
     serve_catalog_get(&f.store, body.as_bytes()).expect("the request must be served")
 }
 
+/// Drive a full tool call and unwrap the catalog arm.
+///
+/// Panics on any other arm rather than returning a default, so a dispatch bug
+/// that routes `catalog.get` to the wrong handler fails here instead of
+/// producing an empty catalog that reads as a legitimate answer.
+fn catalog_from_call(f: &Fixture, body: &[u8]) -> CatalogGetResponse {
+    match fusiform_module::route::serve_tool_call(&f.store, body).expect("the call must be served")
+    {
+        fusiform_module::route::ToolResponse::Catalog(c) => c,
+        other => panic!("expected a catalog response, got {other:?}"),
+    }
+}
+
 /// An empty body is a request for the whole current catalog.
 #[test]
 fn an_empty_request_returns_the_current_catalog() {
@@ -345,20 +358,15 @@ fn the_response_carries_the_catalog_version() {
 fn the_tool_call_envelope_is_unwrapped() {
     let f = fixture();
 
-    let wrapped = fusiform_module::route::serve_tool_call(
-        &f.store,
-        br#"{"name": "catalog.get", "arguments": {}}"#,
-    )
-    .expect("a well-formed tool call must be served");
+    let wrapped = catalog_from_call(&f, br#"{"name": "catalog.get", "arguments": {}}"#);
     assert!(wrapped.model_count() > 10);
 
     // Arguments inside the envelope are honoured, so the unwrap is real rather
     // than the envelope being discarded.
-    let filtered = fusiform_module::route::serve_tool_call(
-        &f.store,
+    let filtered = catalog_from_call(
+        &f,
         br#"{"name": "catalog.get", "arguments": {"fact_prefixes": ["rate."]}}"#,
-    )
-    .expect("arguments must pass through");
+    );
     assert!(filtered.fact_count() < wrapped.fact_count());
     for facts in filtered.models.values() {
         for key in facts.keys() {
@@ -367,8 +375,7 @@ fn the_tool_call_envelope_is_unwrapped() {
     }
 
     // A bare call with no arguments key at all.
-    let bare = fusiform_module::route::serve_tool_call(&f.store, br#"{"name": "catalog.get"}"#)
-        .expect("a call with no arguments is a call for everything");
+    let bare = catalog_from_call(&f, br#"{"name": "catalog.get"}"#);
     assert_eq!(bare.model_count(), wrapped.model_count());
 
     // A different tool name is refused rather than served anyway: a module that
@@ -388,4 +395,238 @@ fn the_tool_call_envelope_is_unwrapped() {
     )
     .expect_err("a misspelled argument must still be refused");
     assert_eq!(err.code, "bad_request");
+}
+
+/// `catalog.history` returns a fact's eras oldest first, with their windows.
+#[test]
+fn history_returns_eras_with_their_windows() {
+    let f = fixture();
+
+    // Reprice twice, so the history has a seed and two observed boundaries.
+    for (at, rate) in [(3_000i64, 7.0f64), (5_000, 11.0)] {
+        let mut doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        doc.get_mut("anthropic")
+            .and_then(|p| p.get_mut("models"))
+            .and_then(|m| m.get_mut("claude-sonnet-4-5"))
+            .and_then(|m| m.get_mut("cost"))
+            .and_then(|c| c.as_object_mut())
+            .unwrap()
+            .insert("input".to_string(), serde_json::json!(rate));
+
+        let obs = f
+            .store
+            .record_observation(&NewObservation {
+                source: SourceId::ModelsDev,
+                observed_at: Timestamp(at - 1_000),
+                outcome: ObservationOutcome::Unchanged,
+                normalized_hash: Some(format!("h{at}")),
+                raw_hash: None,
+                etag: None,
+                duration_ms: None,
+                detail: None,
+            })
+            .unwrap();
+        let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+            .unwrap()
+            .catalog;
+        let plan = plan_ingest(
+            &f.store,
+            &catalog,
+            Timestamp(at),
+            BoundaryKind::Observed,
+            Some(obs),
+        )
+        .unwrap();
+        f.store.append_eras(&plan.eras).unwrap();
+    }
+
+    let history = match fusiform_module::route::serve_tool_call(
+        &f.store,
+        br#"{"name": "catalog.history", "arguments": {
+            "provider_id": "anthropic",
+            "model_id": "claude-sonnet-4-5",
+            "fact_key": "rate.input"
+        }}"#,
+    )
+    .expect("history must be served")
+    {
+        fusiform_module::route::ToolResponse::History(h) => h,
+        other => panic!("expected a history response, got {other:?}"),
+    };
+
+    assert_eq!(history.eras.len(), 3, "seed plus two reprices");
+
+    // Oldest first: a history is read forwards.
+    let boundaries: Vec<i64> = history.eras.iter().map(|e| e.boundary_at_ms).collect();
+    assert_eq!(boundaries, vec![1_000, 3_000, 5_000]);
+
+    // The seed carries no window; both observed boundaries do.
+    assert_eq!(history.eras[0].boundary_kind, "seed");
+    assert_eq!(
+        history.eras[0].window_from_ms, None,
+        "a seed is not an observation and must claim no window"
+    );
+    assert_eq!(history.eras[1].boundary_kind, "observed");
+    assert_eq!(history.eras[1].window_from_ms, Some(2_000));
+    assert_eq!(history.eras[2].window_from_ms, Some(4_000));
+
+    // And the values are the ones that were in force.
+    let units = |i: usize| {
+        history.eras[i]
+            .value
+            .get("units")
+            .and_then(|u| u.as_i64())
+            .unwrap()
+    };
+    assert_eq!(units(0), 3_000_000_000);
+    assert_eq!(units(1), 7_000_000_000);
+    assert_eq!(units(2), 11_000_000_000);
+}
+
+/// `catalog.status` reports polls that changed nothing, not only changes.
+///
+/// The distinction an operator needs: a source returning 304 for a week and a
+/// source failing for a week look identical from the catalog alone.
+#[test]
+fn status_reports_quiet_polls_and_failures() {
+    let f = fixture();
+
+    for (at, outcome) in [
+        (2_000i64, ObservationOutcome::NotModified),
+        (
+            3_000,
+            ObservationOutcome::Failed {
+                class: fusiform_core::FailureClass::Network,
+            },
+        ),
+        (4_000, ObservationOutcome::NotModified),
+    ] {
+        f.store
+            .record_observation(&NewObservation {
+                source: SourceId::ModelsDev,
+                observed_at: Timestamp(at),
+                outcome,
+                normalized_hash: None,
+                raw_hash: None,
+                etag: None,
+                duration_ms: Some(12),
+                detail: Some("probe".to_string()),
+            })
+            .unwrap();
+    }
+
+    let status = match fusiform_module::route::serve_tool_call(
+        &f.store,
+        br#"{"name": "catalog.status", "arguments": {}}"#,
+    )
+    .expect("status must be served")
+    {
+        fusiform_module::route::ToolResponse::Status(s) => s,
+        other => panic!("expected a status response, got {other:?}"),
+    };
+
+    assert_eq!(status.recent_polls.len(), 3);
+    // Newest first.
+    assert_eq!(status.recent_polls[0].observed_at_ms, 4_000);
+    assert_eq!(status.recent_polls[0].outcome, "not_modified");
+
+    // The failure is present with its class, rather than being filtered out as
+    // "not a real poll".
+    let failure = status
+        .recent_polls
+        .iter()
+        .find(|p| p.outcome == "failed")
+        .expect("a failed poll must be reported");
+    assert_eq!(failure.failure_class.as_deref(), Some("network"));
+
+    // Counts come from the same read a consumer gets, so status and catalog.get
+    // cannot disagree about how many models exist.
+    let catalog = get(&f, "{}");
+    assert_eq!(status.model_count, catalog.model_count());
+    assert!(status.era_count > status.model_count as i64);
+}
+
+/// An unknown tool is refused, and the error names what is served.
+#[test]
+fn an_unknown_tool_is_refused() {
+    let f = fixture();
+
+    let err = fusiform_module::route::serve_tool_call(
+        &f.store,
+        br#"{"name": "catalog.list", "arguments": {}}"#,
+    )
+    .expect_err("an unknown tool must be refused");
+    assert_eq!(err.code, "bad_request");
+    assert!(err.message.contains("catalog.list"), "{}", err.message);
+    // The error lists every tool that IS served, so an operator can pick the
+    // right one without going to read the module's code.
+    for tool in fusiform_module::route::TOOLS {
+        assert!(
+            err.message.contains(tool),
+            "the refusal must name {tool}: {}",
+            err.message
+        );
+    }
+}
+
+/// The manifest and the dispatch table describe the same tools.
+///
+/// Two lists of tool names in different files, with nothing comparing them: a
+/// tool declared in the manifest and not dispatched is advertised and broken,
+/// and a tool dispatched and not declared is unreachable. Neither shows up as a
+/// failure anywhere else, because each file is internally consistent.
+#[test]
+fn the_manifest_and_the_dispatch_agree_on_which_tools_exist() {
+    let manifest = fusiform_module::manifest();
+
+    let declared: Vec<String> = manifest
+        .provides
+        .iter()
+        .flat_map(|role| match role {
+            subc_protocol::manifest::ProviderRole::ToolProvider { tools, .. } => {
+                tools.iter().map(|t| t.name.clone()).collect::<Vec<_>>()
+            }
+            _ => Vec::new(),
+        })
+        .collect();
+
+    let dispatched: Vec<String> = fusiform_module::route::TOOLS
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+
+    assert!(!declared.is_empty(), "the manifest must declare tools");
+    assert_eq!(
+        declared, dispatched,
+        "the manifest declares {declared:?} but the dispatch handles {dispatched:?}"
+    );
+
+    // And every declared tool actually answers rather than falling through to
+    // the unknown-tool arm. A name present in both lists still proves nothing
+    // if the match arm is missing.
+    let f = fixture();
+    for tool in &declared {
+        let args = match tool.as_str() {
+            "catalog.history" => serde_json::json!({
+                "provider_id": "anthropic",
+                "model_id": "claude-sonnet-4-5",
+                "fact_key": "rate.input"
+            }),
+            _ => serde_json::json!({}),
+        };
+        let body = serde_json::to_vec(&serde_json::json!({
+            "name": tool,
+            "arguments": args
+        }))
+        .unwrap();
+
+        let result = fusiform_module::route::serve_tool_call(&f.store, &body);
+        match result {
+            Ok(_) => {}
+            Err(e) => panic!(
+                "declared tool {tool} is not served: {} {}",
+                e.code, e.message
+            ),
+        }
+    }
 }

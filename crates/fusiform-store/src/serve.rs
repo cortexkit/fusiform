@@ -327,6 +327,122 @@ impl CatalogStore {
     }
 }
 
+/// One recorded poll, as an operator reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservationRow {
+    pub id: i64,
+    pub observed_at: Timestamp,
+    /// The stored outcome word: changed / unchanged / not_modified / failed.
+    pub outcome: String,
+    /// Present only on a failure, naming the coarse class.
+    pub failure_class: Option<String>,
+    pub detail: Option<String>,
+    pub normalized_hash: Option<String>,
+    pub raw_hash: Option<String>,
+    pub duration_ms: Option<i64>,
+}
+
+/// One era in a fact's history.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryRow {
+    pub value_json: String,
+    pub boundary_at: Timestamp,
+    pub boundary_kind: String,
+    /// The other edge of the observation window, when the boundary has one.
+    pub prior_observation_at: Option<Timestamp>,
+}
+
+impl HistoryRow {
+    /// The interval within which this value became true, when one exists.
+    pub fn window(&self) -> Option<(Timestamp, Timestamp)> {
+        self.prior_observation_at.map(|p| (p, self.boundary_at))
+    }
+}
+
+impl CatalogStore {
+    /// The most recent polls, newest first.
+    ///
+    /// Includes failures and 304s. An operator asking "what has fusiform been
+    /// doing" needs the polls that changed nothing most of all: a source that
+    /// has been returning 304 for a week and a source that has been failing for
+    /// a week look identical from the catalog alone.
+    pub fn recent_observations(
+        &self,
+        source: SourceId,
+        limit: u32,
+    ) -> Result<Vec<ObservationRow>, CatalogError> {
+        let rows = self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, observed_at_ms, outcome, failure_class, detail, \
+                        normalized_hash, raw_hash, duration_ms \
+                 FROM observation WHERE source = ?1 \
+                 ORDER BY observed_at_ms DESC, id DESC LIMIT ?2",
+            )?;
+            let mapped = stmt.query_map(params![source.as_str(), limit], |r| {
+                Ok(ObservationRow {
+                    id: r.get(0)?,
+                    observed_at: Timestamp(r.get(1)?),
+                    outcome: r.get(2)?,
+                    failure_class: r.get(3)?,
+                    detail: r.get(4)?,
+                    normalized_hash: r.get(5)?,
+                    raw_hash: r.get(6)?,
+                    duration_ms: r.get(7)?,
+                })
+            })?;
+            mapped.collect::<rusqlite::Result<Vec<_>>>()
+        })?;
+        Ok(rows)
+    }
+
+    /// Every era for one fact, oldest first.
+    ///
+    /// Oldest first because a history is read forwards: "it was X, then Y from
+    /// this window, then Z". The catalog reads are newest-first because they
+    /// answer a different question.
+    pub fn fact_history(
+        &self,
+        source: SourceId,
+        provider_id: &str,
+        model_id: &str,
+        fact: &FactKey,
+    ) -> Result<Vec<HistoryRow>, CatalogError> {
+        let rows = self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT value_json, boundary_at_ms, boundary_kind, prior_observation_at_ms \
+                 FROM era \
+                 WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3 AND fact_key = ?4 \
+                 ORDER BY boundary_at_ms ASC",
+            )?;
+            let mapped = stmt.query_map(
+                params![source.as_str(), provider_id, model_id, fact.as_str()],
+                |r| {
+                    Ok(HistoryRow {
+                        value_json: r.get(0)?,
+                        boundary_at: Timestamp(r.get(1)?),
+                        boundary_kind: r.get(2)?,
+                        prior_observation_at: r.get::<_, Option<i64>>(3)?.map(Timestamp),
+                    })
+                },
+            )?;
+            mapped.collect::<rusqlite::Result<Vec<_>>>()
+        })?;
+        Ok(rows)
+    }
+
+    /// How many eras the store holds, for one source.
+    pub fn era_count(&self, source: SourceId) -> Result<i64, CatalogError> {
+        let n = self.raw_conn(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM era WHERE source = ?1",
+                params![source.as_str()],
+                |r| r.get::<_, i64>(0),
+            )
+        })?;
+        Ok(n)
+    }
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

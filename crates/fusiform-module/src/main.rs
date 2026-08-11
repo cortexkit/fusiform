@@ -21,12 +21,8 @@
 use std::sync::{Arc, Mutex};
 
 use subc_client_rs::{async_trait, HandlerOutcome, ModuleHandler, RequestCtx};
-use subc_protocol::manifest::{
-    Bindings, Concurrency, ExecutionMode, IdentityBinding, IdentityScope, ModuleManifest,
-    ProviderRole, StorageBinding, StorageKind, StorageScope, Tool, TrustTier,
-};
 use subc_protocol::session::HealthReport;
-use subc_protocol::{ModuleHelloAckBody, PROTOCOL_VERSION};
+use subc_protocol::ModuleHelloAckBody;
 
 use fusiform_store::CatalogStore;
 
@@ -36,12 +32,10 @@ use fusiform_module::loop_::{tick, PollContext, POLL_INTERVAL_MS};
 use fusiform_module::route;
 use fusiform_module::signals::Signals;
 
-const MODULE_ID: &str = "fusiform";
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let handler = Fusiform::new();
-    subc_client_rs::serve(manifest(), handler).await?;
+    subc_client_rs::serve(fusiform_module::manifest(), handler).await?;
     Ok(())
 }
 
@@ -206,54 +200,4 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
-}
-
-fn manifest() -> ModuleManifest {
-    ModuleManifest {
-        module_id: MODULE_ID.to_string(),
-        module_version: env!("CARGO_PKG_VERSION").to_string(),
-        protocol_ver: PROTOCOL_VERSION,
-        trust_tier: TrustTier::FirstParty,
-        provides: vec![ProviderRole::ToolProvider {
-            tools: vec![Tool {
-                name: "catalog.get".to_string(),
-                description: Some(
-                    "Read the model catalog: what models exist, what they can do, what they cost."
-                        .to_string(),
-                ),
-                execution_mode: ExecutionMode::Pure,
-                schema: serde_json::json!({"type": "object"}),
-            }],
-            identity_scope: vec![IdentityScope::Project, IdentityScope::Session],
-            concurrency: Concurrency::ModuleManaged,
-            emits_push: true,
-            sub_supervises: true,
-        }],
-        consumes: Vec::new(),
-        scheduled_tasks: Vec::new(),
-        bindings: Bindings {
-            storage: StorageBinding {
-                kind: StorageKind::Sqlite,
-                // `Project` is the only variant this protocol version defines,
-                // and it does not decide anything here: the daemon resolves
-                // every module to one database (`isolation: module`) at
-                // <data_home>/cortexkit/<module_id>/store.db regardless of what
-                // this field says.
-                //
-                // Worth stating because the field READS like it partitions
-                // storage per project, which for fusiform would be wrong — the
-                // catalog describes the world, not a project, so two projects
-                // asking what models exist must get the same answer. They do,
-                // but because of the daemon's resolution rather than because of
-                // this value.
-                scope: StorageScope::Project,
-                owns_schema: true,
-            },
-            vault_grants: Vec::new(),
-            identity: IdentityBinding {
-                requires: Vec::new(),
-                optional: vec![IdentityScope::Project, IdentityScope::Session],
-            },
-        },
-    }
 }
