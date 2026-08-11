@@ -70,10 +70,42 @@ options:
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    disown_inherited_module_identity();
+
     if let Err(e) = run(env::args_os()).await {
         eprintln!("fusiform: {e}");
         process::exit(1);
     }
+}
+
+/// Drop any module identity inherited from the environment.
+///
+/// `subc-client-rs` falls back to `SUBC_MODULE_ID` and `SUBC_LAUNCH_NONCE` from
+/// the process environment when a call carries no explicit consumer identity,
+/// and there is no way to say "explicitly none" — an absent identity in
+/// `CallOptions` *means* "read the environment".
+///
+/// Those variables are injected by the supervisor into a supervised module's
+/// process. A CLI is not a module. But an operator running this from a shell
+/// inside a module's environment — which is how an agent-driven invocation
+/// happens — inherits that module's id and its live nonce, and every route this
+/// CLI opens is then attributed to that module.
+///
+/// Found by running the CLI against a lab daemon, where it failed with
+/// `bad_consumer_identity (consumer_identity for module_id 'aft' did not match
+/// a supervised launch nonce)`. The failure was luck: the lab daemon has no
+/// `aft` module, so the nonce did not match. Against the real daemon the nonce
+/// WOULD have matched, the call would have succeeded, and the impersonation
+/// would have been invisible.
+///
+/// Clearing them here rather than passing an explicit identity, because the
+/// honest statement is that this process has no module identity at all — not
+/// that it has a different one.
+fn disown_inherited_module_identity() {
+    // Before any task is spawned, so no other thread can be reading the
+    // environment concurrently.
+    env::remove_var("SUBC_MODULE_ID");
+    env::remove_var("SUBC_LAUNCH_NONCE");
 }
 
 struct Args {
@@ -512,6 +544,41 @@ mod tests {
         assert_eq!(format_instant(1_767_225_599_000), "2025-12-31 23:59:59Z");
         // date -u -r 1767225600 => Thu Jan  1 00:00:00 UTC 2026
         assert_eq!(format_instant(1_767_225_600_000), "2026-01-01 00:00:00Z");
+    }
+
+    /// A module identity inherited from the environment is dropped.
+    ///
+    /// `subc-client-rs` reads `SUBC_MODULE_ID` and `SUBC_LAUNCH_NONCE` from the
+    /// process environment when a call carries no explicit consumer identity,
+    /// and an absent identity in `CallOptions` MEANS "read the environment" —
+    /// there is no way to say "explicitly none". So the only way for this CLI
+    /// to have no module identity is for those variables not to be set.
+    ///
+    /// Found against a live daemon: the CLI inherited `SUBC_MODULE_ID=aft` from
+    /// the shell it was run in and every route it opened was attributed to that
+    /// module. It failed only because the lab daemon has no `aft` module, so
+    /// the nonce did not match. Against the daemon that launched the shell it
+    /// would have matched, and the impersonation would have been silent.
+    #[test]
+    fn an_inherited_module_identity_is_dropped() {
+        // Deliberately set both, as a supervised module's environment has them.
+        env::set_var("SUBC_MODULE_ID", "aft");
+        env::set_var("SUBC_LAUNCH_NONCE", "a-live-nonce");
+        assert!(
+            env::var("SUBC_MODULE_ID").is_ok(),
+            "the test must actually set the variable, or it proves nothing"
+        );
+
+        disown_inherited_module_identity();
+
+        assert!(
+            env::var("SUBC_MODULE_ID").is_err(),
+            "an inherited module id must not survive: this CLI is not a module"
+        );
+        assert!(
+            env::var("SUBC_LAUNCH_NONCE").is_err(),
+            "an inherited launch nonce must not survive"
+        );
     }
 
     /// A zero or negative instant renders as absent rather than as 1970.
