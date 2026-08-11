@@ -1,0 +1,581 @@
+#![forbid(unsafe_code)]
+
+//! Durable observation and era history for the catalog.
+//!
+//! The store's job is to make three questions answerable without qualification:
+//! what does the catalog say now, what did it say at an instant, and how did it
+//! come to say that. The schema (see [`schema`]) is shaped so the answers are
+//! arithmetic rather than interpretation.
+//!
+//! Persistence itself is not reinvented here. The module receives a resolved
+//! [`StorageDescriptor`] over the daemon handshake and hands it to
+//! `cortexkit-store`, which acquires the single-writer lease, opens the file
+//! with durable pragmas, and applies migrations. What this crate owns is the
+//! domain: the schema, the writes, and the reads.
+
+pub mod schema;
+
+use std::collections::BTreeMap;
+
+use cortexkit_store::{open_sqlite, SqliteStore, StorageDescriptor, StoreError};
+use fusiform_core::{
+    BoundaryKind, Correction, FailureClass, FieldId, ObservationOutcome, SourceId, Timestamp,
+};
+use rusqlite::{params, OptionalExtension};
+
+/// A lease-guarded, migrated catalog store.
+pub struct CatalogStore {
+    inner: SqliteStore,
+}
+
+/// What went wrong, at the domain's level rather than the driver's.
+#[derive(Debug)]
+pub enum CatalogError {
+    Store(StoreError),
+    /// A write was rejected because a newer writer owns the database.
+    ///
+    /// Distinct from a generic backend error because it has a specific correct
+    /// response: this process is superseded and must stop writing, not retry.
+    Fenced,
+    /// A read or write violated a domain invariant the schema could not express.
+    Invariant(String),
+    /// A value in the database did not round-trip back to the domain.
+    ///
+    /// Not a corrupt-database claim: it is what a schema change or a hand-edit
+    /// looks like from in here, and both need to be loud rather than defaulted.
+    Decode {
+        column: &'static str,
+        value: String,
+    },
+}
+
+impl std::fmt::Display for CatalogError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CatalogError::Store(e) => write!(f, "store: {e}"),
+            CatalogError::Fenced => {
+                write!(f, "write rejected: a newer writer owns this database")
+            }
+            CatalogError::Invariant(msg) => write!(f, "invariant violated: {msg}"),
+            CatalogError::Decode { column, value } => {
+                write!(f, "column {column} holds unreadable value {value:?}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CatalogError {}
+
+impl From<StoreError> for CatalogError {
+    fn from(e: StoreError) -> Self {
+        // A fenced write has a specific correct response — stop writing — so it
+        // is lifted out of the generic backend error rather than left for a
+        // caller to detect by matching on a string.
+        match e {
+            StoreError::Fenced { .. } => CatalogError::Fenced,
+            other => CatalogError::Store(other),
+        }
+    }
+}
+
+/// One recorded poll.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Observation {
+    pub id: i64,
+    pub source: SourceId,
+    pub observed_at: Timestamp,
+    pub outcome: ObservationOutcome,
+    pub normalized_hash: Option<String>,
+    pub raw_hash: Option<String>,
+    pub etag: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub detail: Option<String>,
+}
+
+/// A poll about to be recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewObservation {
+    pub source: SourceId,
+    pub observed_at: Timestamp,
+    pub outcome: ObservationOutcome,
+    pub normalized_hash: Option<String>,
+    pub raw_hash: Option<String>,
+    pub etag: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub detail: Option<String>,
+}
+
+/// An era about to be written.
+///
+/// The observation window is NOT a field a caller supplies. It is derived from
+/// the store's own observation history at write time, because the only party
+/// that can state fusiform's previous observation instant is fusiform, and a
+/// window handed in by a caller is a claim the store cannot check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewEra {
+    pub source: SourceId,
+    pub provider_id: String,
+    pub model_id: String,
+    pub fact_key: FactKey,
+    pub value_json: String,
+    pub boundary_at: Timestamp,
+    pub boundary_kind: BoundaryKind,
+    /// The observation that opened this era. Required for `Observed`, forbidden
+    /// for `Seed`.
+    pub observation_id: Option<i64>,
+}
+
+/// What an era is about, in the served contract's vocabulary.
+///
+/// A newtype rather than a bare string so a caller cannot invent a key at a
+/// call site: the vocabulary is closed at the type level even though the column
+/// is text.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FactKey(String);
+
+impl FactKey {
+    /// The key for a rate, per token class — never one key for "rates".
+    pub fn rate(class: fusiform_core::TokenClass) -> Self {
+        Self(format!("rate.{}", token_class_str(class)))
+    }
+
+    /// The key for a capability field.
+    pub fn capability(name: &str) -> Self {
+        Self(format!("capability.{name}"))
+    }
+
+    /// The key for a declared limit.
+    pub fn limit(name: &str) -> Self {
+        Self(format!("limit.{name}"))
+    }
+
+    /// The key for whether the model exists in the source at all. A retirement
+    /// is a tombstone value under this key, never a deleted row.
+    pub fn existence() -> Self {
+        Self("existence".to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+fn token_class_str(class: fusiform_core::TokenClass) -> &'static str {
+    use fusiform_core::TokenClass::*;
+    match class {
+        Input => "input",
+        Output => "output",
+        CacheRead => "cache_read",
+        CacheWrite => "cache_write",
+        Reasoning => "reasoning",
+    }
+}
+
+impl CatalogStore {
+    /// Open the store from the descriptor delivered over the handshake.
+    ///
+    /// The descriptor is never self-derived. A module that keys its own storage
+    /// path before connecting will eventually key it differently from the
+    /// supervisor and quietly run two databases, which is exactly what one
+    /// fleet module shipped: a nested `astrocyte/cortexkit/astrocyte/store.db`
+    /// alongside the real one.
+    pub fn open(descriptor: &StorageDescriptor) -> Result<Self, CatalogError> {
+        let inner = open_sqlite(descriptor)?;
+        inner.migrate(schema::NAMESPACE, schema::MIGRATIONS)?;
+        Ok(Self { inner })
+    }
+
+    /// The fence epoch of the held single-writer lease.
+    pub fn epoch(&self) -> u64 {
+        self.inner.epoch()
+    }
+
+    /// Record one poll and return its id.
+    ///
+    /// Fenced: a superseded writer that still holds an open connection during a
+    /// lease handover must not append to the history its replacement is already
+    /// writing.
+    pub fn record_observation(&self, obs: &NewObservation) -> Result<i64, CatalogError> {
+        let (outcome, failure_class) = outcome_columns(&obs.outcome);
+        let id = self.inner.with_conn_fenced(|tx| {
+            tx.execute(
+                "INSERT INTO observation \
+                 (source, observed_at_ms, outcome, failure_class, detail, \
+                  normalized_hash, raw_hash, etag, duration_ms) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    obs.source.as_str(),
+                    obs.observed_at.0,
+                    outcome,
+                    failure_class,
+                    obs.detail,
+                    obs.normalized_hash,
+                    obs.raw_hash,
+                    obs.etag,
+                    obs.duration_ms,
+                ],
+            )?;
+            Ok(tx.last_insert_rowid())
+        })?;
+        Ok(id)
+    }
+
+    /// The most recent observation that CONFIRMED current values.
+    ///
+    /// A failed poll is excluded, because it observed nothing and cannot bound
+    /// anything.
+    pub fn last_confirming_observation(
+        &self,
+        source: SourceId,
+    ) -> Result<Option<Timestamp>, CatalogError> {
+        self.last_confirming_observation_before(source, Timestamp(i64::MAX))
+    }
+
+    /// The most recent confirming observation STRICTLY BEFORE an instant.
+    ///
+    /// This is what an era's `prior_observation_at` is, and the strictness is
+    /// load-bearing. An era's boundary instant is the observation that DETECTED
+    /// the change, and that observation is already recorded when the era is
+    /// written — so asking for "the latest confirming observation" returns the
+    /// boundary itself and collapses the window to zero width, claiming the
+    /// change happened in an instant of no duration.
+    ///
+    /// The near edge is the last time fusiform saw the OLD value. That is the
+    /// observation before the one that opened the era.
+    pub fn last_confirming_observation_before(
+        &self,
+        source: SourceId,
+        instant: Timestamp,
+    ) -> Result<Option<Timestamp>, CatalogError> {
+        let ts = self.inner.with_conn(|conn| {
+            conn.query_row(
+                "SELECT observed_at_ms FROM observation \
+                 WHERE source = ?1 \
+                   AND observed_at_ms < ?2 \
+                   AND outcome IN ('changed', 'unchanged', 'not_modified') \
+                 ORDER BY observed_at_ms DESC LIMIT 1",
+                params![source.as_str(), instant.0],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()
+        })?;
+        Ok(ts.map(Timestamp))
+    }
+
+    /// Append eras, deriving each observed boundary's window from the store's
+    /// own history.
+    ///
+    /// All eras in one call commit together. A partially-applied change would
+    /// leave the catalog describing a state the upstream never published — some
+    /// facts moved, others not — and a consumer reading between the two writes
+    /// would believe it, and nothing later would tell it otherwise.
+    pub fn append_eras(&self, eras: &[NewEra]) -> Result<usize, CatalogError> {
+        if eras.is_empty() {
+            return Ok(0);
+        }
+
+        // Resolve the window's near edge per (source, boundary instant), before
+        // the write transaction. Keyed on the boundary as well as the source
+        // because the edge is "the last confirming observation before THIS
+        // boundary" — a batch carrying eras at two different boundaries has two
+        // different near edges, and sharing one would attach the wrong window to
+        // whichever era did not own it.
+        let mut prior_by_key: BTreeMap<(SourceId, i64), Option<Timestamp>> = BTreeMap::new();
+        for era in eras {
+            let key = (era.source, era.boundary_at.0);
+            if let std::collections::btree_map::Entry::Vacant(slot) = prior_by_key.entry(key) {
+                slot.insert(self.last_confirming_observation_before(era.source, era.boundary_at)?);
+            }
+        }
+
+        // An observed boundary with no prior confirming observation cannot state
+        // a window, and the schema will reject it. Failing here names the era
+        // rather than surfacing a constraint violation from the driver.
+        for era in eras {
+            if matches!(era.boundary_kind, BoundaryKind::Observed)
+                && prior_by_key
+                    .get(&(era.source, era.boundary_at.0))
+                    .copied()
+                    .flatten()
+                    .is_none()
+            {
+                return Err(CatalogError::Invariant(format!(
+                    "{}/{} {}: an observed boundary needs a prior confirming observation; \
+                     the first era for a source is a seed",
+                    era.provider_id,
+                    era.model_id,
+                    era.fact_key.as_str()
+                )));
+            }
+        }
+
+        let written = self.inner.with_conn_fenced(|tx| {
+            let mut count = 0usize;
+            for era in eras {
+                let prior = prior_by_key
+                    .get(&(era.source, era.boundary_at.0))
+                    .copied()
+                    .flatten();
+                let (kind, correction) = boundary_columns(&era.boundary_kind);
+                // Only an observed boundary carries a window. Every other kind
+                // writes NULL, which the schema enforces independently.
+                let prior_ms = match era.boundary_kind {
+                    BoundaryKind::Observed => prior.map(|t| t.0),
+                    _ => None,
+                };
+                tx.execute(
+                    "INSERT INTO era \
+                     (source, provider_id, model_id, fact_key, value_json, \
+                      boundary_at_ms, boundary_kind, prior_observation_at_ms, \
+                      observation_id, corrected_fields_json, affected_from_ms, \
+                      affected_until_ms, correction_reason) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                    params![
+                        era.source.as_str(),
+                        era.provider_id,
+                        era.model_id,
+                        era.fact_key.as_str(),
+                        era.value_json,
+                        era.boundary_at.0,
+                        kind,
+                        prior_ms,
+                        era.observation_id,
+                        correction.as_ref().map(|c| c.fields_json.clone()),
+                        correction.as_ref().map(|c| c.affected_from),
+                        correction.as_ref().map(|c| c.affected_until),
+                        correction.as_ref().map(|c| c.reason.clone()),
+                    ],
+                )?;
+                count += 1;
+            }
+            Ok(count)
+        })?;
+
+        Ok(written)
+    }
+
+    /// The value a fact held at an instant, with the boundary that established
+    /// it.
+    ///
+    /// Returns `None` when the instant precedes every era for the fact — which
+    /// is a real answer ("the catalog did not know yet"), not an absence of
+    /// data.
+    pub fn value_at(
+        &self,
+        source: SourceId,
+        provider_id: &str,
+        model_id: &str,
+        fact: &FactKey,
+        at: Timestamp,
+    ) -> Result<Option<EraRow>, CatalogError> {
+        let row = self.inner.with_conn(|conn| {
+            conn.query_row(
+                "SELECT id, value_json, boundary_at_ms, boundary_kind, \
+                        prior_observation_at_ms, observation_id, \
+                        corrected_fields_json, affected_from_ms, affected_until_ms, \
+                        correction_reason \
+                 FROM era \
+                 WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3 \
+                   AND fact_key = ?4 AND boundary_at_ms <= ?5 \
+                 ORDER BY boundary_at_ms DESC LIMIT 1",
+                params![source.as_str(), provider_id, model_id, fact.as_str(), at.0],
+                |r| {
+                    Ok(RawEraRow {
+                        id: r.get(0)?,
+                        value_json: r.get(1)?,
+                        boundary_at_ms: r.get(2)?,
+                        boundary_kind: r.get(3)?,
+                        prior_observation_at_ms: r.get(4)?,
+                        observation_id: r.get(5)?,
+                        corrected_fields_json: r.get(6)?,
+                        affected_from_ms: r.get(7)?,
+                        affected_until_ms: r.get(8)?,
+                        correction_reason: r.get(9)?,
+                    })
+                },
+            )
+            .optional()
+        })?;
+
+        row.map(decode_era_row).transpose()
+    }
+
+    /// The current catalog version.
+    pub fn catalog_version(&self) -> Result<i64, CatalogError> {
+        let v = self.inner.with_conn(|conn| {
+            conn.query_row(
+                "SELECT version FROM catalog_version WHERE id = 1",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+        })?;
+        Ok(v)
+    }
+
+    /// Advance the catalog version, refusing to move it backwards or sideways.
+    ///
+    /// The refusal is the point. An engram restore rewinds this counter, and a
+    /// rewound version means every consumer correctly refuses every subsequent
+    /// push — so the failure is silent at the producer and total at the
+    /// consumer. Making the store reject a non-advancing write turns that into
+    /// an error at the moment it happens.
+    pub fn advance_catalog_version(
+        &self,
+        next: i64,
+        observation_id: i64,
+        now: Timestamp,
+    ) -> Result<(), CatalogError> {
+        self.inner.with_conn_fenced(|tx| {
+            let current: i64 = tx.query_row(
+                "SELECT version FROM catalog_version WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )?;
+            if next <= current {
+                // Signalled through the driver's error channel so the whole
+                // transaction rolls back; mapped to a domain error below.
+                return Err(rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+                    Some(format!(
+                        "catalog version must advance: {current} -> {next} does not"
+                    )),
+                ));
+            }
+            tx.execute(
+                "UPDATE catalog_version \
+                 SET version = ?1, observation_id = ?2, updated_at_ms = ?3 \
+                 WHERE id = 1",
+                params![next, observation_id, now.0],
+            )?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+}
+
+/// An era as stored, decoded back into the domain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EraRow {
+    pub id: i64,
+    pub value_json: String,
+    pub boundary_at: Timestamp,
+    pub boundary_kind: BoundaryKind,
+    pub prior_observation_at: Option<Timestamp>,
+    pub observation_id: Option<i64>,
+}
+
+impl EraRow {
+    /// The interval within which this era's value became true.
+    ///
+    /// `None` when the boundary kind carries no window — a seed, an asserted
+    /// effective date, or a correction. The absence is the honest answer: those
+    /// boundaries are not observations and inventing a window for them would
+    /// manufacture precision.
+    pub fn observation_window(&self) -> Option<(Timestamp, Timestamp)> {
+        self.prior_observation_at
+            .map(|prior| (prior, self.boundary_at))
+    }
+}
+
+struct RawEraRow {
+    id: i64,
+    value_json: String,
+    boundary_at_ms: i64,
+    boundary_kind: String,
+    prior_observation_at_ms: Option<i64>,
+    observation_id: Option<i64>,
+    corrected_fields_json: Option<String>,
+    affected_from_ms: Option<i64>,
+    affected_until_ms: Option<i64>,
+    correction_reason: Option<String>,
+}
+
+fn decode_era_row(raw: RawEraRow) -> Result<EraRow, CatalogError> {
+    let kind = match raw.boundary_kind.as_str() {
+        "observed" => BoundaryKind::Observed,
+        "asserted" => BoundaryKind::Asserted,
+        "seed" => BoundaryKind::Seed,
+        "corrected" => {
+            // Every extent column is required by the schema for this kind, so a
+            // missing one means the row was written by something that bypassed
+            // the constraint. Loud, because a correction without its extent
+            // silently loses the ability to partition what it invalidated.
+            let fields_json = raw.corrected_fields_json.ok_or_else(|| {
+                CatalogError::Invariant("corrected era has no field list".to_string())
+            })?;
+            let fields: Vec<FieldId> =
+                serde_json::from_str(&fields_json).map_err(|_| CatalogError::Decode {
+                    column: "corrected_fields_json",
+                    value: fields_json.clone(),
+                })?;
+            BoundaryKind::Corrected(Correction {
+                fields,
+                affected_from: Timestamp(raw.affected_from_ms.ok_or_else(|| {
+                    CatalogError::Invariant("corrected era has no affected_from".to_string())
+                })?),
+                affected_until: Timestamp(raw.affected_until_ms.ok_or_else(|| {
+                    CatalogError::Invariant("corrected era has no affected_until".to_string())
+                })?),
+                reason: raw.correction_reason.ok_or_else(|| {
+                    CatalogError::Invariant("corrected era has no reason".to_string())
+                })?,
+            })
+        }
+        other => {
+            return Err(CatalogError::Decode {
+                column: "boundary_kind",
+                value: other.to_string(),
+            })
+        }
+    };
+
+    Ok(EraRow {
+        id: raw.id,
+        value_json: raw.value_json,
+        boundary_at: Timestamp(raw.boundary_at_ms),
+        boundary_kind: kind,
+        prior_observation_at: raw.prior_observation_at_ms.map(Timestamp),
+        observation_id: raw.observation_id,
+    })
+}
+
+struct CorrectionColumns {
+    fields_json: String,
+    affected_from: i64,
+    affected_until: i64,
+    reason: String,
+}
+
+fn boundary_columns(kind: &BoundaryKind) -> (&'static str, Option<CorrectionColumns>) {
+    match kind {
+        BoundaryKind::Observed => ("observed", None),
+        BoundaryKind::Asserted => ("asserted", None),
+        BoundaryKind::Seed => ("seed", None),
+        BoundaryKind::Corrected(c) => (
+            "corrected",
+            Some(CorrectionColumns {
+                fields_json: serde_json::to_string(&c.fields)
+                    .expect("FieldId is a plain enum and always serializes"),
+                affected_from: c.affected_from.0,
+                affected_until: c.affected_until.0,
+                reason: c.reason.clone(),
+            }),
+        ),
+    }
+}
+
+fn outcome_columns(outcome: &ObservationOutcome) -> (&'static str, Option<&'static str>) {
+    match outcome {
+        ObservationOutcome::Changed { .. } => ("changed", None),
+        ObservationOutcome::Unchanged => ("unchanged", None),
+        ObservationOutcome::NotModified => ("not_modified", None),
+        ObservationOutcome::Failed { class } => (
+            "failed",
+            Some(match class {
+                FailureClass::Network => "network",
+                FailureClass::HttpStatus => "http_status",
+                FailureClass::Parse => "parse",
+            }),
+        ),
+    }
+}

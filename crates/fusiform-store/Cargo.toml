@@ -1,0 +1,20 @@
+[package]
+name = "fusiform-store"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Durable observation and era history for the ck-fusiform catalog."
+
+[dependencies]
+fusiform-core = { path = "../fusiform-core" }
+
+cortexkit-store = { workspace = true }
+cortexkit-store-types = { workspace = true }
+
+blake3 = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["arbitrary_precision"] }
+
+[dev-dependencies]
+tempfile = "3"
