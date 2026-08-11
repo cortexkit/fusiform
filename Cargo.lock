@@ -465,6 +465,7 @@ name = "fusiform-cli"
 version = "0.1.0"
 dependencies = [
  "fusiform-module",
+ "fusiform-store",
  "serde_json",
  "subc-client-rs",
  "subc-core",

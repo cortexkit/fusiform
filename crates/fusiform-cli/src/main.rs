@@ -34,6 +34,7 @@
 
 use std::{collections::BTreeMap, env, ffi::OsString, path::PathBuf, process, time::Duration};
 
+use fusiform_store::prefix;
 use subc_client_rs::consumer::{CallOptions, ConsumerOptions, SubcConsumer};
 use subc_protocol::{BindIdentity, RouteTarget};
 
@@ -489,9 +490,16 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
                 );
             }
             "--subc" => args.connection_file = PathBuf::from(value()?),
-            "--rates" => args.prefixes = Some(vec!["rate.".to_string()]),
+            // Prefixes come from the store's own constants, not string
+            // literals here. A prefix that matches nothing returns an empty
+            // catalog rather than an error, so a drifted literal would make
+            // `--rates` quietly print nothing at all.
+            "--rates" => args.prefixes = Some(vec![prefix::RATE.to_string()]),
             "--capabilities" => {
-                args.prefixes = Some(vec!["capability.".to_string(), "limit.".to_string()])
+                args.prefixes = Some(vec![
+                    prefix::CAPABILITY.to_string(),
+                    prefix::LIMIT.to_string(),
+                ])
             }
             "--include-retired" => args.include_retired = true,
             "--json" => args.json = true,

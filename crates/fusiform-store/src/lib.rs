@@ -135,10 +135,27 @@ pub struct NewEra {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FactKey(String);
 
+/// The namespace prefixes fact keys are grouped under.
+///
+/// Named constants rather than string literals at each construction site,
+/// because a consumer selecting a plane does it by prefix — and a prefix that
+/// no longer matches any key returns an EMPTY result rather than an error. That
+/// is the failure shape this repository keeps finding: a wrong answer that
+/// reads as a legitimate one. A caller filtering on `"rate."` after the
+/// namespace moved gets zero rates and no indication anything is wrong.
+pub mod prefix {
+    /// Pricing facts, including tiered rates like `rate.input.above_context.200000`.
+    pub const RATE: &str = "rate.";
+    /// Declared capabilities.
+    pub const CAPABILITY: &str = "capability.";
+    /// Declared limits.
+    pub const LIMIT: &str = "limit.";
+}
+
 impl FactKey {
     /// The key for a rate, per token class — never one key for "rates".
     pub fn rate(class: fusiform_core::TokenClass) -> Self {
-        Self(format!("rate.{}", token_class_str(class)))
+        Self(format!("{}{}", prefix::RATE, token_class_str(class)))
     }
 
     /// The key for a rate that applies above a context threshold.
@@ -150,7 +167,8 @@ impl FactKey {
     /// for a model and filter.
     pub fn rate_above_context(class: fusiform_core::TokenClass, tokens: u64) -> Self {
         Self(format!(
-            "rate.{}.above_context.{tokens}",
+            "{}{}.above_context.{tokens}",
+            prefix::RATE,
             token_class_str(class)
         ))
     }
@@ -167,12 +185,12 @@ impl FactKey {
 
     /// The key for a capability field.
     pub fn capability(name: &str) -> Self {
-        Self(format!("capability.{name}"))
+        Self(format!("{}{name}", prefix::CAPABILITY))
     }
 
     /// The key for a declared limit.
     pub fn limit(name: &str) -> Self {
-        Self(format!("limit.{name}"))
+        Self(format!("{}{name}", prefix::LIMIT))
     }
 
     /// The key for whether the model exists in the source at all. A retirement

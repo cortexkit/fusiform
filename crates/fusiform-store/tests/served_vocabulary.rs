@@ -201,3 +201,68 @@ fn last_updated_is_parsed_but_never_reaches_a_fact() {
         }
     }
 }
+
+/// Every namespace prefix matches at least one real fact key.
+///
+/// A prefix filter that matches nothing returns an EMPTY catalog, not an error,
+/// so a namespace nobody can select reads as "this catalog has no prices".
+///
+/// **What this test can and cannot catch, measured by mutation.** Renaming
+/// `prefix::RATE` does NOT fail this test: the key constructors are built from
+/// the same constant, so both move together and the prefix still matches. That
+/// drift is caught by `the_served_fact_set_is_exactly_this`, whose expected
+/// keys are written out as literals — the one place the spelling is stated
+/// independently.
+///
+/// What this test does catch is a key landing in a namespace no filter
+/// declares: proven by adding a `provenance.` fact, which reddens it. That is
+/// the reachability property, and it is the one the constants cannot
+/// self-confirm.
+///
+/// Recording the split because the first version of this comment claimed the
+/// test caught prefix drift, in the same paragraph that explained why nothing
+/// built from the constants could.
+#[test]
+fn every_namespace_prefix_selects_real_facts() {
+    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
+
+    let mut produced: Vec<String> = Vec::new();
+    for model in outcome.catalog.models() {
+        for key in fact_keys_of(model) {
+            produced.push(key.as_str().to_string());
+        }
+    }
+    assert!(!produced.is_empty(), "the fixture must produce facts");
+
+    for prefix in [
+        fusiform_store::prefix::RATE,
+        fusiform_store::prefix::CAPABILITY,
+        fusiform_store::prefix::LIMIT,
+    ] {
+        let matched = produced.iter().filter(|k| k.starts_with(prefix)).count();
+        assert!(
+            matched > 0,
+            "prefix {prefix:?} matches no fact key, so any filter using it \
+             returns an empty result that reads as a legitimate answer"
+        );
+    }
+
+    // And the prefixes partition the non-existence keys: a key matching none of
+    // them is unreachable through any plane filter a consumer can express.
+    for key in &produced {
+        if key == "existence" {
+            continue;
+        }
+        let reachable = [
+            fusiform_store::prefix::RATE,
+            fusiform_store::prefix::CAPABILITY,
+            fusiform_store::prefix::LIMIT,
+        ]
+        .iter()
+        .any(|p| key.starts_with(p));
+        assert!(
+            reachable,
+            "{key:?} belongs to no declared namespace, so no plane filter reaches it"
+        );
+    }
+}
