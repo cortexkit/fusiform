@@ -1,0 +1,195 @@
+//! The upstream's shape, as measured — not as it ought to be.
+//!
+//! These types exist to be permissive at the boundary and strict afterwards.
+//! Every field is optional because the measured document omits nearly all of
+//! them somewhere, and a required field here would turn one provider's sparse
+//! entry into a total ingest failure.
+//!
+//! Rate literals are held as [`serde_json::Number`] and read as their SOURCE
+//! TEXT. The upstream publishes the same key as both int and float, and 151
+//! numbers carry six or more decimals including IEEE-754 artifacts; parsing
+//! them to f64 here would corrupt them before the money boundary ever sees
+//! them. `serde_json`'s `arbitrary_precision` feature is what makes
+//! `Number::as_str` return the literal, and it is enabled for exactly this.
+
+use std::collections::BTreeMap;
+
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RawProvider {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub doc: Option<String>,
+    pub api: Option<String>,
+    #[serde(default)]
+    pub env: Vec<String>,
+    /// Which SDK adapter speaks to this provider. Quarantined: this is the
+    /// single most renderer-selecting fact in the document.
+    pub npm: Option<String>,
+    #[serde(default)]
+    pub models: BTreeMap<String, RawModel>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RawModel {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub family: Option<String>,
+    pub release_date: Option<String>,
+    pub last_updated: Option<String>,
+    pub knowledge: Option<String>,
+    pub open_weights: Option<bool>,
+    pub reasoning: Option<bool>,
+    pub tool_call: Option<bool>,
+    pub attachment: Option<bool>,
+    pub temperature: Option<bool>,
+    pub limit: Option<RawLimit>,
+    pub modalities: Option<RawModalities>,
+    pub cost: Option<RawCost>,
+    /// A per-model override carrying literal headers and body parameters.
+    /// Quarantined: this decides how a request is spoken.
+    pub provider: Option<serde_json::Value>,
+    /// Named modes with their own rates and their own wire shaping.
+    pub experimental: Option<RawExperimental>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RawLimit {
+    pub context: Option<u64>,
+    pub output: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RawModalities {
+    #[serde(default)]
+    pub input: Vec<String>,
+    #[serde(default)]
+    pub output: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RawExperimental {
+    #[serde(default)]
+    pub modes: BTreeMap<String, serde_json::Value>,
+}
+
+/// A cost block, read as a flat map so unknown keys survive.
+///
+/// Deliberately NOT a struct of known fields. The audio keys arrive in the same
+/// flat namespace as token rates with nothing to distinguish their unit, and a
+/// typed struct would silently drop them — turning "fusiform cannot attribute
+/// this charge" into "this charge does not exist", which is the more dangerous
+/// of the two errors.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(from = "BTreeMap<String, serde_json::Value>")]
+pub struct RawCost {
+    /// Scalar rate keys, as literal source text.
+    pub scalars: BTreeMap<String, String>,
+    pub tiers: Vec<RawTier>,
+    /// The older duplicate encoding of a context tier's rates.
+    ///
+    /// The key's NAME is not its threshold. Measured 2026-08-11 across the 288
+    /// models carrying both encodings: the tier size is exactly 200,000 on only
+    /// 126 of them, and is 272,000, 256,000, 262,144 or 512,000 on the rest.
+    /// The key is a legacy label that stopped tracking the number it names.
+    pub context_over_200k: Option<BTreeMap<String, String>>,
+}
+
+impl From<BTreeMap<String, serde_json::Value>> for RawCost {
+    fn from(map: BTreeMap<String, serde_json::Value>) -> Self {
+        let mut scalars = BTreeMap::new();
+        let mut tiers = Vec::new();
+        let mut context_over_200k = None;
+
+        for (key, value) in map {
+            match key.as_str() {
+                "tiers" => {
+                    if let Ok(parsed) = serde_json::from_value::<Vec<RawTier>>(value) {
+                        tiers = parsed;
+                    }
+                }
+                "context_over_200k" => {
+                    context_over_200k = value.as_object().map(|obj| {
+                        obj.iter()
+                            .filter_map(|(k, v)| v.as_number().map(|n| (k.clone(), n.to_string())))
+                            .collect()
+                    });
+                }
+                _ => {
+                    if let Some(number) = value.as_number() {
+                        scalars.insert(key, number.to_string());
+                    }
+                }
+            }
+        }
+
+        RawCost {
+            scalars,
+            tiers,
+            context_over_200k,
+        }
+    }
+}
+
+impl RawCost {
+    /// The literal text of a known token-rate key.
+    pub fn token_rate(&self, key: &str) -> Option<&str> {
+        self.scalars.get(key).map(|s| s.as_str())
+    }
+
+    /// Scalar cost keys this parser has no charge unit for.
+    ///
+    /// Anything that is not a known token class. Returned rather than ignored
+    /// so the rate can be recorded as explicitly unpriced: a consumer must
+    /// refuse to price it, which it can only do if it knows the key was there.
+    pub fn unattributable_keys(&self) -> Vec<&String> {
+        self.scalars
+            .keys()
+            .filter(|k| !KNOWN_TOKEN_KEYS.contains(&k.as_str()))
+            .collect()
+    }
+}
+
+const KNOWN_TOKEN_KEYS: &[&str] = &["input", "output", "cache_read", "cache_write", "reasoning"];
+
+/// One pricing tier.
+///
+/// `tier.type` and `tier.size` are read together and never independently: the
+/// size is a threshold only once the type says what it thresholds.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(from = "BTreeMap<String, serde_json::Value>")]
+pub struct RawTier {
+    pub scalars: BTreeMap<String, String>,
+    pub tier: Option<RawTierSpec>,
+}
+
+impl From<BTreeMap<String, serde_json::Value>> for RawTier {
+    fn from(map: BTreeMap<String, serde_json::Value>) -> Self {
+        let mut scalars = BTreeMap::new();
+        let mut tier = None;
+
+        for (key, value) in map {
+            if key == "tier" {
+                tier = serde_json::from_value::<RawTierSpec>(value).ok();
+            } else if let Some(number) = value.as_number() {
+                scalars.insert(key, number.to_string());
+            }
+        }
+
+        RawTier { scalars, tier }
+    }
+}
+
+impl RawTier {
+    pub fn token_rate(&self, key: &str) -> Option<&str> {
+        self.scalars.get(key).map(|s| s.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RawTierSpec {
+    #[serde(rename = "type")]
+    pub tier_type: Option<String>,
+    pub size: Option<u64>,
+}

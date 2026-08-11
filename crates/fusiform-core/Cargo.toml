@@ -7,4 +7,10 @@ description = "Pure domain for the ck-fusiform AI-model capability catalog: iden
 
 [dependencies]
 serde = { workspace = true }
-serde_json = { workspace = true }
+# `arbitrary_precision` keeps JSON numbers as their literal source text instead
+# of parsing them to f64. This is load-bearing rather than a tuning choice: the
+# upstream publishes rates as both ints and floats, 151 of them with six or more
+# decimals including IEEE-754 artifacts, and the money boundary scales the
+# DECIMAL STRING by powers of ten. Without this, every rate would round-trip
+# through binary floating point before fusiform ever saw it.
+serde_json = { workspace = true, features = ["arbitrary_precision"] }

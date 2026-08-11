@@ -23,10 +23,12 @@
 //!   handle it.
 
 pub mod money;
+pub mod normalize;
 
 use serde::{Deserialize, Serialize};
 
 pub use money::{Amount, CurrencyCode, MoneyError, PolicyId, UnitProvenance};
+pub use normalize::{normalize_models_dev, NormalizeError, NormalizeOutcome, NormalizedCatalog};
 
 /// A declared upstream.
 ///
