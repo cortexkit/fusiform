@@ -75,14 +75,26 @@ fn a_first_ingest_records_every_fact_as_new() {
     )
     .unwrap();
 
-    assert_eq!(plan.new_models, 13, "every model in the fixture is new");
+    // Counted from the catalog rather than hardcoded: the fixture grows when a
+    // new upstream shape needs covering, and a literal here turns that into an
+    // unrelated test failure that teaches nothing.
+    let model_count = catalog.model_count();
+    assert!(model_count > 10, "the fixture must be substantial");
+
+    assert_eq!(
+        plan.new_models, model_count,
+        "every model in the fixture is new"
+    );
     assert_eq!(plan.disappeared_models, 0);
     assert_eq!(
         plan.changed_facts, 0,
         "a first ingest has no changes; its facts are first values, and \
          counting them as changes makes a fresh install look like a repricing"
     );
-    assert!(plan.eras.len() > 13, "each model contributes several facts");
+    assert!(
+        plan.eras.len() > model_count,
+        "each model contributes several facts"
+    );
 
     f.store.append_eras(&plan.eras).unwrap();
 }

@@ -38,7 +38,7 @@ fn rate<'a>(m: &'a NormalizedModel, class: TokenClass, condition: &RateCondition
 #[test]
 fn the_measured_document_normalizes() {
     let outcome = catalog();
-    assert_eq!(outcome.catalog.model_count(), 13);
+    assert_eq!(outcome.catalog.model_count(), 14);
     // A provider with no models is still a provider: dropping it would lose the
     // fact that the upstream describes it.
     assert!(outcome
@@ -207,24 +207,46 @@ fn a_tier_without_a_type_is_refused() {
 }
 
 /// The two tier encodings must agree ON RATES, and disagreement stops the parse.
+///
+/// The mutation is structural rather than textual. A `str::replace` against
+/// pretty-printed JSON depends on the fixture's indentation, so reformatting the
+/// file silently turns the mutation into a no-op and the test passes an
+/// unmutated document — which happened once already in this file, and again
+/// when the fixture was regenerated.
 #[test]
 fn a_legacy_tier_whose_rates_no_row_reproduces_is_refused() {
-    // Change the legacy block's input rate so it no longer matches any tier
-    // row. The two encodings now disagree about money and fusiform cannot tell
-    // which is right.
-    let text = String::from_utf8(FIXTURE.to_vec()).unwrap();
-    let mutated = text.replace(
-        "\"context_over_200k\": {\n      \"cache_read\": 0.4,\n      \"input\": 4,",
-        "\"context_over_200k\": {\n      \"cache_read\": 0.4,\n      \"input\": 7,",
-    );
-    assert_ne!(mutated, text, "the mutation must actually apply");
+    let mut doc: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
 
-    match normalize_models_dev(mutated.as_bytes()) {
+    // Move the legacy block's input rate away from the tier row's, so the two
+    // encodings disagree about money and fusiform cannot tell which is right.
+    let legacy = doc
+        .get_mut("impossibl")
+        .and_then(|p| p.get_mut("models"))
+        .and_then(|m| m.get_mut("google/gemini-3.1-pro-preview"))
+        .and_then(|m| m.get_mut("cost"))
+        .and_then(|c| c.get_mut("context_over_200k"))
+        .and_then(|t| t.as_object_mut())
+        .expect("the fixture must carry this legacy block");
+
+    let before = legacy.get("input").cloned().expect("a legacy input rate");
+    legacy.insert("input".to_string(), serde_json::json!(7));
+    assert_ne!(
+        before,
+        serde_json::json!(7),
+        "the mutation must actually change the value"
+    );
+
+    let mutated = serde_json::to_vec(&doc).unwrap();
+    match normalize_models_dev(&mutated) {
         Err(NormalizeError::OrphanedLegacyTier { model, .. }) => {
             assert!(model.contains("gemini-3.1-pro-preview"), "got {model}");
         }
         other => panic!("a disagreeing legacy tier must stop the parse, got {other:?}"),
     }
+
+    // And the unmutated fixture normalizes, so the failure above is the
+    // mutation's doing rather than a fixture that was already broken.
+    assert!(normalize_models_dev(FIXTURE).is_ok());
 }
 
 /// A tier threshold that is not the number the legacy key is NAMED for must

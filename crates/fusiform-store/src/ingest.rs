@@ -281,6 +281,16 @@ pub fn catalog_digest(catalog: &NormalizedCatalog) -> String {
 /// than a rule someone must remember: they are not in this function, so no code
 /// path can write them into an era, and a field added to the normalizer later
 /// does not silently acquire history.
+/// The complete set of fact keys a model contributes to the store.
+///
+/// Public so a test can assert the SET rather than spot-check members. The fact
+/// set is fusiform's served vocabulary: a field silently joining it is a
+/// contract change no consumer asked for, and a field silently leaving it makes
+/// a consumer's read start returning nothing.
+pub fn fact_keys_of(model: &NormalizedModel) -> Vec<FactKey> {
+    facts_of(model).into_iter().map(|(k, _)| k).collect()
+}
+
 fn facts_of(model: &NormalizedModel) -> Vec<(FactKey, String)> {
     let mut facts = vec![
         // Limits. `null` is a real value here: a limit that stops being
