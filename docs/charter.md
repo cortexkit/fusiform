@@ -127,15 +127,27 @@ v1 ships no non-LLM source. Do not build speculative fetchers.
    Astrocyte's models.dev price lane moves to fusiform-served data when
    fusiform is stable; coordinate with ASTRO, do not force. End state
    (Ufuk, 2026-08-11): the commons crate `cortexkit-model-catalog` retires
-   in its CURRENT role (shared mirror of raw models.dev shapes) once both
-   of its consumers (broca, astrocyte) read fusiform-served data — but the
+   in its CURRENT role (shared mirror of raw models.dev shapes) — but the
    SLOT it fills persists: fusiform's push/read wire schema needs one
-   published type both consumers compile against (fleet cross-repo payload
+   published type consumers compile against (fleet cross-repo payload
    rule), and the cheapest shape is a major-version turnover of that same
-   crate in commons rather than a new dependency edge. Retirement is the
-   TAIL of the consolidation, never a milestone on its own — broca's
-   no-network seed embed parses with the current types until the new ones
-   serve it.
+   crate in commons rather than a new dependency edge. Corrected premise
+   (FUSI, measured 2026-08-11): the crate has exactly ONE dependent today
+   — astrocyte. Broca never consumed it (their `broca-catalog` parses
+   independently into their own spec types, which is why their tier
+   parsing was correct while the crate's was wrong); the crate header's
+   "both consumers parse through this" was aspirational and becomes true
+   only through fusiform's served schema. So the retirement gate is
+   ASTROCYTE'S SWITCH alone; broca's adoption of the served types is a
+   separate decision on their own schedule, and their permanent seed
+   embed changes which types it parses with, never whether they can boot.
+   Transition mechanics: astrocyte's graph carries both crate versions
+   coexisting under a renamed dependency (semver-incompatible versions of
+   one crate) — mechanical, named here so it is not discovered during
+   cutover. Ownership vs location (settled with BROCA): fusiform AUTHORS
+   the served schema and controls its evolution; commons is where it is
+   PUBLISHED from — the coupling worth avoiding is lockstep releases,
+   which semver publication prevents and in-place editing would create.
 
 ## Non-goals
 
