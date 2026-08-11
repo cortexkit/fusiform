@@ -58,7 +58,7 @@ Verified against the working tree at `1ff33f9`, section by section:
 | §1 Identity | **built** — `ModelKey` is the (source, provider, model) triple |
 | §2 Observation vs era | **built** — both tables, with the confirming-outcome split |
 | §3 Eras are pure append | **built** — no `valid_to`, no `is_current`, no update path |
-| §3.1 `Corrected` | **type built, never written** — it round-trips through the store and no code path produces one. The vocabulary and extent rules are specification. |
+| §3.1 `Corrected` | **read side built, write side not.** A correction written by hand is honoured: `value_at` refuses inside its extent and names it, and `read_catalog` omits the fact. What has no producer is the code that DECIDES to write one. The earlier status here read "type built, never written", which was one claim covering two states — the type round-tripped AND every point-in-time read silently ignored corrections. Only the first half had been checked. |
 | §4 Rates | **partially built** — `PerMillionTokens` and the tiered conditions are produced from real documents. `PerImage`, `PerSecond`, `PerMinute`, `PerCharacter` are declared types with no producer, because models.dev publishes no unit for them. |
 | §5 Modality | **built** — carried, unknown values preserved |
 | §5.1 Byte-affecting fields | **built** — the zero-limit rule and the quarantine |
@@ -72,7 +72,8 @@ Verified against the working tree at `1ff33f9`, section by section:
 | §10 Payload boundary | **not built** — the served types have not moved to `cortexkit-model-catalog` |
 
 Two entries deserve emphasis because they are the ones most likely to be cited
-as facts: **nothing writes a `Corrected` era, and no push exists.** A consumer
+as facts: **no defect-detection path writes a `Corrected` era, and no push
+exists.** A consumer
 reasoning about how fusiform acknowledges a push is reasoning about a design.
 
 ### Why the original convention expired, in its own words
@@ -145,7 +146,8 @@ an artifact of having no code, and it is temporary.
 > the working tree rather than by re-reading the prose.
 >
 > The finding worth carrying: two things this note describes in the present
-> tense have no producer at all — nothing writes a `Corrected` era, and no push
+> tense have no producer at all — no code decides to write a `Corrected` era
+> (the read side that honours one is now built), and no push
 > code exists. Both read as built to anyone skimming, because the surrounding
 > sections describe behaviour that is.
 >
