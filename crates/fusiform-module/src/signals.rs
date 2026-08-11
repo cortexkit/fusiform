@@ -21,6 +21,36 @@
 
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
+use fusiform_core::FailureClass;
+
+/// No failure in the current streak.
+const CLASS_NONE: u64 = 0;
+
+/// Encode a failure class for atomic storage.
+///
+/// Exhaustive rather than defaulted: a new class must choose its encoding here
+/// instead of silently sharing one with an existing class, which would make two
+/// different outages read identically in health.
+const fn encode_class(class: FailureClass) -> u64 {
+    match class {
+        FailureClass::Network => 1,
+        FailureClass::HttpStatus => 2,
+        FailureClass::Parse => 3,
+    }
+}
+
+const fn decode_class(value: u64) -> Option<FailureClass> {
+    match value {
+        1 => Some(FailureClass::Network),
+        2 => Some(FailureClass::HttpStatus),
+        3 => Some(FailureClass::Parse),
+        // CLASS_NONE, and any value this build does not know. An unrecognised
+        // encoding reports "no class" rather than guessing one, because a wrong
+        // cause sends an operator somewhere specific and wrong.
+        _ => None,
+    }
+}
+
 /// Counters stamped by the poll loop, read by the health path.
 #[derive(Debug, Default)]
 pub struct Signals {
@@ -38,6 +68,24 @@ pub struct Signals {
     last_observation_ms: AtomicI64,
     /// Consecutive failed polls. Reset on any observation.
     consecutive_failures: AtomicU64,
+    /// What the most recent failure WAS, encoded as a small integer.
+    ///
+    /// A count of failures says a module is failing; it does not say whether
+    /// the upstream is unreachable, answering with an error status, or serving
+    /// a body that will not parse. Those have different operators and different
+    /// fixes, and the class is already computed at the failure site — recording
+    /// only the count throws it away at the one place it is free to keep.
+    ///
+    /// Recording a cause and surfacing a cause are different features, and the
+    /// first alone produces a perfect record of an outage nobody knows about:
+    /// a sibling module ran three days with one of its data sources failing
+    /// every poll, the reason sitting in a store row the whole time, while the
+    /// health surface its operator actually watched said only that something
+    /// was wrong.
+    ///
+    /// An integer rather than a lock-protected enum because this is read on the
+    /// health path, which may not block.
+    last_failure_class: AtomicU64,
     /// When the store last accepted a write, in unix ms.
     last_write_ms: AtomicI64,
     /// Whether the store has been opened. Read as a dispatch-capability signal:
@@ -55,6 +103,7 @@ impl Signals {
             poll_attempts: AtomicU64::new(0),
             last_observation_ms: AtomicI64::new(NEVER),
             consecutive_failures: AtomicU64::new(0),
+            last_failure_class: AtomicU64::new(CLASS_NONE),
             last_write_ms: AtomicI64::new(NEVER),
             store_open: AtomicU64::new(0),
         }
@@ -65,6 +114,9 @@ impl Signals {
         self.poll_attempts.fetch_add(1, Ordering::Relaxed);
         self.last_observation_ms.store(at_ms, Ordering::Relaxed);
         self.consecutive_failures.store(0, Ordering::Relaxed);
+        // Cleared with the streak it describes. A class outliving its streak
+        // would have health explaining a failure that is no longer happening.
+        self.last_failure_class.store(CLASS_NONE, Ordering::Relaxed);
     }
 
     /// Adopt the last observation instant recorded in the store.
@@ -89,9 +141,19 @@ impl Signals {
     }
 
     /// Stamp a completed poll that observed nothing.
-    pub fn failed(&self) {
+    pub fn failed(&self, class: FailureClass) {
         self.poll_attempts.fetch_add(1, Ordering::Relaxed);
         self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
+        self.last_failure_class
+            .store(encode_class(class), Ordering::Relaxed);
+    }
+
+    /// The class of the most recent failure, if the current streak has one.
+    ///
+    /// Reset by any observation, so it describes the streak health is currently
+    /// reporting rather than something that happened last week.
+    pub fn last_failure_class(&self) -> Option<FailureClass> {
+        decode_class(self.last_failure_class.load(Ordering::Relaxed))
     }
 
     /// Stamp a durable write.
@@ -155,8 +217,8 @@ mod tests {
         s.observed(1_000);
         assert_eq!(s.poll_attempts(), 1);
 
-        s.failed();
-        s.failed();
+        s.failed(FailureClass::Network);
+        s.failed(FailureClass::Network);
         // The loop is demonstrably running: three attempts.
         assert_eq!(s.poll_attempts(), 3);
         // But knowledge is still as old as the last real observation, which is
@@ -168,9 +230,9 @@ mod tests {
     #[test]
     fn an_observation_clears_the_failure_streak() {
         let s = Signals::new();
-        s.failed();
-        s.failed();
-        s.failed();
+        s.failed(FailureClass::Network);
+        s.failed(FailureClass::Network);
+        s.failed(FailureClass::Network);
         assert_eq!(s.consecutive_failures(), 3);
         s.observed(10_000);
         assert_eq!(s.consecutive_failures(), 0);

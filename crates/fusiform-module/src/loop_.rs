@@ -326,7 +326,9 @@ fn record_failure(
             detail: Some(detail),
         })
         .map_err(TickError::Store)?;
-    ctx.signals.failed();
+    // The same class that went into the observation row, so health and the
+    // stored history cannot disagree about what failed.
+    ctx.signals.failed(class);
     Ok(TickReport {
         outcome: TickOutcome::Failed { class },
         observation_id: id,

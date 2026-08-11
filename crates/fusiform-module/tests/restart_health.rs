@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::{ObservationOutcome, SourceId, Timestamp};
+use fusiform_core::{FailureClass, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::health;
 use fusiform_module::signals::Signals;
 use fusiform_store::{CatalogStore, NewObservation};
@@ -137,7 +137,7 @@ fn a_restart_with_an_unreachable_upstream_still_reports_the_stale_catalog() {
     }
 
     // One failed poll after the restart: the upstream is still down.
-    signals.failed();
+    signals.failed(FailureClass::Network);
 
     let report = health::report(&signals, now);
     eprintln!("status: {:?} detail: {:?}", report.status, report.detail);

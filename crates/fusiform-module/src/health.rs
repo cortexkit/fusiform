@@ -25,6 +25,8 @@
 
 use subc_protocol::session::{HealthReport, HealthStatus};
 
+use fusiform_core::FailureClass;
+
 use crate::signals::Signals;
 
 /// How old fusiform's knowledge may get before it reports degraded.
@@ -69,7 +71,8 @@ pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
         None if failures >= FAILURE_STREAK_DEGRADED => (
             HealthStatus::Degraded,
             Some(format!(
-                "no successful observation yet; {failures} consecutive fetch failures"
+                "no successful observation yet; {failures} consecutive fetch failures ({})",
+                describe_failure(signals)
             )),
         ),
         None => (
@@ -86,7 +89,8 @@ pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
         Some(_) if failures >= FAILURE_STREAK_DEGRADED => (
             HealthStatus::Degraded,
             Some(format!(
-                "{failures} consecutive fetch failures; catalog is still current but not refreshing"
+                "{failures} consecutive fetch failures ({}); catalog is still current but not refreshing",
+                describe_failure(signals)
             )),
         ),
         Some(age) => (
@@ -107,10 +111,35 @@ pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
 /// Emitted alongside every report rather than only on failure: a status without
 /// its inputs is an assertion, and the first thing anyone debugging a wrong
 /// status needs is the numbers it was computed from.
+/// Name what is failing, for the health detail line.
+///
+/// A count says a module is failing; it does not say whether the upstream is
+/// unreachable, answering with an error status, or serving a body that will not
+/// parse. Those have different fixes and different owners, and an operator
+/// reading "4 consecutive failures" has to open the store to learn which.
+fn describe_failure(signals: &Signals) -> &'static str {
+    match signals.last_failure_class() {
+        Some(FailureClass::Network) => "upstream unreachable",
+        Some(FailureClass::HttpStatus) => "upstream returned an error status",
+        Some(FailureClass::Parse) => "upstream body did not parse",
+        // The streak is nonzero but no class is recorded, which this build
+        // cannot produce. Reported as unknown rather than guessed: a wrong
+        // cause sends an operator somewhere specific and wrong.
+        None => "cause not recorded",
+    }
+}
+
 fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
     serde_json::json!({
         "poll_attempts": signals.poll_attempts(),
         "consecutive_failures": signals.consecutive_failures(),
+        // Present so a machine reading health can branch on the cause without
+        // parsing the detail sentence.
+        "last_failure_class": signals.last_failure_class().map(|c| match c {
+            FailureClass::Network => "network",
+            FailureClass::HttpStatus => "http_status",
+            FailureClass::Parse => "parse",
+        }),
         "observation_age_ms": signals.observation_age_ms(now_ms),
         "last_write_age_ms": signals.last_write_age_ms(now_ms),
         "store_open": signals.store_is_open(),
@@ -167,7 +196,7 @@ mod tests {
     fn one_missed_poll_is_not_a_status_change() {
         let s = open_store();
         s.observed(0);
-        s.failed();
+        s.failed(FailureClass::Network);
         // Thirty minutes on: one cadence interval, one failure.
         let r = report(&s, 30 * 60 * 1_000);
         assert_eq!(
@@ -183,7 +212,7 @@ mod tests {
         let s = open_store();
         s.observed(0);
         for _ in 0..FAILURE_STREAK_DEGRADED {
-            s.failed();
+            s.failed(FailureClass::Network);
         }
         // Only one interval has passed, so the age alone would still be Ok.
         let r = report(&s, 30 * 60 * 1_000);

@@ -311,3 +311,101 @@ async fn polling_continues_against_a_server_without_conditional_support() {
         "a server that ignores If-None-Match must still produce an Unchanged poll"
     );
 }
+
+/// Health names WHAT is failing, not just that something is.
+///
+/// A count of failures says a module is unwell; it does not say whether the
+/// upstream is unreachable, answering with an error status, or serving a body
+/// that will not parse. Those have different fixes and different owners.
+///
+/// Recording the cause in the store is not enough on its own. A sibling module
+/// ran three days with one of its data sources failing every poll and the
+/// reason recorded in a store row throughout, while the health surface its
+/// operator watched reported only that something was wrong.
+#[tokio::test]
+async fn health_names_the_cause_of_a_failure_streak() {
+    let upstream = Upstream::start(Behaviour::ServeCatalog);
+    let h = harness(&upstream.url);
+    tick(&h.ctx, 1_000).await.unwrap();
+
+    // Each failure mode must produce its own description, so an operator can
+    // tell an outage from a bad payload without opening the store.
+    let cases = [
+        (Behaviour::HangUp, "upstream unreachable", "network"),
+        (
+            Behaviour::ServerError,
+            "upstream returned an error status",
+            "http_status",
+        ),
+        (Behaviour::Garbage, "upstream body did not parse", "parse"),
+    ];
+
+    let mut at = 2_000i64;
+    for (behaviour, expected_detail, expected_metric) in cases {
+        upstream.set(behaviour);
+        // Drive a full streak so health reaches Degraded and prints a detail.
+        for _ in 0..FAILURE_STREAK_DEGRADED {
+            tick(&h.ctx, at).await.unwrap();
+            at += 1_000;
+        }
+
+        let report = health::report(&h.signals, at);
+        let detail = report
+            .detail
+            .clone()
+            .expect("a degraded report explains itself");
+        assert!(
+            detail.contains(expected_detail),
+            "health must name the cause; got {detail:?}"
+        );
+
+        let metrics = report.metrics.clone().expect("metrics are always present");
+        assert_eq!(
+            metrics.get("last_failure_class").and_then(|v| v.as_str()),
+            Some(expected_metric),
+            "a machine reading health must branch on the cause without parsing prose"
+        );
+
+        // Recover, so the next case starts from a clean streak.
+        upstream.set(Behaviour::ServeCatalog);
+        tick(&h.ctx, at).await.unwrap();
+        at += 1_000;
+    }
+}
+
+/// A recovery clears the recorded cause along with the streak.
+///
+/// A class outliving its streak would have health explaining a failure that is
+/// no longer happening — which is worse than saying nothing, because it reads
+/// as current.
+#[tokio::test]
+async fn a_recovery_clears_the_recorded_cause() {
+    let upstream = Upstream::start(Behaviour::ServeCatalog);
+    let h = harness(&upstream.url);
+    tick(&h.ctx, 1_000).await.unwrap();
+
+    upstream.set(Behaviour::ServerError);
+    for i in 0..FAILURE_STREAK_DEGRADED {
+        tick(&h.ctx, 2_000 + (i as i64) * 1_000).await.unwrap();
+    }
+    assert!(h.signals.last_failure_class().is_some());
+
+    upstream.set(Behaviour::ServeCatalog);
+    tick(&h.ctx, 9_000).await.unwrap();
+
+    assert_eq!(
+        h.signals.last_failure_class(),
+        None,
+        "the cause belongs to the streak and must clear with it"
+    );
+    let report = health::report(&h.signals, 9_500);
+    assert_eq!(report.status, HealthStatus::Ok);
+    assert!(
+        !report
+            .detail
+            .clone()
+            .unwrap_or_default()
+            .contains("error status"),
+        "a recovered module must not still be explaining an old failure"
+    );
+}
