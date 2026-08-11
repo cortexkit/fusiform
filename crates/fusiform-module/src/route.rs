@@ -89,6 +89,29 @@ pub struct CatalogGetResponse {
     /// pair that makes a model unique — measured, 6,253 model rows carry only
     /// 2,957 distinct ids.
     pub models: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+
+    /// Facts this read withheld because their record is known bad.
+    ///
+    /// Omitted from the wire when empty, which is the ordinary case, so this
+    /// costs nothing until it matters.
+    ///
+    /// A withheld fact is absent from `models`, and without this list that
+    /// absence is indistinguishable from a fact the upstream never published.
+    /// A consumer pricing a model would read "no rate" and could not tell it
+    /// from "the rate we recorded is wrong" — the second demands a different
+    /// action and is the one that costs money.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub withheld: Vec<WithheldFactWire>,
+}
+
+/// A fact a read refused to answer, on the wire.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WithheldFactWire {
+    /// `provider_id/model_id`, the same identity spelling `models` uses.
+    pub model: String,
+    pub fact_key: String,
+    /// Every correction covering the read instant, oldest first.
+    pub corrections: Vec<CorrectionDetail>,
 }
 
 impl CatalogGetResponse {
@@ -186,6 +209,18 @@ pub struct HistoryRequest {
     pub fact_key: String,
 }
 
+/// What a correction says, as an operator reads it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CorrectionDetail {
+    /// The interval whose recorded values are known bad. Closed at both ends.
+    pub affected_from_ms: i64,
+    pub affected_until_ms: i64,
+    /// Why the record was wrong, in fusiform's own words.
+    pub reason: String,
+    /// The `FieldId` list the correction names, as stored.
+    pub fields: serde_json::Value,
+}
+
 /// One era, as an operator reads it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HistoryEra {
@@ -193,6 +228,13 @@ pub struct HistoryEra {
     pub boundary_at_ms: i64,
     /// observed / asserted / seed / corrected.
     pub boundary_kind: String,
+    /// The extent and reason, present only on a `corrected` boundary.
+    ///
+    /// Without this an operator sees `kind: "corrected"` and cannot tell which
+    /// interval was affected or why — the cause recorded in the store with no
+    /// path to the surface anyone reads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correction: Option<CorrectionDetail>,
     /// The other edge of the observation window.
     ///
     /// Present only on an observed boundary. Its absence is the honest answer
@@ -312,6 +354,13 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
                 .unwrap_or(serde_json::Value::String(row.value_json.clone())),
             boundary_at_ms: row.boundary_at.0,
             boundary_kind: row.boundary_kind,
+            correction: row.correction.map(|c| CorrectionDetail {
+                affected_from_ms: c.affected_from.0,
+                affected_until_ms: c.affected_until.0,
+                reason: c.reason,
+                fields: serde_json::from_str(&c.fields_json)
+                    .unwrap_or(serde_json::Value::String(c.fields_json)),
+            }),
             window_from_ms: row.prior_observation_at.map(|t| t.0),
         })
         .collect();
@@ -449,7 +498,7 @@ fn single_model_snapshot(
     request: &CatalogGetRequest,
 ) -> Result<CatalogSnapshot, RouteError> {
     let resolved_at = at.unwrap_or_else(|| Timestamp(now_ms()));
-    let found = store
+    let (found, withheld) = store
         .read_model(source, provider_id, model_id, Some(resolved_at))
         .map_err(|e| store_error(&e))?;
 
@@ -485,6 +534,7 @@ fn single_model_snapshot(
         resolved_at,
         catalog_version,
         models,
+        withheld,
     })
 }
 
@@ -512,11 +562,32 @@ fn render(source: SourceId, snapshot: CatalogSnapshot) -> CatalogGetResponse {
         models.insert(identity, facts);
     }
 
+    let withheld = snapshot
+        .withheld
+        .into_iter()
+        .map(|w| WithheldFactWire {
+            model: format!("{}/{}", w.provider_id, w.model_id),
+            fact_key: w.fact_key.as_str().to_string(),
+            corrections: w
+                .corrections
+                .into_iter()
+                .map(|c| CorrectionDetail {
+                    affected_from_ms: c.affected_from.0,
+                    affected_until_ms: c.affected_until.0,
+                    reason: c.reason,
+                    fields: serde_json::from_str(&c.fields_json)
+                        .unwrap_or(serde_json::Value::String(c.fields_json)),
+                })
+                .collect(),
+        })
+        .collect();
+
     CatalogGetResponse {
         source: source.as_str().to_string(),
         resolved_at_ms: snapshot.resolved_at.0,
         catalog_version: snapshot.catalog_version,
         models,
+        withheld,
     }
 }
 

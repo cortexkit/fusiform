@@ -8,8 +8,10 @@
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::normalize::normalize_models_dev;
-use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
-use fusiform_module::route::{serve_catalog_get, CatalogGetResponse};
+use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp, TokenClass};
+use fusiform_module::route::{
+    serve_catalog_get, serve_tool_call, CatalogGetResponse, ToolResponse,
+};
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, NewObservation};
 
@@ -633,4 +635,292 @@ fn the_manifest_and_the_dispatch_agree_on_which_tools_exist() {
             ),
         }
     }
+}
+
+/// A withheld fact is NAMED on the wire, not silently missing.
+///
+/// The bulk read omits a fact whose record is known bad. Over the wire that
+/// omission is indistinguishable from a fact the upstream never published — a
+/// consumer pricing a model reads "no input rate" and cannot tell it from "the
+/// input rate we recorded is wrong". The second demands a different action and
+/// is the one that costs money.
+#[test]
+fn a_corrected_fact_is_named_as_withheld_on_the_wire() {
+    use fusiform_core::{Correction, FieldId};
+
+    let f = fixture();
+
+    // A correction covering the instant the read asks about.
+    f.store
+        .append_eras(&[fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: fusiform_store::FactKey::rate(TokenClass::Input),
+            value_json: r#"{"units":3000000000}"#.into(),
+            boundary_at: Timestamp(8_000),
+            boundary_kind: BoundaryKind::Corrected(Correction {
+                fields: vec![FieldId::Rate {
+                    class: TokenClass::Input,
+                }],
+                affected_from: Timestamp(2_000),
+                affected_until: Timestamp(8_000),
+                reason: "normalizer scaled the rate wrong".to_string(),
+            }),
+            observation_id: None,
+        }])
+        .unwrap();
+
+    let response = get(&f, r#"{"at_ms": 5000}"#);
+
+    // The fact is not in the models map...
+    let sonnet = response
+        .models
+        .iter()
+        .find(|(k, _)| k.contains("claude-sonnet-4-5"))
+        .map(|(_, v)| v);
+    if let Some(facts) = sonnet {
+        assert!(
+            !facts.contains_key("rate.input"),
+            "a corrected fact must not be served as if it were good"
+        );
+    }
+
+    // ...and the response says so, with the reason.
+    assert_eq!(
+        response.withheld.len(),
+        1,
+        "the withholding must be reported, not silent"
+    );
+    let w = &response.withheld[0];
+    assert_eq!(w.model, "anthropic/claude-sonnet-4-5");
+    assert_eq!(w.fact_key, "rate.input");
+    assert_eq!(w.corrections.len(), 1);
+    assert!(
+        w.corrections[0].reason.contains("normalizer"),
+        "the reason must travel: {:?}",
+        w.corrections[0].reason
+    );
+    assert_eq!(w.corrections[0].affected_from_ms, 2_000);
+    assert_eq!(w.corrections[0].affected_until_ms, 8_000);
+
+    // And a read outside the interval is unaffected and reports nothing.
+    let clean = get(&f, r#"{"at_ms": 9000}"#);
+    assert!(
+        clean.withheld.is_empty(),
+        "a read outside every corrected interval withholds nothing"
+    );
+}
+
+/// `catalog.history` carries a correction's extent and reason.
+///
+/// Reporting `kind: "corrected"` alone records a cause without surfacing it: an
+/// operator learns something was wrong and not which interval or why.
+#[test]
+fn history_carries_the_correction_extent() {
+    use fusiform_core::{Correction, FieldId};
+
+    let f = fixture();
+    f.store
+        .append_eras(&[fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: fusiform_store::FactKey::rate(TokenClass::Input),
+            value_json: r#"{"units":3000000000}"#.into(),
+            boundary_at: Timestamp(8_000),
+            boundary_kind: BoundaryKind::Corrected(Correction {
+                fields: vec![FieldId::Rate {
+                    class: TokenClass::Input,
+                }],
+                affected_from: Timestamp(2_000),
+                affected_until: Timestamp(8_000),
+                reason: "normalizer scaled the rate wrong".to_string(),
+            }),
+            observation_id: None,
+        }])
+        .unwrap();
+
+    let response = match serve_tool_call(
+        &f.store,
+        br#"{"name":"catalog.history","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","fact_key":"rate.input"}}"#,
+    )
+    .expect("history must serve")
+    {
+        ToolResponse::History(h) => h,
+        other => panic!("expected history, got {other:?}"),
+    };
+
+    let corrected = response
+        .eras
+        .iter()
+        .find(|e| e.boundary_kind == "corrected")
+        .expect("the correction must appear in history");
+    let detail = corrected
+        .correction
+        .as_ref()
+        .expect("a corrected era must carry its extent");
+    assert_eq!(detail.affected_from_ms, 2_000);
+    assert_eq!(detail.affected_until_ms, 8_000);
+    assert!(detail.reason.contains("normalizer"));
+
+    // A non-corrected era carries no correction block, so its absence means
+    // something rather than being the default everywhere.
+    let seeded = response
+        .eras
+        .iter()
+        .find(|e| e.boundary_kind != "corrected")
+        .expect("the fixture has ordinary eras too");
+    assert!(seeded.correction.is_none());
+}
+
+/// The SINGLE-MODEL path withholds and reports too.
+///
+/// `catalog.get` with a provider and model resolves its own rows through a
+/// different store method than the bulk read, so it decides about corrections
+/// separately. It got the decision wrong until a mutation showed no test
+/// covered it — and this is the path the most common operator command uses.
+#[test]
+fn the_single_model_read_also_names_a_withheld_fact() {
+    use fusiform_core::{Correction, FieldId};
+
+    let f = fixture();
+    f.store
+        .append_eras(&[fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: fusiform_store::FactKey::rate(TokenClass::Input),
+            value_json: r#"{"units":3000000000}"#.into(),
+            boundary_at: Timestamp(8_000),
+            boundary_kind: BoundaryKind::Corrected(Correction {
+                fields: vec![FieldId::Rate {
+                    class: TokenClass::Input,
+                }],
+                affected_from: Timestamp(2_000),
+                affected_until: Timestamp(8_000),
+                reason: "normalizer scaled the rate wrong".to_string(),
+            }),
+            observation_id: None,
+        }])
+        .unwrap();
+
+    let response = get(
+        &f,
+        r#"{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","at_ms":5000}"#,
+    );
+
+    let facts = response
+        .models
+        .get("anthropic/claude-sonnet-4-5")
+        .expect("the model is present");
+    assert!(
+        !facts.contains_key("rate.input"),
+        "the single-model read must not serve a known-bad fact"
+    );
+    assert!(
+        facts.contains_key("rate.output"),
+        "other facts are unaffected, so this is not an empty answer"
+    );
+
+    assert_eq!(
+        response.withheld.len(),
+        1,
+        "the single-model read must report what it withheld"
+    );
+    assert_eq!(response.withheld[0].fact_key, "rate.input");
+    assert!(response.withheld[0].corrections[0]
+        .reason
+        .contains("normalizer"));
+}
+
+/// A model whose every fact is withheld is still discoverable, through the
+/// withheld list rather than through `models`.
+///
+/// It does NOT appear in `models`: an entry with no facts is noise, and the
+/// route drops it. What matters is that the model's identity and the reason
+/// survive somewhere in the response, so a consumer can tell "fusiform's record
+/// of this model is known bad" from "no such model".
+///
+/// The distinction was found by a mutation that survived. Making `read_model`
+/// return `None` when every fact is withheld changed nothing observable, which
+/// is correct — the route already drops a factless model — but this test was
+/// named `..._is_not_absent` and asserted no such thing. The name claimed a
+/// property the code does not implement and the test never checked.
+#[test]
+fn a_model_whose_facts_are_all_withheld_is_still_discoverable() {
+    use fusiform_core::{Correction, FieldId};
+
+    let f = fixture();
+
+    // Correct every fact this model has.
+    let model = f
+        .store
+        .read_model(
+            SourceId::ModelsDev,
+            "anthropic",
+            "claude-sonnet-4-5",
+            Some(Timestamp(5_000)),
+        )
+        .unwrap()
+        .0
+        .expect("the model exists");
+
+    let eras: Vec<_> = model
+        .facts
+        .keys()
+        .map(|k| fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: k.clone(),
+            value_json: "null".into(),
+            boundary_at: Timestamp(8_000),
+            boundary_kind: BoundaryKind::Corrected(Correction {
+                fields: vec![FieldId::Rate {
+                    class: TokenClass::Input,
+                }],
+                affected_from: Timestamp(2_000),
+                affected_until: Timestamp(8_000),
+                reason: "a defect affecting every fact of this model".to_string(),
+            }),
+            observation_id: None,
+        })
+        .collect();
+    let count = eras.len();
+    f.store.append_eras(&eras).unwrap();
+
+    let response = get(
+        &f,
+        r#"{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","at_ms":5000,"include_retired":true}"#,
+    );
+
+    assert_eq!(
+        response.withheld.len(),
+        count,
+        "every withheld fact must be named"
+    );
+    // The model's identity survives in the withheld list, which is the only
+    // place it can be found — `models` does not carry a factless entry.
+    assert!(response
+        .withheld
+        .iter()
+        .all(|w| w.model == "anthropic/claude-sonnet-4-5"));
+    assert!(
+        !response.models.contains_key("anthropic/claude-sonnet-4-5"),
+        "a model with no readable facts is not carried as an empty entry"
+    );
+
+    // And the response is distinguishable from "no such model", which would
+    // have an empty withheld list.
+    let no_such = get(
+        &f,
+        r#"{"provider_id":"anthropic","model_id":"claude-imaginary-9","at_ms":5000}"#,
+    );
+    assert!(no_such.models.is_empty());
+    assert!(
+        no_such.withheld.is_empty(),
+        "a model that never existed withholds nothing; that is what makes the \
+         two cases distinguishable"
+    );
 }

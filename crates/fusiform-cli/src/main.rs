@@ -335,12 +335,57 @@ fn print_catalog(response: &serde_json::Value) {
                 println!("  {key:<34}  {value}");
             }
         }
+        print_withheld(response);
         return;
     }
 
     println!();
     for identity in models.keys() {
         println!("  {identity}");
+    }
+
+    print_withheld(response);
+}
+
+/// Report facts the read refused to answer.
+///
+/// Printed after the models rather than folded into them, because a withheld
+/// fact is absent from that list. Without this an operator sees a model with no
+/// input rate and concludes the upstream publishes none.
+fn print_withheld(response: &serde_json::Value) {
+    let Some(withheld) = response.get("withheld").and_then(|v| v.as_array()) else {
+        return;
+    };
+    if withheld.is_empty() {
+        return;
+    }
+
+    println!(
+        "\n{} fact(s) withheld — the record fusiform holds for these is known bad:",
+        withheld.len()
+    );
+    for item in withheld {
+        let model = item.get("model").and_then(|v| v.as_str()).unwrap_or("?");
+        let fact = item.get("fact_key").and_then(|v| v.as_str()).unwrap_or("?");
+        println!("  {model}  {fact}");
+        if let Some(corrections) = item.get("corrections").and_then(|v| v.as_array()) {
+            for c in corrections {
+                let from = c
+                    .get("affected_from_ms")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let until = c
+                    .get("affected_until_ms")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let reason = c.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+                println!(
+                    "      {} to {}: {reason}",
+                    format_instant(from),
+                    format_instant(until)
+                );
+            }
+        }
     }
 }
 
@@ -396,6 +441,26 @@ fn print_history(response: &serde_json::Value) {
         };
 
         println!("  {}  {kind:<10} {value}{window}", format_instant(at));
+
+        // A `corrected` boundary without its extent tells an operator that
+        // something was wrong and not what. The reason is recorded in the
+        // store; printing the kind alone leaves it there.
+        if let Some(c) = era.get("correction") {
+            let from = c
+                .get("affected_from_ms")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let until = c
+                .get("affected_until_ms")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let reason = c.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+            println!(
+                "                        corrects {} to {}: {reason}",
+                format_instant(from),
+                format_instant(until)
+            );
+        }
     }
 }
 

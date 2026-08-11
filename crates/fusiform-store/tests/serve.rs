@@ -112,6 +112,7 @@ fn a_point_in_time_read_returns_the_value_in_force_then() {
             Some(Timestamp(2_500)),
         )
         .unwrap()
+        .0
         .expect("the model existed then");
     let value = then.facts.get(&key).expect("the rate was in force then");
     assert!(
@@ -129,6 +130,7 @@ fn a_point_in_time_read_returns_the_value_in_force_then() {
             Some(Timestamp(9_000)),
         )
         .unwrap()
+        .0
         .unwrap();
     let value = now.facts.get(&key).unwrap();
     assert!(
@@ -184,6 +186,7 @@ fn facts_that_moved_at_different_times_resolve_independently() {
             Some(Timestamp(4_000)),
         )
         .unwrap()
+        .0
         .unwrap();
 
     // The rate has moved by now; the limit has not.
@@ -347,6 +350,7 @@ fn a_withdrawn_rate_does_not_stay_current() {
         .store
         .read_model(SourceId::ModelsDev, "anthropic", "claude-sonnet-4-5", None)
         .unwrap()
+        .0
         .unwrap();
 
     let value = now.facts.get(&key).expect("the fact still has an era");

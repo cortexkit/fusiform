@@ -150,6 +150,22 @@ impl CatalogQuery {
     }
 }
 
+/// A fact this read refused to answer, and why.
+///
+/// Omitting a corrected fact silently would make it indistinguishable from one
+/// the upstream never published — the same "wrong answer that reads as a
+/// legitimate one" the handler refuses an empty catalog for. A consumer that
+/// cannot see a rate must be able to tell "no such rate" from "the rate we
+/// recorded here is known bad".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WithheldFact {
+    pub provider_id: String,
+    pub model_id: String,
+    pub fact_key: FactKey,
+    /// Every correction covering the read instant, oldest first.
+    pub corrections: Vec<crate::CorrectionRecord>,
+}
+
 /// The result of a catalog read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogSnapshot {
@@ -163,6 +179,11 @@ pub struct CatalogSnapshot {
     /// The catalog version at the time of the read.
     pub catalog_version: i64,
     pub models: Vec<ModelFacts>,
+    /// Facts withheld because their record is known bad at this instant.
+    ///
+    /// Empty in the ordinary case. Non-empty means the answer is incomplete in
+    /// a specific, named way rather than in an invisible one.
+    pub withheld: Vec<WithheldFact>,
 }
 
 impl CatalogSnapshot {
@@ -228,16 +249,22 @@ impl CatalogStore {
         let corrections = self.all_corrections_covering(query.source, resolved_at)?;
 
         let mut by_model: BTreeMap<(String, String), BTreeMap<FactKey, String>> = BTreeMap::new();
+        let mut withheld: Vec<WithheldFact> = Vec::new();
         for (provider_id, model_id, fact_key, value_json) in rows {
             let fact_key = FactKey::from_stored(fact_key);
-            if !corrections.is_empty()
-                && corrections.contains_key(&(
-                    provider_id.clone(),
-                    model_id.clone(),
-                    fact_key.clone(),
-                ))
-            {
-                continue;
+            if !corrections.is_empty() {
+                let key = (provider_id.clone(), model_id.clone(), fact_key.clone());
+                if let Some(records) = corrections.get(&key) {
+                    // Named rather than dropped. A silently missing fact is
+                    // indistinguishable from one the upstream never published.
+                    withheld.push(WithheldFact {
+                        provider_id,
+                        model_id,
+                        fact_key,
+                        corrections: records.clone(),
+                    });
+                    continue;
+                }
             }
             by_model
                 .entry((provider_id, model_id))
@@ -280,11 +307,16 @@ impl CatalogStore {
             });
         }
 
+        // Withheld facts are reported even when the plane filter would have
+        // excluded them. A consumer reading only rates still needs to know a
+        // rate was withheld, and filtering the notice by the same predicate
+        // would hide exactly the case it exists to report.
         Ok(CatalogSnapshot {
             source: query.source,
             resolved_at,
             catalog_version: self.catalog_version()?,
             models,
+            withheld,
         })
     }
 
@@ -299,21 +331,53 @@ impl CatalogStore {
         provider_id: &str,
         model_id: &str,
         at: Option<Timestamp>,
-    ) -> Result<Option<ModelFacts>, CatalogError> {
+    ) -> Result<(Option<ModelFacts>, Vec<WithheldFact>), CatalogError> {
         let resolved_at = at.unwrap_or_else(|| Timestamp(now_ms()));
         let rows = self.point_in_time_rows_for_model(source, provider_id, model_id, resolved_at)?;
         if rows.is_empty() {
-            return Ok(None);
+            return Ok((None, Vec::new()));
         }
+
+        // Corrections apply here for the same reason they apply to a bulk read,
+        // and this path had to be fixed separately because it resolves its own
+        // rows. Three surfaces answered "what is this fact now" and each
+        // decided about corrections independently; two of them decided wrong.
+        let corrections = self.all_corrections_covering(source, resolved_at)?;
+
         let mut facts = BTreeMap::new();
+        let mut withheld = Vec::new();
         for (fact_key, value_json) in rows {
-            facts.insert(FactKey::from_stored(fact_key), value_json);
+            let fact_key = FactKey::from_stored(fact_key);
+            if !corrections.is_empty() {
+                let key = (
+                    provider_id.to_string(),
+                    model_id.to_string(),
+                    fact_key.clone(),
+                );
+                if let Some(records) = corrections.get(&key) {
+                    withheld.push(WithheldFact {
+                        provider_id: provider_id.to_string(),
+                        model_id: model_id.to_string(),
+                        fact_key,
+                        corrections: records.clone(),
+                    });
+                    continue;
+                }
+            }
+            facts.insert(fact_key, value_json);
         }
-        Ok(Some(ModelFacts {
-            provider_id: provider_id.to_string(),
-            model_id: model_id.to_string(),
-            facts,
-        }))
+
+        // A model whose every fact was withheld is not absent: it is a model
+        // whose record is known bad. Returning None would report it as never
+        // published, which is the misreading this whole path exists to prevent.
+        Ok((
+            Some(ModelFacts {
+                provider_id: provider_id.to_string(),
+                model_id: model_id.to_string(),
+                facts,
+            }),
+            withheld,
+        ))
     }
 
     fn point_in_time_rows(
@@ -374,6 +438,12 @@ pub struct HistoryRow {
     pub boundary_kind: String,
     /// The other edge of the observation window, when the boundary has one.
     pub prior_observation_at: Option<Timestamp>,
+    /// The extent and reason, present only on a `corrected` boundary.
+    ///
+    /// Carried here rather than left in the row because an operator reading a
+    /// history needs to know WHICH interval a correction covers. Reporting the
+    /// kind alone records a cause without surfacing it.
+    pub correction: Option<crate::CorrectionRecord>,
 }
 
 impl HistoryRow {
@@ -433,7 +503,9 @@ impl CatalogStore {
     ) -> Result<Vec<HistoryRow>, CatalogError> {
         let rows = self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT value_json, boundary_at_ms, boundary_kind, prior_observation_at_ms \
+                "SELECT value_json, boundary_at_ms, boundary_kind, prior_observation_at_ms, \
+                        corrected_fields_json, affected_from_ms, affected_until_ms, \
+                        correction_reason \
                  FROM era \
                  WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3 AND fact_key = ?4 \
                  ORDER BY boundary_at_ms ASC",
@@ -441,11 +513,25 @@ impl CatalogStore {
             let mapped = stmt.query_map(
                 params![source.as_str(), provider_id, model_id, fact.as_str()],
                 |r| {
+                    let boundary_at = Timestamp(r.get(1)?);
+                    // The schema's all-or-nothing CHECK guarantees these four
+                    // columns move together, so testing one is enough.
+                    let correction = match r.get::<_, Option<String>>(4)? {
+                        Some(fields_json) => Some(crate::CorrectionRecord {
+                            corrected_at: boundary_at,
+                            fields_json,
+                            affected_from: Timestamp(r.get(5)?),
+                            affected_until: Timestamp(r.get(6)?),
+                            reason: r.get(7)?,
+                        }),
+                        None => None,
+                    };
                     Ok(HistoryRow {
                         value_json: r.get(0)?,
-                        boundary_at: Timestamp(r.get(1)?),
+                        boundary_at,
                         boundary_kind: r.get(2)?,
                         prior_observation_at: r.get::<_, Option<i64>>(3)?.map(Timestamp),
+                        correction,
                     })
                 },
             )?;
