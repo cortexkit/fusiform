@@ -16,12 +16,19 @@ Engram discovers enrollments by walking `<data_home>/cortexkit/*/` and reading
 (`engram-module/src/fleet.rs`). A module directory without one is reported as
 `NotEnrolled` and **is not captured** — engram never guesses.
 
-Install it with `scripts/install-enrollment.sh`, or by hand:
+Install it with `scripts/install-enrollment.sh`, **after the module is deployed
+and its store exists**:
 
 ```sh
-cp crates/fusiform-module/data/engram-catalog.json \
-   ~/.local/share/cortexkit/fusiform/engram-catalog.json
+scripts/install-enrollment.sh
 ```
+
+The installer refuses if there is no `store.db` in the data directory. Enrolling
+an undeployed module puts an entry in engram's fleet walk pointing at a database
+that does not exist — a change to a running system with no store to protect in
+exchange. I made exactly that mistake writing this: installed the descriptor on
+a machine where fusiform is not deployed, then backed it out. The guard exists
+because the mistake is easy and its effects land somewhere I would not see them.
 
 ## Why the file is in the repository at all
 

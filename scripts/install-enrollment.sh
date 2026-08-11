@@ -11,6 +11,13 @@
 # from the repository's: a divergence means someone edited the live file by hand,
 # and silently replacing it would destroy the only record of what they changed.
 #
+# Refuses in one other case: when there is no store to protect. Enrolling a
+# module that is not deployed here puts an entry in a live fleet walk pointing
+# at a database that does not exist, which is a change to someone else's system
+# with no benefit to this one.
+#
+# --force overrides both refusals.
+#
 # Usage: scripts/install-enrollment.sh [--force]
 set -euo pipefail
 
@@ -22,6 +29,27 @@ target_file="$target_dir/engram-catalog.json"
 force="${1:-}"
 
 [ -f "$source_file" ] || { echo "error: $source_file is missing" >&2; exit 1; }
+
+# Refuse to enroll a module that is not deployed here.
+#
+# Engram walks the data home and captures what each descriptor declares. A
+# descriptor naming a store.db that does not exist adds an entry to a live
+# fleet walk pointing at nothing — and engram's whole-db capture opens the
+# source read-only with no prior existence check, so the outcome depends on
+# code paths that cannot be read from this repository.
+#
+# The point of installing is to protect a store. If there is no store, there is
+# nothing to protect and the only effect is on someone else's system. Install
+# alongside the deployment, not before it.
+if [ ! -f "$target_dir/store.db" ] && [ "$force" != "--force" ]; then
+    echo "error: no store at $target_dir/store.db" >&2
+    echo >&2
+    echo "Fusiform does not appear to be deployed on this machine. Enrolling now" >&2
+    echo "would add an entry to engram's fleet walk pointing at a database that" >&2
+    echo "does not exist. Install this after the module is running, or pass" >&2
+    echo "--force if you know the store is about to appear." >&2
+    exit 1
+fi
 
 # Validate before installing. An unparseable descriptor is worse than none:
 # engram reports it as Invalid and refuses the whole fleet capture, so a typo
