@@ -1,0 +1,31 @@
+[package]
+name = "fusiform-module"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The ck-fusiform daemon: fetches upstream catalogs on a cadence and serves the history."
+
+[[bin]]
+name = "ck-fusiform"
+path = "src/main.rs"
+
+[dependencies]
+fusiform-core = { path = "../fusiform-core" }
+fusiform-store = { path = "../fusiform-store" }
+
+subc-client-rs = { workspace = true }
+subc-protocol = { workspace = true }
+cortexkit-store-types = { workspace = true }
+
+async-trait = { workspace = true }
+blake3 = { workspace = true }
+# Matching the version and feature set every other fetching module in the fleet
+# uses: rustls rather than the platform TLS stack, so a module's behaviour does
+# not depend on which machine built it.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["arbitrary_precision"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sync"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/fusiform-core", "crates/fusiform-store"]
+members = ["crates/fusiform-core", "crates/fusiform-store", "crates/fusiform-module"]
 
 # Sibling checkouts, matching the layout CI creates. The daemon contract is a
 # library rather than a template: HELLO, HELLO_ACK, route binding, health

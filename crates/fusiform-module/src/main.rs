@@ -1,0 +1,232 @@
+#![forbid(unsafe_code)]
+
+//! The ck-fusiform daemon: fetch upstream catalogs on a cadence, keep their
+//! history, and answer questions about it.
+//!
+//! The module owns its domain and nothing else. HELLO, authentication, route
+//! binding, reconnect and control dispatch all come from `subc-client-rs`, and
+//! storage comes from `cortexkit-store`; re-deriving any of that by hand is how
+//! a module ends up subtly wrong at handshake.
+//!
+//! # Startup order, and why it is this way
+//!
+//! The store is opened AFTER the daemon connection, using the storage
+//! descriptor that arrives in HELLO_ACK. Keying storage before connecting means
+//! the module's idea of its own path can differ from the supervisor's, and the
+//! symptom is two databases where one is silently ignored.
+//!
+//! The poll loop starts only once the store is open, so there is no window in
+//! which a tick can find no store.
+
+use std::sync::{Arc, Mutex};
+
+use subc_client_rs::{async_trait, HandlerOutcome, ModuleHandler, RequestCtx};
+use subc_protocol::manifest::{
+    Bindings, Concurrency, ExecutionMode, IdentityBinding, IdentityScope, ModuleManifest,
+    ProviderRole, StorageBinding, StorageKind, StorageScope, Tool, TrustTier,
+};
+use subc_protocol::session::HealthReport;
+use subc_protocol::{ModuleHelloAckBody, PROTOCOL_VERSION};
+
+use fusiform_store::CatalogStore;
+
+use fusiform_module::fetch::{Fetcher, SourceEndpoint};
+use fusiform_module::health;
+use fusiform_module::loop_::{tick, PollContext, POLL_INTERVAL_MS};
+use fusiform_module::signals::Signals;
+
+const MODULE_ID: &str = "fusiform";
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let handler = Fusiform::new();
+    subc_client_rs::serve(manifest(), handler).await?;
+    Ok(())
+}
+
+struct Fusiform {
+    signals: Arc<Signals>,
+    /// Set once, when HELLO_ACK delivers the storage descriptor.
+    ///
+    /// A mutex rather than a channel because the health path reads whether the
+    /// store exists and must never block: it checks an atomic in `Signals`, not
+    /// this. Nothing on the health path touches this lock.
+    store: Mutex<Option<Arc<CatalogStore>>>,
+}
+
+impl Fusiform {
+    fn new() -> Self {
+        Self {
+            signals: Arc::new(Signals::new()),
+            store: Mutex::new(None),
+        }
+    }
+}
+
+#[async_trait]
+impl ModuleHandler for Fusiform {
+    async fn handle(&self, _ctx: RequestCtx, _body: Vec<u8>) -> HandlerOutcome {
+        // The served surface is not built yet. An explicit refusal with a
+        // stable code, rather than an empty success: a consumer that receives
+        // `{}` cannot tell "no models matched" from "this module does not
+        // implement reads yet", and would cache the first as if it were data.
+        HandlerOutcome::Error {
+            code: "unimplemented".to_string(),
+            message: "fusiform serves no reads yet; catalog.get is not implemented".to_string(),
+        }
+    }
+
+    async fn on_hello_ack(&self, ack: &ModuleHelloAckBody) {
+        let Some(descriptor_json) = ack.storage.as_ref() else {
+            // No managed storage configured. The module stays up and reports
+            // Failing, because a fusiform that cannot persist history is
+            // running but useless, and that is exactly what the health status
+            // is for.
+            eprintln!("fusiform: HELLO_ACK carried no storage descriptor; no history can be kept");
+            return;
+        };
+
+        let descriptor: cortexkit_store_types::StorageDescriptor =
+            match serde_json::from_value(descriptor_json.clone()) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("fusiform: storage descriptor did not deserialize: {e}");
+                    return;
+                }
+            };
+
+        let store = match CatalogStore::open(&descriptor) {
+            Ok(store) => Arc::new(store),
+            Err(e) => {
+                eprintln!("fusiform: store did not open: {e}");
+                return;
+            }
+        };
+
+        self.signals.store_opened();
+        *self.store.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&store));
+
+        // The poll loop starts only now, so no tick can run without a store.
+        let signals = Arc::clone(&self.signals);
+        tokio::spawn(async move {
+            run_poll_loop(store, signals).await;
+        });
+    }
+
+    async fn health(&self) -> HealthReport {
+        // Reads atomics and does arithmetic. No lock, no disk, no subprocess:
+        // a health reply that queues behind a degraded resource is useless
+        // exactly when it is needed.
+        health::report(&self.signals, now_ms())
+    }
+}
+
+/// Poll forever at the fixed cadence.
+///
+/// The first tick runs immediately rather than after one interval. A module
+/// that starts with an empty store and waits thirty minutes before its first
+/// fetch is thirty minutes of answering from nothing, and the seed exists
+/// precisely so that window is short.
+async fn run_poll_loop(store: Arc<CatalogStore>, signals: Arc<Signals>) {
+    let fetcher = match Fetcher::new() {
+        Ok(f) => f,
+        Err(e) => {
+            // Without a fetcher there is nothing to run. The loop exits and the
+            // heartbeat stops advancing, which health reports as degraded — the
+            // honest outcome, since reads still work against stored history.
+            eprintln!("fusiform: HTTP client did not build: {e}");
+            return;
+        }
+    };
+
+    let ctx = PollContext {
+        store,
+        fetcher,
+        endpoint: SourceEndpoint::models_dev(),
+        signals,
+    };
+
+    let mut interval =
+        tokio::time::interval(std::time::Duration::from_millis(POLL_INTERVAL_MS as u64));
+    // Skip missed ticks rather than firing them back to back. After a suspend
+    // or a long stall, bursting the backlog would hammer the upstream to learn
+    // one thing: what it says now.
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        interval.tick().await;
+        match tick(&ctx, now_ms()).await {
+            Ok(report) => {
+                eprintln!(
+                    "fusiform: poll {:?}, {} eras written",
+                    report.outcome, report.eras_written
+                );
+            }
+            Err(e) => {
+                // A store error, not a fetch error — fetch failures are an
+                // outcome, not an error. The loop continues: a transient write
+                // failure must not end polling, and a persistent one shows up
+                // in health as a heartbeat that advances while nothing is
+                // written.
+                eprintln!("fusiform: tick failed: {e}");
+            }
+        }
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn manifest() -> ModuleManifest {
+    ModuleManifest {
+        module_id: MODULE_ID.to_string(),
+        module_version: env!("CARGO_PKG_VERSION").to_string(),
+        protocol_ver: PROTOCOL_VERSION,
+        trust_tier: TrustTier::FirstParty,
+        provides: vec![ProviderRole::ToolProvider {
+            tools: vec![Tool {
+                name: "catalog.get".to_string(),
+                description: Some(
+                    "Read the model catalog: what models exist, what they can do, what they cost."
+                        .to_string(),
+                ),
+                execution_mode: ExecutionMode::Pure,
+                schema: serde_json::json!({"type": "object"}),
+            }],
+            identity_scope: vec![IdentityScope::Project, IdentityScope::Session],
+            concurrency: Concurrency::ModuleManaged,
+            emits_push: true,
+            sub_supervises: true,
+        }],
+        consumes: Vec::new(),
+        scheduled_tasks: Vec::new(),
+        bindings: Bindings {
+            storage: StorageBinding {
+                kind: StorageKind::Sqlite,
+                // `Project` is the only variant this protocol version defines,
+                // and it does not decide anything here: the daemon resolves
+                // every module to one database (`isolation: module`) at
+                // <data_home>/cortexkit/<module_id>/store.db regardless of what
+                // this field says.
+                //
+                // Worth stating because the field READS like it partitions
+                // storage per project, which for fusiform would be wrong — the
+                // catalog describes the world, not a project, so two projects
+                // asking what models exist must get the same answer. They do,
+                // but because of the daemon's resolution rather than because of
+                // this value.
+                scope: StorageScope::Project,
+                owns_schema: true,
+            },
+            vault_grants: Vec::new(),
+            identity: IdentityBinding {
+                requires: Vec::new(),
+                optional: vec![IdentityScope::Project, IdentityScope::Session],
+            },
+        },
+    }
+}

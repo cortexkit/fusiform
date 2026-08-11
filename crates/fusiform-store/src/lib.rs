@@ -439,6 +439,78 @@ impl CatalogStore {
         Ok(self.inner.with_conn(f)?)
     }
 
+    /// The ETag from the most recent observation that received one.
+    ///
+    /// Read from the store on every tick rather than held in memory: an
+    /// in-process cache is empty after a restart, so the first poll of every
+    /// new process would be unconditional and pull the whole document when a
+    /// 304 would have done.
+    pub fn last_etag(&self, source: SourceId) -> Result<Option<String>, CatalogError> {
+        let etag = self.inner.with_conn(|conn| {
+            conn.query_row(
+                "SELECT etag FROM observation \
+                 WHERE source = ?1 AND etag IS NOT NULL \
+                 ORDER BY observed_at_ms DESC LIMIT 1",
+                params![source.as_str()],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+        })?;
+        Ok(etag)
+    }
+
+    /// The normalized digest from the most recent observation that computed one.
+    ///
+    /// Only observations that parsed a body carry a digest, so a 304 or a
+    /// failure between two full fetches does not erase the comparison basis.
+    pub fn last_normalized_hash(&self, source: SourceId) -> Result<Option<String>, CatalogError> {
+        let hash = self.inner.with_conn(|conn| {
+            conn.query_row(
+                "SELECT normalized_hash FROM observation \
+                 WHERE source = ?1 AND normalized_hash IS NOT NULL \
+                 ORDER BY observed_at_ms DESC LIMIT 1",
+                params![source.as_str()],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+        })?;
+        Ok(hash)
+    }
+
+    /// The raw-bytes hash recorded on one observation, if it has one.
+    ///
+    /// Exists for the failure path: a parse failure records which exact
+    /// document could not be read, so a later fix can be checked against those
+    /// bytes rather than against whatever the upstream is serving by then.
+    pub fn raw_hash_of_observation(&self, id: i64) -> Result<Option<String>, CatalogError> {
+        let hash = self.inner.with_conn(|conn| {
+            conn.query_row(
+                "SELECT raw_hash FROM observation WHERE id = ?1",
+                params![id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+        })?;
+        Ok(hash.flatten())
+    }
+
+    /// The failure class recorded on one observation, if it failed.
+    ///
+    /// Exists so a test can check that the class a caller was told matches the
+    /// class that was written down. Those are two different artifacts derived
+    /// from one intent, and nothing else compares them.
+    pub fn failure_class_of_observation(&self, id: i64) -> Result<Option<String>, CatalogError> {
+        let class = self.inner.with_conn(|conn| {
+            conn.query_row(
+                "SELECT failure_class FROM observation WHERE id = ?1",
+                params![id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+        })?;
+        Ok(class.flatten())
+    }
+
     /// The current catalog version.
     pub fn catalog_version(&self) -> Result<i64, CatalogError> {
         let v = self.inner.with_conn(|conn| {

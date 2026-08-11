@@ -588,3 +588,197 @@ fn a_tiered_rate_has_its_own_fact_key() {
     assert!(base.value_json.contains("200000000"));
     assert!(tiered.value_json.contains("400000000"));
 }
+
+/// The digest changes exactly when the diff produces eras.
+///
+/// This is the property that makes the digest usable as a change signal: it and
+/// the era set come from one function, so they cannot disagree. A digest
+/// computed independently would drift silently — telling a consumer nothing
+/// changed while eras were written, or waking it for a change that produced
+/// none.
+#[test]
+fn the_digest_moves_exactly_when_the_diff_does() {
+    use fusiform_store::ingest::catalog_digest;
+
+    let f = fixture();
+    seed(&f, 1_000);
+    observe(&f, 2_000, ObservationOutcome::Unchanged);
+
+    let base = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let base_digest = catalog_digest(&base);
+
+    // A reserialization: different bytes, same facts. The diff writes nothing,
+    // and the digest must not move.
+    let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    let reserialized = serde_json::to_vec(&doc).unwrap();
+    assert_ne!(
+        reserialized,
+        FIXTURE.as_bytes(),
+        "the round trip must change bytes"
+    );
+    let same = normalize_models_dev(&reserialized).unwrap().catalog;
+
+    assert_eq!(
+        catalog_digest(&same),
+        base_digest,
+        "a reserialized document must not move the digest"
+    );
+    let plan = plan_ingest(
+        &f.store,
+        &same,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        None,
+    )
+    .unwrap();
+    assert!(plan.is_empty(), "and it must not produce eras either");
+
+    // A real change: one rate moves. Both must move together.
+    let mutated = FIXTURE.replace("\"input\": 3,", "\"input\": 4,");
+    assert_ne!(mutated, FIXTURE, "the mutation must apply");
+    let changed = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+
+    assert_ne!(
+        catalog_digest(&changed),
+        base_digest,
+        "a changed rate must move the digest"
+    );
+    let plan = plan_ingest(
+        &f.store,
+        &changed,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        None,
+    )
+    .unwrap();
+    assert_eq!(plan.eras.len(), 1, "and it must produce exactly one era");
+}
+
+/// The digest ignores fields fusiform does not serve.
+///
+/// A renderer-selecting field changing is a real upstream event and an operator
+/// may want to see it, but it is not a change to anything fusiform serves.
+/// Waking every consumer for it would train them to ignore the channel.
+#[test]
+fn the_digest_ignores_quarantined_fields() {
+    use fusiform_store::ingest::catalog_digest;
+
+    let base = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let before = catalog_digest(&base);
+
+    // Change the provider's SDK adapter — the single most renderer-selecting
+    // fact in the document.
+    let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    let mut doc = doc.as_object().unwrap().clone();
+    doc.get_mut("anthropic")
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .insert(
+            "npm".to_string(),
+            serde_json::json!("@ai-sdk/something-else"),
+        );
+    let mutated = serde_json::to_vec(&doc).unwrap();
+
+    let changed = normalize_models_dev(&mutated).unwrap().catalog;
+    assert_eq!(
+        catalog_digest(&changed),
+        before,
+        "a renderer-selecting field must not move the served digest"
+    );
+}
+
+/// Two different fact sets must not hash alike.
+///
+/// The length-prefix guard. Provider and model ids are upstream-controlled
+/// strings, and models.dev model ids routinely contain `/`
+/// (`openai/gpt-oss-120b`), so any separator would come from a namespace the
+/// upstream can write into a value. Without length prefixes, a provider id
+/// that absorbs the start of a model id concatenates identically to the
+/// unshifted pair, and two genuinely different catalogs hash the same.
+///
+/// The two documents below differ only in where the provider/model boundary
+/// falls: `ab` + `/c` against `a` + `b/c`. Their concatenations are equal, so
+/// this fails without the prefixes.
+#[test]
+fn the_digest_is_not_confusable_across_field_boundaries() {
+    use fusiform_store::ingest::catalog_digest;
+
+    let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    let template = doc
+        .as_object()
+        .unwrap()
+        .get("anthropic")
+        .unwrap()
+        .get("models")
+        .unwrap()
+        .get("claude-sonnet-4-5")
+        .unwrap()
+        .clone();
+
+    let build = |provider: &str, model: &str| {
+        let mut m = template.clone();
+        m.as_object_mut()
+            .unwrap()
+            .insert("id".to_string(), serde_json::json!(model));
+        serde_json::json!({
+            provider: {
+                "id": provider,
+                "models": { model: m }
+            }
+        })
+    };
+
+    // "ab" + "/c" and "a" + "b/c" concatenate to the same bytes.
+    let left = build("ab", "/c");
+    let right = build("a", "b/c");
+
+    let dl = catalog_digest(
+        &normalize_models_dev(&serde_json::to_vec(&left).unwrap())
+            .unwrap()
+            .catalog,
+    );
+    let dr = catalog_digest(
+        &normalize_models_dev(&serde_json::to_vec(&right).unwrap())
+            .unwrap()
+            .catalog,
+    );
+    assert_ne!(
+        dl, dr,
+        "a shifted field boundary produced an identical digest: the fields are \
+         being concatenated without length prefixes"
+    );
+}
+
+/// The digest depends on the fact SET, not on the order it arrives in.
+///
+/// Today the normalizer emits providers in sorted order, so the sort inside the
+/// digest is redundant — which is exactly why this test constructs the
+/// disordered case explicitly. A guard that is only correct because of an
+/// upstream implementation detail is one refactor away from being wrong, and
+/// nothing would fail when it broke.
+#[test]
+fn the_digest_does_not_depend_on_provider_order() {
+    use fusiform_store::ingest::catalog_digest;
+
+    let mut catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let ordered = catalog_digest(&catalog);
+
+    catalog.providers.reverse();
+    let reversed = catalog_digest(&catalog);
+    assert_eq!(
+        ordered, reversed,
+        "reversing provider order changed the digest, so it depends on \
+         emission order rather than on the fact set"
+    );
+
+    // And within a provider: reversing its models must not matter either.
+    for provider in &mut catalog.providers {
+        provider.models.reverse();
+    }
+    assert_eq!(
+        ordered,
+        catalog_digest(&catalog),
+        "reversing model order changed the digest"
+    );
+}

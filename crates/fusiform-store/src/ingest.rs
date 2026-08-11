@@ -224,6 +224,50 @@ pub fn plan_ingest(
     })
 }
 
+/// A digest over exactly the facts this module would store.
+///
+/// This is the hash consumers are notified on, and computing it from
+/// `facts_of` rather than from the document is the point: the change SIGNAL
+/// and the era SET are then derived from one function, so they cannot disagree.
+/// A digest computed independently — over the raw bytes, or over a
+/// re-serialization of the catalog — would drift from the diff the moment
+/// either changed, and the failure mode is silent: a consumer told "nothing
+/// changed" while eras were written, or woken for a change that produced none.
+///
+/// It also inherits every normalization decision for free. Sorted modalities,
+/// zero limits as absence, the three rate states kept distinct: each is already
+/// applied in `facts_of`, so a reformatted upstream produces an identical
+/// digest without this function knowing why.
+///
+/// Fed in sorted order, so the digest depends on the fact set rather than on
+/// the order the normalizer happened to emit providers in.
+pub fn catalog_digest(catalog: &NormalizedCatalog) -> String {
+    let mut entries: Vec<(String, String, String, String)> = Vec::new();
+    for model in catalog.models() {
+        for (key, value) in facts_of(model) {
+            entries.push((
+                model.key.provider_id.clone(),
+                model.key.model_id.clone(),
+                key.as_str().to_string(),
+                value,
+            ));
+        }
+    }
+    entries.sort();
+
+    let mut hasher = blake3::Hasher::new();
+    for (provider, model, key, value) in entries {
+        // Length-prefixed rather than delimiter-separated: a provider id
+        // containing the delimiter would otherwise let two different fact sets
+        // hash identically, and provider ids are upstream-controlled strings.
+        for field in [&provider, &model, &key, &value] {
+            hasher.update(&(field.len() as u64).to_le_bytes());
+            hasher.update(field.as_bytes());
+        }
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
 /// Every fact a model publishes, as `(key, value)` pairs.
 ///
 /// The value is JSON so a fact's shape can evolve without a schema migration,
