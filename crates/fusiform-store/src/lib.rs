@@ -505,7 +505,7 @@ impl CatalogStore {
         &self,
         source: SourceId,
         at: Timestamp,
-    ) -> Result<BTreeMap<(String, String, FactKey), Vec<CorrectionRecord>>, CatalogError> {
+    ) -> Result<CorrectionsByFact, CatalogError> {
         let rows = self.raw_conn(|conn| {
             let mut stmt = conn.prepare(CORRECTIONS_COVERING_SQL)?;
             let mapped = stmt.query_map(params![source.as_str(), at.0], |r| {
@@ -731,6 +731,13 @@ impl CatalogStore {
         Ok(issued)
     }
 }
+
+/// Corrections indexed by the fact they cover.
+///
+/// The key is the full identity a fact is addressed by: provider, model, and
+/// fact key. A read resolving thousands of facts looks each one up here, so the
+/// shape is a map rather than a list.
+pub type CorrectionsByFact = BTreeMap<(String, String, FactKey), Vec<CorrectionRecord>>;
 
 /// Corrections covering an instant, for every model and fact of one source.
 ///

@@ -32,7 +32,14 @@
 //! fusiform history --provider P --model M --fact rate.input
 //! ```
 
-use std::{collections::BTreeMap, env, ffi::OsString, path::PathBuf, process, time::Duration};
+use std::{
+    collections::BTreeMap,
+    env,
+    ffi::OsString,
+    path::{Path, PathBuf},
+    process,
+    time::Duration,
+};
 
 use fusiform_store::prefix;
 use subc_client_rs::consumer::{CallOptions, ConsumerOptions, SubcConsumer};
@@ -197,7 +204,7 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
 
 /// Open a route to fusiform, make one call, and close.
 async fn call(
-    connection_file: &PathBuf,
+    connection_file: &Path,
     tool: &str,
     arguments: serde_json::Value,
 ) -> Result<serde_json::Value, String> {

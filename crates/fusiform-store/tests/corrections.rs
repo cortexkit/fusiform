@@ -147,7 +147,7 @@ fn a_read_inside_a_corrected_interval_refuses() {
             );
             // And the corrected_at is after the interval, which is what makes
             // this case invisible to a boundary_at-ordered read.
-            assert!(c.corrected_at > c.affected_until || c.corrected_at == c.affected_until);
+            assert!(c.corrected_at >= c.affected_until);
         }
         other => panic!("a corrected instant must refuse, got {other:?}"),
     }

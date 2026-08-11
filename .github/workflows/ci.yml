@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Linux-only: fusiform has no platform-specific code paths. It is domain
+  # logic, SQLite through cortexkit-store, and an HTTP fetch; the wire layer
+  # talks to the subc daemon through the SDK.
+  test:
+    name: Test (ubuntu)
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # A wedged test must surface as a fast red run rather than burning the
+    # runner for the 6-hour Actions default. Healthy runs finish in minutes.
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: fusiform
+    steps:
+      - name: Checkout fusiform
+        uses: actions/checkout@v5
+        with:
+          path: fusiform
+
+      # Fusiform path-deps three private siblings: subconscious (the subc wire
+      # crates), commons (the cortexkit-store family), and engram (its catalog
+      # parser, used to validate this repo's backup enrollment against the
+      # real thing rather than a local schema check). The default GITHUB_TOKEN
+      # is scoped to this repo only, so mint a short-lived token from the
+      # org-installed cortexkit-ci GitHub App.
+      - name: Mint cross-repo read token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CK_CI_APP_ID }}
+          private-key: ${{ secrets.CK_CI_APP_PRIVATE_KEY }}
+          owner: cortexkit
+          repositories: subconscious,commons,engram
+
+      # The path deps resolve to ../subconscious, ../commons and ../engram
+      # relative to the workspace, so the siblings check out beside fusiform.
+      - name: Checkout subconscious
+        uses: actions/checkout@v5
+        with:
+          repository: cortexkit/subconscious
+          path: subconscious
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Checkout commons
+        uses: actions/checkout@v5
+        with:
+          repository: cortexkit/commons
+          path: commons
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Checkout engram
+        uses: actions/checkout@v5
+        with:
+          repository: cortexkit/engram
+          path: engram
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # `--all-targets` so the integration tests run, which is where every
+      # guard in this repository lives.
+      #
+      # FUSIFORM_LIVE and FUSIFORM_FULL_PAYLOAD are deliberately unset. The
+      # tests they gate reach models.dev or read a captured multi-megabyte
+      # document, and a suite whose result depends on a third party's uptime
+      # reports someone else's outage as this repository's failure.
+      - name: Test
+        run: cargo test --workspace --all-targets
