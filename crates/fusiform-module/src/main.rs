@@ -125,6 +125,27 @@ impl ModuleHandler for Fusiform {
         };
 
         self.signals.store_opened();
+
+        // Adopt the catalog's real age before the loop starts. The staleness
+        // signal lives in an atomic, so a restart empties it — and a module
+        // whose upstream has been unreachable for hours would report healthy
+        // the moment it restarts, which is precisely when an operator is
+        // looking. Read once here on the startup path; the health path itself
+        // still touches nothing but atomics.
+        match store.last_confirming_observation(fusiform_core::SourceId::ModelsDev) {
+            Ok(Some(at)) => self.signals.adopt_last_observation(at.0),
+            Ok(None) => {
+                // A genuinely fresh install. "No observation yet" is the true
+                // answer and health treats it as Ok rather than stale.
+            }
+            Err(e) => {
+                // The store opened but cannot be read. Not fatal — the loop
+                // will try again — but it must not pass as a fresh install, so
+                // it is logged rather than swallowed.
+                eprintln!("fusiform: could not read last observation at startup: {e}");
+            }
+        }
+
         *self.store.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&store));
 
         // The poll loop starts only now, so no tick can run without a store.

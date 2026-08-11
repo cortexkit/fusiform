@@ -67,6 +67,27 @@ impl Signals {
         self.consecutive_failures.store(0, Ordering::Relaxed);
     }
 
+    /// Adopt the last observation instant recorded in the store.
+    ///
+    /// Called once when the store opens, before the poll loop starts. Without
+    /// it the staleness clock restarts with the process, and a module whose
+    /// upstream has been unreachable for hours reports healthy the moment it is
+    /// restarted — which is exactly when an operator is looking, because a
+    /// restart is what they try when something seems wrong.
+    ///
+    /// This does NOT make the health path touch the store. The read happens at
+    /// open time, on the startup path, and only the resulting instant is
+    /// stamped into an atomic; the health path still reads atomics alone.
+    ///
+    /// Deliberately does not touch `poll_attempts`: that counter is a heartbeat
+    /// for THIS process's loop, and priming it would claim polls this process
+    /// never made. Nor does it touch `consecutive_failures`, because a restart
+    /// genuinely does clear the streak — the new process has failed nothing yet
+    /// and the staleness clock is the signal that survives.
+    pub fn adopt_last_observation(&self, at_ms: i64) {
+        self.last_observation_ms.store(at_ms, Ordering::Relaxed);
+    }
+
     /// Stamp a completed poll that observed nothing.
     pub fn failed(&self) {
         self.poll_attempts.fetch_add(1, Ordering::Relaxed);
