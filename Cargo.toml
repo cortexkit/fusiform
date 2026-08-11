@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["crates/fusiform-core"]
+
+# Sibling checkouts, matching the layout CI creates. The daemon contract is a
+# library rather than a template: HELLO, HELLO_ACK, route binding, health
+# control and the frame lifecycle all live in subc-client-rs, and re-deriving
+# any of them by hand is how a module ends up subtly wrong at handshake.
+[workspace.dependencies]
+subc-client-rs = { path = "../subconscious/crates/subc-client-rs" }
+subc-protocol = { path = "../subconscious/crates/subc-protocol" }
+subc-transport = { path = "../subconscious/crates/subc-transport" }
+subc-core = { path = "../subconscious/crates/subc-core" }
+
+cortexkit-paths = { path = "../commons/crates/cortexkit-paths" }
+cortexkit-store = { path = "../commons/crates/cortexkit-store", features = ["sqlite"] }
+cortexkit-store-types = { path = "../commons/crates/cortexkit-store-types" }
+
+async-trait = "0.1"
+blake3 = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

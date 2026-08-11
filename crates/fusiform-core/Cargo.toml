@@ -1,0 +1,10 @@
+[package]
+name = "fusiform-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Pure domain for the ck-fusiform AI-model capability catalog: identity, observations, eras, and rates."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
