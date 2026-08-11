@@ -23,13 +23,18 @@
 //! (77ms vs 45ms on the same store, interleaved to remove ordering bias), so
 //! the correlated form stays.
 //!
-//! What is NOT established here: the real fact-level churn rate, and therefore
-//! how fast the table actually grows in production. The model-count churn is
-//! known (+821 and −391 models over 18 days), but that is not a fact-level
-//! number and extrapolating one from it would be inventing a measurement. The
-//! honest statement is that the cost grows with recorded history at a rate this
-//! repository has not yet measured, and that the current constant leaves
-//! substantial headroom.
+//! Real fact-level churn, measured once on 2026-08-11 by diffing two live
+//! fetches about six hours apart: **9 changed facts out of 67,718** (0.013%),
+//! plus one new model contributing 10 more eras. Three models were repriced —
+//! all three with `last_updated` unchanged, which is independent confirmation
+//! that the field cannot drive change detection, this time for money rather
+//! than for a renderer override.
+//!
+//! One interval is not a rate, and this is a single sample taken on one
+//! afternoon; a repricing wave would produce a different number. What it does
+//! establish is the order of magnitude — tens of eras per poll, not thousands —
+//! against a 1.9x table-growth stress that this test applies deliberately
+//! because real churn is far too small to expose anything.
 
 use std::time::Instant;
 
