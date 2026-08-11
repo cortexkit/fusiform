@@ -1,12 +1,118 @@
 # Fusiform — schema and store, design note 1
 
-Status: **draft for review** by SUBC, BROCA, ASTRO. No code exists. Every
-number cited here was measured, not recalled; the measurements live in
-`docs/upstream-models-dev-measured.md` and are reproducible.
+Status: **draft for review**, 2026-08-11. Fusiform has no code yet; this note
+settles the data model before any is written.
 
-BROCA's consumed field set, envelope shape, ordering rule, bootstrap posture,
-and payload-boundary decision are settled (2026-08-11) and folded in below.
-ASTRO's pricing contract is settled the same day. What remains open is in §11.
+### Who the parties are
+
+Fusiform is a supervised module of the CortexKit fleet (see `docs/charter.md`
+for its mission, v1 scope, and the constraints settled at chartering). Three
+other modules appear throughout; each is an independent binary in its own
+repository with its own owner:
+
+| Name | Module | Relationship to fusiform |
+| --- | --- | --- |
+| **BROCA** | `broca` — the LLM run engine | first consumer; receives the capability catalog |
+| **ASTRO** | `astrocyte` — AI spend metering | second consumer; receives the pricing plane |
+| **SUBC** | `subc` — the daemon and supervisor | owns the module contract and the `commons` shared crates |
+
+Where this note says a thing is "settled with" one of them, it means that
+party is the owner of the constraint and agreed the design meets it. Their
+repositories are the durable record; the reasoning is reproduced here so this
+note stands alone.
+
+### What is settled
+
+BROCA's consumed field set (§5.1), envelope shape, ordering rule, bootstrap
+posture, and the payload-boundary decision are settled. ASTRO's pricing
+contract is settled. What remains open is in §11.
+
+### Evidence
+
+Upstream figures cited here were measured on 2026-08-11 and are recorded with
+their reproduction method in `docs/upstream-models-dev-measured.md`, which is
+the authoritative record for anything about the upstream's shape. Figures
+about other repositories (BROCA's snapshot and source, astrocyte's store) name
+their file and line inline so they can be re-checked in those repositories;
+they cannot be verified from inside fusiform alone. All are dated observations
+of systems that change, not constants.
+
+### Tense convention, and when it expires
+
+**Fusiform has no code.** Every statement about what fusiform does — parses,
+normalizes, serves, refuses — describes the design this note specifies, not
+shipped behavior. The present tense is used for legibility, as a
+specification, throughout. Where something *does* exist today it is named with
+its repository and commit.
+
+That convention is unambiguous only while there is no implementation. Once
+code exists, "fusiform normalizes X" acquires **two truth conditions where it
+had one**, and nothing in the sentence says which was meant. The dangerous
+period is not when they disagree — it is the stretch beforehand when they
+agree, because that is when the habit of not checking forms, at no cost, and
+is in place by the time it matters.
+
+This is the observed mechanism behind the two-versions-of-a-rule failure
+described in §4: nobody chooses the second version. A rule is stated once when
+it is true of an intent, the code later settles somewhere narrower, and the
+sentence keeps being repeated because **a sentence has no way to notice.**
+
+The cheap defence costs one word, and it belongs in messages across seams as
+much as in documents: say **specified** or **measured** when it matters. A
+reader holding a claim cannot see which file the convention lives in, and
+"fusiform does X" is true under both readings while meaning different things.
+The same ambiguity produced a retraction elsewhere in this note — a statement
+about what a module *emits*, read as a statement about what the value *means*.
+True sentence, truth condition in a different place than the reader assumed.
+
+**Two words, not one — the marker needs a tense.** A third state hides between
+"specified" and "measured": a claim that is accurately specified, accurately
+remembered, and describes code not yet written. Nothing about it is false
+except the tense, and **tense is exactly what a seam conversation strips.**
+So: *specified-and-built* or *specified-and-pending*.
+
+This is not hypothetical, and fusiform is downstream of an instance. A
+consumer described a completion signal as its deletion authority — accurate to
+their design, and their shipped code deletes unconditionally for any provider
+appearing in a response, because the slice implementing it has not landed.
+Both halves coherent, contradiction on a schedule rather than on a page.
+
+The consequence for a producer is concrete: reasoning about how a consumer
+handles a signal it does not yet honor produces analysis of failure modes that
+cannot occur, while missing the one that can. **A design a consumer intends to
+build is not a property of the system fusiform is integrating with.**
+
+And it stays not-a-property **after** they build it, until they report it
+landed. An adversarial review can narrow, defer, or restructure a specified
+behavior between the description and the merge — the consumer above has had
+four rounds reshape things they had described as settled. So:
+
+> A consumer's specified behavior is a signal about direction, never a
+> dependency fusiform may take. What converts it is **the consumer reporting a
+> merge**, not fusiform reading their specification.
+
+Same rule as the era-zero seed (§11), from the other direction: each party
+commits only to what it can verify, and a specification is not something its
+author can verify on a reader's behalf.
+
+### Mark tense at the moment of speaking
+
+The remedy is not a retroactive sweep. Fusiform's own case makes a sweep look
+viable — everything it has said is uniformly `specified-and-pending`, so one
+announcement at first implementation would re-date the lot. That uniformity is
+an artifact of having no code, and it is temporary.
+
+A module with both shipped code and a pending specification has no such
+uniformity: adjacent sentences in one message can be a measured fact, behavior
+running since July, and behavior specified but unbuilt — same voice, same
+tense, and **no reader can separate them, including the author later.** Such
+ambiguity resolves per-claim and slice by slice, never all at once, so no
+release history dates it.
+
+Hence: mark at the moment of speaking, because **that is the only moment the
+distinction is free.** Afterwards it costs a source read per claim, against
+claims already scattered across threads — and a sweep done badly is worse than
+an admitted gap.
 
 ## 0. The rule the rest follows from — and its correct boundary
 
@@ -15,8 +121,11 @@ ASTRO's pricing contract is settled the same day. What remains open is in §11.
 Four constraints that arrived from four unrelated directions are the same
 rule:
 
-- **Wire-family resolution stays with consumers** (charter). An upstream edit
-  to a renderer hint must not re-route request bytes.
+- **Wire-family resolution stays with consumers** (`docs/charter.md`). An
+  upstream edit to a renderer hint must not re-route request bytes. A *wire
+  family* is the request-rendering dialect a provider speaks (Anthropic
+  Messages, OpenAI Chat Completions, OpenAI Responses, and so on); picking one
+  determines the exact bytes on the wire.
 - **Never convert currency** (ASTRO). A producer that converts stamps an
   invented rate with producer authority.
 - **Never imply a charge basis** (ASTRO). Calling video-seconds "tokens" makes
@@ -44,10 +153,11 @@ reasoning: if model.capabilities.reasoning {
 The comment reads: *"Provider quirks describe the family's reasoning wire
 shape, but the selected model remains the authority on whether that shape is
 legal at all."* So a boolean fusiform serves decides whether a `thinking`
-block appears in an outbound request body. Three served fields have byte
-consequences, not zero.
+block appears in an outbound request body. Served fields have byte
+consequences, not zero — two of them, enumerated in §5.1.
 
-The correct, narrower invariant — BROCA's formulation, adopted verbatim:
+The correct, narrower invariant — BROCA's formulation, since the boundary
+belongs to whoever owns the renderer:
 
 > **Fusiform may never pick the RENDERER — family, endpoint, auth shaping,
 > quirks. Fusiform may describe MODEL CAPACITY, and capacity legitimately
@@ -98,7 +208,17 @@ starts lying about freshness.
 - An **observation** is "I looked at source S at time T and this is what
   happened." Every poll produces one, including failures and 304s.
 - An **era** is "source S asserted value V for fact F, starting at boundary
-  B." Only a *change* produces one.
+  B." A *change* is the only thing that produces one **from polling** — an
+  unchanged fetch appends nothing (§3).
+
+Two boundary kinds are written by something other than a change, and both are
+deliberate exceptions rather than an inconsistency in the rule above:
+`Seed`, written once at bootstrap because a store coming into existence is not
+an upstream event; and `Corrected`, written when fusiform is repairing its own
+misreading, where the upstream demonstrably did *not* move. Both are defined
+in §3. The rule that holds without exception is narrower and is the one that
+matters: **an era is never written to record that fusiform looked and saw the
+same thing.**
 
 ### Why every poll is recorded, including the ones that changed nothing
 
@@ -112,6 +232,8 @@ A consumer can only bound that skew if it knows both edges. So:
 ```
 observation(seq, source, started_at, outcome, ...)
     outcome ∈ { Changed(snapshot_seq), Unchanged, NotModified304, Failed(class) }
+           snapshot_seq — the snapshot row this observation produced
+           class        — the failure taxonomy (network, HTTP status, parse)
 ```
 
 A **failed** poll observed nothing and must never narrow a window. A 304 and a
@@ -133,8 +255,14 @@ Freshness-by-source-stream only works if a successful observation confirms
 > observation, or has a tombstone era opened at it.
 
 A model vanishing from the upstream writes an era whose value is
-`Absent { reason }`, not a deleted row. This is the 319-retired-models case
-represented in the data plane instead of inferred from a gap.
+`Absent { reason }`, not a deleted row.
+
+This represents in the data plane what would otherwise be inferred from a gap.
+The motivating incident is recorded in `docs/charter.md`: one models.dev
+refresh silently removed 319 retired models from BROCA's catalog and nothing
+failed, which was noticed only because unrelated test fixtures happened to pin
+ids that no longer existed. A deletion that leaves no trace is
+indistinguishable from a model that was never there.
 
 Test shape: construct two observations where a model disappears in the second,
 assert a tombstone era exists at the second, and assert a point-in-time query
@@ -154,6 +282,29 @@ the fact in force at T = the newest era with boundary_at <= T
 Identical in shape to astrocyte's `select_effective`
 (`astrocyte-core/src/pricing.rs:204-212`), deliberately — the semantics a
 consumer already implements should not need a second mental model.
+
+One wrinkle the plain selector does not express, and it is load-bearing:
+**"what did the store say at T" and "what was true at T" are different
+queries**, and the selector above answers only the first.
+
+A `Corrected` era says the value in its `affected_from..affected_until`
+interval was *recorded* wrong. Selecting by `boundary_at` alone returns the
+corrected value for instants after the correction and the original wrong value
+for instants inside the bad interval — correct as history, wrong as fact, with
+nothing in the query distinguishing them.
+
+So the read surface must not conflate them. A point-in-time lookup inside a
+corrected interval **refuses** rather than returning a confident wrong answer:
+the honest response is "the store recorded V here and that record is known
+bad," never V.
+
+This is the primary reason `Correction` carries an interval rather than a
+timestamp — stronger than the reason it was originally requested for. It was
+asked for so a consumer could *find* affected facts. It is also the only thing
+that lets the read surface **refuse**, and without it a corrected era is
+indistinguishable from a later change with the bad interval unmarked. An audit
+aid is useful; a mechanism that stops a query answering the wrong question
+confidently is structural.
 
 An era row:
 
@@ -213,13 +364,18 @@ note; an auditable correction says which fields were wrong over which prior
 interval, so a consumer can mechanically select every fact it derived from the
 bad region instead of eyeballing dates:
 
+`Timestamp` throughout this note is a millisecond instant in UTC;
+`CorrectionReason` names the defect record that explains the correction (a
+finding document under `docs/findings/`, so an audit is repeatable rather than
+dependent on prose).
+
 ```rust
 pub struct Correction {
-    /// Which facts the correction touches.
+    /// Which facts the correction touches. See FieldId below.
     pub fields: Vec<FieldId>,
     /// The prior interval whose recorded values were wrong. A consumer
     /// queries its own facts over this window to find what it derived
-    /// from the bad region.
+    /// from the bad region. affected_from is a LOWER BOUND — see below.
     pub affected_from: Timestamp,
     pub affected_until: Timestamp,
     /// Why the record was wrong. Free text is not enough for an audit to
@@ -228,13 +384,54 @@ pub struct Correction {
 }
 ```
 
-The first real use of this on ASTRO's side is empty today — tier data was
-never read on their pricing path, so the partition is currently zero charges.
-Designing it now, while the stakes are zero, is the point.
+The first real use of this is empty today — the tier defect never reached a
+pricing path, so its partition is zero charges. Designing it now, while the
+stakes are zero, is the point.
 
 A correction never narrows an observation window and never rings a doorbell.
 It is fusiform admitting a defect, and admitting a defect is not news about
 the upstream.
+
+#### `affected_from` is a lower bound, and unknown means earliest
+
+> **Rule.** `affected_from` is a lower bound. When the true start of the bad
+> region is not known precisely, it goes to the **earliest plausible instant**,
+> never to the best guess.
+
+The asymmetry is not a matter of taste. An over-inclusive partition costs a
+consumer review time. An under-inclusive one leaves bad facts outside a
+partition that asserts they are fine — which is worse than no partition at
+all, because it converts an unknown into a false clean bill.
+
+In practice `affected_until` is known exactly (it is when the fix deployed and
+fusiform stopped recording the bad value) while `affected_from` may only be
+bounded (for a parse defect it is when the bad parser shipped, which may
+predate careful records).
+
+#### `FieldId` vocabulary
+
+The vocabulary is **the served contract's field identity, never fusiform's
+storage identity.** A name bound to internal representation changes for
+reasons that are not facts about the world; the served contract is the only
+surface where a rename is already a breaking change both sides would notice.
+
+Granularity is set by a single test:
+
+> Two corrections with genuinely different affected sets must not be able to
+> share a `FieldId`. If they can, the vocabulary is too coarse.
+
+Which yields five categories, at the granularity of what a charge is computed
+from. The rate category is instantiated **per token class**, so the concrete
+id set is larger than five — five is the number of distinct kinds of thing
+that can be independently wrong:
+
+| `FieldId` | Why it is separate |
+| --- | --- |
+| rate, **per token class** | `input` and `cache_read` moving are different facts, and a correction to one need not partition the same set of charges as a correction to the other. How much each class actually matters to a given ledger is that ledger's business and is not measured here. One id per class, never one for "rates". |
+| charge unit | A misread unit is not a misread number. "This was per-image, not per-thousand-images" invalidates every derived charge even where the numeric value was right. |
+| tier threshold | Correcting a threshold partitions only charges where a request crossed the boundary. |
+| tier rates | Distinct from the threshold: if they shared an id, "the threshold was wrong" and "the over-threshold rate was wrong" could not be told apart, and they have different affected sets. This is exactly the shape of the tier defect. |
+| existence | So a tombstone correction — *this model was recorded as present after it was actually retired* — is expressible without claiming a rate was wrong. |
 
 **`prior_observation_at` is the field that makes the window arithmetic rather
 than merely disclosed.** An era saying "observed at T, previously observed at
@@ -277,13 +474,23 @@ pub enum ChargeBasis {
     PerRequest,
 }
 
+/// A provider's named quality/fidelity level for a generated artifact
+/// ("standard", "hd", "draft"). Left as a source-declared string rather
+/// than a fusiform enum: normalizing quality names across providers would
+/// mean asserting two providers' tiers are equivalent, which is a claim
+/// fusiform has no basis to make.
+pub struct QualityTier(String);
+
 pub enum TokenClass { Input, Output, CacheRead, CacheWrite, Reasoning }
 ```
 
 Closed enums, not strings. A consumer must be able to **fail** on a basis it
 does not understand rather than guess — and the failure already has a name in
-ASTRO's vocabulary: `unknown charge basis`. That variant existed before either
-of us knew it would carry non-LLM billing.
+astrocyte's existing unpriced-reason enum
+(`astrocyte-core/src/pricing.rs`): `unknown charge basis`. That variant was
+written for LLM metering, before non-LLM billing was in scope, and it turns
+out to be exactly the right refusal for a charge basis a consumer cannot
+interpret.
 
 The five token classes are the LLM special case, not the general shape. Video
 bills per second, audio per minute, images per image at a size and quality.
@@ -309,14 +516,19 @@ pub enum RateCondition {
 
 The tier discriminator is **verified, never assumed**. `tier.tier.type` is
 `"context"` on 335/335 rows today, and a parser that reads `tier.tier.size`
-without checking `type` silently reads a hypothetical `{"type": "images",
-"size": 1000}` tier as "context ≥ 1000 tokens" — confirmed by probing the
-fixed commons parser, which accepts exactly that. With 164 image-output, 75
-audio and 64 video models already in this upstream, a non-token tier type is a
-plausible near-term addition rather than a thought experiment. An unrecognized
-tier type is unpriced with `unknown charge basis`, never coerced.
+without checking `type` reads a hypothetical `{"type": "images", "size":
+1000}` tier as "context ≥ 1000 tokens". That is not speculative: the first
+commons fix (`ffdd06a`) had exactly this gap and a probe confirmed it accepted
+such a tier. It was closed in `528b680` after the probe was reported — see
+`docs/findings/2026-08-11-commons-tier-threshold.md`.
 
-This settles an open question with ASTRO: a descriptive property participates
+With 164 image-output, 75 audio and 64 video models already in this upstream,
+a non-token tier type is a plausible near-term addition rather than a thought
+experiment. An unrecognized tier type is unpriced with `unknown charge basis`,
+never coerced.
+
+This settles a question left open in the pricing contract: a descriptive
+property participates
 in rate selection **already**, not hypothetically. It also means a pricing
 consumer must never have to join capability rows to price rows to select a
 rate — every discriminator a rate needs travels **in the rate's own key**. If
@@ -330,7 +542,9 @@ default threshold — see the defect in
 `docs/findings/2026-08-11-commons-tier-threshold.md`, which is exactly this
 mistake shipped.
 
-`context_over_200k` (288 models) is an older second encoding of the same fact.
+`context_over_200k` (288 models) reads as an older second encoding of the same
+fact — an inference from co-occurrence and matching values, not something the
+upstream documents (`docs/upstream-models-dev-measured.md`).
 Fusiform normalizes to the general tier form and never serves both. It
 currently only ever co-occurs with `tiers`; that is an upstream convention,
 not a guarantee, so a `context_over_200k` without a matching tier is a
@@ -344,6 +558,8 @@ pub struct Amount {
     pub units: i64,
     /// units × 10^(-exponent) of `currency`. Stated, never assumed.
     pub exponent: u8,
+    /// ISO 4217 alphabetic code. A code, not a symbol, and never
+    /// defaulted — see UnitProvenance below for how it is established.
     pub currency: CurrencyCode,
 }
 ```
@@ -351,7 +567,8 @@ pub struct Amount {
 Floats exist only at the JSON parse boundary where the upstream forces them,
 and never survive normalization. Measured justification: the same cost key
 arrives as both JSON int and float (`input` is an int on 1,620 rows and a
-float on 4,213 — a parser typed to one fails on 26% of rows), and 151 numbers
+float on 4,213 — an `f64`-only parser rejects 27.8% of them, an integer-only
+parser rejects 72.2%), and 151 numbers
 carry ≥6 decimal places including confirmed IEEE-754 artifacts
 (`0.024999999999999998`, `0.39999999999999997`, `1.5999999999999999`).
 
@@ -372,6 +589,9 @@ pub enum UnitProvenance {
     Stated,
     /// Fusiform applied a named, auditable policy. The policy id is
     /// carried so "why does the catalog say USD" has an answer.
+    /// PolicyId names a policy declared in fusiform's source and versioned
+    /// with it (e.g. "models-dev-usd-v1"), so "why does the catalog say USD"
+    /// resolves to a specific auditable rule rather than a habit.
     AssumedByPolicy(PolicyId),
     /// No statement and no policy covers it. The rate is unpriced.
     Unknown,
@@ -379,9 +599,28 @@ pub enum UnitProvenance {
 ```
 
 So models.dev rates are served as USD with
-`AssumedByPolicy("models-dev-usd-v1")`, never as a stated fact. When QTA's
-CNY-denominated providers reach a catalog, `Unknown` is what stops them being
-silently priced in dollars.
+`AssumedByPolicy("models-dev-usd-v1")`, never as a stated fact.
+
+> **The cost of recording provenance is constant; the cost of not recording it
+> increases monotonically, with a discontinuity at an event nobody controls.**
+> A store whose rows carry no unit provenance can still say truthfully, in one
+> migration, that everything written so far assumed USD by policy. After the
+> first genuinely non-USD rate arrives, that sentence stops being true of
+> everything before a line and becomes a claim to defend per row. The decision
+> shape is therefore not "wait until it matters" — the last moment to act
+> cheaply is strictly before the event that makes it matter.
+
+That argument is why this provenance is in the schema on day one rather than
+added when a second currency appears. That policy
+is a declaration in fusiform's source, versioned with it, saying: *rates from
+the models.dev source with no stated currency are treated as USD.* Changing
+it is a code change with a version bump, and every rate carrying it can be
+found by its id.
+
+This matters because non-USD provider pricing already exists in the fleet: the
+quota-tracking module serves CNY balances from deepseek today. When such a
+provider reaches a catalog with no currency stated and no policy covering it,
+`Unknown` is what stops it being silently priced in dollars.
 
 The same mechanism covers the audio keys. `input_audio` sits in the same flat
 namespace as `input` with no unit distinguishing it:
@@ -394,16 +633,100 @@ Per audio token? Per second? Per minute? Unstated. Absent a per-provider
 policy, that rate is served **unpriced with `unknown charge basis`** rather
 than guessed into a token rate.
 
-### Absent, zero, unknown — and retired
+### Absent, zero, and unknown are three states
 
-Absent, zero, and unknown are all statements about a model the upstream **still
+```rust
+pub enum RateValue {
+    Priced(Amount),
+    /// The source stated exactly zero. Not "free" — a stated zero. Whether
+    /// a zero is a real price is the consumer's policy, not ours.
+    StatedZero,
+    Unpriced(UnpricedReason),
+}
+
+/// Adopted from astrocyte's existing unpriced-reason enum rather than
+/// paralleled, so no mapping happens at the boundary. Their remaining
+/// variants (degraded pricing time, arithmetic out of range) are
+/// structurally not a producer's: fusiform has no pricing instant and no
+/// ledger arithmetic.
+pub enum UnpricedReason { MissingRate, NoCatalogCoverage, UnknownChargeBasis }
+```
+
+Measured: 420 models carry no `cost` object at all, and 1,423 cost entries are
+exactly `0` (including whole provider families). Some zeros are genuinely
+free; some are certainly "not published". The upstream cannot distinguish them
+and neither can fusiform from the payload, so fusiform reports what was said
+and surfaces the counts loudly on the operator surface rather than resolving
+them.
+
+### What that costs, stated up front
+
+These rules make fusiform refuse to state a rate in many cases. Measured
+against the 2026-08-11 payload, here is how much:
+
+| | Count | Share |
+| --- | --- | --- |
+| Models with no `cost` object → unpriced, `MissingRate` | 420 | 6.7% of 6,253 |
+| Priced models missing a `cache_read` rate | 2,208 | 37.9% of 5,833 |
+| Priced models missing a `cache_write` rate | 4,637 | 79.5% |
+| Priced models missing a `reasoning` rate | 5,726 | 98.2% |
+| Models with audio rates → `UnknownChargeBasis` absent a unit policy | 81 | — |
+| Models with `experimental` modes **and** a base rate → base rate only, up to 6.67x low if used in a mode | 33 of 38 | — |
+
+`input` and `output` are present on 100% of priced models; every other class
+is sparse. So a consumer metering cache-read traffic will find fusiform
+returning `Unpriced(MissingRate)` for 37.9% of priced models — not because
+fusiform is incomplete, but because the upstream did not publish a rate and
+the alternative is inventing one.
+
+Those are shares of the **catalog**. What they cost a consumer depends on that
+consumer's traffic, which fusiform does not measure. One data point, supplied
+by the metering module as a measurement over its own 16,407 spend facts as of
+2026-08-11 — token volume by class:
+
+| Class | Tokens | Share |
+| --- | --- | --- |
+| `cache_read` | 462,475,858 | 45.64% |
+| `input` | 428,801,363 | 42.32% |
+| `output` | 56,600,353 | 5.59% |
+| `cache_write` | 33,523,908 | 3.31% |
+| `reasoning` | 31,855,428 | 3.14% |
+
+Caveats travel with it: this is one fleet's traffic (long-running agent
+sessions against a small model set, so heavily cached), and it is **volume,
+not cost** — given that cache-read is typically an order of magnitude cheaper
+per token than input, the dollar distribution will look nothing like this.
+
+What that combination implies is more useful than either number alone.
+Cache-read is simultaneously the class most likely to be missing a rate and
+the one where a missing rate touches the most tokens while distorting cost
+least. The 37.9% catalog gap therefore lands on ~46% of that consumer's token
+volume and a much smaller share of its dollars: a real gap, and not the
+catastrophe the raw percentage suggests.
+
+This is the intended behavior and it is worth stating as a number rather than
+a principle, because "absent is not zero" sounds free until you see that it
+means refusing to price four in five models' cache writes. The cost of the
+rule is real; the cost of the alternative is silently wrong money.
+
+The operator surface reports these counts on every ingest, so an unpriced
+population that *grows* is visible as a change rather than as a steady state
+nobody looks at. They stay operator-only and never ride a consumer
+notification: change identity is a fact about models, a count is a fact about
+fusiform's ingest, and putting both on one wire forces a consumer's handler to
+branch on which kind of message arrived.
+
+### The fourth state: retired
+
+The three states above are all statements about a model the upstream **still
 describes**. A model the upstream *stopped* describing is a fourth fact on a
 different axis, and it must never be inferred from a gap.
 
 Measured: BROCA's vendored snapshot (2026-07-24) held 5,823 models; today's
 live payload holds 6,253. **+821 added, −391 removed** — including
 `anthropic/claude-opus-4-1`, `azure/gpt-4`, `azure/deepseek-v3.1`. That is the
-319-retired-models event again, larger, sitting in the upstream now.
+same class of event as the 319 silent removals recorded in `docs/charter.md`,
+larger, sitting in the upstream now.
 
 The two consumers lose different things to a retirement. BROCA's loss is loud:
 a vanished model breaks a live run, which is what their swap guard exists to
@@ -417,30 +740,110 @@ Hence Invariant T (§2): absence is written down with a reason and a boundary,
 never left as silence. A point-in-time query before the tombstone returns the
 live value; after it, a stated absence. Neither is inferred.
 
-### Absent, zero, and unknown are three states
+### Rate absence and coverage absence are different facts
 
-```rust
-pub enum RateValue {
-    Priced(Amount),
-    /// The source stated exactly zero. Not "free" — a stated zero. Whether
-    /// a zero is a real price is the consumer's policy, not ours.
-    StatedZero,
-    Unpriced(UnpricedReason),
-}
+Only 107 of 5,833 priced models publish a separate `reasoning` rate. A
+metering consumer needs to know whether reasoning tokens are billed inside
+output or not billed at all — and **an absent rate is consistent with both.**
 
-/// ASTRO's enum, adopted rather than paralleled. Their producer-side-
-/// irrelevant variants (degraded pricing time, arithmetic out of range)
-/// are structurally not ours: a producer has no pricing instant and no
-/// ledger arithmetic.
-pub enum UnpricedReason { MissingRate, NoCatalogCoverage, UnknownChargeBasis }
-```
+It would be easy to derive an answer: `capabilities.reasoning == true` plus no
+reasoning rate looks like "included in output." Fusiform will not do that. It
+would manufacture a billing-relevant claim by combining two unrelated fields,
+which is producer authority applied to something the upstream never said.
 
-Measured: 420 models carry no `cost` object at all, and 1,423 cost entries are
-exactly `0` (including whole provider families). Some zeros are genuinely
-free; some are certainly "not published". The upstream cannot distinguish them
-and neither can fusiform from the payload, so fusiform reports what was said
-and surfaces the counts loudly on the operator surface rather than resolving
-them.
+**This is not a hypothetical temptation.** The metering module reads its own
+ingest path and derives an accounting classification from
+`capabilities.reasoning` plus an absent rate. Their position is that the ban
+is on inferring a *rate*, not on classifying the accounting — a narrower line
+than fusiform draws, deliberately drawn, and defensible on its own terms.
+
+What makes it worth recording here is not a rule violation. It is that the
+same boundary was drawn in two places and the two disagreed without anyone
+noticing: the rule as stated across the seam was broader than the rule
+implemented in code. **A contradiction between a rule and its implementation
+is findable by reading. A rule that exists in two versions, each internally
+consistent, is not** — there is nothing to catch, because neither location is
+wrong on its own.
+
+The inference is cheap, plausible, and available to anyone holding both
+fields. Refusing it on the producer side does not remove it from the world; it
+relocates it to a consumer with the same two fields and less context about why
+the correlation is unreliable. That is the argument for the served contract
+carrying the cost-object completeness profile (below): **restraint alone
+achieves nothing — the useful act is supplying evidence that makes the
+inference unnecessary.**
+
+And the downstream shape matters more than the classification. In that module
+the derived state is not a label: it decides whether reasoning tokens are
+charged, skipped as already-counted, or treated as a contract violation — and
+their "no separate rate" state is overloaded, carrying both *this model has no
+reasoning* and *I have no information*, which need opposite behavior when
+reasoning tokens actually arrive.
+
+Be precise about what that costs a producer, because the loose version argues
+for the wrong thing. Fusiform's restraint did **not** create that overload —
+it predates fusiform entirely. What the restraint did was make it visible, by
+forcing the question of what a consumer does when nobody hands it a judgment.
+
+"Restraint exported a cost" would argue, weakly, for less restraint. The
+accurate version argues for the same restraint plus one obligation:
+
+> **When you decline a judgment, know what decision the consumer makes without
+> it.** That is an argument for asking, never for deciding on their behalf.
+> Had fusiform supplied the inference, the overloaded state would still be
+> overloaded and nobody would have looked.
+
+But "presence or absence and nothing more" is too thin, and the reason is a
+distinction only the producer can make:
+
+- A provider publishing input, output and cache-read but **no** reasoning line
+  is describing a model and declining to price reasoning.
+- A provider publishing **no cost object at all** is not describing the model.
+
+Both yield a missing reasoning rate. They are not the same evidence, and a
+consumer resolves them differently — the first says something about how that
+provider bills, the second says only that nothing is known.
+
+So the served contract carries the rate's presence **and the completeness of
+the cost object it sits in**. That is still not an inference; it is a fact
+about what fusiform received.
+
+Measured, the shape is real rather than theoretical. 14 distinct cost-object
+key sets exist:
+
+| Cost object | Count |
+| --- | --- |
+| `input`, `output`, `cache_read` | 2,377 |
+| `input`, `output` | 2,128 |
+| `input`, `output`, `cache_read`, `cache_write` | 1,115 |
+| no cost object | 420 |
+| … 10 more shapes | 213 |
+
+And among reasoning-capable models with no reasoning rate: **1,009 sit in a
+rich cost object carrying both cache rates**, while **2,893 sit in one already
+missing a cache rate.** Those two populations are different evidence about the
+same absence, and collapsing them would throw away the only signal available.
+
+What accounting state any of it implies stays the consumer's decision, and the
+profile does not resolve it. A rich object omitting reasoning is *evidence* of
+a deliberate omission, not a statement of one — the provider might bill
+reasoning inside output, or not bill it, or simply never have documented it in
+a feed not designed to answer the question. The metering consumer's rule
+stands: absence means not-reported unless something outside the catalog says
+otherwise. The profile lets them distinguish a not-reported that sits on a
+deliberate omission from one that sits on an incomplete description — a
+defensible unpriced state versus an unknown one.
+
+If a provider ever documents its accounting, that becomes a **named policy**
+on fusiform's side (like the USD assumption in §4), auditable and versioned —
+never an inference.
+
+> **The rate at which a consumer can act on a signal is not the rate at which
+> it should be preserved.** Both sides of this seam nearly failed that rule in
+> opposite directions: the producer withholding a fact it held because it had
+> just caught itself inferring, the consumer collapsing a distinction because
+> it could not act on it yet. Both are the same error — treating "I cannot use
+> this yet" as "this should not exist."
 
 ## 5. Modality is carried from day one
 
@@ -452,35 +855,100 @@ Measured vocabulary — and note these are not hypothetical:
 - input: `text` 6,223, `image` 3,350, `pdf` 1,320, `video` 797, `audio` 468
 - output: `text` 6,067, `image` 164, `audio` 75, `video` 64, `pdf` 2
 
-303 models in this LLM-shaped upstream already emit non-text, and their
-pricing cannot express what they bill. `stabilityai/stablediffusionxl` carries
-`"limit": {"context": 200, "output": 0}` — a token limit of zero on a model
-that does not emit tokens. That is the charter's domain argument as a measured
-fact: a second source is required for real non-LLM coverage, and the schema
-must carry charge basis explicitly before it arrives.
+299 models in this LLM-shaped upstream already emit something other than text.
+164 of them carry a `cost` object, and every rate in it is token-shaped —
+there is no field that can express per-image, per-second, or per-minute
+billing.
 
-Unknown modality values from a future upstream are preserved and served as
-`Other(String)`, never dropped and never coerced into a known variant.
+The schema visibly breaks on those rows: **186 models declare
+`limit.output == 0`** (70 image, 55 video, 17 audio) and **124 declare
+`limit.context == 0`**. `poe/google/veo-3` carries `{"context": 480,
+"output": 0}`. A token limit of zero on a model that does not emit tokens is
+not a measurement — it is the schema representing a field that does not apply,
+and a consumer reading it as a limit concludes the model can produce no
+output.
 
-## 5.1 The byte-affecting three
+Fusiform normalizes a zero in any limit field to **absent**, recording the raw
+value in provenance — unconditionally, because a zero token limit is never a
+meaningful limit on any model. §5.1 gives the measurement that rules out the
+modality-conditional version of this rule, and explains why the mapping
+matters more for `limit.output`, which no consumer reads today, than for a
+field under active use.
 
-BROCA's consumed field set, read from their source rather than described.
-Three fields shape request bytes:
+The design conclusion fusiform draws — that real non-LLM coverage needs a
+second source, and the schema must carry charge basis explicitly before one
+arrives — is an inference from this evidence, not something the payload
+states. It is the argument `docs/charter.md` was chartered on, now with a
+measurement under it.
+
+```rust
+pub enum Modality {
+    Text, Image, Audio, Video, Pdf,
+    /// A value this version of fusiform does not recognize, preserved
+    /// verbatim. An unknown modality is a fact about the upstream, not a
+    /// parse failure, and coercing it into a known variant would invent
+    /// a capability claim.
+    Other(String),
+}
+```
+
+Unknown modality values from a future upstream are preserved as `Other`, never
+dropped and never coerced.
+
+## 5.1 The byte-affecting fields
+
+BROCA's consumed field set, traced at their source rather than described.
+**Two** fields shape request bytes:
 
 | Field | Consequence in BROCA |
 | --- | --- |
 | `limits.context` | the transform's pressure signal |
-| `limits.output` | rendered into the request body as `max_output_tokens` |
-| `capabilities.reasoning` | gates `ReasoningPolicy` (`families/mod.rs:227`) |
+| `capabilities.reasoning` | gates `ReasoningPolicy` (`broca-provider/src/families/mod.rs:227`) — when false, forces `ReasoningPolicy::None` regardless of the provider's quirks, so no thinking block is rendered |
 
 Everything else BROCA reads is **advisory**: `id`, `display_name`, `family`,
 `release_date`, `status`. Their `raw` passthrough is ingestion-only and never
 touched on the render path.
 
-The three get a different class of treatment, because their failure modes are
+The two get a different class of treatment, because their failure modes are
 silent rather than loud. `reasoning: false` on a reasoning model strips
-thinking from every request. A `context` limit that is too large lets the
-transform overfill. Neither errors; both quietly produce worse output.
+thinking from every request. A `context` limit that is wrong distorts the
+transform's pressure signal. Neither errors; both quietly produce worse
+output.
+
+**`limits.context` is where the absent/zero distinction is already being lost
+downstream**, independent of anything fusiform serves. BROCA's
+`broca-core/src/run.rs:2569` reads:
+
+```rust
+TransformUsage::new(fill, control.transform_context_limit.unwrap_or(0))
+```
+
+Meanwhile their catalog layer deliberately declines to guess: a tier-aliased
+id the catalog does not list keeps `None`, because *"resolving it to the base
+model's window would be a guess about whether the tier shares that window, and
+an absent limit is the honest answer where a wrong one is unrecoverable"*
+(`broca-catalog/src/live.rs:481-486`). Three in-use pairs resolve with no
+context limit today, carrying 389 spend facts between them.
+
+What is established: **absent and zero are indistinguishable once they cross
+that boundary.** One bit of information — *was a limit published at all* — is
+destroyed before the value leaves the process. What a downstream consumer then
+does with a zero is not established: `context_limit_tokens` is serialized over
+subc to another module, and that module's handling has not been read. It might
+treat zero as saturation, as unknown, or divide by it. **That question has an
+owner and should be asked rather than assumed.**
+
+The defect stands without the answer, because destroying the distinction is
+the defect. Two correct local decisions compose into a wrong global one: the
+catalog layer's honest `None` becomes a confident `0` one layer down. Each
+half reads fine in isolation.
+
+> **Nobody reviews a composition, because a composition is not a place.**
+
+The consequence for fusiform is not that the downstream collapse is fusiform's
+to fix — it is that **emitting a meaningless zero would join a collapse that
+already exists rather than introduce one.** Absent must stay absent all the way
+out.
 
 1. **Provenance per field, not per row.** Each carries whether its value came
    from the upstream, from a human override, or is absent — and absent stays
@@ -488,10 +956,124 @@ transform overfill. Neither errors; both quietly produce worse output.
    where it came from.
 2. **A change to one is a distinct event in the diff**, surfaced more loudly
    than a display-name edit. A consumer's guard should not have to grep a flat
-   change list to find the three that matter.
+   change list to find the ones that matter.
 3. **No defaults, ever.** Absent is representable and the type forces the
    caller to handle it. The commons defect is what `unwrap_or(0)` does to a
    pricing field; a context limit deserves the same refusal.
+
+### `limits.output`: parsed by everyone, read by no one
+
+An earlier draft listed `limits.output` as a third byte-affecting field. It is
+not, and the correction is worth keeping because the true state is more
+dangerous than the wrong one.
+
+BROCA's `resolve_frozen` takes `max_output_tokens` as a **caller argument**;
+the catalog's `limits.output` parses into their `Limits.max_output` and is
+read by nothing outside three test assertions. No clamp, no default, no
+fallback. So a zero from the upstream cannot reach a request body today.
+
+That makes it a **parsed-but-unread field, which is exactly where a
+plausible-looking zero waits.** The day someone adds a reasonable-looking
+clamp — cap the caller's request at the model's declared maximum — a zero
+limit becomes `max_output_tokens: 0` on the wire, and the reviewer has no
+reason to suspect the value.
+
+Measured: **186 models declare `limit.output == 0`**, **124 declare
+`limit.context == 0`**, and **5 declare `limit.input == 0`**. A zero token
+limit is never a real limit — a model accepting zero context or emitting zero
+output cannot be called — so every one of these means "not applicable" or "not
+published", never "zero tokens".
+
+```
+openai/gpt-image-1          {"context": 0, "input": 0, "output": 0}
+poe/cerebras/qwen3-32b-cs   {"context": 0, "output": 0}       (text output)
+greenpt/green-s             {"context": 0, "output": 8192}    (text output)
+```
+
+### The predicate, corrected by measurement
+
+An earlier draft normalized a zero limit **on a non-text-output model** to
+absent. That predicate is wrong, and the measurement that killed it is worth
+keeping because it shows the rule was over-fitted to the examples that
+suggested it.
+
+Of the models declaring at least one zero limit field:
+
+| Output modality | Count |
+| --- | --- |
+| non-text only (image / video / audio) | 148 |
+| mixed (text **and** non-text) | 13 |
+| **text only** | **39** |
+
+`poe/cerebras/qwen3-32b-cs` declares `{"context": 0, "output": 0}` and emits
+text. `greenpt/green-s` declares `{"context": 0, "output": 8192}` — zero on one
+field, a real value on another, on a text model. And the mixed set is
+genuinely mixed: `poe/google/nano-banana` has a real 65,536 context with a
+zero output, while `azure/gpt-image-1.5` zeroes both.
+
+So modality does not predict the zero, and a per-model judgement cannot be
+made correctly — 39 text-only models would be excluded by the predicate while
+carrying exactly the same meaningless zero.
+
+**The correct rule is simpler and needs no predicate at all:**
+
+> A token limit of zero is never a meaningful limit. A model that accepts zero
+> context tokens or emits zero output tokens cannot be called. So a zero in
+> any limit field normalizes to **absent**, unconditionally, with the raw
+> value kept in provenance.
+
+This is stronger than the modality version and immune to the failure that
+version had: it does not depend on classifying the model, so it cannot be
+right for 148 rows and wrong for 39.
+
+**And it must be per-field, never per-row.** Of the 200 models declaring at
+least one zero limit field, only 110 declare *every* field zero — **90 mix
+real values with zeros**:
+
+```
+alibaba-token-plan/qwen-image-2.0   {"context": 8192, "output": 0}
+xai/grok-imagine-image              {"context": 8000, "output": 0}
+greenpt/green-s                     {"context": 0,    "output": 8192}
+```
+
+A row-level rule discards a real 8,192-token context window along with an
+inapplicable output cap. Eight of those 90 sit under providers a consumer
+serves today.
+
+Absent stops a future clamp cold; zero sails through it. The mapping matters
+*more* because nothing reads two of these fields yet, not less — an unread
+field has no guard around it and no reader who would notice.
+
+### How the wrong rule got there
+
+Worth recording, because the mechanism is more reusable than the rule.
+
+The row-level version came from five OpenAI image models that all zeroed every
+field. But that set was not a sample of zero-limit models — it was the
+`limit.input == 0` set, selected to answer a different question (whether
+`max_input` shared the `max_output` hazard). It was internally consistent
+because image models are, and a property of the *selection* was read as a
+property of the upstream.
+
+> **A rule inferred from a self-consistent example set will be self-consistent
+> and wrong.** The check is not "is this rule true" — that invites
+> re-reasoning from the same sample — but "what population produced these
+> examples, and was it selected for something else?"
+
+Two seats agreed on the row-level pattern before anyone counted. That felt
+like independent confirmation and was not: **two parties agreeing on a pattern
+drawn from one sample is one observation wearing two names.** The agreement is
+what suppressed the check.
+
+The cheap defence, which neither party ran: before agreeing, ask **"what did
+you count?"** rather than "is that right?". The first is answerable and
+exposes a selected sample immediately; the second invites re-derivation from
+the same data.
+
+And on how the modality predicate was caught: it was flagged as *imprecise*,
+and the response was to measure the edge rather than reword the sentence.
+**Rewording is what you do when you believe the rule and doubt the sentence;
+measuring is what you do when you are willing for the rule to be wrong.**
 
 ### What fusiform must never claim
 
@@ -500,10 +1082,13 @@ Whether a model *serves* is not a catalog fact. BROCA's
 suffix-stripping and the overlay's `remove` verb, the auth method, and
 `family_override` derived from it — and a raw presence check is not a
 resolution verdict. Reproduced: screening BROCA's 39 in-use pairs by presence
-reports six false positives (`openai/gpt-5.6-luna-fast`,
-`google/antigravity-gemini-3.5-flash`, and four more), the same six their doc
-comment records, because those ids resolve through suffix-stripping and family
-override rather than catalog presence.
+reports six false positives — `openai/gpt-5.6-luna-fast`,
+`openai/gpt-5.6-sol-fast`, `openai/gpt-5.6-terra-fast`,
+`google/antigravity-gemini-3.5-flash`, `google/antigravity-gemini-3.6-flash`,
+`xai/grok-composer-2.5-fast` — the same six the test's doc comment records,
+because those ids resolve through suffix-stripping and family override rather
+than catalog presence. All six are absent from both the vendored and the live
+snapshot while carrying real production traffic.
 
 > Fusiform's diff may say **"this pair left the upstream."** It may never say
 > "this model is served" or "this model was un-served." That is a serve-layer
@@ -530,14 +1115,85 @@ land verbatim in an outbound provider request.
 > serves them as catalog facts. They are evidence about the upstream, not
 > instructions to a consumer.
 
+### This is not a hypothetical risk
+
+Measured during the first hour of watching the feed. Two fetches 36 minutes
+apart, 6,253 models both times, zero added, zero removed — and exactly one
+field changed in the entire 3.6 MB document:
+
+```
+model  opencode-go/deepseek-v4-flash
+field  provider
+09:58  {"npm": "@ai-sdk/anthropic"}
+10:34  null
+```
+
+Deleting that override drops the model to its provider-level default of
+`@ai-sdk/openai-compatible`. A model's renderer moved from the Anthropic wire
+family to the OpenAI-compatible one, mid-morning, with nothing else in the
+document touched and **`last_updated` still reading `2026-07-31`**.
+
+A consumer sourcing wire-family selection from upstream data would have
+changed its outbound request bytes for that model, silently, within a
+half-hour window. That is the entire argument for Rule Q, and it took 36
+minutes of observation to produce a live specimen.
+
+It also demonstrates the two-hash split (§8) on real data: `raw_hash` moves
+for this fetch, `normalized_hash` does not, and no consumer is notified —
+which is correct, because nothing a consumer may act on has changed. The
+operator surface still learns the upstream moved.
+
 Enforced by a **negative** test over the real payload: the served type
 contains no key from the quarantine set, and the test fails if a future field
 is added to the served shape without classification. A test that only checks
 the fields we do serve cannot see this.
 
-`experimental.modes.*.cost` embeds a second pricing plane inside a
-wire-affecting field. v1 serves a model at its base rate and records modes in
-raw provenance only.
+### `experimental` is two planes fused into one field
+
+Measured on the 10:34 payload: 38 models carry `experimental`, holding 42 mode
+variants. Every mode carries a `provider` block (42 with `body`, 16 with
+`headers`) and 38 carry a `cost` block. So one field contains both literal
+request bytes and a second pricing plane:
+
+```json
+"fast": {
+  "cost": { "input": 30, "output": 150, "cache_read": 3, "cache_write": 37.5 },
+  "provider": { "body": { "speed": "fast" },
+                "headers": { "anthropic-beta": "fast-mode-2026-02-01" } }
+}
+```
+
+The pricing half is not a rounding difference. Of 42 modes, **32 carry an
+input rate that differs from the model's base rate**, at multipliers of 2.0,
+2.5, 6.0 and 6.67 — `gmicloud/anthropic/claude-opus-4.7` bills $4.50/Mtok base
+and $30/Mtok in `fast` mode.
+
+Counts to keep straight: 38 models carry `experimental`, all 38 have modes
+carrying a `cost` block, and **33 of them also carry a base `cost` object.**
+The 33 are where a base rate exists to be wrong; the other 5 have no base rate
+at all, so they are already `Unpriced(MissingRate)` and no silent under-charge
+is possible.
+
+This is the charge-basis argument in its sharpest form: a mode is a rate
+discriminator that lives inside a renderer-selection field. Fusiform cannot
+serve the mode's rate without serving the mode, and serving the mode means
+serving request bytes.
+
+v1 therefore serves a model at its **base rate only** and records modes in raw
+provenance. A consumer metering a request made in a non-base mode would price
+it up to 6.67x low — a *stated coverage limit*, not an oversight.
+
+The eventual fix keeps the quarantine intact: a mode becomes a `RateCondition`
+(§4) carrying only its discriminating identity, never its `provider` block.
+But that fix has a **prerequisite outside fusiform**, and building it earlier
+would ship a selector nobody can use: the metering consumer prices from the
+billing model identity stamped on a spend segment, and nothing on that fact
+distinguishes which mode a run used. The discriminator is lost before pricing
+happens, so the run engine must carry the mode onto the fact before a
+`RateCondition` for modes is worth serving.
+
+Full record, including the fleet's measured exposure and the condition that
+arms it: `docs/findings/2026-08-11-experimental-mode-rates.md`.
 
 If BROCA ever wants to reconcile their hand-tabled `family.rs` against the
 upstream's claim, that is a **report for a human**, never an input to a swap.
@@ -572,7 +1228,8 @@ that has not moved since.
 
 ```
 normalized_hash  — over the normalized, integer-valued document.
-                   Drives diffs, eras, and every consumer notification.
+                   Drives diffs, upstream-derived eras, and every
+                   UPSTREAM-CHANGE notification.
 raw_hash         — over the fetched bytes. Provenance and drift only.
                    Never reaches a consumer.
 ```
@@ -581,45 +1238,74 @@ Split by **audience**, not by mechanism. A convention about which field to use
 erodes; two fields with different destinations cannot be accidentally wired
 together.
 
+Note the qualifier, because the unqualified version conflicts with §3.1: a
+`Corrected` era is written **without** `normalized_hash` moving, since nothing
+upstream changed — fusiform's reading of an unchanged payload did. Corrections
+therefore ring no doorbell and appear in no change notification, and this hash
+is not the mechanism that surfaces them. That is not an exception bolted on;
+it follows from what the hash measures. **A hash over the upstream's content
+cannot detect a defect in the reader**, which is exactly why a correction
+needs its own mechanism rather than riding the change path.
+
 `raw_hash` moving while `normalized_hash` holds means the upstream changed
 something fusiform does not model — genuinely valuable, since that is how
 fusiform learns a field was added *before* a consumer needs it. It goes to the
 operator CLI and nowhere else.
 
-Measured support: two fetches 21 seconds apart were byte-identical
-(`sha256 4fb6410c…`), the ETag matched across both, and a conditional GET
-returned **304 with zero bytes**. So polling is nearly free: an unchanged poll
-costs one round trip and no body, and a changed one costs ~355 KB gzipped.
-That matters because poll interval *is* the width of every observation window
-fusiform records — cadence is not a performance knob here, it is the precision
-of the history.
+`raw_hash` earned its place the same day it was designed. Two fetches 36
+minutes apart differed in exactly one field across 6,253 models, and that
+field was a quarantined one (§6). `normalized_hash` correctly held, no
+consumer was notified, and only `raw_hash` recorded that the upstream had
+moved at all.
+
+A conditional GET returns 304 with zero body bytes
+(`docs/upstream-models-dev-measured.md`), so an unchanged poll is one round
+trip and a changed one is ~355 KB gzipped. Bandwidth is therefore not what
+bounds cadence. What matters is that the poll interval **is** the width of
+every observation window fusiform records: cadence is the precision of the
+history, not a performance knob. The remaining constraint on it is the
+upstream's tolerance for polling, which is a courtesy question rather than a
+measured one.
 
 ## 9. Store
 
 Managed SQLite via `cortexkit-store`, opened **after** daemon connection from
-the HELLO_ACK descriptor (never self-keyed — astrocyte's live store is at
+the storage descriptor the daemon returns in its connection handshake
+(`HELLO_ACK`), which names the path, the single-writer lease, and the mode.
+Opening the store *before* connecting means guessing that path — "self-keyed"
+— and a wrong guess is silent (never self-keyed: astrocyte's live store is at
 `astrocyte/cortexkit/astrocyte/store.db` because it self-keyed early, and the
 path at `astrocyte/store.db` is a 0-byte decoy that misleads every audit,
 including mine an hour ago).
 
 Tables: `observation`, `snapshot`, `provider_era`, `model_era`, `rate_era`,
-`raw_document`. Snapshot history as rows, not content-addressed blobs.
+`raw_document`.
+
+Snapshot history lives as **rows, not content-addressed blob files**. At this
+scale a snapshot is single-digit megabytes and eras only grow on change, so a
+blob store buys nothing on size while costing a second durability surface: the
+backup module captures the database, and files beside it would need their own
+consistency story between the two. One store, one capture, one restore.
 
 Sizing: 3.6 MB per fetch uncompressed, but eras only grow on change, so steady
 state is one raw document per changed fetch plus a few thousand era rows.
 
 ### Ingest is one transaction
 
-From astrocyte's gated background-loop spec: facts, cursor, and outbound work
+Adopted from astrocyte's background-loop design (their repository,
+`.cortexkit/alfonso/drafts/2026-08-08-r3-revision-9-close-astrocyte-background-loop-gaps.md`,
+merged at `05306a0`; a specification under adversarial review, not shipped
+code): facts, cursor, and outbound work
 commit **together**. If ingestion commits facts and advances its cursor before
 recording what it owes downstream, a crash in between leaves a hole no later
 poll can find, because the next poll starts after the committed range. That
-defect started their whole campaign; inheriting the fix is free.
+defect is what prompted that design effort; inheriting the conclusion costs
+nothing.
 
 ### Backup posture is load-bearing for audit, not for operation
 
-Settled with ASTRO: losing fusiform's history must cost them *verifiability*,
-never *explainability*. Their ledger records the rate it charged and enough
+The requirement, set by astrocyte as the consuming ledger: losing fusiform's
+history must cost them *verifiability*, never *explainability*. Their ledger records the rate it charged and enough
 provenance to name the era it came from, so it stands alone.
 
 The specific failure that would be invisible: **a restore that silently
@@ -633,8 +1319,10 @@ assert (a) the boundary survived with its `boundary_kind` and
 returns the earlier value. A collapsed restore passes "the current rate
 matches" and fails this.
 
-Engram: whole-db capture, `restore-with-monotonic-fence` declared for the
-observation sequence so a stale restore cannot rewind it.
+Backup enrollment with `engram` (the fleet's backup module): whole-db capture,
+with `restore-with-monotonic-fence` declared for the observation sequence so a
+restore of an older capture cannot rewind the counter and reissue sequence
+numbers that were already used.
 
 ## 10. Serve and push
 
@@ -660,7 +1348,8 @@ pusher bug**, which is the class of thing guards exist to survive.
 
 ### Pricing is a separate surface, settled from both ends
 
-BROCA reads `cost` into a `CostSchedule` and nothing on their render or
+BROCA parses the upstream's `cost` object into their own cost type, and
+nothing on their render or
 admission path consumes it; their billing lane exports raw token counts with a
 charge-basis label and deliberately ships zero pricing. Capability data
 changes when a provider ships a model; pricing changes on a different clock
@@ -668,7 +1357,14 @@ and carries effective-dated eras capability data does not have. Coupling them
 would make BROCA a consumer of pricing churn they have no use for — and every
 push they receive is a swap they must validate.
 
-ASTRO reached the same split from the pricing side. Settled from both ends.
+Astrocyte did not argue for the split. They stated a requirement —
+effective-dated rate eras with point-in-time lookup — and the split falls out
+of it: a plane carrying eras and a plane carrying current facts have different
+change semantics, not merely different clocks.
+
+Worth stating precisely rather than as "two independent derivations," which
+would be the stronger and less accurate claim. One derivation, plus one
+requirement that implies it.
 
 ASTRO's push carries which models changed, the catalog version, and a hash —
 **nothing they parse into their ledger**. A value-carrying push would create a
@@ -688,28 +1384,252 @@ refused.** Their control surface has no dedup, so duplicates are assumed — the
 version check makes a duplicate delivery structurally a no-op rather than
 defended by luck.
 
-### Payload boundary: shared representation, fusiform-owned envelope
+#### The restore case, where a correct refusal produces a wrong outcome
 
-Settled with BROCA: `cortexkit-model-catalog` owns the **representation**,
-fusiform owns the **envelope**. Extending the shared crate for modality and
-provenance would couple fusiform's schema evolution to every consumer's
-release cycle — a field added for one consumer would move every other
-consumer's crate.
+The version's durability lives in **fusiform's** store, and that store is
+backup-class (§9). A restore from backup rewinds the version counter. Every
+consumer then correctly refuses every push until fusiform re-crosses the old
+high-water — which presents as a total, silent push outage after a recovery,
+with every component behaving exactly as designed.
+
+This is the one path where the ordering rule's correctness is the problem, so
+the rule is not complete without it. Two closures, both taken:
+
+1. **`restore-with-monotonic-fence` declared in the engram enrollment**, so a
+   stale restore cannot rewind the counter in the first place. The fleet rule
+   exists for exactly this shape.
+2. **High-water re-sync on first push after boot.** Fusiform asks each
+   consumer for its last-seen version and refuses to serve below it. This also
+   covers the case the fence cannot: a *consumer* restoring from backup, where
+   fusiform's counter is intact and the consumer's high-water moved backwards.
+
+   **Measured, and it holds — with one ordering requirement.** A consumer
+   restore rewinds its ingest cursor too, so it reports a last-seen version
+   lower than what it actually consumed, and fusiform re-serves eras it
+   already holds. The metering module read its own ingest path against this:
+   it compares each model's rates against the latest stored row and skips on
+   equality, so a re-serve appends nothing. A genuine no-op, not a probable
+   one.
+
+   But the comparison is **latest-row-only**, which makes the guarantee
+   conditional: *re-served eras must arrive in observation order.* An older
+   era arriving after a newer one compares against the newer row, differs, and
+   is appended below the top — leaving a history row out of sequence. Current
+   pricing survives (selection is by pricing instant), but a point-in-time
+   query then returns a value that was never in force at that instant.
+
+   So fusiform's re-serve must be ordered by observation, not merely complete.
+   Their ingest gaining its own ordering guard is their fix; emitting in order
+   is fusiform's obligation, and "the consumer will cope" is not one this
+   design gets to assume.
+
+   Note the shape: the re-sync is correct for fusiform and its consequence
+   lands entirely on the other side of the wire, where fusiform cannot see it.
+   A fix whose cost is paid by the party that did not choose it is one to name
+   out loud rather than ship quietly.
+
+   This is a standing hazard of being a producer, not a one-off: **every
+   consumer-side consequence of a fusiform decision is invisible to fusiform
+   by construction.** A terminal consumer — one that serves only humans — has
+   the opposite property and pays for its own seam mistakes, which means it
+   never has to develop the habit. Fusiform serves modules, so it does.
+
+Belt and braces, because the two failures are on different sides of the wire
+and neither mechanism sees the other's.
+
+**A refusal that a consumer reports as success is the worse cousin of this,
+and it is worth stating even though fusiform does not have it.** The metering
+module raised the possibility in its own delivery path on hearing about this
+one: its receiver treats a too-low version as an idempotent no-op returning
+the installed watermark, and its sender counts any well-formed response as
+progress — so the identical restore would produce a *silent false success*
+there rather than a silent total outage here.
+
+Subsequently measured by its owner and confirmed: their allocator takes
+`MAX(version)` over five tables that all live in one SQLite file, so a restore
+rewinds every source atomically and the allocator has no way to know a higher
+version was ever issued. Combined with the two ends already read from source,
+a restored store reissues versions the consumer has already seen, the consumer
+correctly no-ops them, and the sender retires outbox rows nobody applied.
+
+Two details from that measurement generalize past their module:
+
+**A partial solution to a general problem is more dangerous than none**,
+because it reads as if the hazard was considered. Their schema already carries
+a per-cap `highest_version` specifically so versions are not reused after rows
+are deleted — a deliberate high-water mechanism, solving the reuse hazard for
+the *deletion* path while leaving it open for the whole-file-rewind path.
+
+**Guards reveal their author's assumption.** The same code checks `checked_add`
+and rejects negative versions: it defends against the arithmetic going wrong,
+not against the input being stale. Every guard there assumes the maximum is
+authoritative, which is exactly the assumption a restore breaks.
+
+Applied independently to the receiver at the other end of the same chain, the
+technique found the same gap immediately: every guard in that function
+concerns *the request being wrong* — empty bucket, inactive cap, mismatched
+identity, non-contiguous range — and **not one concerns the request being
+stale-but-well-formed.** Two modules, one blind spot, recovered the same way.
+
+> This is a better audit technique than reading for correctness, because
+> reading for correctness re-derives the author's model and then checks the
+> code against it. Reading the guards recovers the model and then asks what it
+> **omitted** — which is the question the author could not have asked.
+
+Fusiform's push must not acquire this shape. Note also which fix is which: an
+echoed-watermark comparison catches the false success *after* the collision; a
+durable floor prevents the collision. They are not substitutes — the floor
+cannot cover a consumer-side rewind, and the comparison cannot prevent the
+reissue.
+
+The receiver half of that chain was subsequently read at source by its owner,
+and it is not a sender bug in isolation: **two distinct no-op arms both return
+`Applied(current_watermark)`** — one for a stale version, one for an
+already-consumed range — and both roll their transaction back. The reply is
+not merely shaped like a success; it is a legitimate value, the true current
+position. A sender has nothing to distinguish an apply from a
+refusal-dressed-as-acknowledgement except comparing the echoed watermark
+against what it sent, which requires already suspecting the case.
+
+**And the reason it is built that way is correct for the case it was built
+for.** Both arms are idempotency, and idempotency wants exactly this: a
+duplicate delivery should be a harmless no-op returning true state. That is
+right for *retry*. It is wrong for *restore*, where the resent version is not
+a duplicate but a **reissued** one — a different payload wearing a version
+number already retired. Idempotency cannot tell them apart, because from the
+receiver's side they are byte-identical.
+
+> **A guard built for retry, meeting restore.** The distinction a receiver
+> cannot make is not a flaw in the receiver; it is a fact about what the
+> protocol says. If "same version" can mean two different things, the wire
+> must carry which.
+
+So the rule for fusiform's own push is stronger than "compare the watermark":
+**the acknowledgement must be discriminated at the protocol level** — applied
+versus no-op-with-reason — so a sender distinguishes progress from
+acknowledgement without inferring it. A watermark comparison is a sender-side
+workaround for a receiver-side ambiguity, and it only fires for a sender that
+already knows to look.
+
+#### The shape already exists in the fleet; do not invent a third
+
+`broca-protocol/src/approval.rs` ships a discriminated acknowledgement today:
+
+```rust
+#[serde(tag = "decision", rename_all = "snake_case")]
+pub enum ApprovalResponse {
+    Allow         { tool_call_id },
+    AllowNarrowed { tool_call_id, input },   // partial apply, named
+    Deny          { tool_call_id, reason },  // refusal carries its reason
+}
+```
+
+Outcome in the tag, reason on the refusing arm, and — the arm worth stealing —
+**the partial-apply case gets its own name instead of hiding inside success.**
+That is exactly the failure being avoided: an absent or partial apply
+indistinguishable from a completed one. Fusiform's push acknowledgement starts
+from this shape rather than a new one.
+
+The refusal *vocabulary* has a second precedent with a guard attached
+(`broca/docs/error-class-contract.md`): a pinned closed string set, producer
+detail in a sibling channel, and an arm-admission test —
+
+> **"Does a consumer branch on it GENERICALLY?"**
+
+If no consumer makes a distinct decision on a reason, it does not earn a wire
+arm; it collapses to a broader class and survives in detail. Applied to
+fusiform's push refusals, most candidate reasons fail that test, which is the
+point: **a rich refusal vocabulary nobody branches on is the same defect as a
+rich success shape nobody can read.** Both add structure that carries no
+decision.
+
+There is a trap in applying that strictly right now, though: **the test asks
+whether a consumer branches generically, and fusiform has no consumer yet.**
+Answering it today means predicting a consumer's decisions rather than
+observing them.
+
+So the safe direction when unsure is **detail, not an arm.** Promoting a
+detail string to an arm later is additive; demoting an arm is a breaking
+change to a live acknowledgement — the exact wedge this section exists to
+avoid. When a real consumer branches on a detail string, that is the evidence
+to promote it, and it will be evidence rather than prediction.
+
+The reason to record this here rather than design it later: retrofitting a
+discriminator to a live acknowledgement wedges every existing consumer.
+Fusiform has no receiver yet, so it has the one chance to not need that
+retrofit.
+
+A no-op that reports like a success converts an ordering fence into an
+ordering illusion.
+
+Note what the version must **not** be derived from: the maximum observation
+sequence. It rewinds on restore for the same reason the counter does, so it
+solves nothing. A restore-invariant derivation needs a wall-clock or hybrid
+logical-clock component; the fence plus re-sync is simpler and is what this
+design takes.
+
+### Payload boundary: fusiform authors the type, commons publishes it
+
+The fleet's cross-repo payload rule requires one published type that every
+consumer compiles against; a same-repo test cannot see a cross-repo boundary.
+Two questions follow, and they have different answers:
+
+- **Who authors the served schema and controls its evolution?** Fusiform. It
+  is fusiform's domain model, and a consumer must not be able to change what
+  the catalog asserts by editing a type.
+- **Where is it published from?** `commons`, as the next major version of
+  `cortexkit-model-catalog` (`docs/charter.md`, open item 3). The crate's
+  *slot* — one published type both consumers depend on — is exactly what the
+  served schema needs, and turning that slot over is cheaper than adding a
+  second dependency edge to every consumer.
+
+Ownership and location are separable, and conflating them is what makes this
+look like a contradiction. The coupling worth avoiding is **lockstep
+releases**: consumers forced to move together because one of them wanted a
+field. A published, semver-versioned crate does not create that — a consumer
+upgrades when it chooses. A shared type edited in place by whoever needs a
+field does.
+
+So: fusiform's served types are designed as that crate's next major version
+from day one, not as a fusiform-repo type later migrated. Migrating a wire
+type after consumers depend on it is a breaking change for everyone; starting
+in the published slot costs nothing now.
 
 Fusiform takes the crate's money doctrine, because it encodes real incidents:
 decimal-string scaling, half-even rounding at the money resolution,
 reject-nonzero-rounding-to-zero, the negative-rate guard, checked arithmetic
-throughout. Fusiform does **not** take its tier parsing.
+throughout. Fusiform does **not** take its raw-models.dev shape — that is the
+role being retired.
 
-The boundary is pinned with a vendored golden fixture from day one — and, in
-BROCA's sharper form, **a golden that a deliberate mutation must break.** A
-shape assertion nobody has broken on purpose is just a differently-worded
-value assertion.
+The boundary is pinned with a vendored golden fixture from day one, and
+specifically **a golden that a deliberate mutation must break**. A shape
+assertion nobody has broken on purpose is just a differently-worded value
+assertion.
 
-Note for the record: the crate's header describes itself as the shared
-representation "both consumers parse." Measured, no BROCA `Cargo.toml`
-depends on it; only astrocyte does. The claim becomes true through this
-contract, not before it.
+### Retirement is the tail, and it has one real consumer
+
+The current crate's role — shared mirror of raw models.dev shapes — ends when
+its consumers read fusiform-served data instead. That retirement is the *tail*
+of the consolidation, never a milestone on its own: nothing may be removed
+before the replacement serves.
+
+One correction to how this is often stated. Measured: **no BROCA `Cargo.toml`
+depends on `cortexkit-model-catalog`.** BROCA has its own `broca-catalog`,
+which parses the vendored snapshot into `broca-provider`'s own spec types.
+So BROCA's no-network seed embed does **not** parse with the commons crate's
+types and is not coupled to its retirement at all. The current crate has
+exactly one dependent: astrocyte.
+
+That matters for sequencing. The gate on retiring the old *role* is
+astrocyte's switch, not both consumers'. BROCA's gate is separate and is about
+its own embed: it keeps a permanent seed regardless (§7), so what changes for
+BROCA is which types the seed parses with, on BROCA's schedule.
+
+During the transition astrocyte needs both shapes at once — the old parse for
+its staged file until fusiform's lane is live, and the new served types after.
+Semver-incompatible versions of one crate can coexist in a Cargo graph under a
+renamed dependency, so this is mechanical rather than a sequencing constraint;
+naming it here so it is not discovered during the cutover.
 
 ### Multi-source precedence is deferred, not defaulted
 
@@ -727,45 +1647,132 @@ by whichever normalizer happens to run last.
 2. **Per-provider unit policies** for the audio rates and any future
    convention-implied unit. Each one is a named, auditable policy or the rate
    stays unpriced.
-3. **Correction extent granularity** (§3.1). `FieldId` needs a concrete
-   vocabulary that is stable enough for ASTRO to query against and narrow
-   enough to be useful. Settled with ASTRO before the first correction, not
-   during one.
-4. **Cadence.** Poll interval is the width of every observation window, so it
-   is a precision decision, not a performance one. A conditional GET costs one
-   round trip and zero body bytes (measured), so the floor is politeness to
-   the upstream rather than cost.
+3. ~~**Cadence.**~~ **Settled: 30 minutes, conditional GET, not
+   configurable.** Poll interval is the width of every observation window, so
+   it is a precision decision rather than a performance one. The floor is
+   upstream politeness, not cost: an unchanged poll is one round trip and zero
+   body bytes (measured). The value comes from the live specimen in §6 — a
+   renderer flip visible in a 36-minute window — which 30 minutes catches. Not
+   a configuration knob in v1: one number, recorded in every observation row,
+   changed by release. A knob here would let an operator silently widen every
+   era boundary in the store.
+4. **Crate-version sequencing.** The served types ship as
+   `cortexkit-model-catalog`'s next major version (§10). Astrocyte's switch is
+   what retires the crate's current role; BROCA's adoption is on its own
+   schedule, since BROCA does not depend on the crate today. Neither sequence
+   is settled here.
+5. ~~**The cutover prior edge.**~~ **Settled: era zero is `Seed` with no
+   window.** Found by this note contradicting itself — §3 requires
+   `prior_observation_at` to be fusiform's own previous observation and NULL
+   unless the boundary is `Observed`, while a commitment made across the seam
+   assumed that column could hold an instant handed in by a consumer. See
+   below for the resolution and why the alternative was worse.
 
 ### Settled since the first draft
 
-- BROCA's consumed field set (§5.1), envelope (full snapshot + advisory diff),
-  ordering rule (monotonic version, `<=` refused), bootstrap posture
-  (permanent embed, §7), and payload boundary (shared representation,
-  fusiform envelope, §10).
-- Pricing as a separate surface — agreed independently from both consumer
-  sides.
-- `Corrected` as a boundary kind carrying extent (§3.1), requested by ASTRO.
+An index into the sections that carry each decision's reasoning, not a
+substitute for them. Nothing here should be cited without its section.
+
+| Decision | Where |
+| --- | --- |
+| BROCA's consumed field set (two byte-affecting fields, not three) | §5.1 |
+| Envelopes differ **per consumer**: full snapshot + hash to the capability consumer, change-identity doorbell to the pricing one — deliberately, not yet unified | §10 |
+| Diff carried as advisory only; the consumer's guard recomputes | §10 |
+| Ordering: monotonic catalog version, `<=` refused, plus a restore fence **and** a consumer high-water re-sync | §10 |
+| Acknowledgement discriminated at the protocol level; detail-when-unsure | §10 |
+| Bootstrap: consumer keeps a permanent embed | §7 |
+| Payload boundary: fusiform authors the type, commons publishes it | §10 |
+| Pricing as a separate surface from capabilities | §10 |
+| `Corrected` boundary kind, its extent, and its `FieldId` vocabulary | §3.1 |
+| `affected_from` is a lower bound; unknown means earliest | §3.1 |
+| Zero limit → absent, per field, unconditionally | §5.1 |
+| Cadence: 30 minutes, conditional GET, not configurable | §11 |
+
+One of those rows was itself a defect until this pass: the envelope line read
+"full snapshot + content hash" without qualification, collapsing two
+deliberately different shapes into one — which is exactly what §10 warns a
+future reader against doing. **A summary table is where an asymmetry a
+document argues for goes to die**, because summarizing is compression and the
+asymmetry is the detail being compressed away.
+
+### The cutover input fusiform cannot derive — and the schema gap it exposes
+
+Fusiform's first push to the pricing consumer cannot supply its own
+`prior_observation_at`: era zero has no prior edge on the producer side. The
+prior edge must be **handed in** from the consumer's last real observation, or
+the resulting boundary silently looks one poll-interval wide instead of
+spanning the supply gap it actually spans.
+
+**This contradicts §3 as written, and the contradiction is the useful part.**
+§3 defines `prior_observation_at` as *the other edge of the window* —
+fusiform's own previous observation — and requires it NULL unless
+`boundary_kind` is `Observed`. A handed-in instant is neither: it is another
+module's observation of a different artifact, and writing it into that column
+would make the column mean two things depending on the row.
+
+Two options were drawn; **the consumer chose the second**, and their reason is
+stronger than the one this note originally gave for it.
+
+- **Option A:** a distinct nullable column for an inherited prior edge, with
+  its own source attribution, leaving `prior_observation_at` strictly
+  fusiform's.
+- **Option B (chosen):** era zero carries `boundary_kind: Seed` with no window
+  at all. The gap is expressed in the consumer's own record.
+
+The original argument for B was that the gap is a fact about the consumer's
+supply rather than the upstream. True, and not the load-bearing part. The
+real argument is that **A would move a fact across a seam and give it
+fusiform's authority.** The consumer already holds both edges — their last
+real observation sits in their own store. Under A, fusiform's store would
+carry a three-week window as a value it cannot verify, attributed to a source
+it cannot read, in a column used once. A wrong instant handed in would be
+recorded with fusiform's authority and nothing on fusiform's side could catch
+it.
+
+That is the producer-authority problem arriving through a column instead of an
+inference — and refusing it is the same rule as refusing to convert currency
+or derive an accounting state.
+
+Under B, era zero is `Seed` with no window, which is exactly true: fusiform
+has no prior observation and a seed boundary says so. So the commitment splits
+into two, each held by the party that can verify it:
+
+> Fusiform commits that era zero is honestly marked as a seed rather than
+> dressed as an observation. The consumer commits that its first ingest
+> records the gap against its own prior instant.
+
+Neither is weaker than the single commitment it replaces. **A fact should be
+recorded by whoever can check it**, and a guarantee is worth more when its
+holder can falsify it.
+
+On the record so it exists in more than one place: astrocyte's last real
+observation is `observed_at_ms` 1784494281391, snapshot version tag
+`file:1784494256028`, 19 July 2026, 5,297 rows — to be re-measured at cutover
+rather than quoted, but available if it cannot be.
 
 ## 12. Verification stance
 
-Adopted from the fleet's hunting-loop method, applied to this design:
+Adopted from the fleet's verification method (subconscious
+`docs/hunting-loop-briefing.md`, the accumulated defect-hunting discipline
+these modules are reviewed against), applied to this design:
 
-- **Produced-output fixtures must be minted by the real producer** (the
-  fleet's standing form; stronger than "excerpted from a measured payload"
-  because it also covers another module's response envelope, not just an
-  upstream document). A hand-written fixture encodes its author's
-  misunderstanding. The commons defect is that rule's cleanest specimen:
-  fixture and parser authored from one wrong belief in one commit, so a
-  non-vacuous assertion certified the bug.
+- **Produced-output fixtures must be minted by the real producer.** Stronger
+  than "excerpted from a measured payload," because it also covers another
+  module's response envelope, not just an upstream document. A hand-written
+  fixture encodes its author's misunderstanding.
 
-  Quantified by SUBC's mutation run: the old `tiers_parse_sorted` would have
-  stayed green **even after its fixture was corrected**, because a correct
-  fixture parses correctly under both the broken and fixed parsers. The test
-  was not weak — it was incapable of distinguishing the two implementations in
-  either fixture state.
+  The commons tier defect is the specimen: fixture and parser authored from
+  one wrong belief in one commit, so a non-vacuous assertion certified the
+  bug. Mutation-tested during the fix — restoring the defective line reddens
+  the two new tests, while the original `tiers_parse_sorted` stays green **even
+  with a corrected fixture**, because a correct fixture parses correctly under
+  both the broken and the fixed parser. The old test was not weak; it was
+  incapable of distinguishing the two implementations in either fixture state.
+  Only a test pinning the *refusal* direction can. Full record in
+  `docs/findings/2026-08-11-commons-tier-threshold.md`.
 
-  Corollary, from ASTRO: a fixture and the code it exercises must not have the
-  same author in the same commit without a measured payload in between.
+  Corollary: a fixture and the code it exercises must not have the same author
+  in the same commit without a measured payload in between.
 - Every check ships with a proof it can fail. The restore test, Rule Q's
   negative test, and tombstone completeness are all shaped so that the
   plausible-looking wrong implementation fails them.
@@ -775,13 +1782,257 @@ Adopted from the fleet's hunting-loop method, applied to this design:
 - The first instrument is the least trustworthy thing in the module. The
   commons defect was found by *executing* a parser against real bytes, one
   nesting level below where anyone was reading — and it fell out of an
-  unrelated question (how the parser handled the 26% int/float split). The
-  discipline that found it was "run it on real data," not "read it
-  carefully." The plan of record had been to read the crate.
+  unrelated question (how the parser handled the int/float split, where the
+  same key arrives as both types on different rows). The discipline that found
+  it was "run it on real data," not "read it carefully." The plan of record
+  had been to read the crate.
 
-- **A residual finding from probing the fix itself:** the corrected commons
-  parser reads `tier.tier.size` without checking `tier.tier.type`, so a
-  hypothetical `{"type": "images", "size": 1000}` tier is accepted as "context
-  ≥ 1000 tokens." Confirmed by probe, reported to SUBC. Fusiform verifies the
-  discriminator (§4). The lesson generalizes: **a fix is an instrument too,
-  and it earns the same probing as the thing it replaced.**
+- **A sweep is only as good as the case in it whose answer you already know.**
+  Every finding on 2026-08-11 that survived turned on a known-positive sitting
+  in the output: a rate-limit error reproduced against a pre-change binary, an
+  in-use screen that reproduced six known false positives, and a field-usage
+  enumeration whose first pass wrongly flagged a field the author had traced
+  by hand an hour earlier. That last one is the clearest — **the instrument
+  being obviously wrong on a known case is what made it trustworthy on the
+  unknown one.** Without it, the same output is seventeen "unread" fields and
+  no way to sort them.
+
+- **A claim only becomes checkable when it is stated across a seam.** This is
+  stronger than "cross-seam claims have propagated, so check them." A rule
+  held privately reconciles with everything, because it commits to nothing;
+  saying it to another party is what collapses it into a definite form, and
+  the collapsed form is the first version a specification can contradict.
+
+  So the set of claims made across seams is not merely the highest-risk set —
+  it is very nearly the only set that *can* be checked. Everything else is
+  still vague enough to survive any check run against it.
+
+  Evidence, from both sides of this seam on one day: an author-run consistency
+  pass over 1,800 lines was still running when a claim-by-claim check of
+  things said out loud found a real contradiction in ten minutes. And on the
+  consumer's side, four adversarial rounds found contradictions in their
+  specification — every one in a claim they had also stated to another module.
+  The natural reading is "seam claims are load-bearing so they get scrutiny."
+  The better one is that those were the only parts precise enough to be wrong.
+
+  Practical form: **check what you have said, in the direction claim →
+  section.** Reading two sections for agreement invites the author to supply
+  the reconciling clause from intent; testing a specific sentence against a
+  section does not, because the sentence arrived already fixed.
+
+- **Textual and seam contradictions are disjoint populations, and only one of
+  them gets found eventually.** An author-run pass over this document found
+  three real contradictions — all textual, two sentences on a page disagreeing,
+  which any careful reader would eventually hit. The claim-by-claim check
+  found one that **no reader of the document could ever catch**, because the
+  contradicting half lived in a message.
+
+  So the argument is not that one method is cheaper per defect. It is that a
+  textual defect has a finite discovery time and a document-versus-commitment
+  defect has **no discovery mechanism at all** except someone happening to
+  hold both halves — which occurs by accident or never.
+
+- **The narrowing is the event that creates the textual defect, so check at
+  the narrowing.** All three found here have one shape: a general statement
+  written early, a specific rule added later, and the general statement left
+  standing. Nobody chose the contradiction. The highest-yield check is
+  therefore not "read for contradictions" but **re-read every general
+  statement immediately after adding a rule that narrows it** — a moment you
+  can notice while it happens, rather than a search you run afterwards.
+
+- **A premise you would state to someone else is load-bearing enough to
+  measure.** An unverified assumption supporting *caution* escapes checking,
+  because being wrong about it seems only to make you slower — so it feels
+  safe to leave unmeasured. It is not: it propagates as a stated fact and
+  shapes plans around costs that do not exist. Caution built on unmeasured
+  premises is not conservative, it is wrong in a direction that feels
+  responsible. The catchable moment is when the premise becomes a reason given
+  to another party; at that point it has stopped being a private assumption
+  and become a claim.
+
+  **The strong form: "I am about to tell another seat what my system does" is
+  a hard stop for a source read.** Stating a rule across a seam *feels* like
+  reporting and is actually claiming, which is why it escapes the check that
+  any other assertion would get. Three distinct defects in one day would have
+  been caught by that single tell — an unmeasured caution premise, an
+  unmeasured traffic claim, and a policy stated in a form its own code did not
+  implement. Three instances in a day is not a coincidence, it is a rate.
+
+  It is also the deterministic detector for the two-versions-of-a-rule failure
+  above. A third party holding both versions catches it reliably but by
+  accident; the author noticing they are about to assert outward catches it
+  every time, before it propagates, for the cost of one read.
+
+- **Correct attribution does not make a claim measured, and citing a source
+  makes it look checked.** Three variants of one family turned up while this
+  note was written, in increasing order of subtlety: inventing a fact;
+  inferring one by combining unrelated fields; and *laundering an unmeasured
+  claim through correct attribution*. All three produce a sentence that reads
+  as evidence. The third is the hardest to see because the provenance is
+  genuine — nothing feels wrong.
+
+  Specimen: this note carried "cache-read dominates agentic traffic" as a bare
+  fact, then was "fixed" by attributing it to the metering consumer. The fix
+  made it worse, promoting an unmeasured design argument into a cited
+  measurement. It was removed rather than re-attributed.
+
+  The sequel is the useful part. The consumer then *measured* it, and the
+  claim survived in a corrected form: cache-read is 45.6% of their token
+  volume — a plurality, not a majority, with fresh input close behind at
+  42.3%. "Dominates" was wrong; the structural point it was recruited to
+  support was right for a different reason. **An unmeasured claim is not
+  necessarily a false one, which is exactly why it is dangerous** — it is
+  usually close enough to survive scrutiny and wrong in the detail that
+  matters.
+
+  Two corollaries, both earned the same day:
+
+  **Laundering needs no dishonesty at either end.** A second instance ran the
+  full path: a module owner inferred a semantic from a field's name, stated it
+  confidently, this note cited it accurately, and the citation was correct.
+  The defect entered at the assertion and became invisible at the citation.
+
+  The rule this yields is *not* "trust owners less" — a claim from the seat
+  that owns the code is the strongest evidence normally available, and
+  discounting it would cost more than it saves. The precise version is that
+  **owning a field tells you what your code does with it, which is a different
+  fact from what the field means to whoever reads it.** The retracted claim
+  concerned a value with no consumer in its own tree: serialized over the wire
+  to another module, whose handling nobody involved had read. The owner could
+  say exactly what they emit and could not say what it means downstream — and
+  fusiform is in the same position about everything it serves.
+
+  So *"where did you read that"* and *"what happens to it"* are answerable in
+  different places, and a seam is exactly where the two get conflated.
+
+  **A sixth variant, and the only one whose defect enters at someone else's
+  keyboard: a claim strengthened by another party's generous framing.** This
+  note nearly recorded a peer's reasoned hypothesis as something they had
+  found by inspection — an upgrade made in good faith, which would have
+  arrived in a design document with their name attached and neither party
+  having said anything false. They caught it. The author of a claim is the
+  only one who knows which link in it was measured, so a restatement is a
+  place where confidence is silently added.
+
+  The defence they offered is better than a confidence level: **name which
+  link is soft.** "Both ends read from source, the middle reasoned" is
+  checkable and tells a reader exactly where to look. "Fairly confident" is
+  not, and cannot be corrected by anyone but the author.
+
+  The sequel closes the argument. Having named the soft link, they went and
+  measured it — and it confirmed *worse* than the hypothesis (§10). So the
+  retraction was not a detour on the way to the answer; **it was what made the
+  answer worth having.** An unmeasured claim that happens to be right is
+  indistinguishable from one that happens to be wrong, and only the retraction
+  turns "I recognize this shape" into a query someone runs.
+
+  **A structural argument that needs a fact was never structural.** If the
+  argument survives without the measurement, the measurement was decoration;
+  if it does not, it needed a real one. That test disposes of both instances
+  without adjudicating them.
+
+- **A measurement is a measurement at an instant, and different quantities
+  decay differently.** The consumer's fact count went from 15,170 to 16,407
+  within one day, because ingestion never stops — it grows monotonically, so a
+  stale figure is a floor. The upstream's model count moves in *both*
+  directions (+821 and −391 over 18 days), so a stale figure there is neither
+  a floor nor a ceiling and cannot be extrapolated at all. Every count in
+  these documents carries its date; the ones that can move downward say so.
+
+- **A number produced to fill a documentary hole is contaminated even when it
+  is correctly measured.** It exists because a document needed it, not because
+  a question needed answering — and that is how a real measurement becomes
+  load-bearing for a claim nobody tested. A cost-by-class breakdown was
+  offered to fill exactly such a hole here and was declined; the right time to
+  run it is when a decision turns on it, and then it gets to be evidence.
+
+  That completes the family: **inventing a fact, inferring one from adjacent
+  fields, laundering an unmeasured claim through correct attribution, and
+  producing a genuine measurement to fill a hole.** All four read as evidence.
+  The last two are the hard ones, because nothing in them is false.
+
+- **Cross-referencing is the highest-risk moment for propagating a soft
+  claim.** The `context_over_200k` "two encodings of the same fact" inference
+  was caught once and then reproduced twice while checking the documents
+  against each other — because cross-referencing reads one's own prose for
+  *consistency* rather than for *truth*, and a claim repeated in three places
+  reads as three sources agreeing.
+
+- **Inferring a semantic from a name is the cheapest laundering there is.**
+  `context_limit_tokens` with a zero value has an obvious reading, and obvious
+  readings get written down without a source line — by the person who owns the
+  code, who is the last person anyone would ask for one. Fusiform's own rules
+  are exposed to this: `limit.input`, `limit.output` and `cost.cache_read` all
+  have obvious readings, and only two of the three were checked against the
+  payload before a rule was written on them.
+
+- **Agreement between two parties is not confirmation when both read one
+  sample.** Two seats agreed on a row-level zero-limit rule drawn from a
+  five-model set that had been selected to answer a different question. It
+  read as independent corroboration and was one observation wearing two names
+  — and the agreement is precisely what stopped anyone counting. The cheap
+  defence is to ask **"what did you count?"** rather than "is that right?":
+  the first exposes a selected sample, the second invites re-derivation from
+  the same data.
+
+- **Rewording is what you do when you believe the rule and doubt the sentence;
+  measuring is what you do when you are willing for the rule to be wrong.** A
+  reviewer flagged a normalization predicate as imprecise. Measuring the edge
+  destroyed the predicate rather than sharpening it — 39 rows contradicted it
+  outright.
+
+  A wording fix would have been worse than no review at all: **a reworded rule
+  that passed review is worse than an unreviewed one, because the review
+  becomes evidence of correctness.** The unreviewed rule carries its
+  uncertainty visibly; the reviewed-and-reworded rule has been laundered by
+  the review. The review did happen and the record is accurate — the accuracy
+  is what does the damage. Same mechanism as laundering through attribution,
+  one level up.
+
+- **A general flag gets reworded; a specific counterexample gets measured. So
+  ask for the counterexample.** Reviewing this note produced both kinds, and
+  only the second changed anything: the flag that named a specific model whose
+  classification could not be predicted led to a measurement; a general
+  "imprecise here" would have led to a better sentence.
+
+  Checked against the day's record on both sides of the seam, this held
+  without exception — every correction either party made was downstream of
+  something specific the other named. That is not a weakness in either
+  reviewer. **A specific counterexample is expensive to produce about your own
+  work, because producing it requires already suspecting the thing, and cheap
+  to produce about someone else's, because you arrive without the belief that
+  generated it.**
+
+  Practical form: when a review lands as general doubt, do not defend it and
+  do not reword — ask **"which row would this be wrong about?"** That converts
+  an unmeasurable flag into a measurable one and puts the work where it is
+  cheap.
+
+- **To test a belief, measure something chosen for having no relationship to
+  it.** A carefully-reasoned set is reasoned *from a model*, so re-examining
+  the set applies the same wrong model harder. Three defects on 2026-08-11
+  arrived from adjacent work rather than from scrutiny: a tier defect out of
+  an int/float question, a renderer-field misclassification out of counting
+  non-LLM rows, and a second unread limit field out of enumerating struct
+  fields. Adjacency is not the point — *independence from the belief under
+  test* is.
+
+- **A fix is an instrument too, and earns the same probing as the thing it
+  replaced.** Probing the first commons fix found two residuals in the fix
+  itself: an unchecked tier `type` discriminator, and an error variant that
+  named no row in a 3.6 MB payload. Both were closed in a follow-up
+  (`528b680`). The general form: the state of mind that writes a fix is not
+  the state of mind that finds a defect, so a fix for a wrong-assumption
+  defect should sweep for *other* assumed fields in the same parse before it
+  ships.
+
+- **When one variant in an error enum lacks the context its siblings carry,
+  the omission is usually accident, not design.** A mechanically checkable
+  audit form, and how the second residual was noticed.
+
+- **A quarantine is a promise; an unread field is a fact.** BROCA's
+  formulation. Fusiform's producer-side rule keeps renderer fields out of the
+  served contract (§6); a consumer's structural guarantee is that its renderer
+  decision reads a field set that cannot include them. Two independent
+  barriers, neither load-bearing alone — the right shape for a failure that is
+  silent.

@@ -1,11 +1,24 @@
 # Finding: `cortexkit-model-catalog` parses every context-pricing tier threshold as 0
 
-Found 2026-08-11 by FUSI while measuring the models.dev payload for fusiform's
-normalizer. Reported to ASTRO (owner of the affected consumer) and SUBC.
+Found 2026-08-11 while measuring the models.dev payload for fusiform's
+normalizer. The affected crate lives in the `commons` repository, owned by the
+`subc` seat; the affected consumer is `astrocyte`. Both were notified the same
+day and the fix shipped in `commons` — see Status below.
 
-Severity: **latent, not active.** No money is currently wrong. The corrupted
-value is persisted in astrocyte's store but never read back on the pricing
-path. It becomes a live mispricing the moment anyone wires tier selection.
+Recorded here rather than only in `commons` because the reasoning is reusable:
+the defect class, the root cause, and the residuals found in the fix are all
+things fusiform's own normalizer must avoid.
+
+Severity: **latent, not active.** No charge is wrong *because of this defect*:
+the corrupted value is persisted in astrocyte's store but never read back on
+the pricing path. It becomes a live mispricing the moment anyone wires tier
+selection.
+
+That is narrower than "no money is wrong." Astrocyte separately under-prices
+large-context requests on all 320 tiered models, because it prices from flat
+rates and ignores tiers entirely — a real gap, but a different one, and not
+caused by this. The two are connected only in that the obvious fix for the gap
+is the thing this defect makes dangerous.
 
 **Status: fixed at source the same day** — commons `ffdd06a` (threshold read
 from `tier.tier.size`, absent threshold is a loud error) and `528b680` (tier
@@ -112,9 +125,11 @@ from the correct path and drops tiers that lack it:
 let min_context = t.get("tier").and_then(|ti| ti.get("size")).and_then(Value::as_u64)?;
 ```
 
-Two independent implementations of the same parse, one correct, one not —
-which is the duplication argument that chartered fusiform, showing up as a
-concrete defect rather than a maintenance theory.
+Two independent implementations of the same parse, one correct, one not. The
+argument that chartered fusiform (`docs/charter.md`) was that three copies of
+the same upstream knowledge already existed in the fleet and each rots on its
+own schedule; this is that argument as a concrete defect rather than a
+maintenance theory.
 
 ## Root cause: a fixture that cannot express the failure
 
@@ -136,17 +151,21 @@ models.dev. The assertion is real and non-vacuous; the input is fiction. The
 test proves the parser can read a threshold from a key the upstream does not
 emit.
 
-The fleet's standing rule is that **produced-output fixtures must be minted by
-the real producer**, because a hand-written fixture encodes its author's
-misunderstanding. This is that rule's cleanest specimen: fixture and parser
+The fleet's verification method (subconscious
+`docs/hunting-loop-briefing.md`) holds that **produced-output fixtures must be
+minted by the real producer**, because a hand-written fixture encodes its
+author's misunderstanding. This is that rule's cleanest specimen: fixture and parser
 were authored from one wrong belief in one commit, so a non-vacuous assertion
 certified the defect.
 
-Quantified afterwards by mutation: `tiers_parse_sorted` would have stayed
-green **even with a corrected fixture**, because a correct fixture parses
-correctly under both the broken and the fixed parser. The test was not weak —
-it was structurally incapable of distinguishing the two implementations in
-either fixture state. Only a test that pins the *refusal* direction can.
+Quantified afterwards by mutation, during the fix (`ffdd06a`): with the
+defective `unwrap_or(0)` restored, the two newly added tests redden while
+`tiers_parse_sorted` stays green **even with a corrected fixture** — because a
+correct fixture parses correctly under both the broken and the fixed parser.
+The test was not weak; it was structurally incapable of distinguishing the two
+implementations in either fixture state. Only a test pinning the *refusal*
+direction can. To reproduce: restore the `unwrap_or(0)` line in
+`parse_cost` and run the crate's test suite.
 
 Corollary worth carrying: a fixture and the code it exercises must not have
 the same author in the same commit without a measured payload in between.
@@ -171,9 +190,13 @@ whole life of the crate. This was never correct.
    least one tier has a nonzero threshold — a check that fails if the upstream
    shape moves again.
 4. Decide what to do with `context_over_200k` (288 models). It is a second,
-   older encoding of the same fact and is currently ignored entirely by both
-   parsers. It appears only alongside `tiers`, so ignoring it loses nothing
-   today, but that co-occurrence is an upstream convention, not a guarantee.
+   older encoding of the same fact and is ignored entirely by both existing
+   parsers. All 288 rows carrying it also carry `tiers`, so ignoring it loses
+   nothing today — but that co-occurrence is an upstream convention, not a
+   guarantee. (Fusiform's own normalizer, when built, will treat a
+   `context_over_200k` without a matching tier as an error rather than a
+   silent drop; see `docs/design/schema-and-store.md`. That is a fusiform
+   decision, not a recommendation for this crate.)
 
 ## After the fix
 
@@ -196,9 +219,10 @@ A fix is an instrument too, and earns the same probing as the thing it
 replaced. Both were found against `ffdd06a` and closed in `528b680`.
 
 **The tier `type` discriminator was still unchecked.** `ffdd06a` read
-`tier.tier.size` without looking at `tier.tier.type`. Measured, `type` is
-`"context"` on 335/335 rows, so nothing was wrong — but a hypothetical
-non-context tier was silently reinterpreted:
+`tier.tier.size` without looking at `tier.tier.type`. On today's payload every
+tier is a context tier (`type == "context"` on 335/335 rows), so no live row
+was misread — but the parser had no way to tell, and a non-context tier was
+silently reinterpreted:
 
 ```rust
 "tiers": [ { "tier": { "type": "images", "size": 1000 }, "input": 2.5 } ]
