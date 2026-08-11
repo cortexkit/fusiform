@@ -15,6 +15,7 @@
 
 pub mod ingest;
 pub mod schema;
+pub mod serve;
 
 use std::collections::BTreeMap;
 
