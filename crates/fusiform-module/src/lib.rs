@@ -11,4 +11,5 @@
 pub mod fetch;
 pub mod health;
 pub mod loop_;
+pub mod route;
 pub mod signals;
