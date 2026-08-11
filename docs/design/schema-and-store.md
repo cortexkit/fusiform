@@ -2053,26 +2053,29 @@ these modules are reviewed against), applied to this design:
   barriers, neither load-bearing alone — the right shape for a failure that is
   silent.
 
-- **A design note sentence that admits two readings gets implemented as
-  whichever one the implementer already believed.** This note said a
-  `context_over_200k` "without a matching tier" is an error. *Matching* had two
-  readings — matching threshold, matching rates — and the first shipped,
-  rejecting 162 of 288 real models. The correct threshold list sat four
-  paragraphs above the sentence and was not consulted, because the sentence did
-  not feel like it needed consulting.
+- **An author cannot detect the ambiguity that matters, by construction.**
+  This note said a `context_over_200k` "without a matching tier" is an error.
+  *Matching* had two readings — matching threshold, matching rates — and the
+  first shipped, rejecting 162 of 288 real models.
 
-  So the ambiguity is the defect, not the implementation. An unambiguous
-  sentence is checkable against data by someone who does not share the author's
-  belief; an ambiguous one silently recruits that belief and produces agreement
-  with itself.
+  The tempting lesson is "write unambiguous sentences", and it is wrong.
+  Prose specifications contain ambiguous sentences everywhere and most resolve
+  correctly, because a reader hits one that could go two ways and *stops*. This
+  one produced no stop. It produced a confident reading, because the sentence
+  and the implementation came from one understanding — so there were never two
+  readings to choose between, and the ambiguity was invisible to the only
+  person positioned to notice it.
 
-  The general form, and the reason this is not merely an editing lesson:
-  **the sentence and the code were written by one person from one
-  understanding, so the code agreed with the note and the note agreed with the
-  code, and only the DATA disagreed with both.** Nothing internal to either
-  artifact could have surfaced it. This is the same defect the tier finding
-  records — fixture and parser sharing an author — arriving through prose
-  instead of a fixture.
+  An author is therefore the wrong instrument for this class, the same way an
+  author-run consistency pass is the wrong instrument for contradictions. What
+  detects it is a second reader with no understanding to supply, or the data.
+
+  **The data was available the entire time.** Seven distinct threshold values
+  across 6,253 rows, and the correct list sat four paragraphs above the
+  sentence in this document. It was never consulted, because the sentence did
+  not feel like it needed consulting — which is the same tell as stating a rule
+  across a seam without checking it. **The absence of doubt is not evidence,
+  and it is weakest exactly where one belief authored both sides.**
 
 - **The parser written to prevent a defect reproduced it.** Reading
   `tier.size` as a context threshold without checking `tier.type` is the
@@ -2080,7 +2083,12 @@ these modules are reviewed against), applied to this design:
   same act, and it shipped in the module whose purpose is to not do that,
   guarded by a rule stated three times in this note.
 
-  Knowing a failure mode by name does not confer immunity to it, because
-  recognition operates on the version you have already labelled. The check that
-  caught it was not vigilance — it was running the parser against 6,253 real
-  rows, which is the same instrument that caught the original.
+  The failure is not in knowing the rule; it is in recognizing the instance.
+  Recognition matches against the labelled version, and the label was "reading
+  `tier.size` without checking `tier.type`". `context_over_200k` was the same
+  shape wearing a different name — and a name is exactly what recognition keys
+  on.
+
+  So the durable defence is a check that does not depend on recognition at all.
+  Running the parser against 6,253 real rows found this without anyone
+  recognizing anything, which is also how the original was found.
