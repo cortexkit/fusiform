@@ -171,3 +171,107 @@ fn a_second_instance_cannot_steal_the_writer_lease() {
         .record_observation(&observation(1_000))
         .expect("the holder keeps writing after a refused challenger");
 }
+
+/// A restore rewinds the fence epoch, and the catalog version recovers anyway.
+///
+/// Two properties measured together, because one is a hazard and the other is
+/// the thing that makes it survivable.
+///
+/// **The fence rewinds.** `cortexkit-store`'s writer fence is a row in the
+/// database it protects (`cortexkit_fence`, compared per write inside the
+/// transaction). A file-level restore replaces that row along with everything
+/// else, so the epoch a restored file carries is whatever the backup held.
+/// Measured: 2 before the restore, and the restored file carries 1.
+///
+/// That is correct for what the fence defends against — a concurrent second
+/// writer, where comparing inside the transaction is strictly stronger than an
+/// in-process check because it survives a writer forgetting its own state. It
+/// is simply not a defence against restores, and it cannot be: a guard stored
+/// in the artifact it guards shares that artifact's fate.
+///
+/// **The catalog version recovers.** It is `max(now_ms, current + 1)`, so the
+/// wall clock carries it past any rewound value without needing anything
+/// durable. Measured here: 9000 before the restore, 1000 after, and the next
+/// version issued is a current millisecond timestamp — past 9000 by four
+/// orders of magnitude.
+///
+/// That is the property consumers depend on. A consumer refuses any version at
+/// or below the one it holds, so a rewind that persisted would make every
+/// subsequent push refuse forever, silently at the producer and totally at the
+/// consumer.
+#[test]
+fn a_restore_rewinds_the_fence_and_the_catalog_version_recovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("store.db");
+    let descriptor = StorageDescriptor {
+        module_id: "fusiform".to_string(),
+        storage_namespace: "default".to_string(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: path.to_string_lossy().to_string(),
+        },
+    };
+
+    let fence_epoch = |p: &std::path::Path| -> i64 {
+        let c = rusqlite::Connection::open(p).unwrap();
+        c.query_row(
+            "SELECT COALESCE((SELECT epoch FROM cortexkit_fence WHERE id = 0), 0)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+
+    // Run 1, then a backup with the store closed — the checkpointed shape
+    // engram's online backup API produces.
+    let store = CatalogStore::open(&descriptor).unwrap();
+    let id = store.record_observation(&observation(1_000)).unwrap();
+    store.advance_catalog_version(id, Timestamp(1_000)).unwrap();
+    drop(store);
+    let backup = dir.path().join("backup.db");
+    std::fs::copy(&path, &backup).unwrap();
+
+    // Run 2 advances both the version and the fence epoch.
+    let store = CatalogStore::open(&descriptor).unwrap();
+    let id = store.record_observation(&observation(2_000)).unwrap();
+    let pre_restore_version = store.advance_catalog_version(id, Timestamp(9_000)).unwrap();
+    drop(store);
+    let pre_restore_fence = fence_epoch(&path);
+    assert!(
+        pre_restore_fence > 1,
+        "run 2 must have claimed a higher epoch, or the rewind below proves nothing"
+    );
+
+    // The restore: module stopped, file replaced, sidecars removed.
+    std::fs::copy(&backup, &path).unwrap();
+    let _ = std::fs::remove_file(dir.path().join("store.db-wal"));
+    let _ = std::fs::remove_file(dir.path().join("store.db-shm"));
+
+    assert!(
+        fence_epoch(&path) < pre_restore_fence,
+        "the fence lives in the restored file, so it must come back rewound — \
+         if this ever stops being true, the comment above is wrong"
+    );
+
+    // Run 3 comes up on the restored file.
+    let store = CatalogStore::open(&descriptor).unwrap();
+    assert!(
+        store.catalog_version().unwrap() < pre_restore_version,
+        "the stored version must also be rewound, or the recovery below is untested"
+    );
+
+    let id = store.record_observation(&observation(3_000)).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let recovered = store.advance_catalog_version(id, Timestamp(now)).unwrap();
+
+    assert!(
+        recovered > pre_restore_version,
+        "the next version after a restore must exceed the pre-restore high water \
+         ({recovered} vs {pre_restore_version}) — otherwise every consumer holding \
+         the old version refuses every push, correctly by its own rule and \
+         permanently"
+    );
+}
