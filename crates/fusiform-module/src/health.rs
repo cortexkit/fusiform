@@ -56,6 +56,17 @@ pub const FAILURE_STREAK_DEGRADED: u64 = 4;
 /// not running" restarts the module.
 pub const LOOP_SILENT_AFTER_MS: i64 = 70 * 60 * 1_000;
 
+/// How many ticks may reach no verdict before the store is presumed broken.
+///
+/// Two, not one. A single unrecorded tick is reachable without anything being
+/// wrong — a probe reading health between the attempt stamp at the top of a
+/// tick and the observation write at the end sees a difference of one, every
+/// time, on a perfectly healthy module.
+///
+/// Two consecutive is not reachable that way: the second tick is thirty minutes
+/// later, so an in-flight tick can only ever account for one of them.
+pub const UNRECORDED_TICKS_DEGRADED: u64 = 2;
+
 /// Build a health report from mechanical signals alone.
 ///
 /// `now_ms` is passed in rather than read from the clock inside, so the
@@ -76,6 +87,38 @@ pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
 
     let age = signals.observation_age_ms(now_ms);
     let failures = signals.consecutive_failures();
+
+    // Ticks that started and recorded nothing.
+    //
+    // Checked before staleness for the same reason as a stopped loop: it is the
+    // CAUSE of the staleness that follows, and an operator told "the catalog is
+    // five hours old" goes to look at the upstream — which is fine. The disk is
+    // not.
+    //
+    // This state has no other signal. Every fetch result is an outcome and gets
+    // recorded, so a tick only returns Err when the STORE failed: no observation
+    // row is written, no failure streak advances, and the error goes to stderr
+    // where nothing reads it. Measured with a probe: eleven consecutive store
+    // failures reported Ok for two hours, then Degraded-because-stale for three
+    // more, never once mentioning writes.
+    //
+    // The identity is only worth anything because the two counters have
+    // INDEPENDENT sources — attempts stamped at the top of a tick before the
+    // store is touched, verdicts counted when one is recorded. A total derived
+    // from its own parts always balances and proves nothing.
+    let (attempts, recorded) = signals.attempt_ledger();
+    let unrecorded = attempts.saturating_sub(recorded);
+    if unrecorded >= UNRECORDED_TICKS_DEGRADED {
+        return HealthReport {
+            status: HealthStatus::Degraded,
+            detail: Some(format!(
+                "{unrecorded} of {attempts} polls reached no verdict: the fetch \
+                 ran and the store could not record it. The upstream is not the \
+                 problem — check the disk, the lease, and the module's stderr"
+            )),
+            metrics: Some(metrics(signals, now_ms)),
+        };
+    }
 
     // A loop that has STOPPED is checked before staleness, because it is the
     // cause of the staleness that follows and an operator sent to look at the
@@ -177,8 +220,16 @@ fn describe_failure(signals: &Signals) -> &'static str {
 }
 
 fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
+    let (attempts, recorded) = signals.attempt_ledger();
     serde_json::json!({
-        "poll_attempts": signals.poll_attempts(),
+        // Both halves of the conservation identity, so an operator can see the
+        // divergence rather than take health's word for it. Named for what
+        // they count: ticks that started, and ticks that reached a verdict.
+        "poll_attempts": attempts,
+        "polls_recorded": recorded,
+        // Ticks that started and recorded nothing. Non-zero means writes are
+        // failing, and there is no other signal for that state.
+        "polls_unrecorded": attempts.saturating_sub(recorded),
         "consecutive_failures": signals.consecutive_failures(),
         // Present so a machine reading health can branch on the cause without
         // parsing the detail sentence.
@@ -289,11 +340,17 @@ mod tests {
     #[test]
     fn the_report_always_carries_the_numbers_it_was_derived_from() {
         let s = open_store();
+        s.attempted(1_000);
         s.observed(1_000);
         s.wrote(1_100);
         let r = report(&s, 2_000);
         let m = r.metrics.expect("metrics must always be present");
+        // Both halves of the ledger, and their difference. A tick that started
+        // and recorded a verdict contributes one to each, so the difference is
+        // zero on a healthy module.
         assert_eq!(m["poll_attempts"], 1);
+        assert_eq!(m["polls_recorded"], 1);
+        assert_eq!(m["polls_unrecorded"], 0);
         assert_eq!(m["observation_age_ms"], 1_000);
         assert_eq!(m["last_write_age_ms"], 900);
         assert_eq!(m["store_open"], true);

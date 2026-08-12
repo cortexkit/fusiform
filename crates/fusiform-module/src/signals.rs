@@ -56,15 +56,22 @@ const fn decode_class(value: u64) -> Option<FailureClass> {
 /// Counters stamped by the poll loop, read by the health path.
 #[derive(Debug, Default)]
 pub struct Signals {
-    /// Advances once per completed poll attempt, whatever the outcome.
+    /// Advances once per poll that reached a VERDICT — an observation row, or
+    /// a recorded failure.
     ///
-    /// A monotonic heartbeat rather than a timestamp of "last activity",
-    /// because the question health asks is whether the loop is running at all,
-    /// and a loop that is stuck answers that by not advancing this.
-    poll_attempts: AtomicU64,
+    /// Not attempts, despite what this was called for most of its life. A tick
+    /// that fails inside the store increments nothing here, and a probe caught
+    /// it reading 1 after eleven attempts.
+    polls_recorded: AtomicU64,
+    /// How many ticks STARTED.
+    ///
+    /// Independent of the counter above by construction: stamped at the top of
+    /// a tick, before the store is touched. That independence is what makes
+    /// the pair a usable identity — see [`Signals::attempt_ledger`].
+    attempts: AtomicU64,
     /// When the loop last ATTEMPTED a poll, in unix ms, whatever the outcome.
     ///
-    /// The counter above answers "how many", and health is called fresh on
+    /// The counters above answer "how many", and health is called fresh on
     /// every probe with no memory of the last one — so a counter alone can
     /// never say the loop STOPPED advancing it. That needs an instant.
     ///
@@ -113,7 +120,8 @@ const NEVER: i64 = i64::MIN;
 impl Signals {
     pub fn new() -> Self {
         Self {
-            poll_attempts: AtomicU64::new(0),
+            polls_recorded: AtomicU64::new(0),
+            attempts: AtomicU64::new(0),
             last_attempt_ms: AtomicI64::new(NEVER),
             last_observation_ms: AtomicI64::new(NEVER),
             consecutive_failures: AtomicU64::new(0),
@@ -125,7 +133,7 @@ impl Signals {
 
     /// Stamp a completed poll that observed something.
     pub fn observed(&self, at_ms: i64) {
-        self.poll_attempts.fetch_add(1, Ordering::Relaxed);
+        self.polls_recorded.fetch_add(1, Ordering::Relaxed);
         self.last_attempt_ms.store(at_ms, Ordering::Relaxed);
         self.last_observation_ms.store(at_ms, Ordering::Relaxed);
         self.consecutive_failures.store(0, Ordering::Relaxed);
@@ -157,7 +165,7 @@ impl Signals {
 
     /// Stamp a completed poll that observed nothing.
     pub fn failed(&self, class: FailureClass) {
-        self.poll_attempts.fetch_add(1, Ordering::Relaxed);
+        self.polls_recorded.fetch_add(1, Ordering::Relaxed);
         self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
         self.last_failure_class
             .store(encode_class(class), Ordering::Relaxed);
@@ -169,7 +177,27 @@ impl Signals {
     /// for its full timeout still counts as the loop being alive. Stamping
     /// after would make a slow upstream look like a dead loop.
     pub fn attempted(&self, at_ms: i64) {
+        self.attempts.fetch_add(1, Ordering::Relaxed);
         self.last_attempt_ms.store(at_ms, Ordering::Relaxed);
+    }
+
+    /// Ticks that started, and ticks that reached a verdict.
+    ///
+    /// A CONSERVATION IDENTITY, and its value comes entirely from the two
+    /// numbers having independent sources: attempts are stamped at the top of a
+    /// tick before anything can fail, verdicts are counted when one is
+    /// recorded. A total derived from its own parts always balances and proves
+    /// nothing.
+    ///
+    /// They diverge when a tick STARTED and recorded nothing, which happens
+    /// only when the store itself failed — every fetch result is an outcome
+    /// rather than an error. That state has no other signal today: no
+    /// observation row, no failure streak, nothing an operator can see.
+    pub fn attempt_ledger(&self) -> (u64, u64) {
+        (
+            self.attempts.load(Ordering::Relaxed),
+            self.polls_recorded.load(Ordering::Relaxed),
+        )
     }
 
     /// How long since the loop last attempted a poll. `None` if it never has.
@@ -198,8 +226,9 @@ impl Signals {
         self.store_open.store(1, Ordering::Relaxed);
     }
 
-    pub fn poll_attempts(&self) -> u64 {
-        self.poll_attempts.load(Ordering::Relaxed)
+    /// How many polls reached a verdict, successful or failed.
+    pub fn polls_recorded(&self) -> u64 {
+        self.polls_recorded.load(Ordering::Relaxed)
     }
 
     pub fn consecutive_failures(&self) -> u64 {
@@ -247,12 +276,12 @@ mod tests {
     fn a_failed_poll_advances_the_heartbeat_without_refreshing_knowledge() {
         let s = Signals::new();
         s.observed(1_000);
-        assert_eq!(s.poll_attempts(), 1);
+        assert_eq!(s.polls_recorded(), 1);
 
         s.failed(FailureClass::Network);
         s.failed(FailureClass::Network);
         // The loop is demonstrably running: three attempts.
-        assert_eq!(s.poll_attempts(), 3);
+        assert_eq!(s.polls_recorded(), 3);
         // But knowledge is still as old as the last real observation, which is
         // the distinction that keeps a failing fetcher from looking healthy.
         assert_eq!(s.observation_age_ms(5_000), Some(4_000));

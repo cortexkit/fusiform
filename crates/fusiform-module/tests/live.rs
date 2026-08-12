@@ -110,7 +110,7 @@ async fn a_live_poll_cycle_seeds_then_goes_conditional() {
     );
 
     // Four observations' worth of history: three ticks, none of which failed.
-    assert_eq!(ctx.signals.poll_attempts(), 3);
+    assert_eq!(ctx.signals.polls_recorded(), 3);
     assert_eq!(ctx.signals.consecutive_failures(), 0);
     assert_eq!(
         ctx.store.catalog_version().unwrap(),

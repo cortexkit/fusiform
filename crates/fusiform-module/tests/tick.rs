@@ -331,7 +331,7 @@ fn the_version_advances_once_per_change() {
 fn signals_reflect_observations_rather_than_attempts() {
     let f = fixture();
     run(&f, body(FIXTURE, None), 1_000);
-    assert_eq!(f.signals.poll_attempts(), 1);
+    assert_eq!(f.signals.polls_recorded(), 1);
     assert_eq!(f.signals.observation_age_ms(2_000), Some(1_000));
 
     for at in [2_000, 3_000, 4_000] {
@@ -347,7 +347,7 @@ fn signals_reflect_observations_rather_than_attempts() {
     }
 
     // The loop is demonstrably running.
-    assert_eq!(f.signals.poll_attempts(), 4);
+    assert_eq!(f.signals.polls_recorded(), 4);
     assert_eq!(f.signals.consecutive_failures(), 3);
     // But knowledge is as old as the last real observation, which is what stops
     // a failing fetcher from reporting healthy.

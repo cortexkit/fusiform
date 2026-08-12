@@ -317,3 +317,82 @@ const _: () = assert!(
     "the budget must clear two cadences, or ordinary scheduler slop reports a \
      healthy loop as dead"
 );
+
+/// A store that cannot be written is reported, not left to look like staleness.
+///
+/// Every fetch result is an OUTCOME and gets recorded, so a tick only returns
+/// `Err` when the store itself failed — disk full, lease lost, corruption. In
+/// that case nothing is written: no observation row, no failure streak, and the
+/// error goes to stderr where nothing reads it.
+///
+/// Measured with a probe before this existed: eleven consecutive store failures
+/// reported Ok for two hours, then Degraded-because-stale for three more, never
+/// once mentioning writes. An operator told "the catalog is five hours old"
+/// goes to look at the upstream, which is fine.
+///
+/// The identity is ASTRO's: assert that the buckets SUM to the population
+/// rather than that each bucket looks right. It only works because the two
+/// counters have independent sources — attempts stamped at the top of a tick
+/// before the store is touched, verdicts counted when one is recorded.
+#[test]
+fn ticks_that_reach_no_verdict_are_reported_as_a_write_problem() {
+    let s = Signals::default();
+    s.store_opened();
+    s.attempted(0);
+    s.observed(0);
+
+    // The store breaks. The loop keeps ticking; every tick returns Err before
+    // recording anything.
+    let cadence = fusiform_module::loop_::POLL_INTERVAL_MS;
+    for i in 1..=3 {
+        s.attempted(i * cadence);
+    }
+
+    let report = health::report(&s, 3 * cadence);
+    assert_eq!(report.status, HealthStatus::Degraded);
+
+    let detail = report.detail.unwrap();
+    assert!(
+        detail.contains("no verdict") && detail.contains("check the disk"),
+        "the operator must be pointed at the store rather than the upstream: {detail}"
+    );
+
+    // And this must fire BEFORE staleness would, or it reports the symptom.
+    // At three cadences the catalog is 90 minutes old, which is stale.
+    assert!(
+        !detail.contains("minutes old"),
+        "the cause must be reported rather than the staleness it causes: {detail}"
+    );
+
+    // The metrics carry both halves, so an operator can check the arithmetic
+    // rather than take health's word for it.
+    let m = report.metrics.unwrap();
+    assert_eq!(m["poll_attempts"], 4);
+    assert_eq!(m["polls_recorded"], 1);
+    assert_eq!(m["polls_unrecorded"], 3);
+}
+
+/// One unrecorded tick is not a problem, because it is reachable while healthy.
+///
+/// A health probe landing between the attempt stamp at the top of a tick and
+/// the observation write at its end sees a difference of exactly one, every
+/// time, on a module doing nothing wrong. Alerting on that would fire on the
+/// normal case.
+#[test]
+fn a_single_in_flight_tick_is_not_a_write_problem() {
+    let s = Signals::default();
+    s.store_opened();
+    s.attempted(0);
+    s.observed(0);
+
+    // A tick starts and has not finished yet.
+    s.attempted(1_000);
+
+    let report = health::report(&s, 1_000);
+    assert_eq!(
+        report.status,
+        HealthStatus::Ok,
+        "an in-flight tick must not be reported as a failure: {:?}",
+        report.detail
+    );
+}
