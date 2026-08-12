@@ -457,3 +457,56 @@ async fn a_recovery_clears_the_recorded_cause() {
         "a recovered module must not still be explaining an old failure"
     );
 }
+
+/// A real tick stamps the attempt, whatever the outcome.
+///
+/// This is the test that was missing, and a mutation is what showed it. The
+/// attempt stamp originally lived in the poll loop in `main.rs`; no test
+/// exercises that loop, since every test calls `tick` directly, so deleting the
+/// call reddened nothing. The signal that tells an operator the loop is alive
+/// could have been silently removed.
+///
+/// Moved into `tick` so the caller cannot forget it and this test reaches it.
+#[tokio::test]
+async fn a_tick_stamps_the_attempt_on_every_outcome() {
+    let upstream = Upstream::start(Behaviour::ServeCatalog);
+    let h = harness(&upstream.url);
+
+    assert_eq!(
+        h.signals.attempt_age_ms(1_000),
+        None,
+        "nothing has been attempted yet"
+    );
+
+    // A successful tick stamps it.
+    tick(&h.ctx, 1_000).await.unwrap();
+    assert_eq!(
+        h.signals.attempt_age_ms(1_000),
+        Some(0),
+        "a successful tick must stamp the attempt"
+    );
+
+    // And so does a failing one — which is the case that matters, because a
+    // loop that is alive and failing must not be reported as stopped.
+    upstream.set(Behaviour::ServerError);
+    tick(&h.ctx, 5_000).await.unwrap();
+    assert_eq!(
+        h.signals.attempt_age_ms(5_000),
+        Some(0),
+        "a FAILING tick must stamp the attempt too, or a prolonged outage \
+         reads as a dead loop and sends an operator to restart a module that \
+         is working correctly"
+    );
+
+    // Health agrees: alive and failing, not stopped.
+    let report = health::report(&h.signals, 5_000);
+    assert!(
+        !report
+            .detail
+            .as_deref()
+            .unwrap_or("")
+            .contains("not attempted"),
+        "a loop that just attempted must not be called stopped: {:?}",
+        report.detail
+    );
+}

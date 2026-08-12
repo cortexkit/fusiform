@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::{FailureClass, ObservationOutcome, SourceId, Timestamp};
-use fusiform_module::health;
+use fusiform_module::health::{self, LOOP_SILENT_AFTER_MS, STALE_AFTER_MS};
 use fusiform_module::signals::Signals;
 use fusiform_store::{CatalogStore, NewObservation};
 use subc_protocol::session::HealthStatus;
@@ -189,3 +189,131 @@ fn a_fresh_install_with_no_observation_is_still_ok() {
         report.detail
     );
 }
+
+/// A poll loop that has STOPPED is reported as itself, not as staleness.
+///
+/// Found by probing rather than by reasoning, and the numbers are why it
+/// mattered: before this, a dead loop reported Ok for two hours while an
+/// alive-but-failing loop reported Degraded in thirty minutes. The worse
+/// condition was the quieter one — failures announce themselves and absence
+/// does not.
+///
+/// The gap existed because health is stateless: it is called fresh on every
+/// probe with no memory of the last one, so the attempt COUNTER could never say
+/// it had stopped advancing. Only an instant can.
+///
+/// The distinction earns its keep beyond tidiness. A failing upstream may
+/// recover on its own; a loop that is not running never will, and an operator
+/// told "the catalog is two hours old" goes to look at the upstream.
+#[test]
+fn a_stopped_loop_is_named_rather_than_reported_as_staleness() {
+    let signals = Signals::default();
+    signals.store_opened();
+
+    // One healthy poll, then nothing ever again.
+    signals.observed(0);
+    signals.attempted(0);
+
+    // Within the silence budget: still Ok, because a single missed cadence is
+    // scheduler slop rather than a dead loop.
+    let early = health::report(&signals, 60 * 60_000);
+    assert_eq!(
+        early.status,
+        HealthStatus::Ok,
+        "one hour of silence is inside the budget: {:?}",
+        early.detail
+    );
+
+    // Past it: named as a stopped loop, with the action.
+    let late = health::report(&signals, 90 * 60_000);
+    assert_eq!(late.status, HealthStatus::Degraded);
+    let detail = late.detail.unwrap();
+    assert!(
+        detail.contains("not attempted a fetch"),
+        "the detail must name the loop, not the catalog's age: {detail}"
+    );
+    assert!(
+        detail.contains("restart the module"),
+        "and say what to do about it: {detail}"
+    );
+
+    // The probe instant above is only meaningful while it sits inside the
+    // staleness window — otherwise this test would pass on a report that said
+    // "stale" rather than "stopped". Compile-time, so moving STALE_AFTER_MS
+    // below it fails the build rather than quietly weakening the test.
+    const _: () = assert!(
+        90 * 60_000 < STALE_AFTER_MS,
+        "the 90-minute probe must sit inside the staleness window"
+    );
+}
+
+/// A loop that is alive and failing is NOT reported as stopped.
+///
+/// The distinguishing case, and the reason `attempted` is stamped separately
+/// from `observed`: a failing poll advances the attempt instant and not the
+/// observation instant. Without that split, every prolonged outage would be
+/// misreported as a dead loop and send an operator to restart a module that is
+/// working correctly.
+#[test]
+fn an_alive_but_failing_loop_is_not_called_stopped() {
+    let signals = Signals::default();
+    signals.store_opened();
+    signals.observed(0);
+
+    // Three hours of polling, every poll failing. The loop is alive and
+    // stamping attempts; only observation is stuck.
+    let mut at = 0;
+    for _ in 0..6 {
+        at += 30 * 60_000;
+        signals.attempted(at);
+        signals.failed(FailureClass::Network);
+    }
+
+    let report = health::report(&signals, at + 60_000);
+    assert_eq!(report.status, HealthStatus::Degraded);
+    let detail = report.detail.unwrap();
+    assert!(
+        !detail.contains("not attempted"),
+        "an alive loop must not be reported as stopped: {detail}"
+    );
+    assert!(
+        detail.contains("consecutive fetch failures") || detail.contains("catalog is"),
+        "it must be reported as what it is: {detail}"
+    );
+}
+
+/// A slow fetch does not look like a dead loop.
+///
+/// The attempt is stamped at the TOP of a tick rather than after it, so a fetch
+/// running to its full 90-second timeout still counts as the loop being alive.
+/// Stamping after would make a slow upstream indistinguishable from a stopped
+/// loop — the exact distinction the signal exists to draw.
+#[test]
+fn the_silence_budget_clears_a_full_timeout() {
+    // The worst legitimate gap between attempts: one cadence plus a fetch
+    // running to its full timeout.
+    const FETCH_TIMEOUT_MS: i64 = 90 * 1_000;
+    let worst_legitimate_gap = fusiform_module::loop_::POLL_INTERVAL_MS + FETCH_TIMEOUT_MS;
+
+    assert!(
+        LOOP_SILENT_AFTER_MS > worst_legitimate_gap,
+        "the budget ({LOOP_SILENT_AFTER_MS}ms) must clear the worst legitimate \
+         gap ({worst_legitimate_gap}ms), or a slow upstream reports as a dead loop"
+    );
+}
+
+/// The silence budget's bounds, enforced by the compiler.
+///
+/// Both are constants, so a test is the wrong instrument: an out-of-range value
+/// should fail the BUILD rather than a test someone has to run. Same treatment
+/// as the shrink guard's threshold, for the same reason.
+const _: () = assert!(
+    LOOP_SILENT_AFTER_MS < STALE_AFTER_MS,
+    "the loop check must fire BEFORE staleness, or a stopped loop is reported \
+     as its own symptom and an operator goes to look at the upstream"
+);
+const _: () = assert!(
+    LOOP_SILENT_AFTER_MS > 2 * fusiform_module::loop_::POLL_INTERVAL_MS,
+    "the budget must clear two cadences, or ordinary scheduler slop reports a \
+     healthy loop as dead"
+);

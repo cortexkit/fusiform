@@ -43,6 +43,19 @@ pub const STALE_AFTER_MS: i64 = 4 * 30 * 60 * 1_000;
 /// and this notices the pattern before the clock does.
 pub const FAILURE_STREAK_DEGRADED: u64 = 4;
 
+/// How long the poll loop may be silent before it is presumed dead.
+///
+/// Two cadences plus margin. The bound has to clear the worst LEGITIMATE gap
+/// between attempts, which is one interval plus a fetch running to its full
+/// 90-second timeout — about 31.5 minutes. Two cadences is 60, and the extra 10
+/// covers scheduler slop without approaching `STALE_AFTER_MS`.
+///
+/// Deliberately BELOW the staleness threshold, so a stopped loop surfaces as
+/// itself rather than later as its symptom. An operator told "the catalog is
+/// two hours old" goes looking at the upstream; an operator told "the loop is
+/// not running" restarts the module.
+pub const LOOP_SILENT_AFTER_MS: i64 = 70 * 60 * 1_000;
+
 /// Build a health report from mechanical signals alone.
 ///
 /// `now_ms` is passed in rather than read from the clock inside, so the
@@ -63,6 +76,35 @@ pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
 
     let age = signals.observation_age_ms(now_ms);
     let failures = signals.consecutive_failures();
+
+    // A loop that has STOPPED is checked before staleness, because it is the
+    // cause of the staleness that follows and an operator sent to look at the
+    // upstream would find nothing wrong with it.
+    //
+    // This gap exists because health is stateless — called fresh on every probe
+    // with no memory of the last one — so the attempt COUNTER can never say it
+    // stopped advancing. Only an instant can. Before this, a dead loop reported
+    // Ok for two hours while an alive-but-failing loop reported Degraded in
+    // thirty minutes: the worse condition was the quieter one, because failures
+    // announce themselves and absence does not.
+    //
+    // The two are worth distinguishing beyond tidiness. A failing upstream may
+    // recover on its own; a loop that is not running never will.
+    if let Some(attempt_age) = signals.attempt_age_ms(now_ms) {
+        if attempt_age > LOOP_SILENT_AFTER_MS {
+            return HealthReport {
+                status: HealthStatus::Degraded,
+                detail: Some(format!(
+                    "the poll loop has not attempted a fetch in {} minutes \
+                     (cadence is {}); it is not running and will not recover on \
+                     its own — restart the module",
+                    attempt_age / 60_000,
+                    crate::loop_::POLL_INTERVAL_MS / 60_000
+                )),
+                metrics: Some(metrics(signals, now_ms)),
+            };
+        }
+    }
 
     // Never having observed is not an error. A module that just started has an
     // empty history and a seed; calling that unhealthy would make every fresh
@@ -147,6 +189,10 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
             FailureClass::Implausible => "implausible",
         }),
         "observation_age_ms": signals.observation_age_ms(now_ms),
+        // How long since the loop last ATTEMPTED, distinct from how long since
+        // it last observed. A failing loop keeps this current while
+        // observation_age_ms grows; a stopped loop leaves both behind.
+        "attempt_age_ms": signals.attempt_age_ms(now_ms),
         "last_write_age_ms": signals.last_write_age_ms(now_ms),
         "store_open": signals.store_is_open(),
     })
@@ -188,8 +234,22 @@ mod tests {
     fn a_stale_catalog_is_degraded_not_failing() {
         let s = open_store();
         s.observed(0);
-        // Five hours later: well past four cadence intervals.
-        let r = report(&s, 5 * 60 * 60 * 1_000);
+
+        // Five hours later, with the loop STILL POLLING — every attempt
+        // failing, so the catalog ages while the loop stays alive. Keeping the
+        // attempts current is what makes this a staleness case rather than a
+        // stopped-loop case, and the distinction is the point: without the
+        // attempts, five hours of silence is a dead loop and health should say
+        // so instead.
+        let now = 5 * 60 * 60 * 1_000;
+        let mut at = 0;
+        while at + 30 * 60_000 <= now {
+            at += 30 * 60_000;
+            s.attempted(at);
+            s.failed(FailureClass::Network);
+        }
+
+        let r = report(&s, now);
         assert_eq!(
             r.status,
             HealthStatus::Degraded,

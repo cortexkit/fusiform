@@ -62,6 +62,17 @@ pub struct Signals {
     /// because the question health asks is whether the loop is running at all,
     /// and a loop that is stuck answers that by not advancing this.
     poll_attempts: AtomicU64,
+    /// When the loop last ATTEMPTED a poll, in unix ms, whatever the outcome.
+    ///
+    /// The counter above answers "how many", and health is called fresh on
+    /// every probe with no memory of the last one — so a counter alone can
+    /// never say the loop STOPPED advancing it. That needs an instant.
+    ///
+    /// Distinct from `last_observation_ms` on purpose, and the difference is
+    /// the whole point: an attempt that failed advances this and not that. A
+    /// loop that is alive and failing keeps this current; a loop that has
+    /// stopped leaves both behind, and only this one can tell them apart.
+    last_attempt_ms: AtomicI64,
     /// When the last poll that OBSERVED something finished, in unix ms.
     ///
     /// Observed, not succeeded: a 304 observed that the content is unchanged
@@ -103,6 +114,7 @@ impl Signals {
     pub fn new() -> Self {
         Self {
             poll_attempts: AtomicU64::new(0),
+            last_attempt_ms: AtomicI64::new(NEVER),
             last_observation_ms: AtomicI64::new(NEVER),
             consecutive_failures: AtomicU64::new(0),
             last_failure_class: AtomicU64::new(CLASS_NONE),
@@ -114,6 +126,7 @@ impl Signals {
     /// Stamp a completed poll that observed something.
     pub fn observed(&self, at_ms: i64) {
         self.poll_attempts.fetch_add(1, Ordering::Relaxed);
+        self.last_attempt_ms.store(at_ms, Ordering::Relaxed);
         self.last_observation_ms.store(at_ms, Ordering::Relaxed);
         self.consecutive_failures.store(0, Ordering::Relaxed);
         // Cleared with the streak it describes. A class outliving its streak
@@ -148,6 +161,23 @@ impl Signals {
         self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
         self.last_failure_class
             .store(encode_class(class), Ordering::Relaxed);
+    }
+
+    /// Stamp that the loop attempted a poll, whatever came of it.
+    ///
+    /// Called at the TOP of a tick rather than after it, so a fetch that hangs
+    /// for its full timeout still counts as the loop being alive. Stamping
+    /// after would make a slow upstream look like a dead loop.
+    pub fn attempted(&self, at_ms: i64) {
+        self.last_attempt_ms.store(at_ms, Ordering::Relaxed);
+    }
+
+    /// How long since the loop last attempted a poll. `None` if it never has.
+    pub fn attempt_age_ms(&self, now_ms: i64) -> Option<i64> {
+        match self.last_attempt_ms.load(Ordering::Relaxed) {
+            NEVER => None,
+            at => Some(now_ms - at),
+        }
     }
 
     /// The class of the most recent failure, if the current streak has one.

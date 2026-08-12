@@ -76,6 +76,20 @@ pub struct PollContext {
 
 /// Run one poll cycle: fetch, then apply.
 pub async fn tick(ctx: &PollContext, now_ms: i64) -> Result<TickReport, TickError> {
+    // Stamp the attempt FIRST, and stamp it HERE rather than in the caller.
+    //
+    // First, because a fetch that hangs for its full 90-second timeout must
+    // still show the loop as alive: stamping after would make a slow upstream
+    // indistinguishable from a dead loop, which is the exact distinction this
+    // signal exists to draw.
+    //
+    // Here rather than in the caller, because a mutation proved the caller
+    // version untestable. The stamp lived in the poll loop in `main.rs`, no
+    // test exercises that loop — every test calls `tick` directly — and
+    // deleting the call reddened nothing. A signal whose only writer is
+    // unreachable from the test suite is a signal that can be silently removed.
+    ctx.signals.attempted(now_ms);
+
     // The ETag from the last observation that carried one. Read per tick rather
     // than cached in memory: after a restart the in-memory value would be gone
     // and every first poll after a restart would pull 3.6 MB it did not need.

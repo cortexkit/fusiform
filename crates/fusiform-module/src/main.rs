@@ -227,6 +227,9 @@ async fn run_poll_loop(store: Arc<CatalogStore>, signals: Arc<Signals>) {
 
     loop {
         interval.tick().await;
+
+        // `tick` stamps the attempt itself, at the top, so this loop cannot
+        // forget to and a test calling tick directly exercises it.
         match tick(&ctx, now_ms()).await {
             Ok(report) => {
                 eprintln!(
