@@ -174,6 +174,26 @@ pub struct CatalogGetResponse {
 /// otherwise.
 ///
 /// Convention adopted from CKCRED via SUBC.
+///
+/// # It names WHOEVER built this crate, not fusiform
+///
+/// `option_env!` reads the environment of the build that compiled THIS crate.
+/// For fusiform's own binaries that is fusiform's release build, which is the
+/// intent. For a consumer who compiles `fusiform-protocol` into their binary,
+/// it is THEIR build — so this constant would report their rev under a name
+/// that reads like fusiform's.
+///
+/// That is the same definition-site hazard that put the wire crate's version on
+/// both binaries an hour ago, surviving in a second place because a constant
+/// looks less like a call than a macro does. Verified rather than assumed:
+/// cargo does re-track the variable, so `CK_BUILD_REV=AAAA` then `=BBBB` with
+/// no source change produces two different binaries.
+///
+/// So a consumer must not read this as "which fusiform served me". The rev of
+/// the module that answered a request is not available from a type a consumer
+/// compiled themselves; it comes from `ck-fusiform --version` on the running
+/// binary, or from the module's own report. This constant is honest only about
+/// the build it is compiled into.
 pub const BUILD_REV: &str = match option_env!("CK_BUILD_REV") {
     Some(rev) => rev,
     None => "unknown",
