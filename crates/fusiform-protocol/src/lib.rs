@@ -182,6 +182,22 @@ pub struct CatalogGetResponse {
 /// **Advisory.** Descriptive. A consumer may display or filter on these; a
 /// wrong value is visible rather than silent.
 ///
+/// # The classes are not symmetrically evidenced, and the difference matters
+///
+/// `ByteAffecting` is a fact about a CONSUMER'S RENDERER, not about the value.
+/// The three entries carrying it are there because BROCA read them out of their
+/// own source and said so. Nothing in fusiform can verify or refute that, and
+/// nothing in fusiform can discover a fourth.
+///
+/// So `Advisory` here means "no consumer has told fusiform this reaches their
+/// wire" — not "fusiform has established that it does not". The two read
+/// identically in this table and are very different claims.
+///
+/// **If you consume this catalog and render a field marked `Advisory` into a
+/// provider request, that entry is wrong and fusiform cannot find out any other
+/// way.** Say so; it will be reclassified and the class carries your
+/// attribution.
+///
 /// # What fusiform never serves, and why it is not an omission
 ///
 /// Renderer-selection fields — `provider.npm`, per-model provider overrides,

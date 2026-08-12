@@ -10,6 +10,33 @@
 //! tests because it needs both the producer and the wire crate, and
 //! `fusiform-protocol` stays a leaf: a consumer compiling against it must not
 //! pull in the store.
+//!
+//! # What this test could NOT have told me, stated because it is not obvious
+//!
+//! ASTRO's test for a check worth trusting: could this artifact have told me I
+//! was wrong? Applied here, the answer differs by claim, and only one of the
+//! three is genuinely checked from this side.
+//!
+//! **The key set: yes.** It comes from the real normalizer over real upstream
+//! bytes. A fact appearing or vanishing reddens this, and neither the table nor
+//! my belief about it can prevent that.
+//!
+//! **Rates are money: yes, structurally.** The key prefix determines the class,
+//! so a rate classified otherwise is a contradiction the code can find.
+//!
+//! **The classification of everything else: NO.** Whether
+//! `capability.attachment` is advisory or byte-affecting is a fact about a
+//! CONSUMER'S RENDERER, and nothing in this repository can contradict me about
+//! it. The three byte-affecting entries are marked as such because BROCA read
+//! them out of their own source and told me; the advisory entries are advisory
+//! because nobody has said otherwise, which is a weaker claim wearing the same
+//! typeface.
+//!
+//! That asymmetry is not fixable from here and pretending otherwise would be
+//! the defect this file exists to prevent. It is why the classification carries
+//! attribution in `SERVED_FACTS` rather than reading as fusiform's own
+//! determination, and why the standing question to consumers is whether the
+//! byte-affecting set is still complete rather than whether it looks right.
 
 use fusiform_core::normalize::normalize_models_dev;
 use fusiform_store::ingest::fact_keys_of;
