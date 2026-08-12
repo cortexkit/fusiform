@@ -510,3 +510,56 @@ async fn a_tick_stamps_the_attempt_on_every_outcome() {
         report.detail
     );
 }
+
+/// The in-memory failure signal is stamped BEFORE the observation write.
+///
+/// ASTRO's fourth variant, checked for here on their report: a failure path
+/// that depends on the failing subsystem cannot report on it. `signals.failed`
+/// is process-local and exists precisely to be readable when the store is not —
+/// and it was stamped AFTER the observation write, so the `?` on that write
+/// returned early and a store outage suppressed the record of a fetch outage
+/// happening at the same time.
+///
+/// Measured with a probe before the fix: network down and disk broken
+/// together, health reported `consecutive_failures: 0` and
+/// `last_failure_class: null` for three hours while the attempt ledger
+/// correctly reported the store problem. The upstream outage was invisible.
+///
+/// # Why this is a source check rather than a runtime one
+///
+/// Making a real store refuse a write is not reachable from a test. Deleting
+/// the file does not work — SQLite holds an open descriptor and writes to the
+/// unlinked inode. Taking the writer lease from a second instance does not
+/// either: the lease is exclusive, so the second open is refused rather than
+/// the first being fenced. A mock store would prove only that a fake behaved as
+/// instructed.
+///
+/// So this asserts the ordering in the shipped source. It is narrower than a
+/// behavioural test and it is not vacuous: swapping the two lines reddens it by
+/// name, which is the mutation that reintroduces the defect. Stated plainly
+/// rather than dressed up, because a test that cannot reach the failure it
+/// guards should say so.
+#[test]
+fn the_failure_signal_is_stamped_before_the_store_write() {
+    const SOURCE: &str = include_str!("../src/loop_.rs");
+
+    let body = SOURCE
+        .split_once("fn record_failure(")
+        .expect("record_failure must exist")
+        .1;
+
+    let stamp = body
+        .find("ctx.signals.failed(class);")
+        .expect("record_failure must stamp the in-memory failure signal");
+    let write = body
+        .find(".record_observation(")
+        .expect("record_failure must write an observation row");
+
+    assert!(
+        stamp < write,
+        "`signals.failed` must be stamped BEFORE `record_observation`. It is \
+         the signal that survives a store outage, and writing it behind the \
+         store means a broken disk hides every simultaneous upstream failure — \
+         measured at consecutive_failures: 0 through a three-hour network outage."
+    );
+}

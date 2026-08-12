@@ -396,6 +396,29 @@ fn implausible_shrink(
 /// row and the class returned to the caller cannot disagree — they are the same
 /// value. Two call sites each constructing both independently is the shape that
 /// lets a mutation change one and leave the other, with nothing failing.
+///
+/// # The in-memory signal is stamped FIRST, and the order is the point
+///
+/// `signals.failed` is process-local and exists to be readable when the store
+/// is not. Stamping it after the write made that false: the `?` on the write
+/// returned early, so a store outage suppressed the record of a fetch outage
+/// happening at the same time.
+///
+/// Measured with a probe. Network down and disk broken together, health
+/// reported `consecutive_failures: 0` and `last_failure_class: null` for three
+/// hours — the fetch failures were invisible, and the one signal designed to
+/// survive a store outage did not, because it was written behind the store.
+///
+/// This is ASTRO's fourth variant, found in their capacity loop and checked for
+/// here on their report: **a failure path that depends on the failing subsystem
+/// cannot report on it.** The reporter and the reported must be independent,
+/// and "process-local" is not independence if the code path reaches it through
+/// the thing that failed.
+///
+/// The two records now say different things when they disagree, which is
+/// correct rather than a hazard: the signal says a fetch failed (true, it did),
+/// and the missing row says the store could not record it (also true, and
+/// reported separately by the attempt ledger in `health`).
 fn record_failure(
     ctx: &ApplyCtx<'_>,
     class: FailureClass,
@@ -404,6 +427,8 @@ fn record_failure(
     duration: std::time::Duration,
     raw_hash: Option<String>,
 ) -> Result<TickReport, TickError> {
+    ctx.signals.failed(class);
+
     let id = ctx
         .store
         .record_observation(&NewObservation {
@@ -421,9 +446,6 @@ fn record_failure(
             detail: Some(detail),
         })
         .map_err(TickError::Store)?;
-    // The same class that went into the observation row, so health and the
-    // stored history cannot disagree about what failed.
-    ctx.signals.failed(class);
     Ok(TickReport {
         outcome: TickOutcome::Failed { class },
         observation_id: id,
