@@ -55,8 +55,11 @@ pub struct NormalizedRate {
 /// What a model can consume and emit.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Capabilities {
-    pub input_modalities: Vec<Modality>,
-    pub output_modalities: Vec<Modality>,
+    /// What the model accepts. `None` when the upstream published no modality
+    /// block at all, which is not the same claim as an empty list.
+    pub input_modalities: Option<Vec<Modality>>,
+    /// What the model produces. `None` when unpublished, per `input_modalities`.
+    pub output_modalities: Option<Vec<Modality>>,
     pub reasoning: Option<bool>,
     pub tool_call: Option<bool>,
     pub attachment: Option<bool>,
@@ -289,17 +292,30 @@ fn normalize_model(
     let label = format!("{provider_id}/{model_id}");
     let key = ModelKey::new(SourceId::ModelsDev, provider_id, model_id);
 
+    // Modalities are `None` when the upstream publishes no block, and an empty
+    // Vec only when it publishes an empty list.
+    //
+    // The difference is the project's own absent-vs-zero rule, which every
+    // other field here follows: `reasoning` is `Option<bool>` so a missing flag
+    // is unknown rather than false, and a zero limit becomes absence rather
+    // than a capacity of zero. Collapsing a missing block to `[]` states that
+    // the model accepts NO input modality — a positive claim about a model that
+    // certainly accepts something, manufactured from silence.
+    //
+    // Measured 2026-08-11: zero of 6,254 models omit the block, so this is
+    // latent rather than live. It is still worth fixing at the parse boundary,
+    // because the day an upstream drops the block is the day the wrong reading
+    // ships as data — and a consumer selecting models by modality would filter
+    // out every affected model with nothing looking wrong.
     let capabilities = Capabilities {
         input_modalities: raw
             .modalities
             .as_ref()
-            .map(|m| m.input.iter().map(|s| Modality::parse(s)).collect())
-            .unwrap_or_default(),
+            .map(|m| m.input.iter().map(|s| Modality::parse(s)).collect()),
         output_modalities: raw
             .modalities
             .as_ref()
-            .map(|m| m.output.iter().map(|s| Modality::parse(s)).collect())
-            .unwrap_or_default(),
+            .map(|m| m.output.iter().map(|s| Modality::parse(s)).collect()),
         reasoning: raw.reasoning,
         tool_call: raw.tool_call,
         attachment: raw.attachment,

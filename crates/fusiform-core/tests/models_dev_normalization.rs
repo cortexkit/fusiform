@@ -393,18 +393,65 @@ fn modalities_are_preserved_exactly() {
     let outcome = catalog();
 
     let veo = model(&outcome, "poe/google/veo-3");
-    assert_eq!(veo.capabilities.output_modalities, vec![Modality::Video]);
+    assert_eq!(
+        veo.capabilities.output_modalities,
+        Some(vec![Modality::Video])
+    );
 
     let sdxl = model(&outcome, "poe/stabilityai/stablediffusionxl");
-    assert_eq!(sdxl.capabilities.output_modalities, vec![Modality::Image]);
+    assert_eq!(
+        sdxl.capabilities.output_modalities,
+        Some(vec![Modality::Image])
+    );
     assert_eq!(
         sdxl.capabilities.input_modalities,
-        vec![Modality::Text, Modality::Image]
+        Some(vec![Modality::Text, Modality::Image])
     );
 
     let gemini = model(&outcome, "google/gemini-flash-latest");
     assert!(gemini
         .capabilities
         .input_modalities
+        .as_ref()
+        .expect("this model publishes a modality block")
         .contains(&Modality::Audio));
+}
+
+/// A model with no modality block gets `None`, not an empty list.
+///
+/// An empty list is a positive claim that the model accepts nothing. A missing
+/// block is the upstream saying nothing at all, and the two must not collapse:
+/// a consumer selecting models by modality would filter out every affected
+/// model with nothing looking wrong.
+///
+/// Latent rather than live — measured 2026-08-11, zero of 6,254 models omit the
+/// block. Fixed at the parse boundary anyway, because the day one does is the
+/// day the wrong reading ships as data.
+#[test]
+fn a_missing_modality_block_is_unknown_rather_than_empty() {
+    let mut doc: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
+    let model_obj = doc
+        .get_mut("anthropic")
+        .and_then(|p| p.get_mut("models"))
+        .and_then(|m| m.get_mut("claude-sonnet-4-5"))
+        .and_then(|m| m.as_object_mut())
+        .expect("the fixture carries this model");
+    let removed = model_obj.remove("modalities");
+    assert!(
+        removed.is_some(),
+        "the fixture must have had a modality block, or this proves nothing"
+    );
+
+    let outcome = normalize_models_dev(&serde_json::to_vec(&doc).unwrap()).unwrap();
+    let sonnet = model(&outcome, "anthropic/claude-sonnet-4-5");
+    assert_eq!(
+        sonnet.capabilities.input_modalities, None,
+        "a missing block is unknown, never an empty list"
+    );
+    assert_eq!(sonnet.capabilities.output_modalities, None);
+
+    // And a model that DOES publish one is unaffected, so this is not just
+    // everything becoming None.
+    let other = model(&outcome, "openai/gpt-5.6-luna");
+    assert!(other.capabilities.input_modalities.is_some());
 }

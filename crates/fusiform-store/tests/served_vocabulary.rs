@@ -14,6 +14,7 @@
 
 use fusiform_core::normalize::normalize_models_dev;
 use fusiform_store::ingest::fact_keys_of;
+use fusiform_store::FactKey;
 
 const FIXTURE: &[u8] = include_bytes!("../../fusiform-core/fixtures/models-dev-excerpt.json");
 
@@ -265,4 +266,66 @@ fn every_namespace_prefix_selects_real_facts() {
             "{key:?} belongs to no declared namespace, so no plane filter reaches it"
         );
     }
+}
+
+/// An unknown modality list is stored as `null`, never as `[]`.
+///
+/// The parse boundary keeps the distinction — `None` for a missing block,
+/// `Some(vec![])` for a published empty one — and it is worth nothing if the
+/// storage boundary flattens it. An empty list is a positive claim that the
+/// model accepts no input modality; null says the upstream did not say.
+///
+/// Mutation-proven, and it had to be: rendering `None` as `[]` passed every
+/// other test in this repository, because the only assertion on the
+/// distinction lived on the core type rather than on the stored value.
+#[test]
+fn an_unknown_modality_list_is_stored_as_null() {
+    let mut doc: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
+    let model_obj = doc
+        .get_mut("anthropic")
+        .and_then(|p| p.get_mut("models"))
+        .and_then(|m| m.get_mut("claude-sonnet-4-5"))
+        .and_then(|m| m.as_object_mut())
+        .expect("the fixture carries this model");
+    assert!(
+        model_obj.remove("modalities").is_some(),
+        "the fixture must have had a block, or the mutation proves nothing"
+    );
+
+    let outcome = normalize_models_dev(&serde_json::to_vec(&doc).unwrap()).unwrap();
+    let model = outcome
+        .catalog
+        .models()
+        .find(|m| m.key.model_id == "claude-sonnet-4-5")
+        .expect("the model normalizes");
+
+    let facts: std::collections::BTreeMap<_, _> = fusiform_store::ingest::facts_with_values(model)
+        .into_iter()
+        .collect();
+    let input = facts
+        .get(&FactKey::capability("input_modalities"))
+        .expect("the fact is always emitted");
+    assert_eq!(
+        input, "null",
+        "an unpublished modality block must store as null, not as an empty list"
+    );
+
+    // A model that DOES publish one still stores a list, so this is not
+    // everything becoming null.
+    let published = outcome
+        .catalog
+        .models()
+        .find(|m| m.key.model_id == "gpt-5.6-luna")
+        .expect("this model publishes modalities");
+    let facts: std::collections::BTreeMap<_, _> =
+        fusiform_store::ingest::facts_with_values(published)
+            .into_iter()
+            .collect();
+    let input = facts
+        .get(&FactKey::capability("input_modalities"))
+        .expect("the fact is always emitted");
+    assert!(
+        input.starts_with('[') && input.contains("text"),
+        "a published block must store as a list: {input}"
+    );
 }

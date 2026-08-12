@@ -291,6 +291,17 @@ pub fn fact_keys_of(model: &NormalizedModel) -> Vec<FactKey> {
     facts_of(model).into_iter().map(|(k, _)| k).collect()
 }
 
+/// The facts a model contributes, with their stored values.
+///
+/// Public for the same reason as [`fact_keys_of`], one level down: a test that
+/// asserts on values it renders itself proves nothing about what is stored. The
+/// modality distinction — `null` for unpublished, `[]` for published-empty —
+/// survived in the domain type while the storage boundary flattened it, and no
+/// test could see that because none could reach the stored value.
+pub fn facts_with_values(model: &NormalizedModel) -> Vec<(FactKey, String)> {
+    facts_of(model)
+}
+
 fn facts_of(model: &NormalizedModel) -> Vec<(FactKey, String)> {
     let mut facts = vec![
         // Limits. `null` is a real value here: a limit that stops being
@@ -378,7 +389,15 @@ fn json_opt_bool(v: Option<bool>) -> String {
     }
 }
 
-fn json_modalities(mods: &[fusiform_core::Modality]) -> String {
+fn json_modalities(mods: &Option<Vec<fusiform_core::Modality>>) -> String {
+    // `null` when the upstream published no modality block, distinct from `[]`
+    // when it published an empty one. The same absent-vs-zero split the rest of
+    // this file uses: an empty list claims the model accepts nothing, which is
+    // a statement about the model rather than about the document.
+    let Some(mods) = mods else {
+        return "null".to_string();
+    };
+
     // Sorted so a reordering upstream does not read as a capability change. The
     // upstream's array order is not information — it carries no ranking — and
     // treating it as information would manufacture change events.
