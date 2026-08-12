@@ -107,6 +107,25 @@ v1 ships no non-LLM source. Do not build speculative fetchers.
 
 ## Open items (the new owner inherits these WITH their history)
 
+> **On the size estimates in this section.** Where an item describes work in
+> another repository, its scope language is the least reliable thing here, and
+> not through carelessness: scope language is written by whoever proposes a
+> change, which is systematically the party furthest from the code being
+> changed. The information needed to size it is on the other side of a
+> boundary, and nothing in the writing process crosses that boundary.
+>
+> Item 3 is the worked example. "The retirement of `cortexkit-model-catalog`"
+> read as a migration for weeks; the measurement is one type at one call site.
+> Lifecycle verbs — retire, migrate, deprecate, consolidate, cut over — carry
+> an implied scope through connotation, and each implies a scale it has not
+> measured.
+>
+> The fix costs one message, and nobody sent it: **ask the other party for the
+> count before writing the estimate.** "How many call sites touch this?" would
+> have collapsed item 3 the day it was written. Applies to items 1 and 2 too,
+> which describe consumers that do not exist yet — there is nobody to ask, so
+> those numbers are not estimates at all and should not be read as any.
+
 1. **Who drives non-LLM generation?** Settled July 17: astrocyte METERS all
    AI spend; generators are "future modules with usage telemetry of their
    own" — driving was left unowned, deliberately. Current position
