@@ -3,8 +3,25 @@
 Fusiform's store is enrolled with `engram`, the fleet's backup module, as a
 single portable whole-database entry.
 
-**Installed on this machine 2026-08-12**, after ENGRAM reviewed the descriptor
-and ruled it correct as written.
+**Installed and captured on this machine 2026-08-12.** ENGRAM reviewed the
+descriptor and ruled it correct as written; the first capture afterwards
+published as generation 156 carrying `fusiform/store`, taking the fleet's
+`entry_count` from 6 to 7.
+
+**How to confirm coverage without asking anyone** (ENGRAM's own suggestion):
+`entry_count` on the newest published generation. It should read 7 and stay
+there unless a module joins or leaves.
+
+```sh
+sqlite3 ~/.local/share/cortexkit/engram/store.db \
+  "SELECT device_seq, entry_count, published FROM generations \
+   ORDER BY device_seq DESC LIMIT 3;"
+```
+
+The descriptor existing on disk is NOT the witness. It was present for over an
+hour before any capture carried it, and during that window fusiform was
+correctly enrolled and entirely uncaptured — a state that looks identical, from
+the file system, to being backed up.
 
 The descriptor lives at `crates/fusiform-module/data/engram-catalog.json` in
 this repository and must be **installed to the module's data directory** to
