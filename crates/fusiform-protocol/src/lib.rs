@@ -108,6 +108,11 @@ pub struct CatalogGetResponse {
     /// Model identity to fact map. The identity is `provider_id/model_id`, the
     /// pair that makes a model unique — measured, 6,253 model rows carry only
     /// 2,957 distinct ids.
+    ///
+    /// The inner key is a FACT KEY, from the closed set in [`SERVED_FACTS`].
+    /// Read that before deciding what to do with a value: it records which
+    /// facts can change a consumer's request bytes, which are advisory, and
+    /// which fusiform deliberately never serves.
     pub models: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
 
     /// Facts this read withheld because their record is known bad.
@@ -122,6 +127,142 @@ pub struct CatalogGetResponse {
     /// action and is the one that costs money.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub withheld: Vec<WithheldFactWire>,
+}
+
+/// Every fact fusiform serves, and what a consumer may do with it.
+///
+/// # Why this is in the wire crate rather than in fusiform's documentation
+///
+/// The set of served facts is checkable from the payload — a consumer can
+/// enumerate the keys. What is NOT checkable from the payload is which of them
+/// may change the bytes a consumer sends to a provider, and that distinction
+/// decides whether a wrong value is a cosmetic defect or a silent behaviour
+/// change.
+///
+/// It lived in fusiform's charter and in one conversation with the consumer who
+/// named the three byte-affecting fields. Neither is reachable from the artifact
+/// a consumer compiles against, which makes it a relationship recorded nowhere a
+/// check can see — the failure mode ASTRO and I isolated on 2026-08-12, where
+/// every available verification confirms the shapes and none can find the error,
+/// because what is missing is not a wrong value but an unrecorded meaning.
+///
+/// # The classes
+///
+/// **Byte-affecting.** A consumer legitimately renders these into a request, so
+/// a wrong value changes what goes on the wire to a provider with nothing
+/// failing. BROCA named these from their own source: `limits.context` drives
+/// transform pressure, `limits.output` is rendered as a request parameter, and
+/// `capability.reasoning` gates their reasoning policy — a false value strips
+/// thinking blocks and the model simply stops reasoning, silently.
+///
+/// **Money.** Rates price real usage. Absent, zero and unknown are three
+/// distinct states here and must not be collapsed: an unpriced fact is a
+/// refusal to state a rate, not a rate of zero.
+///
+/// **Advisory.** Descriptive. A consumer may display or filter on these; a
+/// wrong value is visible rather than silent.
+///
+/// # What fusiform never serves, and why it is not an omission
+///
+/// Renderer-selection fields — `provider.npm`, per-model provider overrides,
+/// and `experimental` — are parsed, flagged, and never emitted. Fusiform says
+/// WHAT exists; it never says HOW to speak to it. A consumer that found an
+/// endpoint or an auth shape here would be taking wire-family resolution from a
+/// catalog, which is the one thing this module is chartered never to do.
+/// `crates/fusiform-store/tests/served_vocabulary.rs` fails if one appears.
+pub const SERVED_FACTS: &[ServedFact] = &[
+    ServedFact {
+        key: "existence",
+        class: FactClass::Advisory,
+        note: "present, absent, or retired. Absence is a withdrawal, not a gap.",
+    },
+    ServedFact {
+        key: "limit.context",
+        class: FactClass::ByteAffecting,
+        note: "context window; a consumer sizes transform pressure on it",
+    },
+    ServedFact {
+        key: "limit.output",
+        class: FactClass::ByteAffecting,
+        note: "maximum output; rendered as a request parameter",
+    },
+    ServedFact {
+        key: "capability.reasoning",
+        class: FactClass::ByteAffecting,
+        note: "gates a reasoning policy; a wrong false silently strips thinking",
+    },
+    ServedFact {
+        key: "capability.tool_call",
+        class: FactClass::Advisory,
+        note: "whether the model accepts tool definitions",
+    },
+    ServedFact {
+        key: "capability.attachment",
+        class: FactClass::Advisory,
+        note: "whether the model accepts attachments",
+    },
+    ServedFact {
+        key: "capability.input_modalities",
+        class: FactClass::Advisory,
+        note: "null when unpublished, which is not the same as an empty list",
+    },
+    ServedFact {
+        key: "capability.output_modalities",
+        class: FactClass::Advisory,
+        note: "null when unpublished, which is not the same as an empty list",
+    },
+    ServedFact {
+        key: "rate.input",
+        class: FactClass::Money,
+        note: "per million input tokens",
+    },
+    ServedFact {
+        key: "rate.output",
+        class: FactClass::Money,
+        note: "per million output tokens",
+    },
+    ServedFact {
+        key: "rate.cache_read",
+        class: FactClass::Money,
+        note: "per million cached-read tokens",
+    },
+    ServedFact {
+        key: "rate.cache_write",
+        class: FactClass::Money,
+        note: "per million cache-write tokens",
+    },
+    ServedFact {
+        key: "rate.reasoning",
+        class: FactClass::Money,
+        note: "per million reasoning tokens",
+    },
+];
+
+/// One served fact and what a consumer may do with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServedFact {
+    /// The exact key as it appears in [`CatalogGetResponse::models`].
+    ///
+    /// A tiered rate appends `.above_context.<threshold>` — the threshold comes
+    /// from the upstream and is not fusiform's to enumerate, so tiered keys are
+    /// matched by prefix rather than listed.
+    pub key: &'static str,
+    pub class: FactClass,
+    /// What the value means, in one line, for a consumer deciding what to do
+    /// with it.
+    pub note: &'static str,
+}
+
+/// What a wrong value in this fact would do to a consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FactClass {
+    /// A consumer may render this into a provider request. A wrong value
+    /// changes the bytes sent, with nothing failing.
+    ByteAffecting,
+    /// A rate. Prices real usage; absent, zero and unknown are distinct.
+    Money,
+    /// Descriptive. A wrong value is visible rather than silent.
+    Advisory,
 }
 
 /// A fact a read refused to answer, on the wire.
