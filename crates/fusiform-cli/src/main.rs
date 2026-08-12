@@ -378,7 +378,42 @@ fn print_status(response: &serde_json::Value) {
             .and_then(|v| v.as_i64())
             .map(|d| format!("  {d}ms"))
             .unwrap_or_default();
-        println!("  {}  {outcome}{class}{took}", format_instant(at));
+        // What the poll actually changed, when it changed anything.
+        //
+        // An era count alone misleads in a consistent direction: measured over
+        // 11 hours of live polling, 72% of era churn was models arriving and
+        // leaving rather than facts changing, because an arriving model writes
+        // one era per fact it has. One real poll wrote 96 eras for 19 genuine
+        // changes.
+        //
+        // The parts are printed rather than the total, and only the non-zero
+        // ones, so a line says what happened instead of how much happened.
+        let changes = poll.get("changes").and_then(|c| {
+            let n = |k: &str| c.get(k).and_then(|v| v.as_i64()).unwrap_or(0);
+            let (changed, arrived, withdrawn) = (
+                n("facts_changed"),
+                n("models_arrived"),
+                n("models_withdrawn"),
+            );
+
+            let mut parts = Vec::new();
+            if changed > 0 {
+                parts.push(format!("{changed} facts changed"));
+            }
+            if arrived > 0 {
+                parts.push(format!("{arrived} models arrived"));
+            }
+            if withdrawn > 0 {
+                parts.push(format!("{withdrawn} withdrawn"));
+            }
+            (!parts.is_empty()).then(|| format!("  — {}", parts.join(", ")))
+        });
+
+        println!(
+            "  {}  {outcome}{class}{took}{}",
+            format_instant(at),
+            changes.unwrap_or_default()
+        );
     }
 }
 

@@ -31,9 +31,9 @@ use serde::Deserialize;
 // a route should not have to know which crate the type is declared in.
 pub use fusiform_protocol::{
     CatalogGetRequest, CatalogGetResponse, CorrectRequest, CorrectResponse, CorrectedFact,
-    CorrectionDetail, HistoryEra, HistoryRequest, HistoryResponse, StatusPoll, StatusRequest,
-    StatusResponse, ToolResponse, WithheldFactWire, TOOLS, TOOL_CORRECT, TOOL_GET, TOOL_HISTORY,
-    TOOL_STATUS,
+    CorrectionDetail, HistoryEra, HistoryRequest, HistoryResponse, PollChanges, StatusPoll,
+    StatusRequest, StatusResponse, ToolResponse, WithheldFactWire, TOOLS, TOOL_CORRECT, TOOL_GET,
+    TOOL_HISTORY, TOOL_STATUS,
 };
 
 /// Why a request could not be served.
@@ -197,6 +197,16 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
                 failure_class: p.failure_class,
                 detail: p.detail,
                 duration_ms: p.duration_ms,
+                // Omitted when the poll wrote nothing — a 304, an unchanged
+                // document, or a failure. Reporting zeroes there would put
+                // four fields on every ordinary poll to say nothing happened,
+                // which the outcome already says.
+                changes: (p.eras > 0).then_some(PollChanges {
+                    eras: p.eras,
+                    models_arrived: p.models_arrived,
+                    models_withdrawn: p.models_withdrawn,
+                    facts_changed: p.facts_changed,
+                }),
             })
             .collect(),
     })

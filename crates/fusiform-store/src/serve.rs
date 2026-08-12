@@ -428,6 +428,20 @@ pub struct ObservationRow {
     pub normalized_hash: Option<String>,
     pub raw_hash: Option<String>,
     pub duration_ms: Option<i64>,
+    /// Eras this poll opened. Zero for a 304, an unchanged document, or a
+    /// failure.
+    pub eras: i64,
+    /// Models this poll saw for the first time, or saw return.
+    pub models_arrived: i64,
+    /// Models this poll found no longer published.
+    pub models_withdrawn: i64,
+    /// Facts that moved on a model already known — the count an operator
+    /// usually means by "what changed".
+    ///
+    /// Separate from `eras` because an arriving model writes one era per fact
+    /// it has, and measured on real polls that dominates: 96 eras for 19
+    /// changes, 61 for 15.
+    pub facts_changed: i64,
 }
 
 /// One era in a fact's history.
@@ -454,23 +468,59 @@ impl HistoryRow {
 }
 
 impl CatalogStore {
-    /// The most recent polls, newest first.
+    /// The most recent polls, newest first, each with what it actually changed.
     ///
     /// Includes failures and 304s. An operator asking "what has fusiform been
     /// doing" needs the polls that changed nothing most of all: a source that
     /// has been returning 304 for a week and a source that has been failing for
     /// a week look identical from the catalog alone.
+    ///
+    /// # Why the composition rather than an era count
+    ///
+    /// Measured over 11 hours of live polling: 72% of era churn was models
+    /// ARRIVING AND LEAVING rather than facts changing, because an arriving
+    /// model writes one era per fact it has. One real poll wrote 96 eras of
+    /// which 19 were genuine changes; another wrote 61 for 15.
+    ///
+    /// So an era count alone misleads in a consistent direction, and it
+    /// misleads most on the busiest polls — exactly the ones an operator looks
+    /// at. A model arriving is the upstream publishing something new; a fact
+    /// changing on a known model is the upstream REVISING something, and only
+    /// the second is what a consumer's cache or a ledger acts on.
+    ///
+    /// Derived rather than stored: eras carry `observation_id`, so the
+    /// breakdown is a property of history rather than a number a writer had to
+    /// remember to record. That also makes it correct for polls written before
+    /// this existed.
     pub fn recent_observations(
         &self,
         source: SourceId,
         limit: u32,
     ) -> Result<Vec<ObservationRow>, CatalogError> {
         let rows = self.raw_conn(|conn| {
+            // The composition comes from the eras this observation opened. A
+            // model's arrival and withdrawal are its `existence` eras; every
+            // other era belonging to a model that did NOT change existence in
+            // the same poll is a fact revision on a model already known.
             let mut stmt = conn.prepare(
-                "SELECT id, observed_at_ms, outcome, failure_class, detail, \
-                        normalized_hash, raw_hash, duration_ms \
-                 FROM observation WHERE source = ?1 \
-                 ORDER BY observed_at_ms DESC, id DESC LIMIT ?2",
+                "SELECT o.id, o.observed_at_ms, o.outcome, o.failure_class, \
+                        o.detail, o.normalized_hash, o.raw_hash, o.duration_ms, \
+                        (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id) \
+                          AS eras, \
+                        (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id \
+                           AND e.fact_key = 'existence' \
+                           AND e.value_json = '\"present\"') AS arrived, \
+                        (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id \
+                           AND e.fact_key = 'existence' \
+                           AND e.value_json = '\"absent\"') AS withdrawn, \
+                        (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id \
+                           AND NOT EXISTS ( \
+                             SELECT 1 FROM era x WHERE x.observation_id = o.id \
+                               AND x.fact_key = 'existence' \
+                               AND x.provider_id = e.provider_id \
+                               AND x.model_id = e.model_id)) AS facts_changed \
+                 FROM observation o WHERE o.source = ?1 \
+                 ORDER BY o.observed_at_ms DESC, o.id DESC LIMIT ?2",
             )?;
             let mapped = stmt.query_map(params![source.as_str(), limit], |r| {
                 Ok(ObservationRow {
@@ -482,6 +532,10 @@ impl CatalogStore {
                     normalized_hash: r.get(5)?,
                     raw_hash: r.get(6)?,
                     duration_ms: r.get(7)?,
+                    eras: r.get(8)?,
+                    models_arrived: r.get(9)?,
+                    models_withdrawn: r.get(10)?,
+                    facts_changed: r.get(11)?,
                 })
             })?;
             mapped.collect::<rusqlite::Result<Vec<_>>>()

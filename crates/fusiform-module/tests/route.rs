@@ -1008,3 +1008,154 @@ fn every_field_id() -> Vec<fusiform_core::FieldId> {
         },
     ]
 }
+
+/// `catalog.status` reports what each poll changed, not just that it changed.
+///
+/// The composition already existed in two places that an operator cannot
+/// reach: computed on the ingest plan, and logged to the daemon's shared
+/// stderr — which on this machine is a 1.17-million-line file where fusiform
+/// holds 31 lines. That is the recording-versus-surfacing defect: a diagnostic
+/// is only real if something read routinely can get to it, and `ck models
+/// status` is what an operator reads.
+///
+/// Derived from the eras rather than stored, so it is correct for polls written
+/// before this existed.
+#[test]
+fn status_reports_what_each_poll_changed() {
+    let f = fixture();
+
+    // An earlier confirming observation, so the eras below can state a real
+    // window. The store refuses an observed boundary without one, which is the
+    // guard working: an era claiming a window it cannot bound is exactly what
+    // the observation/era split exists to prevent.
+    f.store
+        .record_observation(&fusiform_store::NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(1_000),
+            outcome: ObservationOutcome::Changed { snapshot_seq: 0 },
+            normalized_hash: Some("h1".into()),
+            raw_hash: None,
+            etag: None,
+            duration_ms: Some(10),
+            detail: None,
+        })
+        .unwrap();
+
+    // A poll that adds a model and changes a fact on one already known.
+    let obs = f
+        .store
+        .record_observation(&fusiform_store::NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(5_000),
+            outcome: ObservationOutcome::Changed { snapshot_seq: 1 },
+            normalized_hash: Some("h5".into()),
+            raw_hash: None,
+            etag: None,
+            duration_ms: Some(42),
+            detail: None,
+        })
+        .unwrap();
+
+    let era = |provider: &str, model: &str, fact: &str, value: &str| fusiform_store::NewEra {
+        source: SourceId::ModelsDev,
+        provider_id: provider.into(),
+        model_id: model.into(),
+        fact_key: fusiform_store::FactKey::from_stored(fact.to_string()),
+        value_json: value.to_string(),
+        boundary_at: Timestamp(5_000),
+        boundary_kind: BoundaryKind::Observed,
+        observation_id: Some(obs),
+    };
+
+    f.store
+        .append_eras(&[
+            // TWO models arriving, each writing its existence plus its facts.
+            //
+            // Asymmetric against the one withdrawal on purpose. The first
+            // version of this test had one of each, and a mutation swapping the
+            // two columns survived — exactly the weakness fixed in the tick
+            // test ninety minutes earlier, repeated here in a new fixture.
+            // Knowing the failure mode did not prevent it; the mutation did.
+            era("mistral", "large", "existence", "\"present\""),
+            era("mistral", "large", "rate.input", "1"),
+            era("mistral", "large", "rate.output", "2"),
+            era("google", "gemini", "existence", "\"present\""),
+            era("google", "gemini", "rate.input", "5"),
+            // A model leaving.
+            era("openai", "gpt-5", "existence", "\"absent\""),
+            // And a genuine change on a model already known.
+            era("anthropic", "claude-sonnet-4-5", "rate.input", "9"),
+        ])
+        .unwrap();
+
+    let response =
+        match serve_tool_call(&f.store, br#"{"name":"catalog.status","arguments":{}}"#).unwrap() {
+            ToolResponse::Status(s) => s,
+            other => panic!("expected a status response, got {other:?}"),
+        };
+
+    let poll = response
+        .recent_polls
+        .iter()
+        .find(|p| p.observed_at_ms == 5_000)
+        .expect("the poll must be reported");
+    let changes = poll
+        .changes
+        .as_ref()
+        .expect("a poll that wrote eras must report what it changed");
+
+    assert_eq!(changes.eras, 7);
+    assert_eq!(changes.models_arrived, 2, "mistral and google arrived");
+    assert_eq!(changes.models_withdrawn, 1, "gpt-5 was withdrawn");
+    assert_eq!(
+        changes.facts_changed, 1,
+        "only anthropic's rate moved on a model already known — the arriving \
+         model's two rate eras are part of its arrival, not revisions"
+    );
+
+    // The distinction is the whole point: the parts must not restate the total.
+    assert!(
+        changes.facts_changed < changes.eras,
+        "an arriving model's facts must not be counted as changes"
+    );
+}
+
+/// A poll that changed nothing reports no composition at all.
+///
+/// A 304, an unchanged document and a failure all write no eras, so the
+/// absence is the ordinary case. Reporting zeroes would put four fields on
+/// every ordinary poll to say nothing happened, which the outcome already says.
+#[test]
+fn a_poll_that_wrote_nothing_reports_no_changes() {
+    let f = fixture();
+
+    f.store
+        .record_observation(&fusiform_store::NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(7_000),
+            outcome: ObservationOutcome::NotModified,
+            normalized_hash: None,
+            raw_hash: None,
+            etag: Some("etag-x".into()),
+            duration_ms: Some(11),
+            detail: None,
+        })
+        .unwrap();
+
+    let response =
+        match serve_tool_call(&f.store, br#"{"name":"catalog.status","arguments":{}}"#).unwrap() {
+            ToolResponse::Status(s) => s,
+            other => panic!("expected a status response, got {other:?}"),
+        };
+
+    let poll = response
+        .recent_polls
+        .iter()
+        .find(|p| p.observed_at_ms == 7_000)
+        .expect("the 304 must be reported");
+    assert!(
+        poll.changes.is_none(),
+        "a poll that wrote nothing must not carry a composition: {:?}",
+        poll.changes
+    );
+}

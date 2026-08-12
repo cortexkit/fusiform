@@ -220,6 +220,12 @@ fn every_response_type_round_trips() {
             failure_class: None,
             detail: None,
             duration_ms: Some(291),
+            changes: Some(fusiform_protocol::PollChanges {
+                eras: 7,
+                models_arrived: 2,
+                models_withdrawn: 1,
+                facts_changed: 1,
+            }),
         }],
     };
     let back: StatusResponse =

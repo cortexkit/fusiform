@@ -547,6 +547,38 @@ pub struct StatusPoll {
     pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<i64>,
+
+    /// What this poll changed, omitted when it changed nothing.
+    ///
+    /// A 304, an unchanged document and a failure all write no eras, so the
+    /// absence is the ordinary case and costs nothing on the wire.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changes: Option<PollChanges>,
+}
+
+/// What one poll changed.
+///
+/// # Why an era count alone is not enough
+///
+/// Measured over 11 hours of live polling: 72% of era churn was models ARRIVING
+/// AND LEAVING rather than facts changing, because an arriving model writes one
+/// era per fact it has. One real poll wrote 96 eras of which 19 were genuine
+/// changes; another wrote 61 for 15.
+///
+/// So an era count misleads in a consistent direction, and misleads most on the
+/// busiest polls — exactly the ones an operator looks at. A model arriving is
+/// the upstream publishing something new; a fact changing on a known model is
+/// the upstream REVISING something, and only the second is what a consumer's
+/// cache or a ledger acts on.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PollChanges {
+    /// Total eras written. Kept because it is what the store actually did, and
+    /// a reader comparing it against the parts can see the arithmetic.
+    pub eras: i64,
+    pub models_arrived: i64,
+    pub models_withdrawn: i64,
+    /// Facts that moved on a model already known.
+    pub facts_changed: i64,
 }
 
 /// A `catalog.status` response: what fusiform has been doing.
