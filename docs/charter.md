@@ -125,29 +125,36 @@ v1 ships no non-LLM source. Do not build speculative fetchers.
    that justified this module).
 3. **Astrocyte consolidation and the retirement of `cortexkit-model-catalog`.**
    Astrocyte's models.dev price lane moves to fusiform-served data when
-   fusiform is stable; coordinate with ASTRO, do not force. End state
-   (Ufuk, 2026-08-11): the commons crate `cortexkit-model-catalog` retires
-   in its CURRENT role (shared mirror of raw models.dev shapes) — but the
-   SLOT it fills persists: fusiform's push/read wire schema needs one
-   published type consumers compile against (fleet cross-repo payload
-   rule), and the cheapest shape is a major-version turnover of that same
-   crate in commons rather than a new dependency edge. Corrected premise
-   (FUSI, measured 2026-08-11): the crate has exactly ONE dependent today
-   — astrocyte. Broca never consumed it (their `broca-catalog` parses
-   independently into their own spec types, which is why their tier
-   parsing was correct while the crate's was wrong); the crate header's
-   "both consumers parse through this" was aspirational and becomes true
-   only through fusiform's served schema. So the retirement gate is
-   ASTROCYTE'S SWITCH alone; broca's adoption of the served types is a
-   separate decision on their own schedule, and their permanent seed
-   embed changes which types it parses with, never whether they can boot.
-   Transition mechanics: astrocyte's graph carries both crate versions
-   coexisting under a renamed dependency (semver-incompatible versions of
-   one crate) — mechanical, named here so it is not discovered during
-   cutover. Ownership vs location (settled with BROCA): fusiform AUTHORS
-   the served schema and controls its evolution; commons is where it is
-   PUBLISHED from — the coupling worth avoiding is lockstep releases,
-   which semver publication prevents and in-place editing would create.
+   fusiform is stable; coordinate with ASTRO, do not force.
+
+   **Settled 2026-08-12 (Ufuk), after checking with SUBC, ASTRO and BROCA.**
+   Fusiform OWNS the registry, and the commons crate is SUPERSEDED rather
+   than turned over. The served schema ships as `fusiform-protocol` in this
+   repository, not as a major version of `cortexkit-model-catalog`.
+
+   The earlier plan here was the reverse, on the premise that a cross-repo
+   payload needs a neutral published home. SUBC ruled that the payload rule
+   requires one definition consumed by both sides and never required
+   neutrality: served types are declarations authored by the producer, and
+   producer ownership makes drift unauthorable because schema and crate move
+   in one commit. `subc-protocol` is the precedent. The commons crate living
+   where it does was a workaround for there being no owner module.
+
+   Conditions, all met: the crate depends on serde only (ASTRO's condition,
+   enforced by a test that names each forbidden dependency); version
+   discipline is enforced in CI, because a path-dep consumer cannot see a
+   code change that does not move the version — verified in this repo's own
+   lock file, where a path dep records no source and no checksum while a
+   registry dep records both; and produced outputs are pinned as golden
+   fixtures of real served payloads.
+
+   Retirement remains the TAIL: nothing is removed while a dependent exists.
+   The crate gets a superseded header pointing at the successor. The gate is
+   astrocyte's switch alone — measured, they are the only dependent, and
+   their entire use is one type (`CatalogDoc`) at one call site, so the
+   cutover is a function's input type rather than a migration. BROCA never
+   consumed it; their `broca-catalog` parses independently, which is why
+   their tier parsing was correct while the crate's was wrong.
 
 ## Non-goals
 

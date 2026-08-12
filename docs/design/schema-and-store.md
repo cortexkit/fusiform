@@ -69,7 +69,7 @@ Verified against the working tree at `1ff33f9`, section by section:
 | §9 Engram enrollment | **built** — `crates/fusiform-module/data/engram-catalog.json`, validated with engram's own parser, installed by `scripts/install-enrollment.sh`. See `docs/backup-enrollment.md`. Not load-bearing for the version counter: the §9 text once claimed a `restore-with-monotonic-fence` here, that mechanism does not exist, and the counter is restore-invariant by construction instead (§10). |
 | §10 Serve | **built** — `catalog.get`, `catalog.history`, `catalog.status` |
 | §10 Push | **not built, and not buildable as specified** — see `docs/findings/2026-08-11-push-has-no-acknowledgement.md`. A push frame carries `corr: 0` and a module has no request frame, so the discriminated acknowledgement has no transport; and both consumer clients discard `FrameType::Push` outright. Envelope shapes, ordering and high-water re-sync remain specification; the acknowledgement needs a different design or a transport change that is not fusiform's to make. |
-| §10 Payload boundary | **not built** — the served types have not moved to `cortexkit-model-catalog` |
+| §10 Payload boundary | **built.** The served types live in `fusiform-protocol` (this repo, not commons — settled 2026-08-12, see §10). Dependency tree pinned to serde-only by test; version discipline enforced in CI; golden fixtures of four real served payloads. What is NOT done is astrocyte consuming it, which is their switch on their schedule. |
 
 Two entries deserve emphasis because they are the ones most likely to be cited
 as facts: **no defect-detection path writes a `Corrected` era, and no push
@@ -1704,32 +1704,88 @@ solves nothing. A restore-invariant derivation needs a wall-clock or hybrid
 logical-clock component; the fence plus re-sync is simpler and is what this
 design takes.
 
-### Payload boundary: fusiform authors the type, commons publishes it
+### Payload boundary: fusiform owns the served schema, in its own crate
 
-The fleet's cross-repo payload rule requires one published type that every
-consumer compiles against; a same-repo test cannot see a cross-repo boundary.
-Two questions follow, and they have different answers:
+> **Settled 2026-08-12 (Ufuk), after checking with SUBC, ASTRO and BROCA.**
+> This section previously said the schema would ship as the next major version
+> of `cortexkit-model-catalog` in commons. It ships as `fusiform-protocol` in
+> this repository instead. The reasoning below is what each seat supplied;
+> two of the three corrected something this note had asserted.
 
-- **Who authors the served schema and controls its evolution?** Fusiform. It
-  is fusiform's domain model, and a consumer must not be able to change what
-  the catalog asserts by editing a type.
-- **Where is it published from?** `commons`, as the next major version of
-  `cortexkit-model-catalog` (`docs/charter.md`, open item 3). The crate's
-  *slot* — one published type both consumers depend on — is exactly what the
-  served schema needs, and turning that slot over is cheaper than adding a
-  second dependency edge to every consumer.
+The fleet's cross-repo payload rule requires one definition consumed by both
+sides of a wire; a same-repo test cannot see a cross-repo boundary.
 
-Ownership and location are separable, and conflating them is what makes this
-look like a contradiction. The coupling worth avoiding is **lockstep
-releases**: consumers forced to move together because one of them wanted a
-field. A published, semver-versioned crate does not create that — a consumer
-upgrades when it chooses. A shared type edited in place by whoever needs a
-field does.
+The rule never required a NEUTRAL home — that was this note's inference from
+the fact that the only example it knew of lived in commons. SUBC's ruling:
+served schema types are **declarations authored by the producer**, and
+producer ownership makes drift unauthorable, because the schema and the crate
+move in one commit. A neutral home reintroduces the two-copies problem with
+extra steps. The precedent is `subc-protocol` — subconscious owns the daemon
+and publishes the wire types from the same repo, and every client compiles
+against them. `cortexkit-model-catalog` living in commons was a workaround for
+there being no owner module; now there is one.
 
-So: fusiform's served types are designed as that crate's next major version
-from day one, not as a fusiform-repo type later migrated. Migrating a wire
-type after consumers depend on it is a breaking change for everyone; starting
-in the published slot costs nothing now.
+The dependency tree is part of the contract. ASTRO's condition for depending
+on a module-owned crate: it must not drag in a client, a runtime, or a
+database driver, because then the location stops mattering and the coupling is
+real — they have declined a crate on exactly that ground, mirroring three
+types by hand rather than take a dependency that pulled in cryptographic and
+network libraries for three struct definitions. `fusiform-protocol` depends on
+`serde` and `serde_json`, and `crates/fusiform-protocol/tests/deps.rs` fails
+if anything else arrives.
+
+#### Lockstep: the argument this note made was wrong
+
+This section previously argued that a published, semver-versioned crate cannot
+create lockstep releases, because a consumer upgrades when it chooses. That is
+true of a *published dependency* and says nothing about how this fleet
+actually consumes crates.
+
+BROCA supplied the counterexample from their own tree: **four sibling
+dependencies are PATH deps**, including one into commons. Nobody consumes the
+published version, so semver protected nothing. They already carry the scar —
+a prose file recording which sibling commit each release built against,
+because `Cargo.lock` cannot pin a path dependency.
+
+Verified in fusiform's own lock rather than taken on report: `subc-protocol`
+appears with a version and a dependency list and **no `source` and no
+`checksum`**, while a registry dependency like `serde_json` carries both. So
+`cargo build --locked` genuinely cannot see a path dep's code move.
+
+That makes the version-discipline check load-bearing rather than hygienic: a
+version bump is the only signal that reaches a path-dep consumer at all.
+`scripts/check-wire-crate-version.sh` enforces it in CI, following
+subconscious's own script including the doc-only exemption — a rule that fires
+on prose gets ignored on substance.
+
+The general lesson is worth more than the correction. Two people agreed on a
+mechanism's properties and neither asked the adjacent factual question: does
+anyone here depend that way? **Mutual agreement reads as independent
+confirmation.** A claim held alone still feels like something to check; a
+claim two seats settled together feels checked already, and what made it feel
+settled was consensus rather than evidence.
+
+#### What is pinned
+
+Both halves of the payload rule, in SUBC's framing — declarations shared,
+outputs producer-pinned:
+
+- **Declarations**: `fusiform-protocol`, the crate a consumer compiles against.
+- **Outputs**: `crates/fusiform-module/fixtures/served-payloads.json`, a golden
+  fixture of four real served payloads, minted by running the serve path over a
+  real store. Renaming a wire field, dropping a correction's reason, or
+  emitting a list that should be skipped each redden it by name.
+
+The fixture is minted, never hand-written, per this repository's rule: a
+hand-written fixture encodes its author's understanding of the format, so a
+fixture and the code it exercises sharing one author in one commit can produce
+a non-vacuous test that certifies a bug.
+
+Fusiform takes the commons crate's money doctrine, because it encodes real
+incidents: decimal-string scaling, half-even rounding at the money resolution,
+reject-nonzero-rounding-to-zero, the negative-rate guard, checked arithmetic
+throughout. It does **not** take its raw-models.dev shape — that is the role
+being retired.
 
 Fusiform takes the crate's money doctrine, because it encodes real incidents:
 decimal-string scaling, half-even rounding at the money resolution,
@@ -1761,11 +1817,36 @@ astrocyte's switch, not both consumers'. BROCA's gate is separate and is about
 its own embed: it keeps a permanent seed regardless (§7), so what changes for
 BROCA is which types the seed parses with, on BROCA's schedule.
 
-During the transition astrocyte needs both shapes at once — the old parse for
-its staged file until fusiform's lane is live, and the new served types after.
-Semver-incompatible versions of one crate can coexist in a Cargo graph under a
-renamed dependency, so this is mechanical rather than a sequencing constraint;
-naming it here so it is not discovered during the cutover.
+**And that switch is smaller than every sentence written about it.** ASTRO
+measured their own use, 2026-08-12: the entire dependency is one type,
+`CatalogDoc`, at one call site — `ingest_snapshot` in
+`astrocyte-core/src/catalog_ingest.rs`, which walks providers and models,
+reads five rate fields plus tiers and `capabilities.reasoning`, and converts
+to their own row shape. Nothing else in either of their crates touches it.
+Their store, era selection, pricing and money arithmetic are unaffected: they
+convert at the boundary today and would convert at the boundary after.
+
+So the cutover is a function's input type, not a migration — and the
+transition mechanic this section used to name (two semver-incompatible
+versions of one crate coexisting under a renamed dependency) does not arise
+at all, because the successor is a differently-named crate.
+
+The reason that estimate was wrong for so long is worth keeping, because it
+is reusable. **"The retirement of `cortexkit-model-catalog`" sounds like a
+migration because retirement is a lifecycle word, and lifecycle words carry an
+implied scope** — things that get retired are things that were installed,
+integrated, depended upon. The phrase smuggles in a size estimate through the
+connotation of its verb. What collapsed it was not care; it was asking a
+question with a countable answer (how many call sites) instead of a question
+about the change.
+
+The operational form, from ASTRO: when a change is described with a lifecycle
+verb — retire, migrate, deprecate, consolidate, cut over — find the countable
+thing before estimating. With one addition from this instance: **the countable
+thing is often in someone else's repository**, and that is exactly the
+position where the verb's connotation is the only information available.
+Nothing on fusiform's side could have corrected this; re-reading the charter
+ten more times would have kept yielding the same wrong size.
 
 ### Multi-source precedence is deferred, not defaulted
 
