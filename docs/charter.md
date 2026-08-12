@@ -263,9 +263,51 @@ section records what fusiform does and why, not a rule for everyone.
 
 Supervised module under subc (`ck-fusiform`, pinned codesign identifier);
 Health-Path-Rule v3 compliant health checks (insulated lane, no subprocess
-exec, no live store reads on the reply path); store is backup-class the
-moment it holds snapshot history (enroll with engram, consistent-snapshot
-capture, restore-with-monotonic-fence if any monotonic state appears);
-deploy via the fleet ladder (stage-signed, marker differential, inode
+exec, no live store reads on the reply path); deploy via the fleet ladder
+(stage-signed under `signing-topology/v2`, digests published, inode
 verification); CI on Blacksmith with `--locked` builds; `cortexkit-ci`
 GitHub App secrets for private-repo CI.
+
+### Backup enrollment, and the obligation it creates
+
+Installed 2026-08-12 after ENGRAM reviewed the descriptor.
+`crates/fusiform-module/data/engram-catalog.json`, installed by
+`scripts/install-enrollment.sh`:
+
+```json
+{ "entry_id": "fusiform/store", "class": "portable",
+  "mechanism": "whole-db", "path": "store.db",
+  "writer_interaction": "backup-api-live" }
+```
+
+**`class: "portable"` makes this fleet-wide, and that is the part a future
+maintainer must not discover by accident.** An absent or unreadable
+`store.db` fails the ENTIRE fleet's capture, not just fusiform's entry —
+engram refuses to publish a generation marked complete while promised data is
+missing. So the installer's refusal to enroll when no store exists is
+load-bearing for every other module, and moving or renaming this store
+without updating the descriptor takes down backups fleet-wide.
+
+**Why `whole-db` rather than `page-db`** (ENGRAM's ruling, on measured
+numbers): page-db earns its keep on large files with scattered small changes
+— broca's WAL tree, prefrontal's 1.7 GB store. Fusiform is 19 MB with 9
+changed facts in 6 hours, roughly 15 CDC chunks, re-uploading almost nothing
+when quiet. Page-db would add page hashing and slab packing to save bytes
+that are not being spent.
+
+**Why the WAL is safe.** Engram does not file-copy; it opens through SQLite's
+online backup API on a `mode=ro` connection, so the pager resolves committed
+WAL frames into a transactionally consistent snapshot with no checkpoint and
+no interference with the single writer. It also refuses a generation where a
+header declares WAL and the `-wal` companion is absent, checked before any
+connection opens — because opening one creates the companion it looks for.
+That matters here because a naive file copy of a WAL-mode database comes back
+BEHIND rather than corrupt, and `PRAGMA integrity_check` returns `ok` on it.
+
+**The monotonic-state clause this section used to carry was wrong.** It said
+to enroll with "restore-with-monotonic-fence if any monotonic state appears".
+No such policy exists in engram — the name was invented in this repository
+and attributed to their system. Fusiform's monotonic state, the catalog
+version, is immune by construction instead: `max(now_ms, current + 1)`, so a
+restore cannot rewind it. Immune by construction beats immune by policy, and
+in this case the policy did not exist to rely on.
