@@ -35,6 +35,29 @@ use fusiform_module::signals::Signals;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Answered BEFORE any argument validation, and before the subc connection
+    // arg is required.
+    //
+    // A version probe runs a bare binary with no daemon context — that is
+    // exactly when a deploy ladder and an incident responder ask it. Gating it
+    // behind a config argument makes it fail in the only situation it exists
+    // for: SUBC's placement ladder invoked `--version` on this binary and got
+    // `MissingSubcArg` with exit 1, and fell back to timing an argument
+    // refusal.
+    //
+    // Fleet convention, from CKCRED via SUBC: name, version, and build rev
+    // before any config gate.
+    if std::env::args()
+        .skip(1)
+        .any(|a| a == "--version" || a == "-V")
+    {
+        println!(
+            "{}",
+            fusiform_protocol::version_line("ck-fusiform", env!("CARGO_PKG_VERSION"))
+        );
+        return Ok(());
+    }
+
     let handler = Fusiform::new();
     subc_client_rs::serve(fusiform_module::manifest(), handler).await?;
     Ok(())

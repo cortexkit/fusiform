@@ -149,6 +149,59 @@ pub struct CatalogGetResponse {
     pub withheld: Vec<WithheldFactWire>,
 }
 
+/// The commit this binary was built from, or `"unknown"`.
+///
+/// # Why a version number is not enough
+///
+/// `CARGO_PKG_VERSION` answers "is this fusiform" and never "which fusiform".
+/// It has not moved in this project's lifetime, and the deploy ladder's other
+/// identity — LC_UUID — is PATH-DEPENDENT: the same commit built in the main
+/// tree and in a git worktree produces different UUIDs (measured by CKCRED,
+/// 2026-08-12). LC_UUID proves two FILES match, which is what a placement
+/// needs, and cannot name a commit, which is what an incident needs.
+///
+/// This gap was not hypothetical here. Fusiform ran for several hours on a
+/// binary nine code commits behind the tree, and what exposed it was noticing
+/// that health metrics lacked counters added since — not any identity probe,
+/// because none of them could answer the question.
+///
+/// Read from the environment at compile time rather than from a `build.rs`
+/// shelling out to git: a build script reading HEAD reruns on every commit and
+/// rebuilds the crate graph behind it. `scripts/release-build.sh` sets
+/// `CK_BUILD_REV`; an ordinary `cargo build` leaves it unset and gets
+/// `"unknown"`, which is the honest answer — a dev build IS of unknown
+/// provenance, and stamping a possibly-dirty tree's HEAD would assert
+/// otherwise.
+///
+/// Convention adopted from CKCRED via SUBC.
+pub const BUILD_REV: &str = match option_env!("CK_BUILD_REV") {
+    Some(rev) => rev,
+    None => "unknown",
+};
+
+/// The version line both fusiform binaries print.
+///
+/// One function so the daemon and the CLI cannot drift into two spellings of
+/// the same identity — a forensic comparing them would have to know which
+/// format each used.
+///
+/// The caller passes its OWN version. The first draft of this called
+/// `env!("CARGO_PKG_VERSION")` here, which expands at the DEFINITION site, so
+/// both binaries reported the wire crate's version as their own — a correct
+/// number in the wrong role, and the more confusing kind of wrong because it
+/// moves and looks plausible.
+///
+/// Both numbers are printed, because they answer different questions. The
+/// binary version says which build; the schema version says what a consumer
+/// can expect on the wire, and that is the one a consumer's compatibility
+/// question is actually about.
+pub fn version_line(binary: &str, binary_version: &str) -> String {
+    format!(
+        "{binary} {binary_version} ({BUILD_REV}) schema {}",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
 /// Every fact fusiform serves, and what a consumer may do with it.
 ///
 /// # Why this is in the wire crate rather than in fusiform's documentation
@@ -222,6 +275,27 @@ pub struct CatalogGetResponse {
 /// one without it. **A consumer must carry unknown through to the point that
 /// decides what to do about it, rather than resolving it at the parse boundary
 /// where the only available default is a guess.**
+///
+/// The three collapsed cases are not one defect with three inputs, and the
+/// difference decides what a fix has to do:
+///
+/// | input | result | verdict |
+/// |---|---|---|
+/// | key absent | `false` | a default, defensible |
+/// | key `false` | `false` | correct |
+/// | key `null` | `false` | **a producer's deliberate uncertainty overwritten with a confident claim** |
+///
+/// Only the third has someone upstream doing work specifically to prevent it.
+/// That is why the fix is not "handle null" but "carry unknown to the point
+/// that can decide" — a parse-level default cannot know whether a missing flag
+/// should mean no-reasoning or refuse-to-serve, and should not pretend to.
+///
+/// Fusiform emits `null` for BOTH an absent key and an explicit null, since
+/// both spell "the upstream said nothing". Pinned by
+/// `an_absent_capability_and_an_explicit_null_are_both_unknown`. Note the
+/// contrast with the modality lists, where an absent block and an empty list
+/// are DIFFERENT claims: `[]` states the model accepts no modality at all,
+/// which is a positive assertion manufactured from silence.
 ///
 /// # What fusiform never serves, and why it is the highest-stakes entry here
 ///

@@ -455,3 +455,48 @@ fn a_missing_modality_block_is_unknown_rather_than_empty() {
     let other = model(&outcome, "openai/gpt-5.6-luna");
     assert!(other.capabilities.input_modalities.is_some());
 }
+
+/// An absent capability key and an explicit `null` both normalize to unknown.
+///
+/// Both spellings mean the upstream said nothing, so collapsing them is
+/// correct — unlike the modality lists, where an absent block and an empty list
+/// are different claims (`[]` states the model accepts no modality, which is a
+/// positive assertion manufactured from silence).
+///
+/// Pinned because I told BROCA that fusiform serves `null` under exactly one
+/// condition — the upstream omitting the key — and that was narrower than the
+/// truth. There are two conditions and they agree. Their tripwire asserts
+/// `is_boolean`, so it fires on both, and this test is the other half of that
+/// pair: it fails if fusiform ever starts distinguishing them, which would make
+/// their coverage claim and mine disagree.
+#[test]
+fn an_absent_capability_and_an_explicit_null_are_both_unknown() {
+    let doc = |body: &str| {
+        format!(r#"{{"p":{{"id":"p","name":"P","models":{{"m":{{"id":"m","name":"M"{body}}}}}}}}}"#)
+    };
+
+    let read = |body: &str| {
+        let text = doc(body);
+        normalize_models_dev(text.as_bytes())
+            .unwrap_or_else(|e| panic!("{body:?} must normalize: {e}"))
+            .catalog
+            .models()
+            .next()
+            .expect("one model")
+            .capabilities
+            .reasoning
+    };
+
+    assert_eq!(read(""), None, "an absent key is unknown");
+    assert_eq!(
+        read(r#","reasoning":null"#),
+        None,
+        "an explicit null is unknown too — a future source may spell it this way"
+    );
+    assert_eq!(read(r#","reasoning":true"#), Some(true));
+    assert_eq!(
+        read(r#","reasoning":false"#),
+        Some(false),
+        "an explicit false is a real claim and must not become unknown"
+    );
+}

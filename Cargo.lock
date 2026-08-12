@@ -465,6 +465,7 @@ name = "fusiform-cli"
 version = "0.1.0"
 dependencies = [
  "fusiform-module",
+ "fusiform-protocol",
  "fusiform-store",
  "serde_json",
  "subc-client-rs",
@@ -504,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "fusiform-protocol"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "serde",
  "serde_json",

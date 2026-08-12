@@ -99,6 +99,18 @@ correct options:
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    // Before argument parsing and before the environment is touched: a version
+    // probe must work on a bare binary, because that is the situation a deploy
+    // ladder and an incident responder invoke it in. Fleet convention, from
+    // CKCRED via SUBC.
+    if env::args().skip(1).any(|a| a == "--version" || a == "-V") {
+        println!(
+            "{}",
+            fusiform_protocol::version_line("ck-models", env!("CARGO_PKG_VERSION"))
+        );
+        return;
+    }
+
     disown_inherited_module_identity();
 
     if let Err(e) = run(env::args_os()).await {
