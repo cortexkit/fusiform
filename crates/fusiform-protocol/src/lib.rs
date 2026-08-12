@@ -198,14 +198,47 @@ pub struct CatalogGetResponse {
 /// way.** Say so; it will be reclassified and the class carries your
 /// attribution.
 ///
-/// # What fusiform never serves, and why it is not an omission
+/// That instruction has already worked in the other direction: `limit.output`
+/// was `ByteAffecting` on my belief that a consumer rendered it as a request
+/// parameter, until BROCA enumerated their render path and found zero reads of
+/// it. A wrong classification is not always over-cautious.
+///
+/// # `null` means UNKNOWN, and coercing it to `false` is the failure this
+/// distinction exists to prevent
+///
+/// A capability served as `null` means the upstream published no flag.
+/// Fusiform types these `Option<bool>` deliberately: manufacturing `false` from
+/// silence is a positive claim about a model, made from an absence of
+/// information.
+///
+/// The hazard is measured rather than hypothetical. BROCA's parse reads
+/// `entry.get(k).and_then(Value::as_bool).unwrap_or(false)`, and `as_bool()`
+/// returns `None` on a JSON null — so absent, explicitly false, and null all
+/// collapse to `false`, which routes a model to `ReasoningPolicy::None` and
+/// strips thinking blocks from a model that supports them. Nothing fails.
+///
+/// It is dormant only because models.dev happens to publish the reasoning key
+/// for every model today; they pinned a test that fails if a refresh ever lands
+/// one without it. **A consumer must carry unknown through to the point that
+/// decides what to do about it, rather than resolving it at the parse boundary
+/// where the only available default is a guess.**
+///
+/// # What fusiform never serves, and why it is the highest-stakes entry here
 ///
 /// Renderer-selection fields — `provider.npm`, per-model provider overrides,
 /// and `experimental` — are parsed, flagged, and never emitted. Fusiform says
-/// WHAT exists; it never says HOW to speak to it. A consumer that found an
-/// endpoint or an auth shape here would be taking wire-family resolution from a
-/// catalog, which is the one thing this module is chartered never to do.
+/// WHAT exists; it never says HOW to speak to it.
 /// `crates/fusiform-store/tests/served_vocabulary.rs` fails if one appears.
+///
+/// **This is not merely an omission, and BROCA supplied the reason from their
+/// own render path.** The field the rule excludes is `provider.wire_family`,
+/// which SELECTS THE RENDERER — so it does not affect one field of a request,
+/// it decides every byte of it. Every other entry in this table is a value a
+/// consumer may render; that one would be fusiform choosing how a consumer
+/// speaks. It stays hand-tabled on the consumer's side permanently.
+///
+/// So the most consequential classification in this table is about a field that
+/// is not in it.
 pub const SERVED_FACTS: &[ServedFact] = &[
     ServedFact {
         key: "existence",
@@ -215,17 +248,27 @@ pub const SERVED_FACTS: &[ServedFact] = &[
     ServedFact {
         key: "limit.context",
         class: FactClass::ByteAffecting,
-        note: "context window; a consumer sizes transform pressure on it",
+        note: "NEVER rendered into a request. It is the pressure signal for a \
+               consumer's prompt-reduction transform, so a wrong value changes \
+               what gets compacted, which changes the prompt, which changes \
+               every byte. Indirect and total — a reader who greps for it in a \
+               request body will not find it and may wrongly reclassify it.",
     },
     ServedFact {
         key: "limit.output",
-        class: FactClass::ByteAffecting,
-        note: "maximum output; rendered as a request parameter",
+        class: FactClass::Advisory,
+        note: "the model's maximum output. NOT the request's output cap: BROCA \
+               takes that from the caller's max_tokens, never from a catalog. \
+               Reclassified 2026-08-12 after they enumerated their render path \
+               and found zero reads of it.",
     },
     ServedFact {
         key: "capability.reasoning",
         class: FactClass::ByteAffecting,
-        note: "gates a reasoning policy; a wrong false silently strips thinking",
+        note: "gates a reasoning policy; a wrong false silently strips thinking \
+               blocks and a capable model stops reasoning with nothing failing. \
+               null means UNKNOWN and a consumer must not coerce it to false — \
+               see the note on FactClass.",
     },
     ServedFact {
         key: "capability.tool_call",

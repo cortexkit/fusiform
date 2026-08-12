@@ -106,10 +106,17 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
         );
     }
 
-    // The three fields BROCA named from their own source must be classified as
-    // byte-affecting. Naming them here rather than counting: a count would pass
-    // if one were swapped for another.
-    for key in ["limit.context", "limit.output", "capability.reasoning"] {
+    // The fields BROCA enumerated from their own render path, named
+    // individually rather than counted: a count would pass if one were swapped
+    // for another.
+    //
+    // `limit.output` is deliberately NOT here. It was byte-affecting on my
+    // belief that a consumer rendered it as a request parameter, and BROCA
+    // enumerated `resolve_frozen` and found zero reads of it — their output cap
+    // comes from the caller's max_tokens. That correction is the reason this
+    // list is short: it is what a consumer read out of their source, not what
+    // the field names suggest.
+    for key in ["limit.context", "capability.reasoning"] {
         let fact = SERVED_FACTS
             .iter()
             .find(|f| f.key == key)
@@ -132,4 +139,33 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             fact.key
         );
     }
+}
+
+/// `limit.output` is advisory, and this is the test that would notice it moving
+/// back.
+///
+/// It carried `ByteAffecting` for one commit on my assumption that a consumer
+/// renders it as a request parameter. BROCA enumerated their render path and
+/// found zero reads of `limits.max_output` — the output cap in a request comes
+/// from the caller, never from a catalog.
+///
+/// Pinned because the plausible-sounding classification is the wrong one, so a
+/// future reader "fixing" it would be restoring the error.
+#[test]
+fn limit_output_is_advisory_because_no_consumer_renders_it() {
+    use fusiform_protocol::{FactClass, SERVED_FACTS};
+
+    let fact = SERVED_FACTS
+        .iter()
+        .find(|f| f.key == "limit.output")
+        .expect("limit.output is served");
+
+    assert_eq!(
+        fact.class,
+        FactClass::Advisory,
+        "limit.output reads like a request parameter and is not one: BROCA's \
+         render path takes the output cap from the caller's max_tokens and \
+         never from the catalog. Reclassifying it byte-affecting would be \
+         restoring an assumption a consumer already refuted from source."
+    );
 }
