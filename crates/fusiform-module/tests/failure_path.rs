@@ -78,6 +78,25 @@ impl Upstream {
     }
 }
 
+/// Serve one request and close.
+///
+/// `Connection: close` on every response is load-bearing, not politeness. This
+/// function handles ONE request per connection and then drops the socket, while
+/// an HTTP/1.1 response carrying `Content-Length` and no close header advertises
+/// a reusable connection. A pooling client — reqwest's default — takes that at
+/// its word, keeps the socket, and sends its next request into a server that
+/// already hung up.
+///
+/// That mismatch is a race by construction: whether it fails depends on whether
+/// the client notices the close before writing, which depends on scheduling.
+///
+/// NOT PROVEN to be the cause of the one CI failure this file has had. Thirty
+/// runs with the close header removed produced zero failures locally, so the
+/// theory survives reading and was not reproduced. It is fixed anyway because
+/// the mismatch is real and removing it costs one header — but "flaky test
+/// fixed" would be a claim the evidence does not support, and the assertion
+/// reordering below is what makes the next occurrence say what actually
+/// happened.
 fn serve_one(mut stream: TcpStream, behaviour: Behaviour) {
     // Read the request head so the client sees a complete exchange.
     let mut buf = [0u8; 2048];
@@ -96,13 +115,15 @@ fn serve_one(mut stream: TcpStream, behaviour: Behaviour) {
             drop(stream);
         }
         Behaviour::ServerError => {
-            let _ = stream
-                .write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
+            let _ = stream.write_all(
+                b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\
+                  Connection: close\r\n\r\n",
+            );
         }
         _ => {
             let head = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
-                 Content-Length: {}\r\n\r\n",
+                 Content-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
             );
             let _ = stream.write_all(head.as_bytes());
@@ -290,25 +311,52 @@ async fn the_loop_recovers_when_the_upstream_returns() {
     );
 }
 
-/// A conditional request is sent once an ETag is known.
+/// Polling continues against a server that ignores conditional requests.
 ///
-/// Verified by counting requests rather than by inspecting headers, then by the
-/// outcome: the stub does not implement conditional GET, so a second poll of an
-/// unchanged document must come back Unchanged via a full body rather than
-/// erroring.
+/// The property under test is the OUTCOME: the stub does not implement
+/// conditional GET, so a second poll of an unchanged document must come back
+/// Unchanged via a full body rather than erroring.
+///
+/// The outcomes are asserted before the request count, and that ordering is the
+/// point rather than style. `tick` RECORDS a failed poll and returns `Ok`,
+/// because a failure is a normal outcome of polling rather than an error of the
+/// loop. So a first tick that failed for an environmental reason — a slow CI
+/// runner, a socket that was not ready — leaves the count at 1 and everything
+/// else looking fine.
+///
+/// This test failed exactly that way on CI once, on a docs-only commit, and
+/// passed on the commits either side. The failure message was `left: 1, right:
+/// 2` with no indication that a poll had failed at all, because the count was
+/// checked first. Forty local runs never reproduced it.
+///
+/// A count mismatch now cannot be the first thing you see: if a poll failed,
+/// the assertion that fires says so, with the failure class the tick recorded.
 #[tokio::test]
 async fn polling_continues_against_a_server_without_conditional_support() {
     let upstream = Upstream::start(Behaviour::ServeCatalog);
     let h = harness(&upstream.url);
 
-    tick(&h.ctx, 1_000).await.unwrap();
-    let second = tick(&h.ctx, 2_000).await.unwrap();
+    let first = tick(&h.ctx, 1_000).await.unwrap();
+    assert!(
+        matches!(first.outcome, TickOutcome::Changed { .. }),
+        "the first poll of a fresh store must ingest the document, got {:?}",
+        first.outcome
+    );
 
-    assert_eq!(upstream.request_count(), 2);
+    let second = tick(&h.ctx, 2_000).await.unwrap();
     assert_eq!(
         second.outcome,
         TickOutcome::Unchanged,
         "a server that ignores If-None-Match must still produce an Unchanged poll"
+    );
+
+    // Both polls reached the server. Checked last because it is corroboration
+    // for the outcomes above rather than the property itself — and because a
+    // count is the least informative thing to fail on.
+    assert_eq!(
+        upstream.request_count(),
+        2,
+        "both polls must have reached the upstream"
     );
 }
 
