@@ -31,6 +31,9 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: fusiform
+          # Full history so the version-discipline check can diff against
+          # origin/master. The default depth of 1 makes that ref unresolvable.
+          fetch-depth: 0
 
       # Fusiform path-deps three private siblings: subconscious (the subc wire
       # crates), commons (the cortexkit-store family), and engram (its catalog
@@ -89,3 +92,13 @@ jobs:
       # reports someone else's outage as this repository's failure.
       - name: Test
         run: cargo test --workspace --all-targets
+
+      # The served schema is what consumers compile against, and a consumer
+      # that path-depends on this repo cannot see a code change that does not
+      # move the version: Cargo.lock records a path dep with no source and no
+      # checksum, so `--locked` passes over moved code. Measured in this repo's
+      # own lock file against subc-protocol.
+      #
+      # Fetch depth 0 above so origin/master resolves for the comparison.
+      - name: Served schema version discipline
+        run: ./scripts/check-wire-crate-version.sh origin/master

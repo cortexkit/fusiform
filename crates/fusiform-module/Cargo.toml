@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 fusiform-core = { path = "../fusiform-core" }
+fusiform-protocol = { path = "../fusiform-protocol" }
 fusiform-store = { path = "../fusiform-store" }
 
 subc-client-rs = { workspace = true }

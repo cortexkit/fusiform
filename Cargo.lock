@@ -490,6 +490,7 @@ dependencies = [
  "cortexkit-store-types",
  "engram-core",
  "fusiform-core",
+ "fusiform-protocol",
  "fusiform-store",
  "reqwest",
  "serde",
@@ -499,6 +500,14 @@ dependencies = [
  "subc-protocol",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "fusiform-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
