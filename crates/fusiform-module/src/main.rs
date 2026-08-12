@@ -255,10 +255,25 @@ async fn run_poll_loop(store: Arc<CatalogStore>, signals: Arc<Signals>) {
         // forget to and a test calling tick directly exercises it.
         match tick(&ctx, now_ms()).await {
             Ok(report) => {
-                eprintln!(
-                    "fusiform: poll {:?}, {} eras written",
-                    report.outcome, report.eras_written
-                );
+                // The composition rather than the row count alone. Measured
+                // over 11 hours of live polling, 72% of era churn was models
+                // arriving and leaving — an arriving model writes one era per
+                // fact it has — so "45 eras written" reads as 45 facts moving
+                // when it was 8 facts and 5 arrivals.
+                let c = report.composition;
+                if report.eras_written == 0 {
+                    eprintln!("fusiform: poll {:?}", report.outcome);
+                } else {
+                    eprintln!(
+                        "fusiform: poll {:?}, {} eras ({} facts changed, \
+                         {} models arrived, {} withdrawn)",
+                        report.outcome,
+                        report.eras_written,
+                        c.facts_changed,
+                        c.models_arrived,
+                        c.models_withdrawn
+                    );
+                }
             }
             Err(e) => {
                 // A store error, not a fetch error — fetch failures are an

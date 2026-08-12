@@ -408,3 +408,74 @@ fn the_reported_failure_class_matches_the_stored_one() {
         );
     }
 }
+
+/// A tick reports how its eras divide, not just how many there are.
+///
+/// Measured over 11 hours of live polling: 72% of era churn was models arriving
+/// and leaving rather than facts changing, because an arriving model writes one
+/// era per fact it has. Capability "changes" were the extreme case — 230 of 245
+/// were arrivals and only 15 were genuine changes on a known model.
+///
+/// So a row count alone is misleading in a specific direction: an operator
+/// reading "45 eras written" takes it as 45 facts moving. The distinction is
+/// not cosmetic — a model arriving is the upstream publishing something new, a
+/// fact changing on a known model is the upstream revising something, and only
+/// the second is the event a consumer's cache or a ledger cares about.
+///
+/// The counts already existed on the ingest plan and were discarded at the tick
+/// boundary. This asserts they survive to the report, which is what an operator
+/// reads.
+#[test]
+fn a_tick_reports_arrivals_and_changes_separately() {
+    let f = fixture();
+
+    let doc = |models: &[(&str, &str, &str)]| {
+        let entries: Vec<String> = models
+            .iter()
+            .map(|(prov, id, rate)| {
+                format!(
+                    r#""{prov}":{{"id":"{prov}","name":"{prov}","models":{{"{id}":{{"id":"{id}","name":"{id}","cost":{{"input":{rate},"output":{rate}}}}}}}}}"#
+                )
+            })
+            .collect();
+        format!("{{{}}}", entries.join(","))
+    };
+
+    // Seed: two models.
+    let first = doc(&[("anthropic", "sonnet", "3.0"), ("openai", "gpt5", "2.0")]);
+    let seeded = run(&f, body(first.as_bytes(), None), 1_000);
+    assert!(seeded.eras_written > 0, "the seed must write something");
+
+    // Next poll: one rate moves on a known model, TWO models arrive, one goes.
+    //
+    // Asymmetric counts on purpose. An earlier version used one arrival and one
+    // withdrawal, and a mutation swapping the two fields survived — the test
+    // could not tell them apart. Two and one can.
+    let second = doc(&[
+        ("anthropic", "sonnet", "4.0"),
+        ("mistral", "large", "1.0"),
+        ("google", "gemini", "5.0"),
+    ]);
+    let report = run(&f, body(second.as_bytes(), None), 2_000);
+
+    let c = report.composition;
+    assert_eq!(c.models_arrived, 2, "mistral and google arrived: {c:?}");
+    assert_eq!(
+        c.models_withdrawn, 1,
+        "openai stopped being published: {c:?}"
+    );
+    assert!(
+        c.facts_changed >= 1,
+        "anthropic's rate moved on a model already known: {c:?}"
+    );
+
+    // The composition must not simply restate the row count, which is the
+    // conflation it exists to prevent.
+    assert!(
+        c.facts_changed < report.eras_written,
+        "an arriving model's facts must not be counted as changes: {} changed \
+         of {} eras",
+        c.facts_changed,
+        report.eras_written
+    );
+}

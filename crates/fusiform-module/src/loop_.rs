@@ -52,6 +52,30 @@ pub struct TickReport {
     pub outcome: TickOutcome,
     pub observation_id: i64,
     pub eras_written: usize,
+    /// How the eras divide: models arriving, models leaving, and facts that
+    /// moved on a model already known.
+    ///
+    /// A row count alone is misleading in a specific direction, measured over
+    /// 11 hours of live polling: 72% of era churn was models arriving and
+    /// leaving rather than facts changing, because an arriving model writes one
+    /// era per fact it has. An operator reading "45 eras written" would take
+    /// that as 45 facts moving; on one real poll it was 8 facts and 5 arrivals.
+    ///
+    /// The distinction is not cosmetic. A model arriving is the upstream
+    /// publishing something new; a fact changing on a known model is the
+    /// upstream revising something, which is the event a consumer's cache and
+    /// a ledger care about.
+    pub composition: EraComposition,
+}
+
+/// How a tick's eras divide by cause.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EraComposition {
+    pub models_arrived: usize,
+    pub models_withdrawn: usize,
+    /// Facts that moved on a model already known — the count an operator
+    /// usually means by "what changed".
+    pub facts_changed: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,6 +190,7 @@ pub fn apply(
                 outcome: TickOutcome::NotModified,
                 observation_id: id,
                 eras_written: 0,
+                composition: EraComposition::default(),
             })
         }
 
@@ -230,6 +255,7 @@ pub fn apply(
                     outcome: TickOutcome::Unchanged,
                     observation_id: id,
                     eras_written: 0,
+                    composition: EraComposition::default(),
                 });
             }
 
@@ -330,6 +356,11 @@ pub fn apply(
                 },
                 observation_id,
                 eras_written,
+                composition: EraComposition {
+                    models_arrived: plan.new_models,
+                    models_withdrawn: plan.disappeared_models,
+                    facts_changed: plan.changed_facts,
+                },
             })
         }
     }
@@ -450,6 +481,7 @@ fn record_failure(
         outcome: TickOutcome::Failed { class },
         observation_id: id,
         eras_written: 0,
+        composition: EraComposition::default(),
     })
 }
 
