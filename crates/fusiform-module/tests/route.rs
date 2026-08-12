@@ -866,6 +866,22 @@ fn a_model_whose_facts_are_all_withheld_is_still_discoverable() {
         .0
         .expect("the model exists");
 
+    // One defect touching every fact, so each row carries the WHOLE extent and
+    // each therefore names its own fact.
+    //
+    // An earlier version declared `Rate{Input}` as the extent on every row,
+    // including the capability and limit rows. That is incoherent — a
+    // correction on `capability.attachment` telling a consumer to partition on
+    // an input rate — and nothing rejected it until the store learned to. The
+    // guard caught this test, which is the right way round.
+    let all_fields: Vec<FieldId> = every_field_id()
+        .into_iter()
+        .filter(|f| {
+            fusiform_store::FactKey::for_field(f.clone())
+                .is_some_and(|k| model.facts.contains_key(&k))
+        })
+        .collect();
+
     let eras: Vec<_> = model
         .facts
         .keys()
@@ -877,9 +893,7 @@ fn a_model_whose_facts_are_all_withheld_is_still_discoverable() {
             value_json: "null".into(),
             boundary_at: Timestamp(8_000),
             boundary_kind: BoundaryKind::Corrected(Correction {
-                fields: vec![FieldId::Rate {
-                    class: TokenClass::Input,
-                }],
+                fields: all_fields.clone(),
                 affected_from: Timestamp(2_000),
                 affected_until: Timestamp(8_000),
                 reason: "a defect affecting every fact of this model".to_string(),
@@ -923,4 +937,53 @@ fn a_model_whose_facts_are_all_withheld_is_still_discoverable() {
         "a model that never existed withholds nothing; that is what makes the \
          two cases distinguishable"
     );
+}
+
+/// Every `FieldId` a correction can name.
+///
+/// Written out rather than derived, because deriving it from the same mapping
+/// the code under test uses would make any test built on it agree with a broken
+/// mapping. `FactKey::for_field` is exhaustive at the type level, so a new
+/// variant fails to compile there and this list is what has to follow.
+fn every_field_id() -> Vec<fusiform_core::FieldId> {
+    use fusiform_core::{CapabilityId, FieldId, LimitId};
+    vec![
+        FieldId::Existence,
+        FieldId::Rate {
+            class: TokenClass::Input,
+        },
+        FieldId::Rate {
+            class: TokenClass::Output,
+        },
+        FieldId::Rate {
+            class: TokenClass::CacheRead,
+        },
+        FieldId::Rate {
+            class: TokenClass::CacheWrite,
+        },
+        FieldId::Rate {
+            class: TokenClass::Reasoning,
+        },
+        FieldId::Limit {
+            limit: LimitId::Context,
+        },
+        FieldId::Limit {
+            limit: LimitId::Output,
+        },
+        FieldId::Capability {
+            capability: CapabilityId::Reasoning,
+        },
+        FieldId::Capability {
+            capability: CapabilityId::ToolCall,
+        },
+        FieldId::Capability {
+            capability: CapabilityId::Attachment,
+        },
+        FieldId::Capability {
+            capability: CapabilityId::InputModalities,
+        },
+        FieldId::Capability {
+            capability: CapabilityId::OutputModalities,
+        },
+    ]
 }

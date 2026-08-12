@@ -287,9 +287,39 @@ pub fn catalog_digest(catalog: &NormalizedCatalog) -> String {
 /// set is fusiform's served vocabulary: a field silently joining it is a
 /// contract change no consumer asked for, and a field silently leaving it makes
 /// a consumer's read start returning nothing.
+///
+/// Does NOT include `existence`, which [`plan_ingest`] writes from its own
+/// presence logic rather than from a model's fields. Callers wanting every
+/// served fact want [`SERVED_FACT_NAMESPACE`] plus this.
 pub fn fact_keys_of(model: &NormalizedModel) -> Vec<FactKey> {
     facts_of(model).into_iter().map(|(k, _)| k).collect()
 }
+
+/// Every fact key fusiform serves, as a closed set.
+///
+/// One definition, because there were two. This list lived in a test file while
+/// another test derived "the served facts" from [`fact_keys_of`], which omits
+/// `existence` — so a coverage assertion silently skipped the one fact whose
+/// correction expresses a model being wrongly recorded as present. A mutation
+/// mapping `FieldId::Existence` to the wrong key survived because of it.
+///
+/// Tiered rate keys are not listed: they carry an upstream threshold and are
+/// checked structurally, since the thresholds are not fusiform's to enumerate.
+pub const SERVED_FACT_NAMESPACE: &[&str] = &[
+    "existence",
+    "limit.context",
+    "limit.output",
+    "capability.reasoning",
+    "capability.tool_call",
+    "capability.attachment",
+    "capability.input_modalities",
+    "capability.output_modalities",
+    "rate.input",
+    "rate.output",
+    "rate.cache_read",
+    "rate.cache_write",
+    "rate.reasoning",
+];
 
 /// The facts a model contributes, with their stored values.
 ///

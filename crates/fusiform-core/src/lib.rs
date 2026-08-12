@@ -225,6 +225,44 @@ pub enum FieldId {
     /// So a tombstone correction — this model was recorded as present after it
     /// was actually retired — is expressible without claiming a rate was wrong.
     Existence,
+    /// A capacity limit fusiform misread.
+    ///
+    /// Per limit, never one id for "limits": a wrong context window and a wrong
+    /// output cap affect different things at a consumer, so they cannot share a
+    /// partition.
+    Limit { limit: LimitId },
+    /// A capability flag fusiform misread.
+    ///
+    /// Per capability, for the same reason. A wrong `reasoning` flag and a
+    /// wrong `attachment` flag are unrelated defects with unrelated blast
+    /// radii.
+    Capability { capability: CapabilityId },
+}
+
+/// Which capacity limit a correction names.
+///
+/// A closed enum rather than a string, so a limit cannot enter the correction
+/// vocabulary by being typed into a call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LimitId {
+    /// The context window. A consumer sizes its transform pressure on this.
+    Context,
+    /// The maximum output. A consumer renders this as a request parameter.
+    Output,
+}
+
+/// Which capability flag a correction names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityId {
+    /// Whether the model reasons. A consumer gates its reasoning policy on
+    /// this, so a wrong value changes the bytes of every request.
+    Reasoning,
+    ToolCall,
+    Attachment,
+    InputModalities,
+    OutputModalities,
 }
 
 /// The token classes an LLM bills in.

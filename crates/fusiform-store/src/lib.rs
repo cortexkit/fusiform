@@ -135,6 +135,43 @@ pub struct NewEra {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FactKey(String);
 
+impl FactKey {
+    /// The fact a [`FieldId`] names.
+    ///
+    /// A correction declares WHICH fields were wrong and is written on a
+    /// specific fact's row. Those are two statements of one belief, and without
+    /// a mapping between them nothing stops a row that corrects `rate.input`
+    /// from declaring an extent about limits — incoherent, and invisible,
+    /// because each half is individually well formed.
+    ///
+    /// Exhaustive by construction: adding a `FieldId` variant without a fact
+    /// key here fails to compile.
+    pub fn for_field(field: fusiform_core::FieldId) -> Option<Self> {
+        use fusiform_core::{CapabilityId, FieldId, LimitId};
+        Some(match field {
+            FieldId::Rate { class } => Self::rate(class),
+            FieldId::Existence => Self::existence(),
+            FieldId::Limit { limit } => Self::limit(match limit {
+                LimitId::Context => "context",
+                LimitId::Output => "output",
+            }),
+            FieldId::Capability { capability } => Self::capability(match capability {
+                CapabilityId::Reasoning => "reasoning",
+                CapabilityId::ToolCall => "tool_call",
+                CapabilityId::Attachment => "attachment",
+                CapabilityId::InputModalities => "input_modalities",
+                CapabilityId::OutputModalities => "output_modalities",
+            }),
+            // A tiered rate's fact key carries a threshold that the FieldId
+            // does not know, so these two cannot be mapped to a single key.
+            // `None` rather than a guess: the alternative is returning the
+            // untiered key, which would make a correction about a tier read as
+            // a correction about the base rate.
+            FieldId::TierThreshold | FieldId::TierRate | FieldId::ChargeUnit => return None,
+        })
+    }
+}
+
 /// The namespace prefixes fact keys are grouped under.
 ///
 /// Named constants rather than string literals at each construction site,
@@ -351,6 +388,87 @@ impl CatalogStore {
                     era.provider_id,
                     era.model_id,
                     era.fact_key.as_str()
+                )));
+            }
+        }
+
+        // A correction's declared extent must name the fact it is written on.
+        //
+        // The row says "this fact's recorded value was wrong"; the extent says
+        // which fields a consumer should partition on. One belief, two
+        // statements, and each is well formed alone — so a correction on
+        // `rate.input` declaring an extent about `limit.context` passes every
+        // other check and tells a consumer to partition the wrong charges.
+        //
+        // Containment rather than equality: a single defect can span several
+        // facts, and each row may carry the whole defect's extent. What it may
+        // not do is omit its own fact.
+        for era in eras {
+            let BoundaryKind::Corrected(correction) = &era.boundary_kind else {
+                continue;
+            };
+            if correction.fields.is_empty() {
+                return Err(CatalogError::Invariant(format!(
+                    "{}/{} {}: a correction must name at least one field; an extent \
+                     naming nothing cannot be partitioned on",
+                    era.provider_id,
+                    era.model_id,
+                    era.fact_key.as_str()
+                )));
+            }
+            // Fields with no single fact key (tier and charge-unit corrections)
+            // cannot be checked this way and are accepted: a tiered fact key
+            // carries a threshold the FieldId does not know.
+            let unmappable = correction
+                .fields
+                .iter()
+                .any(|f| FactKey::for_field(f.clone()).is_none());
+            if unmappable {
+                continue;
+            }
+            let names_own_fact = correction
+                .fields
+                .iter()
+                .filter_map(|f| FactKey::for_field(f.clone()))
+                .any(|k| k == era.fact_key);
+            if !names_own_fact {
+                return Err(CatalogError::Invariant(format!(
+                    "{}/{} {}: the correction's extent names {:?}, which does not \
+                     include the fact it is written on",
+                    era.provider_id,
+                    era.model_id,
+                    era.fact_key.as_str(),
+                    correction.fields
+                )));
+            }
+        }
+
+        // A correction's interval must be ordered and must end at or before the
+        // instant it is recorded. An extent reaching into the future claims
+        // fusiform knows a value it has not observed yet.
+        for era in eras {
+            let BoundaryKind::Corrected(correction) = &era.boundary_kind else {
+                continue;
+            };
+            if correction.affected_from > correction.affected_until {
+                return Err(CatalogError::Invariant(format!(
+                    "{}/{} {}: correction interval runs backwards ({} to {})",
+                    era.provider_id,
+                    era.model_id,
+                    era.fact_key.as_str(),
+                    correction.affected_from.0,
+                    correction.affected_until.0
+                )));
+            }
+            if correction.affected_until > era.boundary_at {
+                return Err(CatalogError::Invariant(format!(
+                    "{}/{} {}: correction extends to {} but is recorded at {}; a \
+                     correction cannot cover instants fusiform has not reached",
+                    era.provider_id,
+                    era.model_id,
+                    era.fact_key.as_str(),
+                    correction.affected_until.0,
+                    era.boundary_at.0
                 )));
             }
         }
