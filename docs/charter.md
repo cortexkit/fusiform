@@ -68,7 +68,9 @@ fleet consumers over subc routes and pushed on change.
 
 ## v1 scope (deliberately small)
 
-1. **Fetch** models.dev on a cadence (supervised, health-probed, jittered).
+1. **Fetch** models.dev on a cadence (supervised, health-probed). See
+   "Polling cadence" below — this line said "jittered" from the charter's
+   first draft and nothing ever implemented it.
 2. **Normalize** into fusiform's own schema (see Schema, below).
 3. **Diff** against the last snapshot; store snapshot history + provenance
    (source, fetch time, content hash) in the module store.
@@ -198,6 +200,56 @@ v1 ships no non-LLM source. Do not build speculative fetchers.
    cutover is a function's input type rather than a migration. BROCA never
    consumed it; their `broca-catalog` parses independently, which is why
    their tier parsing was correct while the crate's was wrong.
+
+## Polling cadence (fleet precedent, set 2026-08-12)
+
+Fusiform is the first supervised CortexKit module that polls a third party on
+a timer, so this is a precedent rather than a preference — SUBC confirmed no
+fleet convention exists. Written after deployment rather than before, because a
+cadence claim from an undeployed module is a claim about a system that does not
+exist.
+
+**Measured, from the running module:**
+
+| Property | Value |
+| --- | --- |
+| Interval | 30 minutes, `POLL_INTERVAL_MS`, not configurable |
+| Phase | relative to process start, not the wall clock |
+| Missed ticks | `MissedTickBehavior::Skip` |
+| First tick | immediate — `tokio::time::interval` fires at once, measured 1ms |
+| Jitter | **none** |
+| Cost of a poll that finds nothing | one conditional GET, 304, zero body bytes |
+| Cost of a poll that finds a change | ~355 KB gzipped |
+
+**On jitter, honestly.** The charter said "jittered" before any code existed
+and no code ever added it. What jitter would buy here is not aligning with
+other clients of the same upstream on the half hour — and that property is
+already present, because the interval runs from PROCESS START rather than from
+a wall-clock boundary, so the phase is whatever second the module happened to
+come up and re-randomises on every restart.
+
+Present by accident is worth saying out loud rather than dressing up: nothing
+chose it, and a future change to wall-clock-aligned scheduling would remove it
+silently. The line is not being made true by adding a jitter knob, because that
+would be adding a mechanism to justify a sentence.
+
+The other thing jitter conventionally protects against — a restart burst — is
+bounded by the supervisor, which allows 3 restarts with a 100ms backoff. Four
+conditional GETs in a fraction of a second, each costing zero body bytes on a
+304.
+
+**The two rules that actually matter, which any future poller should copy:**
+
+1. **The poll is not on the health path.** Health reads atomics the loop
+   stamps and does arithmetic — no lock, no disk, no network. A health probe
+   that queues behind a degraded upstream is useless exactly when it is needed.
+2. **A poll that finds nothing costs nothing.** Conditional GET with a stored
+   ETag; a 304 transfers no body. This is what makes a 30-minute cadence a
+   politeness question rather than a cost one.
+
+A future poller with a heavier upstream, or a fleet with several of them
+hitting the same host, should revisit the jitter question on ITS evidence. This
+section records what fusiform does and why, not a rule for everyone.
 
 ## Non-goals
 
