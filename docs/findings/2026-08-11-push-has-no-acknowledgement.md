@@ -1,3 +1,26 @@
+> **RESOLVED 2026-08-12, and not the way this document expected.**
+>
+> The delivery half was fixed: `subc-client-rs` 0.3.0 surfaces push frames to
+> consumers, opt-in per route and epoch-fenced, plus an always-present
+> `pushes_dropped_no_receiver` counter so a producer pushing into a discarding
+> client can tell.
+>
+> The acknowledgement half was WITHDRAWN rather than built. Asking for the
+> transport forced the question of what the acknowledgement was for, and the
+> answer did not survive it: if push is the only notification path, an ack
+> reports a staleness it cannot repair. With consumers keeping a slow poll
+> backstop, a dropped push costs latency only — and the backstop is a better
+> acknowledgement than a message, because it cannot itself be dropped.
+>
+> So the reduced ask was delivery plus visibility, with no wire change and no
+> module-initiated request frame. Fusiform emits no pushes today; `emits_push`
+> is false in its manifest.
+>
+> The finding below stands as measured. Keeping it because the DIAGNOSIS was
+> right and the REMEDY it implied was wrong, which is the more useful half: a
+> missing transport is easier to notice than an unnecessary requirement, and
+> fixing the first would have closed the gap while preserving the mistake.
+
 # The push surface fusiform specified cannot be built as specified
 
 Measured 2026-08-11 against `subconscious@a23ae4ab`, `broca` working tree.

@@ -58,7 +58,7 @@ Verified against the working tree at `1ff33f9`, section by section:
 | §1 Identity | **built** — `ModelKey` is the (source, provider, model) triple |
 | §2 Observation vs era | **built** — both tables, with the confirming-outcome split |
 | §3 Eras are pure append | **built** — no `valid_to`, no `is_current`, no update path |
-| §3.1 `Corrected` | **read side built, write side not.** A correction written by hand is honoured: `value_at` refuses inside its extent and names it, and `read_catalog` omits the fact. What has no producer is the code that DECIDES to write one. The earlier status here read "type built, never written", which was one claim covering two states — the type round-tripped AND every point-in-time read silently ignored corrections. Only the first half had been checked. |
+| §3.1 `Corrected` | **built, operator-driven.** Reads inside a corrected window refuse and name the correction; `read_catalog` omits the fact and reports it as withheld. Writes come from `ck models correct`, where a human supplies the diagnosis — which model, which facts, what window, which finding document — and supplies NO value: the window ends when the fix landed, so a later poll has already written the right one. There is deliberately no automatic detector: one built before a real defect existed would define what counts as detectable, and the first real defect would be classified by a taxonomy written in ignorance of it. |
 | §4 Rates | **partially built** — `PerMillionTokens` and the tiered conditions are produced from real documents. `PerImage`, `PerSecond`, `PerMinute`, `PerCharacter` are declared types with no producer, because models.dev publishes no unit for them. |
 | §5 Modality | **built** — carried, unknown values preserved |
 | §5.1 Byte-affecting fields | **built** — the zero-limit rule and the quarantine |
@@ -68,13 +68,20 @@ Verified against the working tree at `1ff33f9`, section by section:
 | §9 Store | **built** — managed SQLite from the HELLO_ACK descriptor |
 | §9 Engram enrollment | **built** — `crates/fusiform-module/data/engram-catalog.json`, validated with engram's own parser, installed by `scripts/install-enrollment.sh`. See `docs/backup-enrollment.md`. Not load-bearing for the version counter: the §9 text once claimed a `restore-with-monotonic-fence` here, that mechanism does not exist, and the counter is restore-invariant by construction instead (§10). |
 | §10 Serve | **built** — `catalog.get`, `catalog.history`, `catalog.status` |
-| §10 Push | **not built, and not buildable as specified** — see `docs/findings/2026-08-11-push-has-no-acknowledgement.md`. A push frame carries `corr: 0` and a module has no request frame, so the discriminated acknowledgement has no transport; and both consumer clients discard `FrameType::Push` outright. Envelope shapes, ordering and high-water re-sync remain specification; the acknowledgement needs a different design or a transport change that is not fusiform's to make. |
+| §10 Push | **transport now exists; fusiform emits nothing.** `subc-client-rs` 0.3.0 surfaces push frames to consumers (opt-in per route, epoch-fenced) with an always-present `pushes_dropped_no_receiver` counter, so a module pushing into a discarding client is a readable fact. What is NOT built is any fusiform push: `emits_push` is false in the manifest, and no code calls `ModuleHandle::push`. The discriminated acknowledgement of §10 is WITHDRAWN rather than pending — see below. |
 | §10 Payload boundary | **built.** The served types live in `fusiform-protocol` (this repo, not commons — settled 2026-08-12, see §10). Dependency tree pinned to serde-only by test; version discipline enforced in CI; golden fixtures of four real served payloads. What is NOT done is astrocyte consuming it, which is their switch on their schedule. |
 
-Two entries deserve emphasis because they are the ones most likely to be cited
-as facts: **no defect-detection path writes a `Corrected` era, and no push
-exists.** A consumer
-reasoning about how fusiform acknowledges a push is reasoning about a design.
+One entry deserves emphasis because it is the one most likely to be cited as a
+fact: **fusiform emits no pushes.** The transport exists as of 2026-08-12, the
+manifest says `emits_push: false`, and no code calls it. A consumer reasoning
+about receiving a push from fusiform is reasoning about a design.
+
+The other entry that sat here — that nothing writes a `Corrected` era — stopped
+being true on 2026-08-12 when `ck models correct` shipped. What remains absent
+is an AUTOMATIC detector, and that absence is deliberate rather than pending:
+one built before a real defect existed would define what counts as detectable,
+and the first real defect would be classified by a taxonomy written in
+ignorance of it.
 
 ### Why the original convention expired, in its own words
 
@@ -145,11 +152,17 @@ an artifact of having no code, and it is temporary.
 > the state of each section was established by running `grep` and `ls` against
 > the working tree rather than by re-reading the prose.
 >
-> The finding worth carrying: two things this note describes in the present
-> tense have no producer at all — no code decides to write a `Corrected` era
-> (the read side that honours one is now built), and no push
-> code exists. Both read as built to anyone skimming, because the surrounding
+> The finding worth carrying: two things this note described in the present
+> tense had no producer at all — nothing wrote a `Corrected` era, and no push
+> code existed. Both read as built to anyone skimming, because the surrounding
 > sections describe behaviour that is.
+>
+> Both have since moved, on different dates, which is the point of the table
+> rather than a footnote to it: corrections gained a writer on 2026-08-12, and
+> push gained a transport the same day while fusiform still emits nothing. A
+> row goes stale one at a time and nothing announces it — these two were caught
+> because a peer's message named the state they were in and it no longer
+> matched.
 >
 > A first draft of this paragraph claimed four corrections and named the
 > crate-version sequencing item as one of them. There were three changes, and
@@ -1622,10 +1635,39 @@ acknowledgement without inferring it. A watermark comparison is a sender-side
 workaround for a receiver-side ambiguity, and it only fires for a sender that
 already knows to look.
 
-#### Measured 2026-08-11: this acknowledgement has no transport
+#### WITHDRAWN 2026-08-12: the acknowledgement was the wrong mechanism
 
-Everything below about the acknowledgement's shape stands as reasoning and
-cannot be built on the current push path. Three facts, read from source:
+> **Read this before the reasoning below.** The acknowledgement is not pending
+> a transport. It is withdrawn, and the transport now exists without it.
+>
+> The original argument was that a push must be acknowledged so fusiform knows
+> whether a consumer applied it. Walking it end to end for the transport made
+> the flaw visible: **if push is the only notification path, the ack is a patch
+> over that fragility rather than a fix for it.** A dropped push leaves a
+> consumer permanently stale, and an acknowledgement does not repair that — it
+> reports it, to a producer with nothing useful to do about it.
+>
+> With consumers keeping a slow poll of fusiform as a backstop, a dropped push
+> costs LATENCY and nothing else. And the backstop is structurally a better
+> acknowledgement than a message, because it cannot itself be dropped.
+>
+> That reframes push honestly: with a poll backstop it is a **latency
+> optimization, not a correctness requirement.** Stating that plainly is what
+> settled it — SUBC shipped consumer-side push delivery in `subc-client-rs`
+> 0.3.0 with no wire change, no module-initiated request frame, and no ack.
+>
+> What DID survive from the ask below is the smallest part of it: a producer
+> pushing into a client that discards every frame could not tell. That is now a
+> `pushes_dropped_no_receiver` counter. A perfect record nobody can read is the
+> same defect this repository found in its own health path (§12), and it was
+> worth more than the acknowledgement it replaced.
+>
+> The sections below are kept because the reasoning about DISCRIMINATED refusal
+> vocabularies is still correct and still useful — for any surface that has a
+> reply channel by construction. Read them as being about that, not about push.
+
+The measurement that started this, from 2026-08-11. Three facts, read from
+source:
 
 - `ModuleHandle::push` emits `FrameType::Push` with `corr: 0`, and a module's
   outbound vocabulary is `catalog_update`, `push`, and nothing else. There is
@@ -1636,9 +1678,15 @@ cannot be built on the current push path. Three facts, read from source:
   "interim progress — ignore".
 
 The daemon forwards pushes to the consumer socket, so the bytes arrive; both
-clients throw them away. What a consumer actually receives is `StreamData` on
+clients threw them away. What a consumer received instead was `StreamData` on
 a held-open subscription, which the module emits from inside a live request —
 a pull-shaped relationship, with the consumer owning the lifecycle.
+
+**Superseded 2026-08-12** for the delivery half: `subc-client-rs` 0.3.0 adds
+`push_events(&route_handle)`, opt-in per route and epoch-fenced so a stale
+handle refuses and a reconnect cannot deliver into a dead registration. The
+reply-channel fact still holds — there is still no module-initiated request —
+and no longer matters, because the acknowledgement is withdrawn.
 
 The error worth naming: `broca-protocol`'s `ApprovalResponse` is real and does
 what this section says. A response TYPE existing was read as a response
@@ -1646,6 +1694,14 @@ CHANNEL existing. The section argues at length about which arm names a partial
 apply and never says how the reply travels — **a design detailed about a
 message's contents and silent about its direction has not been walked end to
 end.**
+
+And the second error, visible only after the first was fixed: walking it end to
+end did not just reveal a missing transport, it revealed that the mechanism was
+wrong. The reply channel was the obvious thing to ask for, and asking for it
+would have bought a protocol addition to report a staleness the design had no
+way to repair. **A missing transport is easier to notice than an unnecessary
+requirement**, and finding the first is what created the opportunity to notice
+the second — the fix would have closed the gap and preserved the mistake.
 
 #### The shape already exists in the fleet; do not invent a third
 
