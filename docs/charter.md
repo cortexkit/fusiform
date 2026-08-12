@@ -122,9 +122,33 @@ v1 ships no non-LLM source. Do not build speculative fetchers.
 >
 > The fix costs one message, and nobody sent it: **ask the other party for the
 > count before writing the estimate.** "How many call sites touch this?" would
-> have collapsed item 3 the day it was written. Applies to items 1 and 2 too,
-> which describe consumers that do not exist yet — there is nobody to ask, so
-> those numbers are not estimates at all and should not be read as any.
+> have collapsed item 3 the day it was written.
+>
+> **Items 1 and 2 are a different hazard and a worse one.** They describe
+> consumers that do not exist yet, so there is nobody to ask — and what they
+> carry is not a size estimate at all. It is DESIGN PRESCRIPTION: "a job-shaped
+> sibling of broca, NOT broca's run-loop machinery"; "multiple sources
+> normalized into one schema". Those sentences were written by people reasoning
+> about a module nobody has built.
+>
+> A claim about a system with no keyboard on the other side does not merely
+> survive unchecked — it is **self-confirming**. Whoever eventually builds that
+> driver will read this item, take the prescription as a constraint, and build
+> to it. At which point it is true, and was retroactively always true, and
+> nothing was ever wrong. Reality gets shaped by the claim rather than being
+> free to contradict it.
+>
+> So, explicitly, for whoever builds it: **these are positions, not
+> requirements, and you are free to disagree with them.** They were reached
+> without the information you will have. If the job shape is wrong when you get
+> there, the charter is wrong — say so and change it. The marking is the only
+> defence, because an unmarked position becomes a requirement its implementer
+> inherits without ever seeing it argued.
+>
+> (This paragraph replaces one that said "those numbers are not estimates at
+> all". Items 1 and 2 contain no numbers. The sentence was true of what it
+> meant and false of what was on the page — the same defect the paragraph above
+> is about, committed inside the correction for it.)
 
 1. **Who drives non-LLM generation?** Settled July 17: astrocyte METERS all
    AI spend; generators are "future modules with usage telemetry of their
