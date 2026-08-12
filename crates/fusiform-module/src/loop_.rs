@@ -219,6 +219,32 @@ pub fn apply(
                 });
             }
 
+            // A document that describes far less than the last one is refused
+            // before anything is written.
+            //
+            // Fusiform's ingest treats "absent from this document" as a
+            // withdrawal, so a valid-but-collapsed response — a truncated CDN
+            // cache entry, a provider index caught mid-rebuild, an API
+            // returning `{}` on an internal error — tombstones every model it
+            // omits. Measured against a real seed: one such response took a
+            // 14-model store to 1, and at production scale it would tombstone
+            // 6,270 models, report success, and leave every consumer reading an
+            // empty catalog.
+            //
+            // Nothing else catches it. The bytes are well formed, the parse
+            // succeeds, the hash differs, and the tombstones are exactly what
+            // the diff asks for.
+            if let Some(reason) = implausible_shrink(ctx, &catalog).map_err(TickError::Store)? {
+                return record_failure(
+                    ctx,
+                    FailureClass::Implausible,
+                    reason,
+                    now_ms,
+                    duration,
+                    Some(raw_hash),
+                );
+            }
+
             // Something moved. The observation is written first so the eras
             // appended below can derive their windows from a history that
             // already contains this tick.
@@ -293,6 +319,61 @@ pub fn apply(
             })
         }
     }
+}
+
+/// The fraction of the catalog a single poll may drop before fusiform refuses.
+///
+/// Grounded in two measurements rather than chosen. Across two live fetches six
+/// hours apart, ZERO models disappeared out of 6,253 — the real rate is not
+/// merely low, it was nil over that interval. And the largest single provider
+/// carries 9.9% of the catalog, so a whole provider vanishing at once, the
+/// biggest plausible legitimate drop, stays under this.
+///
+/// A legitimate mass withdrawal beyond that is possible and would be refused.
+/// That is the intended direction: it presents as a Degraded module with a
+/// named reason and an operator decision, while the alternative presents as a
+/// successful poll that emptied the catalog. One is a delay, the other is
+/// silent data loss with every component reporting success.
+pub const MAX_SHRINK_FRACTION: f64 = 0.25;
+
+/// Below this many models, the fraction is meaningless and any drop is allowed.
+///
+/// A store holding four models cannot express a 25% threshold usefully, and a
+/// small catalog is either a test fixture or a brand-new install — neither is a
+/// state worth defending against a shrink.
+pub const SHRINK_GUARD_MIN_MODELS: usize = 100;
+
+/// Whether a document drops so much of the catalog that fusiform refuses it.
+///
+/// Compares against what the store currently holds as PRESENT, not against the
+/// last document's size: the store is what a consumer would lose.
+fn implausible_shrink(
+    ctx: &ApplyCtx<'_>,
+    catalog: &fusiform_core::NormalizedCatalog,
+) -> Result<Option<String>, fusiform_store::CatalogError> {
+    let held = ctx.store.present_model_count(ctx.source)?;
+    if held < SHRINK_GUARD_MIN_MODELS {
+        return Ok(None);
+    }
+
+    let incoming = catalog.model_count();
+    if incoming >= held {
+        return Ok(None);
+    }
+
+    let dropped = held - incoming;
+    let fraction = dropped as f64 / held as f64;
+    if fraction <= MAX_SHRINK_FRACTION {
+        return Ok(None);
+    }
+
+    Ok(Some(format!(
+        "upstream document describes {incoming} models, {dropped} fewer than the \
+         {held} currently held ({:.1}% drop, limit {:.0}%); refusing to tombstone \
+         them on one response",
+        fraction * 100.0,
+        MAX_SHRINK_FRACTION * 100.0
+    )))
 }
 
 /// Record a poll that observed nothing.

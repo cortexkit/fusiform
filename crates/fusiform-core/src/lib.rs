@@ -423,6 +423,15 @@ pub enum FailureClass {
     HttpStatus,
     /// The body arrived and could not be normalised.
     Parse,
+    /// The body parsed, and describes so much less than the last one that
+    /// fusiform will not believe it.
+    ///
+    /// A separate class from `Parse` because the document is well formed and
+    /// nothing is wrong with fusiform's reading of it. What is wrong is the
+    /// document, and the fix is on the upstream's side rather than in a parser.
+    /// A consumer branching on `Parse` would be told to check for a schema
+    /// change that did not happen.
+    Implausible,
 }
 
 #[cfg(test)]

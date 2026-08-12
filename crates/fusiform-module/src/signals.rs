@@ -36,6 +36,7 @@ const fn encode_class(class: FailureClass) -> u64 {
         FailureClass::Network => 1,
         FailureClass::HttpStatus => 2,
         FailureClass::Parse => 3,
+        FailureClass::Implausible => 4,
     }
 }
 
@@ -44,6 +45,7 @@ const fn decode_class(value: u64) -> Option<FailureClass> {
         1 => Some(FailureClass::Network),
         2 => Some(FailureClass::HttpStatus),
         3 => Some(FailureClass::Parse),
+        4 => Some(FailureClass::Implausible),
         // CLASS_NONE, and any value this build does not know. An unrecognised
         // encoding reports "no class" rather than guessing one, because a wrong
         // cause sends an operator somewhere specific and wrong.

@@ -122,6 +122,11 @@ fn describe_failure(signals: &Signals) -> &'static str {
         Some(FailureClass::Network) => "upstream unreachable",
         Some(FailureClass::HttpStatus) => "upstream returned an error status",
         Some(FailureClass::Parse) => "upstream body did not parse",
+        // Deliberately not phrased as a fusiform failure. The document is
+        // well formed and fusiform read it correctly; it was refused because
+        // believing it would have deleted most of the catalog. An operator
+        // needs to look at the upstream, not at this module.
+        Some(FailureClass::Implausible) => "upstream document dropped too much of the catalog",
         // The streak is nonzero but no class is recorded, which this build
         // cannot produce. Reported as unknown rather than guessed: a wrong
         // cause sends an operator somewhere specific and wrong.
@@ -139,6 +144,7 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
             FailureClass::Network => "network",
             FailureClass::HttpStatus => "http_status",
             FailureClass::Parse => "parse",
+            FailureClass::Implausible => "implausible",
         }),
         "observation_age_ms": signals.observation_age_ms(now_ms),
         "last_write_age_ms": signals.last_write_age_ms(now_ms),

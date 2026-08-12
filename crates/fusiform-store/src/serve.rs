@@ -540,6 +540,34 @@ impl CatalogStore {
         Ok(rows)
     }
 
+    /// How many models the store currently holds as present.
+    ///
+    /// Counts existence facts whose latest era says present, which is the same
+    /// definition a catalog read uses. Answered by a targeted query rather than
+    /// by reading the catalog and counting: the shrink guard runs on every
+    /// changed poll, and rendering 67,000 facts to learn one number is a cost
+    /// paid for nothing.
+    pub fn present_model_count(&self, source: SourceId) -> Result<usize, CatalogError> {
+        let n = self.raw_conn(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM ( \
+                   SELECT e.provider_id, e.model_id \
+                   FROM era e \
+                   WHERE e.source = ?1 AND e.fact_key = 'existence' \
+                     AND e.boundary_at_ms = ( \
+                       SELECT MAX(e2.boundary_at_ms) FROM era e2 \
+                       WHERE e2.source = e.source \
+                         AND e2.provider_id = e.provider_id \
+                         AND e2.model_id = e.model_id \
+                         AND e2.fact_key = 'existence') \
+                     AND e.value_json = '\"present\"')",
+                params![source.as_str()],
+                |r| r.get::<_, i64>(0),
+            )
+        })?;
+        Ok(n as usize)
+    }
+
     /// How many eras the store holds, for one source.
     pub fn era_count(&self, source: SourceId) -> Result<i64, CatalogError> {
         let n = self.raw_conn(|conn| {

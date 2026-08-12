@@ -954,6 +954,7 @@ fn outcome_columns(outcome: &ObservationOutcome) -> (&'static str, Option<&'stat
             FailureClass::Network => "network",
             FailureClass::HttpStatus => "http_status",
             FailureClass::Parse => "parse",
+            FailureClass::Implausible => "implausible",
         }),
         _ => None,
     };
