@@ -66,6 +66,12 @@ pub enum SeedOutcome {
         eras_written: usize,
         model_count: usize,
         fetched_at: Timestamp,
+        /// The catalog version the seed issued, equal to `fetched_at`.
+        ///
+        /// Reported rather than left implicit because it is what a consumer
+        /// compares against, and because a seeded store serving version 0 was a
+        /// real defect found only by reading this number off a live module.
+        version: i64,
     },
     /// The store already held facts, so the snapshot was not applied.
     ///
@@ -139,7 +145,7 @@ pub fn seed_if_empty(store: &CatalogStore) -> Result<SeedOutcome, SeedError> {
     // Its hash is the normalized digest of the snapshot, so the first real
     // fetch of an unchanged document compares equal and correctly records
     // `Unchanged` rather than rewriting every fact.
-    let observation_id = store
+    let observation_id: i64 = store
         .record_observation(&NewObservation {
             source: SourceId::ModelsDev,
             observed_at: fetched_at,
@@ -162,7 +168,6 @@ pub fn seed_if_empty(store: &CatalogStore) -> Result<SeedOutcome, SeedError> {
             )),
         })
         .map_err(SeedError::Store)?;
-    let _ = observation_id;
 
     // The eras themselves are Seed boundaries with no observation link. The
     // schema enforces that pairing: a seed era naming an observation would read
@@ -173,9 +178,41 @@ pub fn seed_if_empty(store: &CatalogStore) -> Result<SeedOutcome, SeedError> {
 
     let eras_written = store.append_eras(&plan.eras).map_err(SeedError::Store)?;
 
+    // The version advances to the snapshot's FETCH INSTANT, not to now.
+    //
+    // Without this the store served version 0 while holding a complete
+    // catalog — measured on the first live deployment, where `ck models status`
+    // reported 6,280 models, 68,026 eras and `catalog version 0`. The version
+    // is what a consumer holds as a high-water mark and refuses at or below, so
+    // a seeded catalog was indistinguishable from a store that knows nothing,
+    // and stayed that way until the first CHANGED poll — an unchanged poll
+    // advances nothing, so on a quiet upstream that is hours or days.
+    //
+    // The failure that makes it serious is the reinstall: a fresh install
+    // seeded from a NEWER snapshot also served 0, so every consumer holding a
+    // real version refused it — correctly by their own rule, and wrongly in
+    // fact, because the refused catalog was the newer one. Silent at the
+    // producer, total at the consumer: exactly the failure
+    // `advance_catalog_version` is written to prevent, reached through the one
+    // path that never called it.
+    //
+    // Fetch instant rather than now, because the version then states the
+    // VINTAGE OF THE CONTENT rather than the age of the install. Two machines
+    // installed a week apart from the same snapshot agree, and an install from
+    // a stale snapshot is correctly ordered below a consumer's newer catalog
+    // instead of claiming to supersede it.
+    //
+    // Monotonicity is safe here: this runs only on a store with no eras, so
+    // the version it advances from is always 0, and the store's own guard
+    // rejects a non-advancing write regardless.
+    let version = store
+        .advance_catalog_version(observation_id, fetched_at)
+        .map_err(SeedError::Store)?;
+
     Ok(SeedOutcome::Seeded {
         eras_written,
         model_count: catalog.model_count(),
         fetched_at,
+        version,
     })
 }

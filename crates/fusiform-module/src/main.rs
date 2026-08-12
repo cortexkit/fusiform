@@ -139,9 +139,10 @@ impl ModuleHandler for Fusiform {
                 eras_written,
                 model_count,
                 fetched_at,
+                version,
             }) => eprintln!(
                 "fusiform: seeded {model_count} models ({eras_written} eras) from the \
-                 embedded snapshot fetched at {}",
+                 embedded snapshot fetched at {}, catalog version {version}",
                 fetched_at.0
             ),
             Ok(seed::SeedOutcome::AlreadyPopulated { existing_eras }) => {

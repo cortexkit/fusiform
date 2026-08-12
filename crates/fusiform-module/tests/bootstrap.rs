@@ -339,3 +339,88 @@ fn the_snapshot_and_its_metadata_agree() {
         "the metadata's model count does not match the snapshot"
     );
 }
+
+/// A seeded store serves a version that states the snapshot's vintage.
+///
+/// Found by driving the live module after deployment: `ck models status`
+/// reported 6,280 models, 68,026 eras, and `catalog version 0`. The version is
+/// what a consumer holds as a high-water mark and refuses at or below, so a
+/// full catalog was indistinguishable from a store that knows nothing — and it
+/// stayed that way until the first CHANGED poll, since an unchanged poll
+/// advances nothing.
+///
+/// The serious case is a reinstall. A fresh install seeded from a NEWER
+/// snapshot also served 0, so every consumer holding a real version refused it
+/// — correctly by their own rule and wrongly in fact, because the refused
+/// catalog was the newer one.
+///
+/// The version is the snapshot's FETCH INSTANT rather than now, so it states
+/// the vintage of the content rather than the age of the install: two machines
+/// installed a week apart from one snapshot agree, and an install from a stale
+/// snapshot orders correctly below a consumer's newer catalog instead of
+/// claiming to supersede it.
+#[test]
+fn a_seeded_store_serves_the_snapshots_vintage_as_its_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = fresh_store(&dir);
+
+    // Before: nothing, and version 0 is the honest answer for a store that
+    // knows nothing.
+    assert_eq!(store.catalog_version().unwrap(), 0);
+
+    let outcome = seed::seed_if_empty(&store).unwrap();
+    let SeedOutcome::Seeded {
+        fetched_at,
+        version,
+        model_count,
+        ..
+    } = outcome
+    else {
+        panic!("an empty store must seed, got {outcome:?}");
+    };
+
+    assert!(model_count > 6_000, "the snapshot describes a real catalog");
+    assert_eq!(
+        version, fetched_at.0,
+        "the version must be the snapshot's fetch instant, not the install time"
+    );
+    assert_eq!(
+        store.catalog_version().unwrap(),
+        fetched_at.0,
+        "and the store must serve it"
+    );
+
+    // The distinguishing property, stated directly: a seeded store and an
+    // empty one must not report the same version.
+    let empty_dir = tempfile::tempdir().unwrap();
+    let empty = fresh_store(&empty_dir);
+    assert_ne!(
+        store.catalog_version().unwrap(),
+        empty.catalog_version().unwrap(),
+        "a consumer must be able to tell a seeded catalog from an empty store"
+    );
+}
+
+/// Two installs from the same snapshot agree on their version.
+///
+/// This is why the version is the fetch instant rather than `now`. Under a
+/// now-based version, two machines installed a week apart from one snapshot
+/// would claim different versions for identical content, and the later install
+/// would appear to supersede the earlier one while holding exactly the same
+/// catalog.
+#[test]
+fn two_installs_from_one_snapshot_report_the_same_version() {
+    let a_dir = tempfile::tempdir().unwrap();
+    let a = fresh_store(&a_dir);
+    seed::seed_if_empty(&a).unwrap();
+
+    let b_dir = tempfile::tempdir().unwrap();
+    let b = fresh_store(&b_dir);
+    seed::seed_if_empty(&b).unwrap();
+
+    assert_eq!(
+        a.catalog_version().unwrap(),
+        b.catalog_version().unwrap(),
+        "identical content must carry an identical version"
+    );
+}
