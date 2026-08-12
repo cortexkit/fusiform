@@ -97,10 +97,53 @@ pub fn manifest() -> ModuleManifest {
                         "additionalProperties": false
                     }),
                 },
+                Tool {
+                    name: route::TOOL_CORRECT.to_string(),
+                    description: Some(
+                        "Record that fusiform's own record was wrong over a past window. \
+                         Marks the window so reads inside it refuse; never changes what the \
+                         catalog currently says. Previews unless dry_run is false."
+                            .to_string(),
+                    ),
+                    // The only tool here that writes. Declared honestly so the
+                    // daemon can fence it: calling it Pure would tell the
+                    // supervisor a write is safe to replay.
+                    execution_mode: ExecutionMode::Mutating,
+                    schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "string"},
+                            "provider_id": {"type": "string"},
+                            "model_id": {"type": "string"},
+                            "fields": {"type": "array", "items": {"type": "object"}},
+                            "affected_from_ms": {"type": "integer"},
+                            "affected_until_ms": {"type": "integer"},
+                            "reason": {"type": "string"},
+                            "dry_run": {"type": "boolean"}
+                        },
+                        // No wildcard form: a correction makes reads inside its
+                        // window refuse, so one naming every model would be a
+                        // catalog kill switch. Both ids are required.
+                        "required": [
+                            "provider_id", "model_id", "fields",
+                            "affected_from_ms", "affected_until_ms", "reason"
+                        ],
+                        "additionalProperties": false
+                    }),
+                },
             ],
             identity_scope: vec![IdentityScope::Project, IdentityScope::Session],
             concurrency: Concurrency::ModuleManaged,
-            emits_push: true,
+            // False, and it was true here for eleven commits while nothing in
+            // this repository ever called push. A manifest is a claim the
+            // daemon and every operator reads; declaring a capability fusiform
+            // does not exercise is the same defect as a comment describing code
+            // that is not there, with a wider audience.
+            //
+            // Fusiform is pull-only. The transport now exists — subc-client-rs
+            // 0.3.0 surfaces push frames to consumers — but fusiform emits
+            // none, so this stays false until it does.
+            emits_push: false,
             sub_supervises: true,
         }],
         consumes: Vec::new(),

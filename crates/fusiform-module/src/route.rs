@@ -19,7 +19,8 @@
 
 use std::collections::BTreeMap;
 
-use fusiform_core::{SourceId, Timestamp};
+use fusiform_core::{FieldId, SourceId, Timestamp};
+use fusiform_store::correct::{apply_correction, plan_correction};
 use fusiform_store::serve::{CatalogQuery, CatalogSnapshot, Presence};
 use fusiform_store::{CatalogError, CatalogStore, FactKey};
 use serde::Deserialize;
@@ -29,9 +30,10 @@ use serde::Deserialize;
 // here because this file is where the contract is USED, and a reader following
 // a route should not have to know which crate the type is declared in.
 pub use fusiform_protocol::{
-    CatalogGetRequest, CatalogGetResponse, CorrectionDetail, HistoryEra, HistoryRequest,
-    HistoryResponse, StatusPoll, StatusRequest, StatusResponse, ToolResponse, WithheldFactWire,
-    TOOLS, TOOL_GET, TOOL_HISTORY, TOOL_STATUS,
+    CatalogGetRequest, CatalogGetResponse, CorrectRequest, CorrectResponse, CorrectedFact,
+    CorrectionDetail, HistoryEra, HistoryRequest, HistoryResponse, StatusPoll, StatusRequest,
+    StatusResponse, ToolResponse, WithheldFactWire, TOOLS, TOOL_CORRECT, TOOL_GET, TOOL_HISTORY,
+    TOOL_STATUS,
 };
 
 /// Why a request could not be served.
@@ -111,6 +113,7 @@ pub fn serve_tool_call(store: &CatalogStore, body: &[u8]) -> Result<ToolResponse
         TOOL_GET => serve_catalog_get(store, &args).map(ToolResponse::Catalog),
         TOOL_HISTORY => serve_history(store, &args).map(ToolResponse::History),
         TOOL_STATUS => serve_status(store, &args).map(ToolResponse::Status),
+        TOOL_CORRECT => serve_correct(store, &args).map(ToolResponse::Correct),
         // Named explicitly rather than served anyway. A module that answers to
         // any tool name keeps answering after a consumer's typo, and the
         // consumer believes it called something else.
@@ -196,6 +199,98 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
                 duration_ms: p.duration_ms,
             })
             .collect(),
+    })
+}
+
+/// Serve `catalog.correct`: record that fusiform's own record was wrong.
+///
+/// The only route that writes. It plans against the store first and reports
+/// every refusal at once, because an operator correcting six facts wants six
+/// problems in one reply rather than six round trips.
+pub fn serve_correct(store: &CatalogStore, body: &[u8]) -> Result<CorrectResponse, RouteError> {
+    let request: CorrectRequest = serde_json::from_slice(body)
+        .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?;
+    let source = parse_source(request.source.as_deref())?;
+
+    if request.reason.trim().is_empty() {
+        // A correction with no reason is unauditable: the design's whole point
+        // is that a consumer can trace a partition back to a named defect.
+        return Err(RouteError::bad_request(
+            "a correction must carry a reason naming the defect record".to_string(),
+        ));
+    }
+
+    // Field ids arrive as the served vocabulary spells them, and are parsed
+    // through the same serde representation a consumer reads. A field this does
+    // not recognise is refused rather than skipped: silently dropping one would
+    // write a correction with a narrower extent than the operator stated.
+    let mut fields = Vec::new();
+    for raw in &request.fields {
+        let field: FieldId = serde_json::from_value(raw.clone()).map_err(|e| {
+            RouteError::bad_request(format!(
+                "{raw} is not a field this catalog can correct: {e}"
+            ))
+        })?;
+        fields.push(field);
+    }
+    if fields.is_empty() {
+        return Err(RouteError::bad_request(
+            "a correction must name at least one field".to_string(),
+        ));
+    }
+
+    let now = Timestamp(now_ms());
+    let planned = plan_correction(
+        store,
+        source,
+        &request.provider_id,
+        &request.model_id,
+        &fields,
+        Timestamp(request.affected_from_ms),
+        Timestamp(request.affected_until_ms),
+        &request.reason,
+        now,
+    )
+    .map_err(|e| store_error(&e))?;
+
+    let plan = match planned {
+        Ok(plan) => plan,
+        Err(refusals) => {
+            // Every refusal, joined. The code is coarse on purpose — a consumer
+            // branches on "refused", an operator reads the message.
+            let detail = refusals
+                .iter()
+                .map(|r| r.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(RouteError {
+                code: "refused",
+                message: detail,
+            });
+        }
+    };
+
+    let facts: Vec<CorrectedFact> = plan
+        .rows
+        .iter()
+        .map(|row| CorrectedFact {
+            fact_key: row.fact_key.as_str().to_string(),
+            value: serde_json::from_str(&row.value_json)
+                .unwrap_or(serde_json::Value::String(row.value_json.clone())),
+            current_since_ms: row.current_since.0,
+        })
+        .collect();
+
+    if !request.dry_run {
+        apply_correction(store, source, &plan, now).map_err(|e| store_error(&e))?;
+    }
+
+    Ok(CorrectResponse {
+        written: !request.dry_run,
+        facts,
+        affected_from_ms: plan.affected_from.0,
+        affected_until_ms: plan.affected_until.0,
+        reason: plan.reason,
     })
 }
 

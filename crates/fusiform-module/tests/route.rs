@@ -610,6 +610,13 @@ fn the_manifest_and_the_dispatch_agree_on_which_tools_exist() {
     // And every declared tool actually answers rather than falling through to
     // the unknown-tool arm. A name present in both lists still proves nothing
     // if the match arm is missing.
+    //
+    // Arguments per tool rather than `{}` for all: `catalog.correct` REQUIRES a
+    // named model, deliberately, so a bare call is correctly refused. An
+    // earlier version of this loop sent `{}` to everything and would have
+    // reported a correctly-refusing write tool as unserved — the test's method
+    // assumed every tool is callable with no arguments, which stopped being
+    // true the moment one of them could change the store.
     let f = fixture();
     for tool in &declared {
         let args = match tool.as_str() {
@@ -617,6 +624,16 @@ fn the_manifest_and_the_dispatch_agree_on_which_tools_exist() {
                 "provider_id": "anthropic",
                 "model_id": "claude-sonnet-4-5",
                 "fact_key": "rate.input"
+            }),
+            "catalog.correct" => serde_json::json!({
+                "provider_id": "anthropic",
+                "model_id": "claude-sonnet-4-5",
+                "fields": [{"field": "rate", "class": "input"}],
+                "affected_from_ms": 1,
+                "affected_until_ms": 2,
+                "reason": "reachability check"
+                // dry_run defaults to true, so this proves the tool is reached
+                // without writing anything.
             }),
             _ => serde_json::json!({}),
         };
@@ -629,6 +646,10 @@ fn the_manifest_and_the_dispatch_agree_on_which_tools_exist() {
         let result = fusiform_module::route::serve_tool_call(&f.store, &body);
         match result {
             Ok(_) => {}
+            // A `refused` code means the tool WAS reached and declined on the
+            // merits, which is what this loop is checking for. Only a
+            // bad_request or an unknown tool means it was not served.
+            Err(e) if e.code == "refused" => {}
             Err(e) => panic!(
                 "declared tool {tool} is not served: {} {}",
                 e.code, e.message

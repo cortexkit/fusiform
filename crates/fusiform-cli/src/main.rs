@@ -1,6 +1,11 @@
 #![forbid(unsafe_code)]
 
-//! `fusiform` — the operator CLI.
+//! `ck-models` — the operator CLI, dispatched as `ck models <verb>`.
+//!
+//! `ck` resolves an unknown domain by running `ck-<domain>` from PATH with the
+//! tail passed verbatim and the exit code propagated, so this binary needs no
+//! registration and `ck` needs no change. Confirmed with SUBC rather than
+//! inferred from reading their dispatcher.
 //!
 //! # Why this talks to the daemon instead of opening the database
 //!
@@ -26,10 +31,12 @@
 //! # Usage
 //!
 //! ```text
-//! fusiform status [--polls N]
-//! fusiform get [--provider P] [--model M] [--at MS] [--rates|--capabilities]
-//!              [--include-retired]
-//! fusiform history --provider P --model M --fact rate.input
+//! ck models status [--polls N]
+//! ck models get [--provider P] [--model M] [--at MS] [--rates|--capabilities]
+//!               [--include-retired]
+//! ck models history --provider P --model M --fact rate.input
+//! ck models correct --provider P --model M --field rate.input
+//!                   --from MS --until MS --reason docs/findings/... [--commit]
 //! ```
 
 use std::{
@@ -54,13 +61,15 @@ use subc_protocol::{BindIdentity, RouteTarget};
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 const USAGE: &str = "\
-usage: fusiform <command> [options]
+usage: ck models <command> [options]
 
 commands:
   status                    what fusiform has been doing: recent polls,
                             catalog version, row counts
   get                       read the catalog
   history                   every recorded era for one fact
+  correct                   record that fusiform's own record was wrong over a
+                            past window (previews by default; --commit writes)
 
 options:
   --provider <id>           narrow to one provider
@@ -72,6 +81,18 @@ options:
   --capabilities            only capability and limit facts
   --include-retired         include models the upstream stopped publishing
   --polls <n>               how many recent polls status should show
+
+correct options:
+  --field <key>             a fact this correction names; repeatable
+                            (rate.input, limit.context, capability.reasoning,
+                            existence)
+  --from <epoch-ms>         start of the bad window; a LOWER bound, so when the
+                            true start is unknown use the earliest plausible
+                            instant rather than a best guess
+  --until <epoch-ms>        when the fix landed and fusiform stopped recording
+                            the bad value
+  --reason <path>           the finding document explaining the defect
+  --commit                  actually write it (without this, nothing changes)
   --subc <path>             connection file (default: the per-user path)
   --json                    print the raw response instead of a summary
 ";
@@ -81,7 +102,7 @@ async fn main() {
     disown_inherited_module_identity();
 
     if let Err(e) = run(env::args_os()).await {
-        eprintln!("fusiform: {e}");
+        eprintln!("ck models: {e}");
         process::exit(1);
     }
 }
@@ -125,6 +146,11 @@ struct Args {
     prefixes: Option<Vec<String>>,
     include_retired: bool,
     polls: Option<u32>,
+    fields: Vec<String>,
+    from_ms: Option<i64>,
+    until_ms: Option<i64>,
+    reason: Option<String>,
+    commit: bool,
     connection_file: PathBuf,
     json: bool,
 }
@@ -180,6 +206,41 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
                 }),
             )
         }
+        "correct" => {
+            let provider = args.provider.as_ref().ok_or("correct needs --provider")?;
+            let model = args.model.as_ref().ok_or("correct needs --model")?;
+            let reason = args
+                .reason
+                .as_ref()
+                .ok_or("correct needs --reason naming the finding document")?;
+            let from = args.from_ms.ok_or("correct needs --from")?;
+            let until = args.until_ms.ok_or("correct needs --until")?;
+            if args.fields.is_empty() {
+                return Err("correct needs at least one --field".to_string());
+            }
+
+            // Fact keys are translated to the served FieldId spelling here so an
+            // operator types what they already read in `history` and `get`
+            // output, rather than a JSON object.
+            let fields: Vec<serde_json::Value> = args
+                .fields
+                .iter()
+                .map(|k| field_id_for_fact_key(k))
+                .collect::<Result<_, _>>()?;
+
+            (
+                fusiform_module::route::TOOL_CORRECT,
+                serde_json::json!({
+                    "provider_id": provider,
+                    "model_id": model,
+                    "fields": fields,
+                    "affected_from_ms": from,
+                    "affected_until_ms": until,
+                    "reason": reason,
+                    "dry_run": !args.commit,
+                }),
+            )
+        }
         other => return Err(format!("unknown command {other:?}\n\n{USAGE}")),
     };
 
@@ -197,6 +258,7 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
         "status" => print_status(&response),
         "get" => print_catalog(&response),
         "history" => print_history(&response),
+        "correct" => print_correction(&response),
         _ => unreachable!("the command was validated above"),
     }
     Ok(())
@@ -532,6 +594,11 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         prefixes: None,
         include_retired: false,
         polls: None,
+        fields: Vec::new(),
+        from_ms: None,
+        until_ms: None,
+        reason: None,
+        commit: false,
         connection_file: subc_core::bootstrap::connection_file_path(),
         json: false,
     };
@@ -561,6 +628,25 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
                         .map_err(|_| format!("--polls needs a number, got {raw:?}"))?,
                 );
             }
+            // Repeatable: one defect commonly touches several facts, and each
+            // --field adds to the extent rather than replacing it.
+            "--field" => args.fields.push(value()?),
+            "--from" => {
+                let raw = value()?;
+                args.from_ms = Some(
+                    raw.parse()
+                        .map_err(|_| format!("--from needs epoch milliseconds, got {raw:?}"))?,
+                );
+            }
+            "--until" => {
+                let raw = value()?;
+                args.until_ms = Some(
+                    raw.parse()
+                        .map_err(|_| format!("--until needs epoch milliseconds, got {raw:?}"))?,
+                );
+            }
+            "--reason" => args.reason = Some(value()?),
+            "--commit" => args.commit = true,
             "--subc" => args.connection_file = PathBuf::from(value()?),
             // Prefixes come from the store's own constants, not string
             // literals here. A prefix that matches nothing returns an empty
@@ -580,6 +666,103 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
     }
 
     Ok(args)
+}
+
+/// Translate a fact key into the `FieldId` the wire expects.
+///
+/// An operator types the key they read in `history` and `get` output. Building
+/// the JSON object here rather than making them write it keeps one spelling of
+/// a fact across every verb — and a key this cannot translate is refused by
+/// name, listing what it can, rather than being passed through to fail with a
+/// serde message about an unknown variant.
+fn field_id_for_fact_key(key: &str) -> Result<serde_json::Value, String> {
+    // Rates carry their token class.
+    if let Some(class) = key.strip_prefix("rate.") {
+        if class.contains(".above_context.") {
+            return Err(format!(
+                "{key} is a tiered rate; tier corrections carry a threshold this \
+                 command cannot address yet"
+            ));
+        }
+        return Ok(serde_json::json!({"field": "rate", "class": class}));
+    }
+    if let Some(limit) = key.strip_prefix("limit.") {
+        return Ok(serde_json::json!({"field": "limit", "limit": limit}));
+    }
+    if let Some(capability) = key.strip_prefix("capability.") {
+        return Ok(serde_json::json!({"field": "capability", "capability": capability}));
+    }
+    if key == "existence" {
+        return Ok(serde_json::json!({"field": "existence"}));
+    }
+    Err(format!(
+        "{key:?} is not a fact this catalog can correct; expected one of: {}",
+        fusiform_store::ingest::SERVED_FACT_NAMESPACE.join(", ")
+    ))
+}
+
+/// Print what a correction did, or would do.
+fn print_correction(response: &serde_json::Value) {
+    let written = response
+        .get("written")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let facts = response
+        .get("facts")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    if written {
+        println!("recorded a correction over {} fact(s)", facts.len());
+    } else {
+        println!(
+            "PREVIEW — nothing written. {} fact(s) would be corrected.",
+            facts.len()
+        );
+    }
+    println!();
+    println!(
+        "  window   {} to {}",
+        format_instant(
+            response
+                .get("affected_from_ms")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0)
+        ),
+        format_instant(
+            response
+                .get("affected_until_ms")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0)
+        ),
+    );
+    if let Some(reason) = response.get("reason").and_then(|v| v.as_str()) {
+        println!("  reason   {reason}");
+    }
+    println!();
+    println!("  reads inside that window will refuse and name this correction.");
+    println!("  the value below stays in force and is NOT changed:");
+    println!();
+
+    for fact in &facts {
+        let key = fact.get("fact_key").and_then(|v| v.as_str()).unwrap_or("?");
+        let value = fact
+            .get("value")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "?".into());
+        let since = fact
+            .get("current_since_ms")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        println!("    {key:<32}  {value}");
+        println!("    {:<32}  in force since {}", "", format_instant(since));
+    }
+
+    if !written {
+        println!();
+        println!("  add --commit to record it.");
+    }
 }
 
 #[cfg(test)]

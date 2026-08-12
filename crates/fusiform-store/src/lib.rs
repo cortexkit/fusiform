@@ -13,6 +13,7 @@
 //! with durable pragmas, and applies migrations. What this crate owns is the
 //! domain: the schema, the writes, and the reads.
 
+pub mod correct;
 pub mod ingest;
 pub mod schema;
 pub mod serve;

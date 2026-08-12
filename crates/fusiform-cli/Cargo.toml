@@ -3,15 +3,15 @@ name = "fusiform-cli"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Operator CLI for ck-fusiform: read the catalog, a fact's history, and what the daemon has been doing."
+description = "Operator CLI for ck-fusiform, dispatched as `ck models`: read the catalog, a fact's history, what the daemon has been doing, and record corrections."
 
 [[bin]]
-name = "fusiform"
+name = "ck-models"
 path = "src/main.rs"
 
 [dependencies]
 fusiform-module = { path = "../fusiform-module" }
-# For the fact-key namespace constants the plane flags select on.
+# For the fact-key namespace constants the plane flags and correct verb use.
 fusiform-store = { path = "../fusiform-store" }
 
 subc-client-rs = { workspace = true }

@@ -37,10 +37,12 @@ use serde::{Deserialize, Serialize};
 pub const TOOL_GET: &str = "catalog.get";
 pub const TOOL_HISTORY: &str = "catalog.history";
 pub const TOOL_STATUS: &str = "catalog.status";
+/// The only tool that writes.
+pub const TOOL_CORRECT: &str = "catalog.correct";
 
 /// Every tool name, so a dispatch and a manifest cannot disagree about which
 /// tools exist.
-pub const TOOLS: &[&str] = &[TOOL_GET, TOOL_HISTORY, TOOL_STATUS];
+pub const TOOLS: &[&str] = &[TOOL_GET, TOOL_HISTORY, TOOL_STATUS, TOOL_CORRECT];
 
 /// A `catalog.get` request.
 ///
@@ -143,6 +145,7 @@ pub enum ToolResponse {
     Catalog(CatalogGetResponse),
     History(HistoryResponse),
     Status(StatusResponse),
+    Correct(CorrectResponse),
 }
 
 /// A `catalog.history` request: every era for one fact.
@@ -256,4 +259,76 @@ impl CatalogGetResponse {
     pub fn fact_count(&self) -> usize {
         self.models.values().map(|f| f.len()).sum()
     }
+}
+
+/// A `catalog.correct` request: record that fusiform's own record was wrong.
+///
+/// # Why this carries no value, and no wildcard
+///
+/// The operator supplies a DIAGNOSIS — which model, which facts, what window,
+/// and why. They supply no value: `affected_until` is when the fix deployed and
+/// fusiform stopped recording the bad value, so a later poll has already
+/// written the right one. A correction marks a window; it never edits a value.
+///
+/// And it names exactly one model. There is no "all models" or "every fact"
+/// form, deliberately: a correction makes reads inside its window refuse, so a
+/// wildcard correction is a catalog kill switch. Fusiform cannot tell who is
+/// calling — `RequestCtx` carries no consumer identity — so the blast radius is
+/// bounded by what the request can express rather than by who may send it.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CorrectRequest {
+    #[serde(default)]
+    pub source: Option<String>,
+    pub provider_id: String,
+    pub model_id: String,
+    /// The `FieldId` values this correction names, as the served vocabulary
+    /// spells them: `{"field":"rate","class":"input"}`, `{"field":"limit",
+    /// "limit":"context"}`, `{"field":"existence"}`.
+    pub fields: Vec<serde_json::Value>,
+    /// Start of the bad window. A LOWER BOUND: when the true start is not known
+    /// precisely it goes to the earliest plausible instant, never the best
+    /// guess. An over-inclusive partition costs review time; an under-inclusive
+    /// one leaves bad facts outside a partition asserting they are fine.
+    pub affected_from_ms: i64,
+    /// End of the bad window: when the fix deployed and fusiform stopped
+    /// recording the bad value.
+    pub affected_until_ms: i64,
+    /// Why the record was wrong. Names a finding document, so an audit is
+    /// repeatable rather than dependent on prose.
+    pub reason: String,
+    /// Resolve and report without writing.
+    ///
+    /// Defaults to true. A write that happens because a flag was forgotten is
+    /// the wrong default for the only command in this module that changes what
+    /// the catalog says about the past.
+    #[serde(default = "default_true")]
+    pub dry_run: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// What a correction did, or would do.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CorrectResponse {
+    /// False when this was a dry run.
+    pub written: bool,
+    /// One entry per fact, each carrying the value that stays in force.
+    pub facts: Vec<CorrectedFact>,
+    pub affected_from_ms: i64,
+    pub affected_until_ms: i64,
+    pub reason: String,
+}
+
+/// One fact a correction marked, or would mark.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CorrectedFact {
+    pub fact_key: String,
+    /// The value that remains in force, read from the store rather than
+    /// supplied. Shown so an operator can see what the catalog will still say.
+    pub value: serde_json::Value,
+    /// When the era carrying that value was established.
+    pub current_since_ms: i64,
 }

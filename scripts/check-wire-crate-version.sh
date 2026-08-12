@@ -50,6 +50,20 @@ if [ ! -d "$src" ]; then
   exit 2
 fi
 
+# UNCOMMITTED WORK IS INVISIBLE TO A COMMIT-RANGE DIFF, and silence about that
+# is the trap. In CI the head is committed so the range is complete; run locally
+# before committing, this would compare an unchanged range and report clean over
+# a working tree full of schema edits. Measured on this repository: the served
+# schema had gained three types and the script said "unchanged".
+#
+# Reported rather than folded into the comparison, because a dirty tree is not
+# itself a violation — the operator just needs to know the answer does not
+# cover it yet.
+if ! git diff --quiet -- "$src" "$manifest" 2>/dev/null; then
+  echo "  note: $CRATE has UNCOMMITTED changes, which this check does not see." >&2
+  echo "        It compares $BASE...HEAD. Commit first for a complete answer." >&2
+fi
+
 changed=$(git diff "$BASE"...HEAD -- "$src" \
   | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' || true)
 
