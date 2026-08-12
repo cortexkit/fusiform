@@ -518,3 +518,119 @@ fn a_fact_unchanged_since_before_the_window_is_refused() {
         other => panic!("expected PresentStillAffected, got {other:?}"),
     }
 }
+
+/// A poll landing between plan and apply is refused, not overwritten.
+///
+/// `apply_correction` takes a plan so the rows written are the rows the
+/// operator was shown. On its own that is dangerous: the poll loop writes to
+/// the same store every 30 minutes, and reading a preview before typing
+/// `--commit` easily takes longer than nothing.
+///
+/// Found with a probe rather than by reasoning. A poll landing in that gap left
+/// the plan carrying a value that was no longer current, and applying it wrote
+/// that stale value at a LATER boundary — silently reverting a real upstream
+/// reprice, wearing a `Corrected` boundary that reads as a repair. The one
+/// thing this module exists not to do, reached through the mechanism chosen to
+/// prevent it.
+#[test]
+fn a_poll_between_plan_and_apply_is_refused() {
+    let f = fixture();
+    let plan = plan(&f, &rates(), BAD_FROM, FIXED_AT);
+
+    // A poll lands while the operator reads the preview: the upstream repriced.
+    f.store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(NOW - 1),
+            outcome: ObservationOutcome::Changed { snapshot_seq: 9 },
+            normalized_hash: Some("later".into()),
+            raw_hash: None,
+            etag: None,
+            duration_ms: Some(10),
+            detail: None,
+        })
+        .unwrap();
+    f.store
+        .append_eras(&[NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: FactKey::rate(TokenClass::Input),
+            value_json: r#"{"units":2500000000}"#.into(),
+            boundary_at: Timestamp(NOW - 1),
+            boundary_kind: BoundaryKind::Observed,
+            observation_id: None,
+        }])
+        .unwrap();
+
+    let err = apply_correction(&f.store, SourceId::ModelsDev, &plan, Timestamp(NOW))
+        .expect_err("a stale plan must be refused");
+    let text = format!("{err}");
+    assert!(
+        text.contains("changed after this correction was planned"),
+        "the refusal must say what happened: {text}"
+    );
+    assert!(text.contains("revert"), "and why it matters: {text}");
+
+    // The upstream's value survives untouched.
+    let current = f
+        .store
+        .recorded_value_at(
+            SourceId::ModelsDev,
+            "anthropic",
+            "claude-sonnet-4-5",
+            &FactKey::rate(TokenClass::Input),
+            Timestamp(NOW + 1),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        current.value_json, r#"{"units":2500000000}"#,
+        "the poll's value must survive a refused correction"
+    );
+}
+
+/// A plan applied against an unchanged store still works.
+///
+/// The compare-and-swap above is worthless if it also refuses the ordinary
+/// case, and a guard that refuses everything passes any test written only for
+/// the failure.
+#[test]
+fn an_unchanged_store_still_accepts_its_plan() {
+    let f = fixture();
+    let plan = plan(&f, &rates(), BAD_FROM, FIXED_AT);
+    let written = apply_correction(&f.store, SourceId::ModelsDev, &plan, Timestamp(NOW))
+        .expect("an unchanged store must accept the plan");
+    assert_eq!(written, 2);
+}
+
+/// A second correction landing between plan and apply is also refused.
+///
+/// This is what makes the compare-and-swap compare BOUNDARIES rather than
+/// values, and mutation is what showed the difference mattered. A poll cannot
+/// write an unchanged value — `plan_ingest` skips facts whose value did not
+/// move — so the only way the same value appears at a new boundary is another
+/// correction landing on the same fact.
+///
+/// Refusing is right: the second operator's diagnosis was made against a
+/// history that no longer exists, and their correction would now stack on top
+/// of one they never saw. A value comparison would accept it silently.
+#[test]
+fn a_second_correction_between_plan_and_apply_is_refused() {
+    let f = fixture();
+
+    // Two operators plan the same correction from the same state.
+    let first = plan(&f, &rates(), BAD_FROM, FIXED_AT);
+    let second = plan(&f, &rates(), BAD_FROM, FIXED_AT);
+
+    apply_correction(&f.store, SourceId::ModelsDev, &first, Timestamp(NOW)).unwrap();
+
+    // The second plan carries the same VALUES — a correction writes the value
+    // already in force — but the era in force has moved.
+    let err = apply_correction(&f.store, SourceId::ModelsDev, &second, Timestamp(NOW + 1))
+        .expect_err("a plan made against superseded history must be refused");
+    assert!(
+        format!("{err}").contains("changed after this correction was planned"),
+        "got {err}"
+    );
+}

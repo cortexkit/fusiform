@@ -270,17 +270,73 @@ pub fn plan_correction(
     }))
 }
 
-/// Write a planned correction.
+/// Write a planned correction, refusing if the store moved since it was
+/// planned.
 ///
-/// Takes a plan rather than the raw arguments, so the rows that are written are
-/// the rows that were shown. Re-resolving here would let the store change
-/// between preview and commit and write something the operator never saw.
+/// Takes a plan rather than the raw arguments, so the rows written are the rows
+/// that were shown. That is the safe half of the decision, and on its own it is
+/// dangerous: the poll loop writes to the same store on a 30-minute cadence,
+/// and an operator reading a preview before typing `--commit` easily takes
+/// longer than nothing.
+///
+/// Measured with a probe. A poll landing between plan and apply left the plan
+/// carrying a value that was no longer current, and applying it wrote that
+/// stale value at a LATER boundary — so the correction silently reverted a real
+/// upstream reprice, and did it wearing a `Corrected` boundary that reads as a
+/// repair. The one thing this module exists not to do, reached through the
+/// mechanism chosen to prevent it.
+///
+/// So the plan is a compare-and-swap: every row records which era was in force
+/// when it was planned, and this refuses unless that is still true. Refusing is
+/// correct rather than conservative — the operator's diagnosis was made against
+/// a catalog state that no longer exists, and re-planning shows them what
+/// actually changed.
 pub fn apply_correction(
     store: &CatalogStore,
     source: SourceId,
     plan: &CorrectionPlan,
     now: Timestamp,
 ) -> Result<usize, CatalogError> {
+    for row in &plan.rows {
+        let current = store
+            .recorded_value_at(source, &row.provider_id, &row.model_id, &row.fact_key, now)?
+            // Unreachable by construction, and left in place deliberately.
+            // Eras are append-only and the plan already found a row at or
+            // before this instant, so nothing can remove it. No test covers
+            // this arm because no test CAN — mutating it to succeed does not
+            // redden anything, which is the honest state rather than a gap.
+            // It exists so that a future change breaking append-only fails
+            // loudly here instead of writing a correction against a fact that
+            // is no longer there.
+            .ok_or_else(|| {
+                CatalogError::Invariant(format!(
+                    "{}/{} {}: the fact vanished between planning and applying, \
+                     which append-only eras should make impossible",
+                    row.provider_id,
+                    row.model_id,
+                    row.fact_key.as_str()
+                ))
+            })?;
+
+        // The boundary instant identifies the era. Comparing values instead
+        // would accept a poll that wrote the same value at a new boundary,
+        // which is harmless here but makes the check mean something weaker
+        // than "nothing moved".
+        if current.boundary_at != row.current_since {
+            return Err(CatalogError::Invariant(format!(
+                "{}/{} {}: the catalog changed after this correction was planned \
+                 — the value in force was recorded at {} and is now recorded at \
+                 {}. Applying the plan would write the old value back and revert \
+                 that change. Re-run without --commit to see the current state.",
+                row.provider_id,
+                row.model_id,
+                row.fact_key.as_str(),
+                row.current_since.0,
+                current.boundary_at.0
+            )));
+        }
+    }
+
     let correction = Correction {
         fields: plan.fields.clone(),
         affected_from: plan.affected_from,
