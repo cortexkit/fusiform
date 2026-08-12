@@ -79,7 +79,20 @@ fi
 
 mkdir -p "$target_dir"
 cp "$source_file" "$target_file"
-echo "installed: $target_file"
+
+# 0600, matching the store beside it.
+#
+# A catalog descriptor is a precise map of which files on this machine are
+# worth taking, so it is worth no more exposure than the data it points at.
+# `cp` gives it the repository copy's mode, which is world-readable because a
+# git working tree is.
+#
+# The directory too: a fresh data home from the daemon is 0755, and a
+# descriptor is only as private as the directory listing it.
+chmod 600 "$target_file"
+chmod 700 "$target_dir"
+
+echo "installed: $target_file (0600, dir 0700)"
 echo
 echo "Engram picks this up on its next fleet walk. Until then fusiform reports"
 echo "as NotEnrolled and its store is not captured."

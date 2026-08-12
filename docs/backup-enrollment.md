@@ -111,6 +111,18 @@ is silently missing recent writes.
 **The lease file** (`*.lease`). Device-local by construction — it names a
 writer on this machine — and a restored store must acquire its own.
 
+## Permissions
+
+The installed descriptor is `0600` and its directory `0700`, matching the
+store beside it. `install-enrollment.sh` sets both, because `cp` gives the file
+the repository copy's mode and a git working tree is world-readable.
+
+Not a capture concern — engram only reads it — but a catalog descriptor is a
+precise map of which files on this machine are worth taking, and it should be
+no more exposed than the data it points at. It was world-readable for about an
+hour after the first install, until ENGRAM noticed that every other enrolled
+module keeps both at `0600`/`0700` and fusiform did not.
+
 ## What enrollment does not protect
 
 Enrollment is backup coverage. It is **not** what keeps the catalog version
