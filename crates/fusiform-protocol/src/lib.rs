@@ -104,6 +104,26 @@ pub struct CatalogGetResponse {
     /// Carried on a pull as well as a push, so a consumer can tell whether a
     /// read it just made is newer than the last push it applied without
     /// correlating two different surfaces.
+    ///
+    /// # This is the ONLY field safe to hold as a high-water mark
+    ///
+    /// It is monotonic ACROSS RESTORES, which no other number here is. The
+    /// value is derived as `max(now_ms, current + 1)`, so a whole-database
+    /// restore that rewinds the stored counter cannot rewind the next value
+    /// issued — wall-clock time does not go backwards when a file is replaced.
+    /// Measured, not asserted: a restore rewound this from 9000 to 1000 and the
+    /// next version issued was a current millisecond timestamp.
+    ///
+    /// Other numbers in these responses look like they could serve the same
+    /// purpose and cannot. `era_count` rises monotonically in normal operation
+    /// and is a plain row count, so a restore rewinds it to whatever the backup
+    /// held; a consumer using it to detect change would see the catalog go
+    /// backwards and then repeat values it had already processed. Same for
+    /// `model_count`.
+    ///
+    /// The distinction is not visible in the payload — both are integers that
+    /// only ever went up in every observation a consumer has made — which is
+    /// why it is recorded here rather than left to be inferred.
     pub catalog_version: i64,
     /// Model identity to fact map. The identity is `provider_id/model_id`, the
     /// pair that makes a model unique — measured, 6,253 model rows carry only

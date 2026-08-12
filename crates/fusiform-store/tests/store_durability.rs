@@ -275,3 +275,99 @@ fn a_restore_rewinds_the_fence_and_the_catalog_version_recovers() {
          permanently"
     );
 }
+
+/// `era_count` rewinds on a restore and `catalog_version` does not.
+///
+/// Both rise monotonically in every observation a consumer can make, so from
+/// the payload they are indistinguishable as change signals. They behave
+/// differently in exactly one situation, and it is the one that matters: a
+/// restore.
+///
+/// A consumer holding `era_count` as a high-water mark would, after a restore,
+/// see the catalog go backwards and then reprocess values it had already seen.
+/// A consumer holding `catalog_version` sees it jump forward and keeps working.
+///
+/// Written after ASTRO found the same class in their own allocator: theirs
+/// derives from `maximum + 1` over durable tables with no clock floor, so a
+/// restore rewinds every authority together and it reissues versions the
+/// receiver has already accepted. Fusiform's version is immune by derivation —
+/// this pins that the immunity is real AND that it does not extend to the
+/// neighbouring counters, because the wire crate now tells consumers so.
+#[test]
+fn a_restore_rewinds_the_row_counts_but_not_the_catalog_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("store.db");
+    let descriptor = StorageDescriptor {
+        module_id: "fusiform".to_string(),
+        storage_namespace: "default".to_string(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: path.to_string_lossy().to_string(),
+        },
+    };
+
+    let era = |at: i64, fact: &str| fusiform_store::NewEra {
+        source: SourceId::ModelsDev,
+        provider_id: "anthropic".into(),
+        model_id: "claude-sonnet-4-5".into(),
+        fact_key: fusiform_store::FactKey::from_stored(fact.to_string()),
+        value_json: format!("{at}"),
+        boundary_at: Timestamp(at),
+        boundary_kind: fusiform_core::BoundaryKind::Seed,
+        observation_id: None,
+    };
+
+    // Run 1: a small catalog, then a backup.
+    let store = CatalogStore::open(&descriptor).unwrap();
+    let id = store.record_observation(&observation(1_000)).unwrap();
+    store.append_eras(&[era(1_000, "rate.input")]).unwrap();
+    store.advance_catalog_version(id, Timestamp(1_000)).unwrap();
+    let eras_at_backup = store.era_count(SourceId::ModelsDev).unwrap();
+    drop(store);
+    let backup = dir.path().join("backup.db");
+    std::fs::copy(&path, &backup).unwrap();
+
+    // Run 2: more eras, higher version.
+    let store = CatalogStore::open(&descriptor).unwrap();
+    let id = store.record_observation(&observation(2_000)).unwrap();
+    store
+        .append_eras(&[era(2_000, "rate.output"), era(2_000, "limit.context")])
+        .unwrap();
+    let version_before = store.advance_catalog_version(id, Timestamp(9_000)).unwrap();
+    let eras_before = store.era_count(SourceId::ModelsDev).unwrap();
+    assert!(
+        eras_before > eras_at_backup,
+        "run 2 must add eras, or the rewind below proves nothing"
+    );
+    drop(store);
+
+    // The restore.
+    std::fs::copy(&backup, &path).unwrap();
+    let _ = std::fs::remove_file(dir.path().join("store.db-wal"));
+    let _ = std::fs::remove_file(dir.path().join("store.db-shm"));
+
+    let store = CatalogStore::open(&descriptor).unwrap();
+
+    // The row count went backwards, which is why it must not be a change signal.
+    assert_eq!(
+        store.era_count(SourceId::ModelsDev).unwrap(),
+        eras_at_backup,
+        "era_count is a plain row count and a restore rewinds it"
+    );
+
+    // And the version, once the module polls again, exceeds the pre-restore
+    // high water rather than repeating it.
+    let id = store.record_observation(&observation(3_000)).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let version_after = store.advance_catalog_version(id, Timestamp(now)).unwrap();
+    assert!(
+        version_after > version_before,
+        "the catalog version must clear the pre-restore high water \
+         ({version_after} vs {version_before}) while the row count does not — \
+         that difference is the whole reason one is safe to hold and the other \
+         is not"
+    );
+}
