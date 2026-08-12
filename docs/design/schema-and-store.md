@@ -67,7 +67,7 @@ Verified against the working tree at `1ff33f9`, section by section:
 | §8 Two hashes | **built** — split by audience, both recorded per observation |
 | §9 Store | **built** — managed SQLite from the HELLO_ACK descriptor |
 | §9 Engram enrollment | **built** — `crates/fusiform-module/data/engram-catalog.json`, validated with engram's own parser, installed by `scripts/install-enrollment.sh`. See `docs/backup-enrollment.md`. Not load-bearing for the version counter: the §9 text once claimed a `restore-with-monotonic-fence` here, that mechanism does not exist, and the counter is restore-invariant by construction instead (§10). |
-| §10 Serve | **built** — `catalog.get`, `catalog.history`, `catalog.status` |
+| §10 Serve | **built.** Tools: `catalog.get` `catalog.history` `catalog.status` `catalog.correct`. The last one WRITES; see §3.1. |
 | §10 Push | **transport now exists; fusiform emits nothing.** `subc-client-rs` 0.3.0 surfaces push frames to consumers (opt-in per route, epoch-fenced) with an always-present `pushes_dropped_no_receiver` counter, so a module pushing into a discarding client is a readable fact. What is NOT built is any fusiform push: `emits_push` is false in the manifest, and no code calls `ModuleHandle::push`. The discriminated acknowledgement of §10 is WITHDRAWN rather than pending — see below. |
 | §10 Payload boundary | **built.** The served types live in `fusiform-protocol` (this repo, not commons — settled 2026-08-12, see §10). Dependency tree pinned to serde-only by test; version discipline enforced in CI; golden fixtures of four real served payloads. What is NOT done is astrocyte consuming it, which is their switch on their schedule. |
 
@@ -240,6 +240,22 @@ This is testable where the slogan was not, and it makes the quarantine set
 
 Everything below is an application of these rules. Where a design choice is
 arbitrary, it is marked as such.
+
+This table's tool list is checked by a test
+(`the_design_notes_serve_row_lists_every_served_tool`), because it went stale
+within hours: §10 Serve listed three tools while `catalog.correct` was already
+live. The row had been written when the read surface was the whole surface, and
+adding a tool did not feel like changing what §10 says — so a reader citing it
+would have believed the served surface was read-only, which is the most
+consequential thing in that row to be wrong about.
+
+The first version of that test was vacuous, in a way worth recording. It
+asserted each tool name appears somewhere in the row, and the row's own
+explanatory sentence mentioned `catalog.correct` — so it passed on a row that
+listed three tools and explained why the fourth was missing. Removing the
+prose from the cell is what made the check mean what it says: the row is now a
+list, and a list is checkable.
+
 
 ## 1. Identity
 

@@ -169,3 +169,34 @@ fn limit_output_is_advisory_because_no_consumer_renders_it() {
          restoring an assumption a consumer already refuted from source."
     );
 }
+
+/// The design note's status table lists every tool the module actually serves.
+///
+/// Found stale: §10 Serve listed three tools for the several hours after
+/// `catalog.correct` went live. The row was written when the read surface was
+/// the whole surface, and adding a tool did not feel like changing what §10
+/// says — so a reader citing it would have believed the served surface was
+/// read-only, which is the most consequential property in that row to be wrong
+/// about.
+///
+/// This is the narrow, mechanical part of the staleness problem: the tool list
+/// is checkable, so a test should check it rather than a human re-reading. The
+/// rest of that table is prose about behaviour and stays a human's job.
+#[test]
+fn the_design_notes_serve_row_lists_every_served_tool() {
+    const NOTE: &str = include_str!("../../../docs/design/schema-and-store.md");
+
+    let row = NOTE
+        .lines()
+        .find(|l| l.starts_with("| §10 Serve"))
+        .expect("the status table must have a §10 Serve row");
+
+    for tool in fusiform_protocol::TOOLS {
+        assert!(
+            row.contains(tool),
+            "the module serves {tool} and the design note's §10 Serve row does \
+             not mention it. A reader citing that row would get a wrong picture \
+             of the served surface.\n\nrow: {row}"
+        );
+    }
+}
