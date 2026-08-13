@@ -410,8 +410,34 @@ reporter is not asserting the path does not forward; it has no opinion. Reading
 `false` there would admit a report as safely non-forwarded when nobody checked,
 which is the one direction that can promote a cell it should not.
 
-So: absent means **unknown routing**, which refuses promotion exactly as
-`true` does.
+So: absent means **the reporter did not mark this path**, which is the ordinary
+case and is not itself a refusal.
+
+#### Absence alone must not refuse, or nothing can ever be promoted
+
+The sentence above originally read *"absent means unknown routing, which
+refuses promotion exactly as `true` does"*. Combined with `false` being
+unrepresentable one section down, that leaves **no value that permits
+anything** — every report refuses, no cell is ever minted, and the pipeline is
+inert. MC asked whether my promotion logic keys on presence or truthiness, and
+answering it is what exposed the contradiction.
+
+The error was locating the routing knowledge in the wrong system. A reporter
+knows whether IT marked a path; **whether a provider can forward at all is a
+fact fusiform holds** — the admit list in §11. So:
+
+| `path_may_forward` | provider on the admit list | promotion |
+|---|---|---|
+| `true` | either | **refused** — the capture site says this path can forward |
+| absent | yes | **refused** — fusiform knows what the reporter did not say |
+| absent | no | permitted, subject to every other rule |
+| `false` | either | **malformed**, rejected |
+
+The middle row is why absence cannot be read as safety: a reporter predating
+the field, or one whose forwarder set is narrower than mine, omits the flag on
+a path I have admitted. Fusiform refuses there on its own knowledge rather than
+on the reporter's silence — which is the same shape as the admit list itself
+never clearing a provider.
 
 #### `false` is unrepresentable, because nothing can establish it
 
