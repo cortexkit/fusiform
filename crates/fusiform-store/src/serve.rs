@@ -23,7 +23,7 @@
 use std::collections::BTreeMap;
 
 use fusiform_core::{SourceId, Timestamp};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use crate::{prefix, CatalogError, CatalogStore, FactKey};
 
@@ -669,6 +669,49 @@ impl CatalogStore {
     /// Oldest first because a history is read forwards: "it was X, then Y from
     /// this window, then Z". The catalog reads are newest-first because they
     /// answer a different question.
+    /// Has fusiform ever recorded anything for this provider?
+    ///
+    /// Includes retired models and every historical era, because the question
+    /// is "do I know this name" rather than "is it current". A provider whose
+    /// every model was withdrawn is still a name fusiform knows, and telling an
+    /// operator otherwise would send them hunting a typo they did not make.
+    pub fn provider_is_known(
+        &self,
+        source: SourceId,
+        provider_id: &str,
+    ) -> Result<bool, CatalogError> {
+        let found: Option<i64> = self.raw_conn(|conn| {
+            conn.query_row(
+                "SELECT 1 FROM era WHERE source = ?1 AND provider_id = ?2 LIMIT 1",
+                params![source.as_str(), provider_id],
+                |r| r.get(0),
+            )
+            .optional()
+        })?;
+        Ok(found.is_some())
+    }
+
+    /// Has fusiform ever recorded anything for this exact model?
+    ///
+    /// Per `provider_is_known`: history counts, so a withdrawn model is known.
+    pub fn model_is_known(
+        &self,
+        source: SourceId,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<bool, CatalogError> {
+        let found: Option<i64> = self.raw_conn(|conn| {
+            conn.query_row(
+                "SELECT 1 FROM era WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3 \
+                 LIMIT 1",
+                params![source.as_str(), provider_id, model_id],
+                |r| r.get(0),
+            )
+            .optional()
+        })?;
+        Ok(found.is_some())
+    }
+
     pub fn fact_history(
         &self,
         source: SourceId,

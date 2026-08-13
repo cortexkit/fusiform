@@ -375,6 +375,28 @@ pub fn serve_catalog_get(
         let mut snapshot = store.read_catalog(&query).map_err(|e| store_error(&e))?;
         if let Some(provider) = provider_filter {
             snapshot.models.retain(|m| m.provider_id == provider);
+
+            // An unknown provider is a REFUSAL, not an empty result.
+            //
+            // "0 models" is a true statement about the filter and a misleading
+            // one about the catalog: a misspelled provider and a real provider
+            // whose models are all retired produce the identical answer, and
+            // the first is far more common at a terminal. An operator reading
+            // zero concludes the catalog is missing something.
+            //
+            // Checked only when the filter matched nothing, so the ordinary
+            // path pays no query.
+            if snapshot.models.is_empty()
+                && !store
+                    .provider_is_known(source, &provider)
+                    .map_err(|e| store_error(&e))?
+            {
+                return Err(RouteError::bad_request(format!(
+                    "unknown provider {provider:?}: fusiform has never recorded \
+                     a model under that id. Check the spelling — provider ids \
+                     are the upstream's, so \"anthropic\" rather than \"Anthropic\""
+                )));
+            }
         }
         snapshot
     };
@@ -394,6 +416,43 @@ fn single_model_snapshot(
     let (found, withheld) = store
         .read_model(source, provider_id, model_id, Some(resolved_at))
         .map_err(|e| store_error(&e))?;
+
+    // A name fusiform has never recorded is a REFUSAL, not an empty answer.
+    //
+    // Same reasoning as the provider filter above, and the two failures are
+    // separated because the correct action differs: a wrong provider means the
+    // whole id is wrong, while a wrong model under a real provider usually
+    // means a version suffix. Reporting "0 models" for either leaves an
+    // operator unable to tell a typo from a catalog that genuinely lacks the
+    // model — and at a terminal the typo is far more likely.
+    //
+    // Reached only when the read found nothing, so the ordinary path pays no
+    // extra query. History counts as known: a withdrawn model is still a name
+    // fusiform recognises, and saying otherwise would send someone hunting a
+    // typo they did not make.
+    if found.is_none() {
+        if !store
+            .provider_is_known(source, provider_id)
+            .map_err(|e| store_error(&e))?
+        {
+            return Err(RouteError::bad_request(format!(
+                "unknown provider {provider_id:?}: fusiform has never recorded \
+                 a model under that id"
+            )));
+        }
+        if !store
+            .model_is_known(source, provider_id, model_id)
+            .map_err(|e| store_error(&e))?
+        {
+            return Err(RouteError::bad_request(format!(
+                "unknown model {model_id:?} under provider {provider_id:?}: the \
+                 provider exists, so check the model id — upstream ids often \
+                 carry a version suffix"
+            )));
+        }
+        // Known, and absent at this instant: that is a real answer about a real
+        // model, so it stays an empty result rather than becoming an error.
+    }
 
     let catalog_version = store.catalog_version().map_err(|e| store_error(&e))?;
 

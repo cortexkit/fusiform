@@ -213,13 +213,29 @@ fn a_single_model_request_returns_one_model() {
     assert_eq!(one.model_count(), 1);
     assert!(one.models.contains_key("anthropic/claude-sonnet-4-5"));
 
-    // A model that does not exist is an empty result, not an error: "no such
-    // model" is a legitimate answer to a question about a catalog.
-    let none = get(
-        &f,
-        r#"{"provider_id": "anthropic", "model_id": "no-such-model"}"#,
-    );
-    assert_eq!(none.model_count(), 0);
+    // A name fusiform has never recorded is a refusal.
+    //
+    // THIS REVERSES AN EARLIER DECISION, recorded here because the old reason
+    // was not wrong so much as answering a different question. It said: "no
+    // such model is a legitimate answer to a question about a catalog." True
+    // of a QUERY — asking whether the catalog contains X, empty is the answer.
+    //
+    // What changed is noticing fusiform holds a distinction it was discarding.
+    // It knows three states, not two: never recorded this name, know it and it
+    // is retired, know it and it is present. Collapsing the first two into "0
+    // models" is the same defect as collapsing a published zero into absence —
+    // an unknown and a real-but-empty answer rendered identically.
+    //
+    // The terminal is what settled it. `ck models get --provider notaprovider`
+    // answered "0 models", and at a terminal a typo is far more likely than a
+    // provider whose every model is retired.
+    match serve_catalog_get(
+        &f.store,
+        br#"{"provider_id": "anthropic", "model_id": "no-such-model"}"#,
+    ) {
+        Err(e) => assert_eq!(e.code, "bad_request"),
+        Ok(r) => panic!("an unrecorded model must be refused, got {r:?}"),
+    }
 }
 
 /// A bare model id is refused, because it is not unique.
@@ -946,18 +962,25 @@ fn a_model_whose_facts_are_all_withheld_is_still_discoverable() {
         "a model with no readable facts is not carried as an empty entry"
     );
 
-    // And the response is distinguishable from "no such model", which would
-    // have an empty withheld list.
-    let no_such = get(
-        &f,
-        r#"{"provider_id":"anthropic","model_id":"claude-imaginary-9","at_ms":5000}"#,
-    );
-    assert!(no_such.models.is_empty());
-    assert!(
-        no_such.withheld.is_empty(),
-        "a model that never existed withholds nothing; that is what makes the \
-         two cases distinguishable"
-    );
+    // And the response is distinguishable from "no such model" — which is now
+    // a REFUSAL rather than an empty answer.
+    //
+    // This assertion used to check that an unknown model returned an empty
+    // withheld list, which distinguished the two cases only if a reader
+    // compared two fields. Driving the CLI showed the weaker half in practice:
+    // an unknown model answered "0 models", identical to a real model with
+    // nothing to show. The distinction is now carried by the response KIND.
+    match serve_catalog_get(
+        &f.store,
+        br#"{"provider_id":"anthropic","model_id":"claude-imaginary-9","at_ms":5000}"#,
+    ) {
+        Err(e) => assert!(
+            e.message.contains("claude-imaginary-9"),
+            "the refusal must name the model, got {:?}",
+            e.message
+        ),
+        Ok(r) => panic!("a model that never existed must be refused, got {r:?}"),
+    }
 }
 
 /// Every `FieldId` a correction can name.
@@ -1349,4 +1372,160 @@ fn a_historical_read_reports_uncertainty_on_the_wire() {
             edge.uncertain
         );
     }
+}
+
+/// An unknown provider is refused, not answered with zero models.
+///
+/// Found by driving the CLI along paths I did not design: `ck models get
+/// --provider notaprovider` returned "0 models", which is a true statement
+/// about the filter and a misleading one about the catalog. A misspelled
+/// provider and a real provider whose models are all retired produced the
+/// identical answer, and at a terminal the typo is far more likely.
+#[test]
+fn an_unknown_provider_is_refused_rather_than_answered_with_zero() {
+    let f = fixture();
+
+    match serve_catalog_get(&f.store, br#"{"provider_id": "notaprovider"}"#) {
+        Err(e) => {
+            assert_eq!(e.code, "bad_request");
+            assert!(
+                e.message.contains("notaprovider"),
+                "the refusal must name what was not found, got {:?}",
+                e.message
+            );
+        }
+        Ok(r) => panic!(
+            "an unknown provider must be refused, got {} models",
+            r.model_count()
+        ),
+    }
+
+    // The control: a REAL provider still answers, so the refusal is the
+    // unknown-ness rather than the filter being broken.
+    let ok = get(&f, r#"{"provider_id": "anthropic"}"#);
+    assert!(ok.model_count() > 0, "a known provider must still answer");
+}
+
+/// An unknown model under a KNOWN provider is refused, and says so distinctly.
+///
+/// Two refusals rather than one because the operator's next action differs: a
+/// wrong provider means the whole id is wrong, a wrong model under a real
+/// provider usually means a version suffix.
+#[test]
+fn an_unknown_model_names_the_provider_as_known() {
+    let f = fixture();
+
+    match serve_catalog_get(
+        &f.store,
+        br#"{"provider_id": "anthropic", "model_id": "no-such-model"}"#,
+    ) {
+        Err(e) => {
+            assert_eq!(e.code, "bad_request");
+            assert!(
+                e.message.contains("no-such-model"),
+                "must name the model, got {:?}",
+                e.message
+            );
+            assert!(
+                e.message.contains("provider exists"),
+                "must distinguish this from an unknown provider, got {:?}",
+                e.message
+            );
+        }
+        Ok(r) => panic!("an unknown model must be refused, got {r:?}"),
+    }
+}
+
+/// A model fusiform KNOWS but that is absent right now is an empty answer, not
+/// an error.
+///
+/// This is the line the two refusals must not cross. A withdrawn model is a
+/// real answer about a real model — "the upstream stopped publishing it" — and
+/// turning that into an error would make a withdrawal indistinguishable from a
+/// typo, which is the defect above with the sign flipped.
+#[test]
+fn a_known_but_retired_model_answers_rather_than_refusing() {
+    let f = fixture();
+
+    // A confirming observation, so the withdrawal below can state a window.
+    // The schema requires it: an observed boundary with no prior confirming
+    // observation cannot say when the change happened.
+    f.store
+        .record_observation(&fusiform_store::NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(5_000),
+            outcome: fusiform_core::ObservationOutcome::Unchanged,
+            normalized_hash: Some("h".into()),
+            raw_hash: Some("r".into()),
+            etag: None,
+            duration_ms: Some(10),
+            detail: None,
+        })
+        .unwrap();
+
+    // Withdraw it: a later era says absent.
+    f.store
+        .append_eras(&[fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: fusiform_store::FactKey::existence(),
+            value_json: "\"absent\"".into(),
+            boundary_at: Timestamp(9_000),
+            boundary_kind: BoundaryKind::Observed,
+            observation_id: None,
+        }])
+        .unwrap();
+
+    let r = get(
+        &f,
+        r#"{"provider_id": "anthropic", "model_id": "claude-sonnet-4-5"}"#,
+    );
+    assert_eq!(
+        r.model_count(),
+        0,
+        "a retired model is absent from a present-only read"
+    );
+
+    // And including retired brings it back, proving the zero above is presence
+    // rather than the model being unknown.
+    let with_retired = get(
+        &f,
+        r#"{"provider_id": "anthropic", "model_id": "claude-sonnet-4-5", "include_retired": true}"#,
+    );
+    assert_eq!(with_retired.model_count(), 1);
+}
+
+/// A known model read BEFORE it existed is an empty answer, not "unknown".
+///
+/// The case a surviving mutation named. `read_model` finds nothing at an
+/// instant earlier than the model's first era, which looks identical to a
+/// misspelling from inside the function — and the two need opposite answers.
+///
+/// "This model did not exist on the 3rd" is a real historical fact and one of
+/// the questions point-in-time reads exist to answer. Refusing it would make a
+/// correct answer about the past indistinguishable from a typo, which is the
+/// defect this refusal was added to fix, with the sign flipped.
+#[test]
+fn a_known_model_before_it_existed_answers_rather_than_refusing() {
+    let f = fixture();
+
+    // The fixture seeds at t=1000, so t=500 predates every era.
+    let before = get(
+        &f,
+        r#"{"provider_id": "anthropic", "model_id": "claude-sonnet-4-5", "at_ms": 500}"#,
+    );
+    assert_eq!(
+        before.model_count(),
+        0,
+        "a model that did not exist yet is absent, and that is an answer"
+    );
+
+    // The control: the same model at an instant it DOES exist, so the zero
+    // above is the instant rather than the model being unreadable.
+    let after = get(
+        &f,
+        r#"{"provider_id": "anthropic", "model_id": "claude-sonnet-4-5", "at_ms": 2000}"#,
+    );
+    assert_eq!(after.model_count(), 1);
 }
