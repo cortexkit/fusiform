@@ -121,8 +121,15 @@ fn a_correction_defaults_to_a_dry_run() {
             Timestamp(5_000),
         )
         .unwrap();
+    // `KnownStale` as well as `Known`: this fixture's read instant sits inside
+    // the next era's observation window, so the honest answer carries the
+    // bracket. What matters here is that it ANSWERS rather than refusing — a
+    // dry run must not have written the correction.
     assert!(
-        matches!(inside, PointInTime::Known(_)),
+        matches!(
+            inside,
+            PointInTime::Known(_) | PointInTime::KnownStale { .. }
+        ),
         "a dry run must leave the store untouched, got {inside:?}"
     );
 }

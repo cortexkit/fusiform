@@ -206,9 +206,22 @@ fn both_endpoints_are_inside_the_corrected_interval() {
             "t={at} is an endpoint of the corrected interval and must refuse"
         );
     }
-    // And one millisecond outside each end answers.
-    assert!(matches!(read(&store, 4_999), PointInTime::Known(_)));
-    assert!(matches!(read(&store, 9_001), PointInTime::Known(_)));
+    // And one millisecond outside each end ANSWERS rather than refusing.
+    //
+    // `KnownStale` counts as answering: t=4999 sits inside a later era's
+    // observation window, so the read carries that bracket. That is an
+    // unrelated qualification about polling gaps, not a refusal, and this test
+    // is about the correction's endpoints.
+    for at in [4_999i64, 9_001] {
+        assert!(
+            matches!(
+                read(&store, at),
+                PointInTime::Known(_) | PointInTime::KnownStale { .. }
+            ),
+            "t={at} is outside the corrected interval and must answer, got {:?}",
+            read(&store, at)
+        );
+    }
 }
 
 /// An instant with no era at all is Unknown, not Corrected and not a value.

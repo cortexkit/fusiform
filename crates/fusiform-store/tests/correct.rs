@@ -231,9 +231,15 @@ fn applying_a_correction_makes_the_window_refuse() {
             Timestamp(2_000),
         )
         .unwrap();
+    // Unaffected BY THE CORRECTION, which is what this test is about: it must
+    // not refuse. `KnownStale` is accepted because t=2000 sits inside the next
+    // era's observation window, which is an unrelated and honest qualification.
     assert!(
-        matches!(before, PointInTime::Known(_)),
-        "a read before the window must be unaffected, got {before:?}"
+        matches!(
+            before,
+            PointInTime::Known(_) | PointInTime::KnownStale { .. }
+        ),
+        "a read before the window must not refuse, got {before:?}"
     );
 
     // After it: the corrected value, served normally.

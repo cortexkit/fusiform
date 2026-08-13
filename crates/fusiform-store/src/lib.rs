@@ -608,10 +608,77 @@ impl CatalogStore {
         if !corrections.is_empty() {
             return Ok(PointInTime::Corrected { corrections });
         }
-        match self.recorded_value_at(source, provider_id, model_id, fact, at)? {
-            Some(row) => Ok(PointInTime::Known(row)),
-            None => Ok(PointInTime::Unknown),
+        let Some(row) = self.recorded_value_at(source, provider_id, model_id, fact, at)? else {
+            return Ok(PointInTime::Unknown);
+        };
+
+        // Is `at` inside a LATER era's observation window?
+        //
+        // An era saying "observed at T, previously confirmed at P" states that
+        // the change happened somewhere in (P, T]. If `at` falls in that
+        // interval, the era answering this read may already have ended before
+        // `at` — fusiform was not looking. Answering with the value alone is a
+        // confident claim the store cannot support.
+        //
+        // The uncertainty was always computable from these rows and no read
+        // reported it. Found by probing what a restore does to history: the
+        // rewind produces one enormous window, and every read inside it
+        // answered confidently.
+        // The interval excludes both endpoints. `prior` is an instant fusiform
+        // CONFIRMED the value, so it is certain.
+        //
+        // The upper exclusion is unreachable rather than merely correct, and
+        // saying so keeps anyone from testing for it: the era answering this
+        // read has `boundary_at <= at`, and the next era is selected with
+        // `boundary_at > row.boundary_at`. If that next boundary equalled `at`,
+        // the read would have landed on THAT era instead. So `at == boundary`
+        // cannot occur here, and a mutation widening this to `<=` is an
+        // equivalent mutant.
+        let next = self.next_era_window(source, provider_id, model_id, fact, row.boundary_at)?;
+        if let Some((prior, boundary)) = next {
+            if prior.0 < at.0 && at.0 < boundary.0 {
+                return Ok(PointInTime::KnownStale {
+                    row,
+                    superseded_after: prior,
+                    superseded_by: boundary,
+                });
+            }
         }
+
+        Ok(PointInTime::Known(row))
+    }
+
+    /// The window of the first era after an instant, when it has one.
+    ///
+    /// Only `Observed` boundaries carry a window; a seed or a correction states
+    /// no interval, so there is nothing to be uncertain inside.
+    fn next_era_window(
+        &self,
+        source: SourceId,
+        provider_id: &str,
+        model_id: &str,
+        fact: &FactKey,
+        after: Timestamp,
+    ) -> Result<Option<(Timestamp, Timestamp)>, CatalogError> {
+        let row = self.raw_conn(|conn| {
+            conn.query_row(
+                "SELECT prior_observation_at_ms, boundary_at_ms FROM era \
+                 WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3 \
+                   AND fact_key = ?4 AND boundary_at_ms > ?5 \
+                   AND prior_observation_at_ms IS NOT NULL \
+                 ORDER BY boundary_at_ms ASC LIMIT 1",
+                params![
+                    source.as_str(),
+                    provider_id,
+                    model_id,
+                    fact.as_str(),
+                    after.0
+                ],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+            )
+            .optional()
+        })?;
+        Ok(row.map(|(p, b)| (Timestamp(p), Timestamp(b))))
     }
 
     /// Every correction covering an instant, across all models and facts.
@@ -893,6 +960,30 @@ pub const CORRECTIONS_FOR_FACT_SQL: &str =
 pub enum PointInTime {
     /// The store holds a value for this instant and nothing has corrected it.
     Known(EraRow),
+    /// The store holds a value, and a LATER era's observation window covers
+    /// this instant — so whether the value was still in force is unknown.
+    ///
+    /// The era answering the read ended somewhere inside
+    /// `(superseded_after, superseded_by]`, which brackets `at`. Fusiform did
+    /// not look during that interval, so the honest answer is the value plus
+    /// the bracket rather than the value alone.
+    ///
+    /// This is not an exotic state. It occurs whenever a point-in-time read
+    /// lands inside any era's window, and a poll gap makes the window wide: a
+    /// restore rewinding history produces one spanning the whole lost interval,
+    /// and every read inside it answered confidently before this existed.
+    ///
+    /// Never reached by a read of the CURRENT catalog, which lands on the
+    /// newest era and has no later window by construction. It is the historical
+    /// audit — "what was the rate on the 9th" — that needs it, which is the
+    /// question a wrong answer costs money on.
+    KnownStale {
+        row: EraRow,
+        /// The last instant fusiform confirmed this value before the change.
+        superseded_after: Timestamp,
+        /// The instant it observed the change.
+        superseded_by: Timestamp,
+    },
     /// No era covers this instant. The fact was not yet recorded.
     Unknown,
     /// The record covering this instant is known bad, and here is why.
@@ -915,14 +1006,14 @@ impl PointInTime {
     /// reach a caller that did not explicitly match for it.
     pub fn known(&self) -> Option<&EraRow> {
         match self {
-            PointInTime::Known(row) => Some(row),
+            PointInTime::Known(row) | PointInTime::KnownStale { row, .. } => Some(row),
             PointInTime::Unknown | PointInTime::Corrected { .. } => None,
         }
     }
 
     pub fn value_json(&self) -> Option<&str> {
         match self {
-            PointInTime::Known(row) => Some(&row.value_json),
+            PointInTime::Known(row) | PointInTime::KnownStale { row, .. } => Some(&row.value_json),
             PointInTime::Unknown | PointInTime::Corrected { .. } => None,
         }
     }
