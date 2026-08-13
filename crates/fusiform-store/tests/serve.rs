@@ -544,3 +544,83 @@ fn priced_count_matches_a_real_catalog() {
         "a real catalog has both kinds"
     );
 }
+
+/// A read at exactly a boundary instant returns the era that STARTS there.
+///
+/// The interval is closed on the left: an era's `boundary_at` is the first
+/// instant its value is in force, so `at == boundary_at` must return the new
+/// value, not the one it replaced.
+///
+/// Untested until now, and both mutations that flip it survived the suite. The
+/// failure is quiet in the worst way: `boundary_at_ms < ?` instead of `<=`
+/// returns the PREVIOUS era's value at exactly that instant — a stale answer,
+/// confidently, for the one instant an auditor asking "what changed at T" is
+/// most likely to name.
+///
+/// A boundary instant is not an obscure input. Every era boundary is an
+/// observation instant fusiform recorded and reports in `catalog.history`, so
+/// it is precisely the timestamp someone copies out of a history line and pastes
+/// into a point-in-time query.
+#[test]
+fn a_read_at_a_boundary_instant_returns_the_new_value() {
+    let f = fixture();
+    seed(&f, 1_000);
+    observe(&f, 2_000);
+
+    let mut d = doc();
+    set_rate(&mut d, "anthropic", "claude-sonnet-4-5", "input", 9.0);
+    apply(&f, &d, 3_000);
+
+    let key = FactKey::rate(fusiform_core::TokenClass::Input);
+    let rate_at = |at: i64| -> String {
+        f.store
+            .read_model(
+                SourceId::ModelsDev,
+                "anthropic",
+                "claude-sonnet-4-5",
+                Some(Timestamp(at)),
+            )
+            .unwrap()
+            .0
+            .expect("the model exists")
+            .facts
+            .get(&key)
+            .expect("the rate is in force")
+            .clone()
+    };
+
+    // One millisecond before the boundary: the old value.
+    assert!(
+        rate_at(2_999).contains("3000000000"),
+        "before the boundary the seeded rate is in force, got {}",
+        rate_at(2_999)
+    );
+
+    // AT the boundary: the new value. This is the assertion the mutations
+    // survive without.
+    assert!(
+        rate_at(3_000).contains("9000000000"),
+        "at the boundary instant the NEW value is in force, got {}",
+        rate_at(3_000)
+    );
+
+    // The bulk read must agree with the single-model read at that instant:
+    // two surfaces resolving the same fact, and a consumer may use either.
+    let snapshot = f
+        .store
+        .read_catalog(&CatalogQuery::at(SourceId::ModelsDev, Timestamp(3_000)))
+        .unwrap();
+    let bulk = snapshot
+        .models
+        .iter()
+        .find(|m| m.model_id == "claude-sonnet-4-5")
+        .expect("the model is in the catalog")
+        .facts
+        .get(&key)
+        .expect("the rate is in force");
+    assert_eq!(
+        *bulk,
+        rate_at(3_000),
+        "the bulk and single-model reads must agree at a boundary instant"
+    );
+}
