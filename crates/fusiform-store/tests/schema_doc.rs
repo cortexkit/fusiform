@@ -91,6 +91,36 @@ fn the_design_note_names_the_tables_that_exist() {
         .expect("§9 states a table list beginning 'Tables, as shipped:'");
     let line = &paragraph.replace('\n', " ");
 
+    // Both directions below are FOR loops, and a for loop over an empty
+    // collection asserts nothing at all. So both collections are checked for
+    // content first: an extraction that stops matching would otherwise pass this
+    // test in silence, which is the same asymmetry that produced seven
+    // misreports in scripts/mutate.sh — a failure path returning the same type
+    // as the success path, so failure-to-measure arrives dressed as evidence.
+    //
+    // The floors are measured, not guessed: the store creates five tables
+    // (observation, era, catalog_version, cortexkit_schema_version, and
+    // cortexkit_fence once a fenced write has happened), and §9 names all of
+    // them. Stated as floors so adding a table does not fail a test about
+    // extraction.
+    let real_tables = tables_in_a_real_store();
+    assert!(
+        real_tables.len() >= 3,
+        "the store enumeration found {} tables, which cannot be right: a query \
+         that stopped matching would make every assertion below vacuous. Found: \
+         {real_tables:?}",
+        real_tables.len()
+    );
+    let named: Vec<&str> = line.split('`').skip(1).step_by(2).collect();
+    assert!(
+        named.len() >= 3,
+        "the note extraction found {} backticked names in §9. The reverse \
+         direction below iterates over these, so an extraction that finds \
+         nothing reports no phantom tables while checking none. Paragraph was: \
+         {line}",
+        named.len()
+    );
+
     for table in tables_in_a_real_store() {
         assert!(
             line.contains(&format!("`{table}`")),
@@ -103,8 +133,8 @@ fn the_design_note_names_the_tables_that_exist() {
     // And the reverse: a name in the note that no longer exists. Without this,
     // a dropped table leaves a phantom in the document forever — which is the
     // half of the defect that was actually present, four times over.
-    let real = tables_in_a_real_store();
-    for word in line.split('`').skip(1).step_by(2) {
+    let real = real_tables;
+    for word in named {
         assert!(
             real.iter().any(|t| t == word),
             "the design note's §9 names `{word}`, which the store does not create.\n\

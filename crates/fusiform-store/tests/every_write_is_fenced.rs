@@ -155,11 +155,14 @@ fn fenced_ranges(text: &str) -> Vec<(usize, usize)> {
 fn no_write_escapes_the_fence() {
     // Every file that can issue SQL against the store. `schema.rs` is excluded
     // deliberately and checked separately below.
+    let mut writes_seen = 0usize;
+
     for file in ["lib.rs", "ingest.rs", "serve.rs", "correct.rs"] {
         let text = source(file);
         let ranges = fenced_ranges(&text);
 
         for line in write_lines(&text) {
+            writes_seen += 1;
             let fenced = ranges
                 .iter()
                 .any(|(start, end)| line >= *start && line <= *end);
@@ -173,6 +176,53 @@ fn no_write_escapes_the_fence() {
             );
         }
     }
+
+    // THE CONTROL, and the reason it is not decoration.
+    //
+    // The loop above asserts nothing when `write_lines` finds nothing, so a
+    // detector that stops matching passes this test in total silence — an empty
+    // match arriving as a pass, which is the same asymmetry that produced seven
+    // separate misreports in scripts/mutate.sh: a harness's failure path
+    // returns the SAME TYPE as its success path, so failure-to-measure arrives
+    // pre-dressed in evidence's clothes.
+    //
+    // Not hypothetical here. This checker has already had one detection hole
+    // shaped like the crate's own formatting: a write whose SQL keyword
+    // straddled a `\` continuation was invisible, and continuations are the
+    // house style for every multi-line statement in the store. The checker
+    // passed its own codebase perfectly while seeing nothing.
+    //
+    // The floor is MEASURED, and the enumeration is here so the next reader can
+    // check it rather than trust it. Three write sites, all in lib.rs, all with
+    // their SQL keyword straddling a `\` continuation:
+    //
+    //   lib.rs:284   INSERT INTO observation
+    //   lib.rs:492   INSERT INTO era
+    //   lib.rs:910   UPDATE catalog_version
+    //
+    // ingest.rs, serve.rs and correct.rs issue none: they build plans and read,
+    // and every write they cause goes through `append_eras` in lib.rs. That is
+    // itself worth knowing, because it means the fenced surface is ONE file.
+    //
+    // The first version of this assertion said `>= 8`, a number I guessed and
+    // wrote in the register of a measurement. It fired immediately, which is the
+    // only reason it did not ship — the same fabricated-number failure that put
+    // an invented bracket bound into a consumer's fixture earlier today, in the
+    // test file whose subject is keeping this crate honest. A floor is a claim
+    // about the codebase and has to be counted like one.
+    //
+    // A floor rather than an exact count, so adding a write does not fail a test
+    // about detection. What cannot happen quietly is the detector finding
+    // NOTHING.
+    assert!(
+        writes_seen >= 3,
+        "the write detector found only {writes_seen} write sites, and there are \
+         three (enumerated above). The loop above asserts nothing when it finds \
+         nothing, so this test would pass while checking no writes at all. \
+         Either WRITE_KEYWORDS has drifted from how this crate spells its \
+         statements, or the continuation-joining broke -- read the detector \
+         before touching this floor."
+    );
 }
 
 /// The fence has call sites at all.
