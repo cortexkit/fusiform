@@ -385,41 +385,10 @@ fn print_status(response: &serde_json::Value) {
             .and_then(|v| v.as_i64())
             .map(|d| format!("  {d}ms"))
             .unwrap_or_default();
-        // What the poll actually changed, when it changed anything.
-        //
-        // An era count alone misleads in a consistent direction: measured over
-        // 11 hours of live polling, 72% of era churn was models arriving and
-        // leaving rather than facts changing, because an arriving model writes
-        // one era per fact it has. One real poll wrote 96 eras for 19 genuine
-        // changes.
-        //
-        // The parts are printed rather than the total, and only the non-zero
-        // ones, so a line says what happened instead of how much happened.
-        let changes = poll.get("changes").and_then(|c| {
-            let n = |k: &str| c.get(k).and_then(|v| v.as_i64()).unwrap_or(0);
-            let (changed, arrived, withdrawn) = (
-                n("facts_changed"),
-                n("models_arrived"),
-                n("models_withdrawn"),
-            );
-
-            let mut parts = Vec::new();
-            if changed > 0 {
-                parts.push(format!("{changed} {} changed", plural(changed, "fact")));
-            }
-            if arrived > 0 {
-                parts.push(format!("{arrived} {} arrived", plural(arrived, "model")));
-            }
-            if withdrawn > 0 {
-                parts.push(format!("{withdrawn} withdrawn"));
-            }
-            (!parts.is_empty()).then(|| format!("  — {}", parts.join(", ")))
-        });
-
         println!(
             "  {}  {outcome}{class}{took}{}",
             format_instant(at),
-            changes.unwrap_or_default()
+            render_changes(poll.get("changes"))
         );
     }
 }
@@ -585,6 +554,50 @@ fn print_history(response: &serde_json::Value) {
             );
         }
     }
+}
+
+/// What a poll changed, as it appears at the end of a status line.
+///
+/// Extracted from the print loop so a test can read THE RENDERED LINE rather
+/// than the pieces it is built from. The distinction is not academic: the
+/// defect that shipped here was `1 models arrived`, which every unit test of
+/// `plural` would have passed, because the defect was in the caller and the
+/// tests were written in the dialect of tests rather than the dialect of the
+/// output.
+///
+/// The parts are printed rather than the total, and only the non-zero ones, so
+/// a line says what happened instead of how much happened. Measured over 11
+/// hours of live polling: 72% of era churn was models arriving and leaving
+/// rather than facts changing, because an arriving model writes one era per
+/// fact it has. One real poll wrote 96 eras for 19 genuine changes.
+///
+/// Empty when the poll changed nothing, which is the ordinary case — a 304, an
+/// unchanged document, or a failure.
+fn render_changes(changes: Option<&serde_json::Value>) -> String {
+    let Some(c) = changes else {
+        return String::new();
+    };
+    let n = |k: &str| c.get(k).and_then(|v| v.as_i64()).unwrap_or(0);
+    let (changed, arrived, withdrawn) = (
+        n("facts_changed"),
+        n("models_arrived"),
+        n("models_withdrawn"),
+    );
+
+    let mut parts = Vec::new();
+    if changed > 0 {
+        parts.push(format!("{changed} {} changed", plural(changed, "fact")));
+    }
+    if arrived > 0 {
+        parts.push(format!("{arrived} {} arrived", plural(arrived, "model")));
+    }
+    if withdrawn > 0 {
+        parts.push(format!("{withdrawn} withdrawn"));
+    }
+    if parts.is_empty() {
+        return String::new();
+    }
+    format!("  — {}", parts.join(", "))
 }
 
 /// The singular or plural form of a noun, for a count.
@@ -966,5 +979,42 @@ mod tests {
         assert_eq!(plural(0, "fact"), "facts");
         assert_eq!(plural(2, "model"), "models");
         assert_eq!(plural(24, "fact"), "facts");
+    }
+
+    /// The rendered line reads as English, for the counts a real poll produces.
+    ///
+    /// Asserts on the OUTPUT rather than on the pieces. `1 models arrived`
+    /// shipped to production and would have passed any test of `plural` in
+    /// isolation, because the defect was in the caller: the unit test was
+    /// written in the dialect of tests, and the defect lived in the dialect of
+    /// the output.
+    ///
+    /// The inputs are real poll compositions read off the live store, not
+    /// hand-picked numbers. A single model arriving is the most common non-zero
+    /// arrival, so the 1 case is the ordinary reading rather than a boundary.
+    #[test]
+    fn a_rendered_change_line_reads_as_english() {
+        let line = |changed, arrived, withdrawn| {
+            render_changes(Some(&serde_json::json!({
+                "facts_changed": changed,
+                "models_arrived": arrived,
+                "models_withdrawn": withdrawn,
+            })))
+        };
+
+        // Measured polls, from `ck models status` on the production store.
+        assert_eq!(line(24, 0, 0), "  \u{2014} 24 facts changed");
+        assert_eq!(line(7, 1, 0), "  \u{2014} 7 facts changed, 1 model arrived");
+        assert_eq!(line(1, 0, 0), "  \u{2014} 1 fact changed");
+        assert_eq!(
+            line(19, 7, 0),
+            "  \u{2014} 19 facts changed, 7 models arrived"
+        );
+        assert_eq!(line(0, 0, 1), "  \u{2014} 1 withdrawn");
+
+        // A poll that changed nothing renders nothing, rather than a dash with
+        // an empty list after it.
+        assert_eq!(line(0, 0, 0), "");
+        assert_eq!(render_changes(None), "");
     }
 }
