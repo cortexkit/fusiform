@@ -360,6 +360,46 @@ that matter most, because new cells get added for facts the old schema could
 not carry — so the failure lands precisely on the newest and most consequential
 data.
 
+### 7.1 Which is exactly why an ADDITIVE reason value does not bump the version
+
+The refusal rule and the closed reason vocabulary are both correct, and put
+together they have a trap. Adding one `why` value is additive: a consumer that
+does not know it skips that cell and merges the rest correctly. But if the
+addition bumps `schema`, the refusal rule fires at the FILE level — and a
+consumer loses every cell over one value affecting one of them.
+
+Found 2026-08-13 by bumping to `v1.1` for the
+`not_single_valued_at_this_key` addition and then re-reading this section.
+The bump was the tidy-looking move and it would have cost a consumer 8 good
+cells to protect them from 1 they could already skip.
+
+**The rule: a value added to a closed vocabulary does not move `schema`.** What
+moves it is a change to the CELL SHAPE — a new required field, a renamed field,
+a changed meaning — because those are the changes an old consumer cannot skip
+past. The distinction is whether the ignorant consumer's degradation is
+per-cell or whole-file.
+
+The reason vocabulary being closed is what makes this safe: an unrecognised
+value is a REFUSED CELL rather than a merged one, so the addition degrades
+loudly in the one place it applies and nowhere else.
+
+### 7.2 `grade` describes the evidence for the cell's ASSERTION, not for a number
+
+An unknown's assertion depends on its reason, and the two kinds are graded
+differently:
+
+- **Evidence-absence reasons** (`never_measured`, `placeholder_*`, `retracted`)
+  assert *nobody has established this*. There is nothing to grade, so the grade
+  must be `unknown` — anything else claims evidence the value denies.
+- **`not_single_valued_at_this_key`** asserts *the key cannot hold one fact*.
+  That is a positive claim resting on evidence, so it carries the grade of that
+  evidence and a real `source_ref`. Grading it `unknown` would say nobody
+  established it, which is what the reason denies.
+
+So a cell may legitimately have `kind: "unknown"` and `grade: "measured"`. The
+two fields answer different questions and the first case of their divergence is
+OpenRouter's geometry.
+
 ## 7. What this dataset will never carry
 
 No renderer selection and no endpoint. Access-path **identity** is a key and is

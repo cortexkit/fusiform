@@ -51,6 +51,12 @@ const UNKNOWN_WHY: &[&str] = &[
     "placeholder_zero",
     "never_measured",
     "retracted",
+    // Added 2026-08-13, ruled by SUBC and MC. The first four describe evidence
+    // states at a valid key; this one says the KEY ITSELF cannot hold a single
+    // fact, so measurement samples a routing decision rather than settling
+    // anything. `never_measured` would be an instruction to go and measure,
+    // aimed at the catalog's largest provider.
+    "not_single_valued_at_this_key",
 ];
 
 /// Every fact key the schema defines.
@@ -295,13 +301,52 @@ fn a_value_is_one_of_the_three_kinds_and_says_what_it_must() {
                         "{id} {key}: unknown reason {why:?} is outside the \
                          vocabulary — a free-text reason cannot be branched on"
                     );
-                    assert_eq!(
-                        fact["grade"].as_str().unwrap(),
-                        "unknown",
-                        "{id} {key}: a value nobody has established must carry \
-                         grade unknown, or the grade claims evidence the value \
-                         denies"
+
+                    // `grade` describes the evidence for THE CELL'S ASSERTION,
+                    // and an unknown's assertion depends on its reason.
+                    //
+                    // For the evidence-absence reasons the assertion is "nobody
+                    // has established this", and there is nothing to grade, so
+                    // the grade must be unknown or it claims evidence the value
+                    // denies.
+                    //
+                    // `not_single_valued_at_this_key` asserts something else
+                    // entirely: that the KEY cannot hold one fact. That is a
+                    // positive claim resting on evidence — for OpenRouter, 348
+                    // models spanning other providers' catalogs plus the
+                    // consumer's confirmation of the routing behaviour — so it
+                    // carries a real grade and a real source_ref.
+                    //
+                    // This guard originally required grade == unknown for every
+                    // unknown, which was right for the four reasons that existed
+                    // when it was written and refused the fifth. It is scoped
+                    // rather than removed: the original force still applies
+                    // where the original premise holds.
+                    let evidence_absence = matches!(
+                        why,
+                        "never_measured"
+                            | "placeholder_output_equals_context"
+                            | "placeholder_zero"
+                            | "retracted"
                     );
+                    if evidence_absence {
+                        assert_eq!(
+                            fact["grade"].as_str().unwrap(),
+                            "unknown",
+                            "{id} {key}: reason {why:?} asserts that nobody has \
+                             established the value, so the grade must be unknown \
+                             or it claims evidence the value denies"
+                        );
+                    } else {
+                        assert_ne!(
+                            fact["grade"].as_str().unwrap(),
+                            "unknown",
+                            "{id} {key}: reason {why:?} is a positive claim about \
+                             the key, so it must carry the grade of the evidence \
+                             behind that claim. Grading it unknown says nobody \
+                             established it, which is what the reason denies."
+                        );
+                    }
                 }
                 other => panic!("{id} {key}: unknown value kind {other:?}"),
             }
