@@ -1,3 +1,12 @@
 # Alfonso seat working state (prompts, drafts, session scratch)
 .cortexkit/
 /target
+
+# Tooling-generated codebase summaries. Ignored rather than committed because
+# they are regenerated from the tree and would go stale silently — and because
+# an untracked file makes the tree dirty, which makes the release script refuse
+# to stamp a build. That refusal is correct and cost a near-miss to discover:
+# the script's message was hidden behind a grep filter, so a stale binary was
+# signed and staged before a version check caught it.
+ARCHITECTURE.md
+STRUCTURE.md
