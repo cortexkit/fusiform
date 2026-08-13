@@ -8,6 +8,7 @@ use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp, Token
 use fusiform_module::route::{serve_tool_call, CorrectResponse, RouteError};
 use fusiform_protocol::ToolResponse;
 use fusiform_store::{CatalogStore, FactKey, NewEra, NewObservation, PointInTime};
+use fusiform_testkit::mutate;
 
 /// The window: bad from t=3000, fixed at t=8000.
 const BAD_FROM: i64 = 3_000;
@@ -130,7 +131,8 @@ fn a_correction_defaults_to_a_dry_run() {
 #[test]
 fn a_committed_correction_makes_the_window_refuse() {
     let f = fixture();
-    let args = ARGS.replace(
+    let args = mutate(
+        ARGS,
         r#""reason":"docs/findings/2026-08-12-example.md""#,
         r#""reason":"docs/findings/2026-08-12-example.md","dry_run":false"#,
     );
@@ -174,7 +176,7 @@ fn the_response_reports_the_value_the_catalog_keeps() {
 #[test]
 fn a_correction_without_a_reason_is_refused() {
     let f = fixture();
-    let args = ARGS.replace("docs/findings/2026-08-12-example.md", "   ");
+    let args = mutate(ARGS, "docs/findings/2026-08-12-example.md", "   ");
     let err = correct(&f, &args).expect_err("an unauditable correction must be refused");
     assert_eq!(err.code, "bad_request");
     assert!(err.message.contains("reason"));
@@ -188,7 +190,8 @@ fn a_correction_without_a_reason_is_refused() {
 #[test]
 fn an_unrecognised_field_is_refused_rather_than_dropped() {
     let f = fixture();
-    let args = ARGS.replace(
+    let args = mutate(
+        ARGS,
         r#"[{"field":"rate","class":"input"}]"#,
         r#"[{"field":"rate","class":"input"},{"field":"vibes"}]"#,
     );
@@ -205,7 +208,7 @@ fn an_unrecognised_field_is_refused_rather_than_dropped() {
 #[test]
 fn an_empty_field_list_is_refused() {
     let f = fixture();
-    let args = ARGS.replace(r#"[{"field":"rate","class":"input"}]"#, "[]");
+    let args = mutate(ARGS, r#"[{"field":"rate","class":"input"}]"#, "[]");
     let err = correct(&f, &args).expect_err("a correction naming nothing must be refused");
     assert_eq!(err.code, "bad_request");
 }
@@ -240,7 +243,11 @@ fn a_correction_cannot_name_all_models() {
 #[test]
 fn a_window_containing_the_present_is_refused_with_instructions() {
     let f = fixture();
-    let args = ARGS.replace(r#""affected_until_ms":8000"#, r#""affected_until_ms":9000"#);
+    let args = mutate(
+        ARGS,
+        r#""affected_until_ms":8000"#,
+        r#""affected_until_ms":9000"#,
+    );
     let err = correct(&f, &args).expect_err("this window must be refused");
 
     assert_eq!(err.code, "refused");
@@ -260,7 +267,8 @@ fn the_dry_run_and_the_commit_agree() {
     let f = fixture();
     let preview = correct(&f, ARGS).unwrap();
 
-    let args = ARGS.replace(
+    let args = mutate(
+        ARGS,
         r#""reason":"docs/findings/2026-08-12-example.md""#,
         r#""reason":"docs/findings/2026-08-12-example.md","dry_run":false"#,
     );

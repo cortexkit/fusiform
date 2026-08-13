@@ -17,6 +17,7 @@ use fusiform_store::CatalogStore;
 use fusiform_module::fetch::FetchOutcome;
 use fusiform_module::loop_::{apply, TickOutcome};
 use fusiform_module::signals::Signals;
+use fusiform_testkit::mutate;
 
 const FIXTURE: &[u8] = include_bytes!("../../fusiform-core/fixtures/models-dev-excerpt.json");
 
@@ -307,7 +308,7 @@ fn the_version_advances_once_per_change() {
     .into_iter()
     .enumerate()
     {
-        let mutated = text.replace(from, to);
+        let mutated = mutate(&text, from, to);
         let at = 2_000 + i as i64 * 1_000;
         let report = run(&f, body(mutated.as_bytes(), None), at);
         assert!(

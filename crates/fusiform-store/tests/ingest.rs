@@ -13,6 +13,7 @@ use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, FactKey, NewObservation};
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+use fusiform_testkit::mutate;
 
 const FIXTURE: &str = include_str!("../../fusiform-core/fixtures/models-dev-excerpt.json");
 
@@ -143,7 +144,7 @@ fn one_rate_change_opens_exactly_one_era() {
     let detecting = observe(&f, 3_000, ObservationOutcome::Changed { snapshot_seq: 1 });
 
     // Anthropic's input rate goes from 3 to 4.
-    let mutated = FIXTURE.replace("\"input\": 3,", "\"input\": 4,");
+    let mutated = mutate(FIXTURE, "\"input\": 3,", "\"input\": 4,");
     assert_ne!(mutated, FIXTURE, "the mutation must actually apply");
 
     let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
@@ -349,29 +350,32 @@ fn reordering_a_modality_array_is_not_a_change() {
     seed(&f, 1_000);
     observe(&f, 2_000, ObservationOutcome::Unchanged);
 
-    let mutated = FIXTURE.replace(r#"["text","image","pdf"]"#, r#"["pdf","image","text"]"#);
-    let mutated = if mutated == FIXTURE {
-        // The fixture is pretty-printed; reorder through the parsed form
-        // instead of depending on its exact whitespace.
-        let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
-        let mut doc = doc.as_object().unwrap().clone();
-        let model = doc
-            .get_mut("anthropic")
-            .unwrap()
-            .get_mut("models")
-            .unwrap()
-            .get_mut("claude-sonnet-4-5")
-            .unwrap()
-            .get_mut("modalities")
-            .unwrap()
-            .get_mut("input")
-            .unwrap()
+    // Reordered through the PARSED form rather than by text substitution.
+    //
+    // The fixture is pretty-printed, so `["text","image","pdf"]` does not occur
+    // in it as a string and a text replace is silently a no-op -- which would
+    // leave this test asserting that an UNCHANGED document produces no eras.
+    // True, and nothing to do with ordering.
+    //
+    // This was previously written as a text replace with a parsed-form
+    // fallback, so it worked; the guard is that reversing the parsed array
+    // cannot no-op silently, because a wrong path panics rather than passing.
+    let mutated = {
+        let mut doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        let input = doc["anthropic"]["models"]["claude-sonnet-4-5"]["modalities"]["input"]
             .as_array_mut()
-            .unwrap();
-        model.reverse();
+            .expect("this model publishes an input modality array");
+        assert!(
+            input.len() > 1,
+            "reordering a one-element array is not a reordering"
+        );
+        let before = input.clone();
+        input.reverse();
+        assert_ne!(
+            *input, before,
+            "the reversal must actually change the order"
+        );
         serde_json::to_string(&doc).unwrap()
-    } else {
-        mutated
     };
 
     let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
@@ -662,7 +666,7 @@ fn the_digest_moves_exactly_when_the_diff_does() {
     assert!(plan.is_empty(), "and it must not produce eras either");
 
     // A real change: one rate moves. Both must move together.
-    let mutated = FIXTURE.replace("\"input\": 3,", "\"input\": 4,");
+    let mutated = mutate(FIXTURE, "\"input\": 3,", "\"input\": 4,");
     assert_ne!(mutated, FIXTURE, "the mutation must apply");
     let changed = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
 

@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 
 use engram_core::catalog::{plan, CaptureMechanism, Class, WriterInteraction};
+use fusiform_testkit::mutate;
 
 const DESCRIPTOR: &str = include_str!("../data/engram-catalog.json");
 
@@ -106,7 +107,7 @@ fn no_device_local_state_is_declared_portable() {
 /// being parsed at all.
 #[test]
 fn a_broken_descriptor_is_refused() {
-    let mutated = DESCRIPTOR.replace("\"whole-db\"", "\"telepathy\"");
+    let mutated = mutate(DESCRIPTOR, "\"whole-db\"", "\"telepathy\"");
     assert_ne!(mutated, DESCRIPTOR, "the mutation must apply");
     assert!(
         plan(&mutated).is_err(),
@@ -116,7 +117,7 @@ fn a_broken_descriptor_is_refused() {
     // A module_id that does not match the directory is the other fail-loud rule
     // engram's fleet walk enforces, and it is worth pinning here because the
     // symptom is a module silently not captured.
-    let renamed = DESCRIPTOR.replace("\"fusiform\"", "\"fusifrom\"");
+    let renamed = mutate(DESCRIPTOR, "\"fusiform\"", "\"fusifrom\"");
     let p = plan(&renamed).expect("a typo'd id still parses");
     assert_ne!(
         p.module_id, "fusiform",

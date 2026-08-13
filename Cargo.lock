@@ -478,6 +478,7 @@ dependencies = [
 name = "fusiform-core"
 version = "0.1.0"
 dependencies = [
+ "fusiform-testkit",
  "serde",
  "serde_json",
 ]
@@ -493,6 +494,7 @@ dependencies = [
  "fusiform-core",
  "fusiform-protocol",
  "fusiform-store",
+ "fusiform-testkit",
  "reqwest",
  "serde",
  "serde_json",
@@ -519,11 +521,16 @@ dependencies = [
  "cortexkit-store",
  "cortexkit-store-types",
  "fusiform-core",
+ "fusiform-testkit",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
 ]
+
+[[package]]
+name = "fusiform-testkit"
+version = "0.1.0"
 
 [[package]]
 name = "futures-channel"

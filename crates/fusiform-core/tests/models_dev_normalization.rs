@@ -12,6 +12,7 @@ use fusiform_core::normalize::{normalize_models_dev, NormalizedModel};
 use fusiform_core::{
     ChargeBasis, Modality, NormalizeError, RateCondition, RateValue, TokenClass, UnpricedReason,
 };
+use fusiform_testkit::mutate;
 
 const FIXTURE: &[u8] = include_bytes!("../fixtures/models-dev-excerpt.json");
 
@@ -171,13 +172,8 @@ fn context_tiers_produce_conditional_rates() {
 /// real bytes.
 #[test]
 fn an_unknown_tier_type_is_refused_not_guessed() {
-    let mutated = String::from_utf8(FIXTURE.to_vec())
-        .unwrap()
-        .replace("\"type\": \"context\"", "\"type\": \"volume\"");
-    assert!(
-        mutated.contains("\"volume\""),
-        "the mutation must actually apply, or this test proves nothing"
-    );
+    let text = String::from_utf8(FIXTURE.to_vec()).unwrap();
+    let mutated = mutate(&text, "\"type\": \"context\"", "\"type\": \"volume\"");
 
     match normalize_models_dev(mutated.as_bytes()) {
         Err(NormalizeError::UnknownTierType { tier_type, .. }) => {
@@ -197,8 +193,7 @@ fn an_unknown_tier_type_is_refused_not_guessed() {
 #[test]
 fn a_tier_without_a_type_is_refused() {
     let text = String::from_utf8(FIXTURE.to_vec()).unwrap();
-    let mutated = text.replace("\"type\": \"context\"", "\"kind\": \"context\"");
-    assert_ne!(mutated, text, "the mutation must actually apply");
+    let mutated = mutate(&text, "\"type\": \"context\"", "\"kind\": \"context\"");
 
     match normalize_models_dev(mutated.as_bytes()) {
         Err(NormalizeError::TierMissingType { .. }) => {}
