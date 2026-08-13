@@ -495,3 +495,57 @@ fn an_absent_capability_and_an_explicit_null_are_both_unknown() {
         "an explicit false is a real claim and must not become unknown"
     );
 }
+
+/// A published zero limit and an absent limit are the same claim: unknown.
+///
+/// Both become `None`, so both serialize as `null` on the wire and a consumer
+/// cannot distinguish them. That is deliberate — no model accepts zero tokens,
+/// so a published zero is the upstream's spelling of "not stated" rather than a
+/// capacity — and it is pinned here because it is INVISIBLE from the wire and
+/// UNRECOVERABLE downstream.
+///
+/// BROCA traced the consumer half of this on 2026-08-13: their parser read a
+/// published 0 as `Some(0)`, and their transform's `unwrap_or(0)` made
+/// `Some(0)` and `None` arrive identically at the prompt-reduction seam. Fixing
+/// that would not recover the distinction, because fusiform collapsed it first.
+///
+/// Measured case: `privatemode-ai/whisper-large-v3` published `context: 0` and
+/// was corrected to 448 during the day.
+#[test]
+fn a_zero_limit_and_an_absent_limit_are_both_unknown() {
+    let doc = |body: &str| {
+        format!(r#"{{"p":{{"id":"p","name":"P","models":{{"m":{{"id":"m","name":"M"{body}}}}}}}}}"#)
+    };
+    let limits = |body: &str| {
+        let text = doc(body);
+        let m = normalize_models_dev(text.as_bytes())
+            .unwrap_or_else(|e| panic!("{body:?} must normalize: {e}"))
+            .catalog
+            .models()
+            .next()
+            .expect("one model")
+            .limits
+            .clone();
+        (m.context_tokens, m.output_tokens)
+    };
+
+    assert_eq!(limits(""), (None, None), "no limit block at all is unknown");
+    assert_eq!(
+        limits(r#","limit":{"context":0,"output":0}"#),
+        (None, None),
+        "a published zero is the upstream's spelling of 'not stated'"
+    );
+
+    // PER FIELD, not per model. 90 models mix real and zero limits, so a
+    // row-level rule would discard a real limit alongside a zero one.
+    assert_eq!(
+        limits(r#","limit":{"context":8192,"output":0}"#),
+        (Some(8192), None),
+        "a real limit beside a zero one must survive"
+    );
+    assert_eq!(
+        limits(r#","limit":{"context":0,"output":4096}"#),
+        (None, Some(4096)),
+        "and in the other direction"
+    );
+}

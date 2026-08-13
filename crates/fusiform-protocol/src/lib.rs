@@ -355,6 +355,31 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// are DIFFERENT claims: `[]` states the model accepts no modality at all,
 /// which is a positive assertion manufactured from silence.
 ///
+/// # Limits: a published ZERO also arrives as `null`, and that is deliberate
+///
+/// `limit.context` and `limit.output` collapse an upstream zero into `null`
+/// alongside an absent key. **A consumer cannot distinguish "the upstream
+/// published 0" from "the upstream published nothing"**, and should not try:
+/// no model accepts zero tokens, so a published zero is the upstream's spelling
+/// of "not stated" rather than a capacity.
+///
+/// Per FIELD rather than per model. Measured 2026-08-11: 90 models mix real and
+/// zero limits — `alibaba-token-plan/qwen-image-2.0` publishes an 8,192 context
+/// limit beside a zero output cap, and a row-level rule would discard the real
+/// one.
+///
+/// This is stated here because it is invisible from the wire and unrecoverable
+/// downstream. A consumer fixing its own zero-versus-absent handling cannot get
+/// the distinction back, because it was collapsed before the response was
+/// built. Measured example: `privatemode-ai/whisper-large-v3` published
+/// `context: 0` and was corrected to `448` on 2026-08-13 — during that window
+/// fusiform served `null`, and "the upstream said zero" was not reconstructible.
+///
+/// If a consumer needs the distinction — for a drift alarm, or to catch an
+/// upstream regression — it is a wire change to request, not a value to infer.
+/// Fusiform will not emit a bare `0` and leave every consumer to decide what it
+/// means, since that is the shape that produces absorbing-default defects.
+///
 /// # What fusiform never serves, and why it is the highest-stakes entry here
 ///
 /// Renderer-selection fields — `provider.npm`, per-model provider overrides,
@@ -384,7 +409,10 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                consumer's prompt-reduction transform, so a wrong value changes \
                what gets compacted, which changes the prompt, which changes \
                every byte. Indirect and total — a reader who greps for it in a \
-               request body will not find it and may wrongly reclassify it.",
+               request body will not find it and may wrongly reclassify it. \
+               NULL means the limit is UNKNOWN and must not be defaulted to a \
+               number: a consumer that reads null as zero applies maximum \
+               compaction pressure to a model whose capacity it does not know.",
     },
     ServedFact {
         key: "limit.output",
