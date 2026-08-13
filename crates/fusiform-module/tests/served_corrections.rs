@@ -49,6 +49,10 @@ const UPSTREAM: &str = r#"{
 }"#;
 
 fn store() -> (CatalogStore, tempfile::TempDir) {
+    store_from(UPSTREAM)
+}
+
+fn store_from(upstream: &str) -> (CatalogStore, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".to_string(),
@@ -73,7 +77,7 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
         })
         .unwrap();
 
-    let catalog = normalize_models_dev(UPSTREAM.as_bytes()).unwrap().catalog;
+    let catalog = normalize_models_dev(upstream.as_bytes()).unwrap().catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
 
@@ -186,5 +190,105 @@ fn a_model_without_a_corrective_cell_is_untouched() {
     assert!(
         overridden.is_none() || overridden.unwrap().is_empty(),
         "a model with no corrective cell must report no override"
+    );
+}
+
+/// `catalog.status` reports the overrides in effect, not only `catalog.get`.
+///
+/// An operator asking "what is fusiform doing" is asking a different question
+/// than "what are this model's facts", and the answer includes "deliberately
+/// disagreeing with the upstream about these facts". Without this they learn it
+/// only by happening to read one of the affected models.
+///
+/// Found by BROCA describing what they had built on their side and my checking
+/// whether both of my surfaces did the same — the renderer went to `get`
+/// because `get` is where the gap was found, and nothing asked whether the
+/// other verb needed it.
+#[test]
+fn the_status_surface_reports_the_overrides_in_effect() {
+    let (store, _dir) = store();
+    let response = match serve_tool_call(
+        &store,
+        br#"{"name":"catalog.status","arguments":{"polls":3}}"#,
+    )
+    .expect("must serve")
+    {
+        ToolResponse::Status(s) => serde_json::to_value(s).unwrap(),
+        other => panic!("expected a status, got {other:?}"),
+    };
+
+    let entry = response["overridden"]
+        .as_array()
+        .expect("status must carry the override list")
+        .iter()
+        .find(|o| o["model_id"] == "claude-sonnet-4-5")
+        .expect("the sonnet-4.5 override must be reported on the status surface");
+
+    assert_eq!(entry["upstream_value"], "1000000");
+    assert_eq!(entry["served_value"], "200000");
+
+    // And it must agree with what `catalog.get` says, because two surfaces
+    // reporting one fact differently is worse than one surface reporting it.
+    let from_get = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5"}}"#,
+    );
+    assert_eq!(
+        from_get["overridden"][0]["served_value"], entry["served_value"],
+        "status and get must not disagree about an override"
+    );
+}
+
+/// A correction the upstream has already fixed is reported by neither surface.
+///
+/// The redundant-cell case, and it is the one that decides whether the override
+/// block stays readable. If models.dev corrects `claude-sonnet-4-5` to 200,000
+/// tomorrow, the cell becomes a no-op — and reporting it would print
+/// `200000 -> 200000` on every read forever, which is the noise that trains an
+/// operator to skip the block entirely.
+///
+/// Found by a surviving mutation: removing the equality check changed nothing,
+/// because every fixture in this file disagrees with its correction. The
+/// agreeing case had no coverage at all.
+#[test]
+fn a_correction_the_upstream_has_adopted_is_not_reported() {
+    // The same upstream document, with the row already carrying Anthropic's
+    // real number — which is exactly what a fixed upstream looks like.
+    let fixed = UPSTREAM.replace(
+        r#""limit": { "context": 1000000, "output": 64000 }"#,
+        r#""limit": { "context": 200000, "output": 64000 }"#,
+    );
+    assert_ne!(fixed, UPSTREAM, "the fixture mutation must apply");
+
+    let (store, _dir) = store_from(&fixed);
+
+    let from_get = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5"}}"#,
+    );
+    assert_eq!(
+        from_get["models"]["anthropic/claude-sonnet-4-5"]["limit.context"], 200_000,
+        "the value is right either way, which is why the report is the only \
+         thing that can be wrong here"
+    );
+    let overridden = from_get["overridden"].as_array();
+    assert!(
+        overridden.is_none() || overridden.unwrap().is_empty(),
+        "an override that changes nothing must not be reported: {overridden:?}"
+    );
+
+    let status = match serve_tool_call(
+        &store,
+        br#"{"name":"catalog.status","arguments":{"polls":1}}"#,
+    )
+    .expect("must serve")
+    {
+        ToolResponse::Status(s) => serde_json::to_value(s).unwrap(),
+        other => panic!("expected a status, got {other:?}"),
+    };
+    let s_over = status["overridden"].as_array();
+    assert!(
+        s_over.is_none() || s_over.unwrap().is_empty(),
+        "status must agree with get about a no-op override: {s_over:?}"
     );
 }

@@ -225,6 +225,7 @@ fn every_response_type_round_trips() {
     assert_eq!(back, history);
 
     let status = StatusResponse {
+        overridden: vec![],
         source: "models.dev".into(),
         catalog_version: 7,
         model_count: 6_270,

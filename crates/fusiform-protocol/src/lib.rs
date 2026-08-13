@@ -705,6 +705,19 @@ pub struct StatusResponse {
     pub source: String,
     pub catalog_version: i64,
     pub model_count: usize,
+    /// Facts fusiform is currently serving against what the upstream publishes.
+    ///
+    /// # Why this belongs on the status surface and not only on a read
+    ///
+    /// `catalog.get` reports the overrides that apply to the rows it returned.
+    /// An operator asking "what is fusiform doing" is asking a different
+    /// question, and the answer includes "deliberately disagreeing with the
+    /// upstream about two facts" — which they would otherwise learn only by
+    /// happening to read one of those two models.
+    ///
+    /// Empty in the ordinary case, and omitted from the wire when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overridden: Vec<OverriddenFactWire>,
     /// How many of those models carry at least one rate.
     ///
     /// Measured on the live store: 420 of 6,293 present models carry no rate at

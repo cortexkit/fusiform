@@ -185,9 +185,34 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
         .read_catalog(&CatalogQuery::current(source))
         .map_err(|e| store_error(&e))?;
 
+    // The overrides in effect right now, from the same snapshot the counts come
+    // from, so status cannot disagree with itself about which models exist.
+    //
+    // Rendered into the wire model map first because that is the shape both
+    // this and `catalog.get` compare against — building a second traversal here
+    // would be two artifacts of one rule with nothing holding them together.
+    let mut wire_models: BTreeMap<String, BTreeMap<String, serde_json::Value>> = BTreeMap::new();
+    for model in &snapshot.models {
+        wire_models.insert(
+            format!("{}/{}", model.provider_id, model.model_id),
+            model
+                .facts
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.as_str().to_string(),
+                        serde_json::from_str(v).unwrap_or(serde_json::Value::Null),
+                    )
+                })
+                .collect(),
+        );
+    }
+    let overridden = overrides_in_effect(&wire_models, overlay::corrections());
+
     Ok(StatusResponse {
         source: source.as_str().to_string(),
         catalog_version,
+        overridden,
         model_count: snapshot.model_count(),
         // Counted from the same snapshot as the model total, so the two cannot
         // disagree about which models exist.
@@ -628,6 +653,55 @@ fn now_ms() -> i64 {
 ///
 /// So a point-in-time read never reaches this function, and history keeps
 /// saying what models.dev said — the true statement about the record.
+/// Which corrections currently DIVERGE from what the upstream publishes.
+///
+/// Reporting only — nothing is mutated. Shares its rule with
+/// [`apply_corrections`] by construction: both ask whether the served value
+/// differs from the stored one, so `catalog.get` and `catalog.status` cannot
+/// disagree about what is being overridden.
+///
+/// A correction whose row the upstream has since fixed is a no-op and is
+/// omitted from both. That is not an error: the cell is redundant rather than
+/// wrong, and reporting "1000000 -> 1000000" would train an operator to skim
+/// the entries that matter.
+fn overrides_in_effect(
+    models: &BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+    corrections: &overlay::Corrections,
+) -> Vec<OverriddenFactWire> {
+    let mut out = Vec::new();
+    for (identity, facts) in models {
+        let Some((provider_id, model_id)) = identity.split_once('/') else {
+            continue;
+        };
+        for (fact_key, value) in facts {
+            let key = (
+                provider_id.to_string(),
+                model_id.to_string(),
+                FactKey::from_stored(fact_key.clone()),
+            );
+            let Some(correction) = corrections.get(&key) else {
+                continue;
+            };
+            let served: serde_json::Value = match correction.served_value.parse::<i64>() {
+                Ok(n) => serde_json::Value::from(n),
+                Err(_) => serde_json::Value::String(correction.served_value.clone()),
+            };
+            if *value == served {
+                continue;
+            }
+            out.push(OverriddenFactWire {
+                provider_id: provider_id.to_string(),
+                model_id: model_id.to_string(),
+                fact_key: fact_key.clone(),
+                upstream_value: value.to_string(),
+                served_value: correction.served_value.clone(),
+                authority: correction.authority.clone(),
+            });
+        }
+    }
+    out
+}
+
 fn apply_corrections(
     models: &mut BTreeMap<String, BTreeMap<String, serde_json::Value>>,
     corrections: &overlay::Corrections,

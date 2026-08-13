@@ -222,6 +222,16 @@
       "era_count": 164,
       "model_count": 15,
       "models_priced": 9,
+      "overridden": [
+        {
+          "authority": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-08-13) — 'Other Claude models, including Claude Sonnet 4.5, have a 200k-token context window'",
+          "fact_key": "limit.context",
+          "model_id": "claude-sonnet-4-5",
+          "provider_id": "anthropic",
+          "served_value": "200000",
+          "upstream_value": "1000000"
+        }
+      ],
       "recent_polls": [
         {
           "detail": "upstream returned 503",

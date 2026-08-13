@@ -468,6 +468,11 @@ fn print_status(response: &serde_json::Value) {
         .map(|priced| format!("  ({} with no rate)", models - priced))
         .unwrap_or_default();
     println!("models           {models}{unpriced}");
+    // Overrides on the status surface, because "what is fusiform doing"
+    // includes "deliberately disagreeing with the upstream about these facts".
+    // An operator would otherwise learn it only by happening to read one of the
+    // affected models.
+    print!("{}", render_overridden(response));
     println!(
         "eras             {}",
         get("era_count").and_then(|v| v.as_i64()).unwrap_or(-1)
