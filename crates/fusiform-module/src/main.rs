@@ -172,10 +172,20 @@ impl ModuleHandler for Fusiform {
                 eprintln!("fusiform: store already holds {existing_eras} eras; seed not applied")
             }
             Err(e) => {
-                // Not fatal. A module that cannot seed can still poll, and the
-                // first fetch will populate the store — but until then it
-                // serves nothing, so this must be loud rather than swallowed.
-                eprintln!("fusiform: could not seed the store: {e}");
+                // Not fatal, and the message says what that means rather than
+                // leaving an operator to work it out.
+                //
+                // A module that cannot seed still polls, and the first fetch
+                // populates the store — but until that lands it serves an empty
+                // catalog, and an empty catalog answers reads successfully. A
+                // consumer cannot tell it from an upstream that describes
+                // nothing, which is why this has to be loud AND has to say what
+                // the next thirty minutes look like.
+                eprintln!(
+                    "fusiform: could not seed the store, so the catalog is EMPTY and \
+                     will answer reads with zero models until the first poll \
+                     succeeds: {e}"
+                );
             }
         }
 

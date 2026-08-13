@@ -186,7 +186,18 @@ impl Signals {
             // A genuinely fresh install: "no observation yet" is the true
             // answer, and health treats it as Ok rather than stale.
             Ok(None) => {}
-            Err(e) => eprintln!("fusiform: could not read last observation at startup: {e}"),
+            // Names what health will now SAY, not just what failed here.
+            //
+            // The read failing leaves the staleness clock empty, so health
+            // reports observation_age_ms as null and calls it Ok — which is the
+            // exact false-fresh-install reading this adoption exists to
+            // prevent. An operator who sees only "could not read" has no reason
+            // to distrust the health line that follows it.
+            Err(e) => eprintln!(
+                "fusiform: could not read the last observation at startup, so health \
+                 will report observation_age_ms as null and look like a fresh \
+                 install until the next poll: {e}"
+            ),
         }
 
         // The instant the catalog last changed, for the same reason. This one
@@ -198,7 +209,11 @@ impl Signals {
             Ok(Some(at)) => self.adopt_last_write(at.0),
             // No eras at all, so null is then the true answer.
             Ok(None) => {}
-            Err(e) => eprintln!("fusiform: could not read the newest era at startup: {e}"),
+            Err(e) => eprintln!(
+                "fusiform: could not read the newest era at startup, so health will \
+                 report last_write_age_ms as null — which reads as 'never written' \
+                 rather than 'not adopted': {e}"
+            ),
         }
     }
 
