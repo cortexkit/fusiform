@@ -33,12 +33,66 @@ use std::collections::BTreeSet;
 /// Statements that modify the database, as they appear in SQL.
 const WRITE_KEYWORDS: [&str; 3] = ["INSERT INTO", "UPDATE ", "DELETE FROM"];
 
-/// Read a store source file.
+/// Read a store source file, with SQL string continuations joined.
+///
+/// # The checker must not disagree with the document's own structure
+///
+/// Rust string literals in this crate are wrapped with `\` continuations, and
+/// that is the file's house style rather than an edge case — every multi-line
+/// SQL statement in the store is written that way. A line-oriented scan over
+/// that source cannot see a keyword split across the wrap:
+///
+///     conn.execute(
+///         "INSERT \
+///          INTO observation ...",
+///
+/// Probed rather than reasoned about: an unfenced write in exactly that shape
+/// SURVIVED this checker before the join. ASTRO named the class an hour
+/// earlier, from my own checker reading one line of a two-line list in the
+/// design note and reporting a real table as missing — line-oriented reading of
+/// a wrapped document is a parser that quietly disagrees with the document's
+/// structure.
+///
+/// Joining changes the line NUMBERS, which is harmless here because both the
+/// write scan and the fenced-range scan run over this same joined text. They
+/// are consistent with each other, which is the only property the comparison
+/// needs.
 fn source(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    join_continuations(&raw)
+}
+
+/// Collapse `\` line continuations inside string literals onto one line.
+fn join_continuations(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' && chars.peek() == Some(&'\n') {
+            chars.next();
+            // Consume the wrapped line's leading whitespace.
+            while chars.peek().is_some_and(|c| *c == ' ' || *c == '\t') {
+                chars.next();
+            }
+            // Leave exactly one space, so `INSERT \` + `INTO` joins as
+            // `INSERT INTO` rather than `INSERTINTO` or `INSERT  INTO`.
+            //
+            // The double-space case is not hypothetical: the first version
+            // pushed unconditionally, and since the wrapped line already ended
+            // with a space the join produced `INSERT  INTO`, which the exact
+            // keyword never matches. The mutation still survived and the fix
+            // looked right — a corrected parser that corrects to a string
+            // nothing compares against.
+            if !out.ends_with(' ') {
+                out.push(' ');
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// The line numbers on which a write statement begins.
