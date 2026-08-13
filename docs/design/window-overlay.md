@@ -819,3 +819,71 @@ through. **The question is never "does this provider originate the model" but
 A wrong answer here is expensive in both directions: refusing ollama-cloud loses
 the batch's best cell, and accepting an OpenRouter measurement mints a value
 correct for one routing decision and wrong for the next.
+
+## 15. Serving corrections on the catalog surface
+
+Settled with SUBC 2026-08-13. BROCA's admission path consumes the catalog
+surface and knows nothing of the overlay, so a corrective cell reaches nobody
+who dispatches real requests. Fusiform serves the corrected value on the catalog
+surface itself; the overlay stays the provenance layer explaining why the served
+number differs from upstream.
+
+Three constraints, then a fourth that only appeared when the mapping was
+measured rather than assumed.
+
+**A corrected value is never served as though the upstream said it.** models.dev
+never said 200k for `claude-sonnet-4-5` and will say 1M again at the next poll.
+A `corrected` list rides beside the existing `withheld` and `uncertain` lists,
+each entry naming the upstream value, the served value, and the `source_ref`. A
+consumer ignoring it gets the safe value; a consumer reading it can audit.
+
+**Corrections apply to the current view only, never to point-in-time reads.** An
+overlay cell carries `observed_at` and NO validity interval. "Anthropic's
+documentation, read today, says 200k" does not establish what was true in July —
+Anthropic may have reduced it, and the catalog may have been right at the time.
+Projecting a present reading backward manufactures a claim about a window nobody
+observed: not a forged observation, a forged inference. History keeps saying
+what models.dev said, because that is the true statement about the record.
+
+**A wrong correction is silent, so a corrective cell has a higher bar than an
+additive one.** Serving 1M when the truth is 200k produces a hard 400 — loud and
+recoverable. Serving 200k when the truth is 1M has the consumer quietly
+under-using the window forever with nothing to surface it. An additive cell that
+is wrong leaves a gap; a corrective cell that is wrong replaces a right answer
+AND hides the evidence.
+
+### 15.1 Only `limit.context` can be corrected — the output field is not one question
+
+Measured 2026-08-13 across the whole overlay. Half the facts have no catalog
+counterpart at all (`window.enforced`, `output.enforced`, `output.default`,
+`geometry` — the dataset exists because the catalog cannot express them). Of the
+12 that map, exactly two disagree, **and they disagree in opposite directions**:
+
+```
+anthropic/claude-sonnet-4-5  window.advertised  200000    catalog 1000000   TIGHTENS
+moonshotai/kimi-k3           output.advertised  1048576   catalog  131072   LOOSENS
+```
+
+The second must not be applied, and the reason is not the direction:
+
+```
+kimi-k3     catalog output = 131072  == the overlay's output.DEFAULT
+gemini-3.5  catalog output =  65536  == the overlay's output.ADVERTISED (a cap)
+```
+
+**models.dev's `output` field answers a different question per row, and nothing
+in the row says which.** For Kimi it carries the default you get without asking;
+for Gemini it carries a per-model cap. Replacing 131072 with 1048576 would swap a
+true statement about the default for a true statement about the cap — that is a
+substitution, not a correction, and a consumer reading "output limit" cannot
+tell which question it just got answered.
+
+So the corrective surface is **`limit.context` only**, from
+`window.advertised`. It is the one field where the catalog and the overlay
+provably ask the same question.
+
+That also makes the direction observation moot rather than load-bearing, which
+is the honest reading: the loosening correction was excluded by semantics before
+its direction mattered. Worth recording anyway, because the next corrective
+field will have to answer the same question first — **does the catalog's field
+mean what my fact means** — and the answer will not always be no.
