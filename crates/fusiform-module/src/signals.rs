@@ -54,7 +54,18 @@ const fn decode_class(value: u64) -> Option<FailureClass> {
 }
 
 /// Counters stamped by the poll loop, read by the health path.
-#[derive(Debug, Default)]
+///
+/// `Default` is written out rather than derived, because the derived one is
+/// WRONG here and silently so. `AtomicI64::default()` is zero, and zero is a
+/// real instant — the unix epoch — so a derived `Signals` claims fusiform last
+/// wrote in 1970 rather than never. A probe caught this reporting
+/// `last_write_age_ms` as the entire age of the clock where production, built
+/// with `new()`, correctly reports null.
+///
+/// The two constructors disagreeing is the defect rather than either value
+/// being wrong on its own: every test used `Default` and production used
+/// `new()`, so the sentinel under test was never the sentinel that ships.
+#[derive(Debug)]
 pub struct Signals {
     /// Advances once per poll that reached a VERDICT — an observation row, or
     /// a recorded failure.
@@ -117,6 +128,12 @@ pub struct Signals {
 /// obviously wrong rather than subtly plausible.
 const NEVER: i64 = i64::MIN;
 
+impl Default for Signals {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Signals {
     pub fn new() -> Self {
         Self {
@@ -142,6 +159,49 @@ impl Signals {
         self.last_failure_class.store(CLASS_NONE, Ordering::Relaxed);
     }
 
+    /// Adopt everything the store knows that a restart would otherwise erase.
+    ///
+    /// Called once when the store opens, before the poll loop starts. It lives
+    /// here rather than in `main` so a test can drive the real startup path:
+    /// when this logic sat in the binary, a test could only reproduce it, and a
+    /// mutation deleting the call from `main` reddened nothing. A signal whose
+    /// only writer is unreachable from the test suite can be silently removed —
+    /// the same defect this module hit with the attempt heartbeat.
+    ///
+    /// Errors are logged rather than returned. The store opened; a read failing
+    /// here is not fatal because the loop will write its own values shortly, but
+    /// it must not silently pass as a fresh install.
+    pub fn adopt_from_store(
+        &self,
+        store: &fusiform_store::CatalogStore,
+        source: fusiform_core::SourceId,
+    ) {
+        // The catalog's real age. Without it the staleness clock restarts with
+        // the process, and a module whose upstream has been unreachable for
+        // hours reports healthy the moment it restarts — which is precisely
+        // when an operator is looking, because a restart is what they try when
+        // something seems wrong.
+        match store.last_confirming_observation(source) {
+            Ok(Some(at)) => self.adopt_last_observation(at.0),
+            // A genuinely fresh install: "no observation yet" is the true
+            // answer, and health treats it as Ok rather than stale.
+            Ok(None) => {}
+            Err(e) => eprintln!("fusiform: could not read last observation at startup: {e}"),
+        }
+
+        // The instant the catalog last changed, for the same reason. This one
+        // was missed when the observation clock was fixed: two adjacent metrics
+        // of the same shape, one adopted across a restart and one not, so
+        // production reported `last_write_age_ms: null` — never written —
+        // beside a store holding 68,000 eras.
+        match store.newest_era_boundary(source) {
+            Ok(Some(at)) => self.adopt_last_write(at.0),
+            // No eras at all, so null is then the true answer.
+            Ok(None) => {}
+            Err(e) => eprintln!("fusiform: could not read the newest era at startup: {e}"),
+        }
+    }
+
     /// Adopt the last observation instant recorded in the store.
     ///
     /// Called once when the store opens, before the poll loop starts. Without
@@ -161,6 +221,26 @@ impl Signals {
     /// and the staleness clock is the signal that survives.
     pub fn adopt_last_observation(&self, at_ms: i64) {
         self.last_observation_ms.store(at_ms, Ordering::Relaxed);
+    }
+
+    /// Adopt the instant the catalog last changed, from the store.
+    ///
+    /// Same reasoning as `adopt_last_observation` and found the same way: the
+    /// write clock is an atomic, so a restart empties it, and a module holding
+    /// 68,000 eras reported `last_write_age_ms: null` — "fusiform has never
+    /// written anything" — minutes after a placement.
+    ///
+    /// Null is a strong claim, not a missing value. It is the correct answer
+    /// for a genuinely fresh install and a false one for a restart, and those
+    /// two were indistinguishable in the metric an operator reads.
+    ///
+    /// The instant is the newest ERA BOUNDARY rather than a recorded write
+    /// time, because that is what an operator means by "when did the catalog
+    /// last change" — and it is a property of history rather than a number
+    /// someone had to remember to record, so it is correct for eras written
+    /// before this existed.
+    pub fn adopt_last_write(&self, at_ms: i64) {
+        self.last_write_ms.store(at_ms, Ordering::Relaxed);
     }
 
     /// Stamp a completed poll that observed nothing.

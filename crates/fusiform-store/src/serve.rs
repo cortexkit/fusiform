@@ -637,6 +637,28 @@ impl CatalogStore {
         Ok(n as usize)
     }
 
+    /// When the catalog last changed, for one source.
+    ///
+    /// The newest era's boundary. `None` only when the source has no eras at
+    /// all, which is a genuinely empty store rather than a quiet one.
+    ///
+    /// Exists so a restarted process can adopt this instant instead of
+    /// reporting that it has never written. The write clock lives in an atomic
+    /// that a restart empties, and a store holding 68,000 eras reporting "no
+    /// write ever" is the same defect as the staleness clock resetting: the
+    /// atomic describes the process, and an operator reads it as describing the
+    /// catalog.
+    pub fn newest_era_boundary(&self, source: SourceId) -> Result<Option<Timestamp>, CatalogError> {
+        let at = self.raw_conn(|conn| {
+            conn.query_row(
+                "SELECT MAX(boundary_at_ms) FROM era WHERE source = ?1",
+                params![source.as_str()],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+        })?;
+        Ok(at.map(Timestamp))
+    }
+
     /// How many eras the store holds, for one source.
     pub fn era_count(&self, source: SourceId) -> Result<i64, CatalogError> {
         let n = self.raw_conn(|conn| {

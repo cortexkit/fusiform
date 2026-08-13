@@ -185,19 +185,14 @@ impl ModuleHandler for Fusiform {
         // the moment it restarts, which is precisely when an operator is
         // looking. Read once here on the startup path; the health path itself
         // still touches nothing but atomics.
-        match store.last_confirming_observation(fusiform_core::SourceId::ModelsDev) {
-            Ok(Some(at)) => self.signals.adopt_last_observation(at.0),
-            Ok(None) => {
-                // A genuinely fresh install. "No observation yet" is the true
-                // answer and health treats it as Ok rather than stale.
-            }
-            Err(e) => {
-                // The store opened but cannot be read. Not fatal — the loop
-                // will try again — but it must not pass as a fresh install, so
-                // it is logged rather than swallowed.
-                eprintln!("fusiform: could not read last observation at startup: {e}");
-            }
-        }
+        // Adopt what the store knows before the loop starts. The signals are
+        // atomics, so a restart empties them and a module with real history
+        // would report as a fresh install — healthy, never written, nothing
+        // observed — at exactly the moment an operator is looking.
+        //
+        // The logic lives in `Signals` rather than here so a test can drive it.
+        self.signals
+            .adopt_from_store(&store, fusiform_core::SourceId::ModelsDev);
 
         *self.store.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&store));
 
