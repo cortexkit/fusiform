@@ -561,3 +561,45 @@ wall that truncates, the enum is the thing that is wrong, not the report.**
 This is the same shape as the advertised/enforced split that started this
 dataset — two facts wearing one number — caught early enough to be a note rather
 than a correction.
+
+### 12.1 Second instance, with a named mechanism
+
+Anthropic's live documentation (read 2026-08-13) separates the two dimensions
+explicitly, and the separation is exactly the one the enum collapses:
+
+> If the input alone already exceeds the model's context window, the API returns
+> a 400 `invalid_request_error` ("prompt is too long") **on every model**. On
+> Claude 4.5 models and newer, if input tokens plus `max_tokens` exceeds the
+> context window size, the API accepts the request [and] stops with
+> `stop_reason: "model_context_window_exceeded"`. On earlier models, the API
+> returns a validation error instead. To opt in to the
+> `model_context_window_exceeded` behavior on those models, use the
+> `model-context-window-exceeded-2025-08-26` beta header.
+
+The wall is prompt-only on every Anthropic model, always. What varies is the
+over-window OUTPUT behaviour — by model version, **and by a request header on
+older models**.
+
+So geometry is request-dependent here through a named, documented mechanism
+rather than by inference. Two providers now, reached independently: OpenAI via
+`truncation`, Anthropic via a beta header. That is no longer a boundary
+condition; it is how the space is shaped.
+
+Still not changing the contract. The trigger in §12 stands, and this is the
+evidence that it will fire.
+
+### 12.2 No geometry wildcard is justified for any provider
+
+Checked while planning to extend geometry with `model_id: "*"`. Every
+documented geometry names a **model**, a **version**, or a **request mode** —
+none names a provider:
+
+- **anthropic** — version-gated at 4.5, header-overridable below it.
+- **xai** — measured on grok-4.6 alone. One model is not a provider.
+- **openai platform** — the `shared_upfront` evidence is specific to
+  `truncation: disabled`.
+- **google** — contradicted by its own documentation (§11.2 below).
+
+The uniformity of that result is the finding. It suggests geometry may be keyed
+at the wrong granularity — `(provider, model)` cannot express a fact that
+depends on a header the consumer sets. Recorded, not acted on.

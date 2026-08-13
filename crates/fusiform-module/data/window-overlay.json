@@ -99,7 +99,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:claude-opus-5",
+          "source_ref": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-08-13) \u2014 'Claude Opus 5 ... has a 1M-token context window on the Claude API, Amazon Bedrock, Google Cloud, and Microsoft Foundry'",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "output.advertised": {
@@ -110,7 +110,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:claude-opus-5",
+          "source_ref": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-08-13) \u2014 'a request to any model with a 1M-token context window can generate up to 128k output tokens (max_tokens)'",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "geometry": {
@@ -121,11 +121,11 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Asserted",
-          "source_ref": "mc-geometry-spec@06a0e5ac#provider-geometry-classes:anthropic",
+          "source_ref": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-08-13) \u2014 'Context window overflow behavior'",
           "observed_at": "2026-08-13T12:54:15Z"
         }
       },
-      "note": "NO access-path id minted. The window is 1M on both the OAuth and API paths, so by mint-on-divergence there is nothing to fork; only plan gating differs, which is not a window fact. The geometry boundary is Asserted rather than Observed because it is VERSION-GATED: 4.5+ truncates over-window output, older models 400 on the combined sum. A consumer resolving geometry for an older Claude must not inherit this cell."
+      "note": "VERIFIED AGAINST THE PRIMARY SOURCE 2026-08-13, replacing the seed spec as source_ref. The doc names Opus 5 explicitly in a list of 1M-window models, and states the 128k output cap as a property of any 1M-window model rather than of this model. NO access-path id minted: the window holds on the Claude API, Bedrock, Google Cloud and Microsoft Foundry alike, so by mint-on-divergence there is nothing to fork. GEOMETRY IS THE INTERESTING PART AND IT SPLITS. The prompt-only wall is universal: 'if the input alone already exceeds the model's context window, the API returns a 400 invalid_request_error (prompt is too long) ON EVERY MODEL'. What happens to over-window OUTPUT is version-gated AND header-controlled: 4.5+ accepts the request and stops with stop_reason model_context_window_exceeded, earlier models return a validation error, and earlier models can OPT IN to the newer behaviour with the model-context-window-exceeded-2025-08-26 beta header. So a pre-4.5 model's geometry depends on a request header \u2014 the second instance of the request-dependence recorded in the design note's section 12, and the first with a named mechanism. shared_truncating is correct for Opus 5 and must not be inherited by an older Claude."
     },
     {
       "provider_id": "xai",
