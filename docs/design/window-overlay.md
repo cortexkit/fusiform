@@ -339,6 +339,51 @@ what collapses a bracket into a false point, and it is unrecoverable afterwards.
 `report_id` is the reporter's, and it becomes the cell's `source_ref` as
 `mc-report:<report_id>`.
 
+### 6.1 Capture-time routing evidence, because it is unrecoverable afterwards
+
+Added 2026-08-13 on SUBC's rider. A report arriving through a **forwarder**
+carries the UPSTREAM's wall under the FORWARDER's `provider_id`, and after
+capture nobody can tell which. github-copilot serves models from at least five
+first-party catalogs; a 400 from that path may be copilot's ceiling or
+Anthropic's, and the report as shaped above cannot say.
+
+Two fields, both optional, and they do different jobs:
+
+```json
+"path_may_forward": true,
+"served_by_hint": "anthropic-upstream (error body named the upstream)"
+```
+
+**`path_may_forward`** is what the capture site always knows and an analyst can
+never reconstruct: whether the addressed provider is capable of serving this
+request from someone else's backend.
+
+**`served_by_hint`** is what the capture site SOMETIMES knows — an upstream
+named in an error body, a vendor prefix on the model id, a response header
+identifying the backend. Free-form on purpose: it is evidence to be read by a
+person, not a value to branch on.
+
+**The distinction matters because the boolean alone can never promote a cell.**
+SUBC's framing was that capture-time tagging makes the routing discriminant
+exist when the day comes. It half does: `path_may_forward: true` is enough to
+REFUSE a promotion and never enough to permit one, because *"this may have been
+forwarded"* does not say **which route was taken**. Only `served_by_hint` can
+grow into a discriminant, and only when the capture site happens to observe one.
+
+So the honest statement of what these buy:
+
+- **Without them**: a forwarded report is indistinguishable from a direct one,
+  and a wall gets attributed to the wrong provider silently.
+- **With the boolean**: the misattribution becomes visible and the report
+  becomes correctly unpromotable.
+- **With the hint, when present**: a future routing-discriminant sub-key has
+  something real to be built from.
+
+Both are optional, so a reporter that omits them produces a valid report — the
+same additive rule as §7.1, applied to the report schema. **A required field
+would break every existing producer to fix a problem that only affects
+forwarders.**
+
 ## 7. File shape and version refusal
 
 ```json
