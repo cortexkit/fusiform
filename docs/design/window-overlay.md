@@ -874,6 +874,23 @@ present evidence proves multi-vendor, absent evidence proves nothing.
 
 #### The admitted candidates, measured 2026-08-13
 
+> **CORRECTED the same evening.** The table below measures the eight LARGEST
+> providers with no cell. Running the detectors over the whole catalog admits
+> **125 providers and 5,680 models** — so the table is a selection by SIZE, not
+> the admit set, and reading it as the admit set omits 117 providers and 3,431
+> models.
+>
+> MC consumed it as the admit set, which was the only reading under which it
+> was actionable to them. Same failure as reporting a ratio counted in eras to
+> a consumer whose decision is made in polls: **a measurement over a
+> sub-population, consumed as a measurement over the population.** The
+> selection criterion has to travel with the number, and "the eight largest"
+> was in my sentence and not in theirs.
+>
+> The full 125 are in `docs/design/window-overlay.md` history and were sent to
+> MC directly. The table stays because the per-detector breakdown below is
+> still the useful part.
+
 Running both detectors over the eight largest providers with no cell today.
 This is an ADMIT list, not a classification: every row here needs per-cell
 evidence that its WALL is forwarded before any refusal is minted, because
