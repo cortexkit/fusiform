@@ -272,17 +272,17 @@
         },
         "geometry": {
           "value": {
-            "kind": "stated",
-            "value": "separate"
+            "kind": "unknown",
+            "why": "never_measured"
           },
-          "grade": "provider_asserted_doc",
+          "grade": "unknown",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@06a0e5ac#provider-geometry-classes:google",
-          "observed_at": "2026-08-13T12:54:15Z"
+          "source_ref": "https://ai.google.dev/gemini-api/docs/tokens (contradicts itself; see note)",
+          "observed_at": "2026-08-13T16:05:00Z"
         }
       },
-      "note": "NO antigravity id minted: 1M input and 65k output on both the Antigravity and generateContent paths, so nothing has diverged. Antigravity's self-compaction around 135k is harness behaviour, not a window, and does not belong in this dataset. Separate geometry means a smaller output request buys no input headroom \u2014 the input_token_limit is the usable input, full stop."
+      "note": "NO antigravity id minted: 1M input and 65k output on both the Antigravity and generateContent paths, so nothing has diverged. Antigravity's self-compaction around 135k is harness behaviour, not a window, and does not belong in this dataset. Separate geometry means a smaller output request buys no input headroom \u2014 the input_token_limit is the usable input, full stop. GEOMETRY DOWNGRADED TO UNKNOWN 2026-08-13 after reading the primary source. The seed spec classifies Gemini as `separate` citing input_token_limit and output_token_limit as independent model constants. Those fields are real (https://ai.google.dev/api/models: 'Maximum number of input tokens allowed', 'Maximum number of output tokens available'), but the same docs page that demonstrates them states the opposite about the wall: 'The context window defines the combined limit of input and output tokens.' Two field constants and a combined wall are not contradictory \u2014 the fields can be per-side caps INSIDE a shared budget \u2014 so the field names do not establish `separate`. Neither reading is established by documentation alone; only a request that trades output for input can settle it."
     }
   ],
   "source_revision_note": "Cells transcribed from mc-geometry-spec were read at c6a85d85 and their source_ref names 06a0e5ac, the current revision. The bump is verified rather than assumed: every row transcribed here is byte-identical between the two revisions (checked per row with git show). The Codex row DID change between them, and no cell here cites the spec for Codex \u2014 those cells cite codex-rs directly. Pointing at the newer revision matters because c6a85d85 carried a misattributed Codex number, and a reader resolving a source_ref should land on a document without a known bad row in it."
