@@ -203,3 +203,99 @@ pub struct RawTierSpec {
     pub tier_type: Option<String>,
     pub size: Option<u64>,
 }
+
+#[cfg(test)]
+mod tests {
+    /// The raw upstream layer can be read and cannot be written.
+    ///
+    /// # Why a negative property needs a test
+    ///
+    /// These types hold the upstream document verbatim, including the two
+    /// fields fusiform must never emit: a model's `provider` override (literal
+    /// headers and body parameters) and `experimental.modes` (per-mode request
+    /// overrides). Both are `serde_json::Value` passthroughs, kept whole so the
+    /// normalizer can flag their presence without interpreting them.
+    ///
+    /// They derive `Deserialize` and not `Serialize`, so a quarantined value
+    /// cannot be written back out. That is the strongest form of the
+    /// quarantine: not "nothing serializes them today" but "nothing can".
+    ///
+    /// **It was true by accident until this test existed.** Nothing stopped
+    /// someone adding `Serialize` to a derive line, and the reason to add one
+    /// is entirely plausible — dumping a raw model to a file while debugging a
+    /// normalizer finding. That single word would put a renderer-selecting
+    /// override one `to_string` from any wire, and no reviewer would see a
+    /// quarantine in a diff reading `#[derive(Debug, Clone, Deserialize,
+    /// Serialize)]`.
+    ///
+    /// The module being private is a second layer, not a substitute: it stops a
+    /// consumer serializing these types and does nothing about a serialization
+    /// added inside this crate, which is where the plausible mistake lives.
+    ///
+    /// BROCA hit the mirror image on 2026-08-13: their `ProviderSpec` derives
+    /// `Serialize` AND carries a raw passthrough, with the fence a narrowing
+    /// one layer further in held by a comment. Same hazard, opposite structure
+    /// — theirs fails only when someone widens the narrowing, which is a
+    /// quieter moment than a diff.
+    ///
+    /// # Why this reads the source text
+    ///
+    /// The first version used autoref specialization to ask the type system
+    /// whether each type implements `Serialize`. Its control — assert `String`
+    /// reads as serializable — FAILED, so the technique was answering `false`
+    /// unconditionally and every assertion built on it would have passed
+    /// vacuously while proving nothing.
+    ///
+    /// The derive attribute is the artifact that would actually change, so this
+    /// reads it. A text check on source is usually the weaker instrument; here
+    /// it is the direct one, because the hazard is a word being added to a line.
+    ///
+    /// # A second, stronger property found while mutating this
+    ///
+    /// Adding `Serialize` to `RawModel` DOES NOT COMPILE: its fields are
+    /// `RawLimit`, `RawModalities`, `RawExperimental` and `RawCost`, none of
+    /// which are serializable either, so the compiler demands the whole tree.
+    /// The types are mutually protective, and the plausible one-word mistake is
+    /// only reachable on a leaf.
+    ///
+    /// That does not make this test redundant — it makes it the guard for the
+    /// leaves, where the mistake is both possible and quiet. Verified by
+    /// mutating `RawTierSpec`, a leaf of `String` fields: it compiles, and this
+    /// test reddens naming the derive line.
+    #[test]
+    fn the_raw_layer_is_read_only() {
+        let source = include_str!("raw.rs");
+
+        let offenders: Vec<&str> = source
+            .lines()
+            .filter(|line| line.trim_start().starts_with("#[derive("))
+            .filter(|line| line.contains("Serialize"))
+            .collect();
+
+        assert!(
+            offenders.is_empty(),
+            "a raw upstream type now derives Serialize, which makes the \
+             quarantine a convention rather than a property — a `provider` \
+             override or an `experimental` mode becomes one `to_string` from \
+             any wire: {offenders:?}"
+        );
+
+        // The control. Without it this passes on an empty file, a moved file,
+        // or a rename of the derive syntax — three ways to prove nothing while
+        // looking green.
+        let derives = source
+            .lines()
+            .filter(|line| line.trim_start().starts_with("#[derive("))
+            .count();
+        assert!(
+            derives >= 8,
+            "expected the raw layer's derive lines to be visible; found \
+             {derives}, so this test is not reading what it thinks it is"
+        );
+        assert!(
+            source.contains("pub provider: Option<serde_json::Value>"),
+            "the quarantined provider override must still be in this file, or \
+             this test is guarding something that moved"
+        );
+    }
+}
