@@ -163,7 +163,14 @@ struct Args {
     until_ms: Option<i64>,
     reason: Option<String>,
     commit: bool,
-    connection_file: PathBuf,
+    /// An explicit `--subc` path, or `None` to discover.
+    ///
+    /// An override is EXCLUSIVE rather than first-in-a-list: a path the operator
+    /// named and got wrong must fail loudly, not fall through to whichever
+    /// daemon discovery happens to find. Otherwise the reply is true and about
+    /// the wrong machine, and every later conclusion inherits that while the
+    /// operator believes they are reading the one they named.
+    connection_file: Option<PathBuf>,
     json: bool,
 }
 
@@ -256,7 +263,7 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
         other => return Err(format!("unknown command {other:?}\n\n{USAGE}")),
     };
 
-    let response = call(&args.connection_file, tool, arguments).await?;
+    let response = call(args.connection_file.as_deref(), tool, arguments).await?;
 
     if args.json {
         println!(
@@ -276,21 +283,129 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
     Ok(())
 }
 
+/// Where a CLIENT looks for the daemon's connection file, in order.
+///
+/// # Why this is not `bootstrap::connection_file_path()`
+///
+/// That function is the DAEMON'S WRITER: it answers "where do I put the file",
+/// and it answers correctly — `XDG_RUNTIME_DIR` if set, otherwise a temp path.
+/// Using it here asked a writer's question to answer a reader's one.
+///
+/// The two differ because **the daemon writes one path and a client must search
+/// several.** A daemon started under a launch agent has an environment the
+/// operator's shell does not, so the client cannot derive the path the daemon
+/// chose — it has to look where daemons put them.
+///
+/// Reported from Ufuk's terminal 2026-08-13: `ck models status` failed naming a
+/// temp path while `ck health` in the same shell served fine. Not a daemon
+/// problem — fusiform's CLI had jumped straight to the LAST rung, because
+/// without `XDG_RUNTIME_DIR` the writer's answer is the temp fallback and the
+/// client took that as its only candidate.
+///
+/// The order matches `ck`'s own, read from `subc-core/src/bin/ck.rs`:
+///
+/// 1. `--subc`, exclusive
+/// 2. `SUBC_CONNECTION_FILE`, exclusive
+/// 3. `$XDG_RUNTIME_DIR/subc-connection.json`
+/// 4. `~/.local/share/cortexkit/run/subc-connection.json`
+/// 5. `$TMPDIR/subc-<token>.connection.json`
+///
+/// The first two are EXCLUSIVE rather than first-in-a-list, which is the part
+/// worth preserving deliberately: a path the operator named and got wrong must
+/// fail loudly. Falling through to discovery would answer from whichever daemon
+/// is found — in practice production — and the reply would be true and about
+/// the wrong machine.
+fn connection_file_candidates(override_path: Option<&Path>) -> Vec<PathBuf> {
+    candidates_with(
+        override_path,
+        non_empty("SUBC_CONNECTION_FILE"),
+        non_empty("XDG_RUNTIME_DIR"),
+        non_empty("HOME"),
+        subc_core::bootstrap::connection_file_path(),
+    )
+}
+
+fn non_empty(key: &str) -> Option<PathBuf> {
+    env::var_os(key)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// The ladder, with the environment passed in rather than read.
+///
+/// Taking the values as parameters is what makes the exclusivity rule testable.
+/// Reading them here would force a test to mutate the process environment,
+/// which races under threaded test execution — the same reason `ck` structures
+/// its equivalent this way.
+fn candidates_with(
+    override_path: Option<&Path>,
+    env_named: Option<PathBuf>,
+    runtime_dir: Option<PathBuf>,
+    home: Option<PathBuf>,
+    temp_fallback: PathBuf,
+) -> Vec<PathBuf> {
+    if let Some(path) = override_path {
+        return vec![path.to_path_buf()];
+    }
+    if let Some(named) = env_named {
+        return vec![named];
+    }
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    let push = |p: PathBuf, out: &mut Vec<PathBuf>| {
+        if !out.contains(&p) {
+            out.push(p);
+        }
+    };
+
+    if let Some(runtime) = runtime_dir {
+        push(runtime.join(CONNECTION_FILE_NAME), &mut candidates);
+    }
+    if let Some(home) = home {
+        let mut path = home;
+        for part in [".local", "share", "cortexkit", "run", CONNECTION_FILE_NAME] {
+            path.push(part);
+        }
+        push(path, &mut candidates);
+    }
+    push(temp_fallback, &mut candidates);
+    candidates
+}
+
+/// The connection file's name, matching `ck` and the daemon.
+const CONNECTION_FILE_NAME: &str = "subc-connection.json";
+
 /// Open a route to fusiform, make one call, and close.
 async fn call(
-    connection_file: &Path,
+    override_path: Option<&Path>,
     tool: &str,
     arguments: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let consumer = SubcConsumer::connect(connection_file, ConsumerOptions::default())
-        .await
-        .map_err(|e| {
-            format!(
-                "could not reach subc at {}: {e}\n\
-                 is the daemon running? override the path with --subc",
-                connection_file.display()
-            )
-        })?;
+    let candidates = connection_file_candidates(override_path);
+
+    let mut tried: Vec<String> = Vec::new();
+    let mut consumer = None;
+    for path in &candidates {
+        match SubcConsumer::connect(path, ConsumerOptions::default()).await {
+            Ok(c) => {
+                consumer = Some(c);
+                break;
+            }
+            Err(e) => tried.push(format!("  {}: {e}", path.display())),
+        }
+    }
+
+    let Some(consumer) = consumer else {
+        // Every rung, named. The previous message reported ONE path as though
+        // it were THE path, which sent a reader toward "the daemon is down"
+        // when the daemon was healthy and the file was two rungs up the ladder.
+        return Err(format!(
+            "could not reach subc. Tried {} path(s):\n{}\n\
+             If the daemon is running, name its connection file with --subc.",
+            candidates.len(),
+            tried.join("\n")
+        ));
+    };
 
     let identity = BindIdentity {
         project_root: env::current_dir().map_err(|e| e.to_string())?,
@@ -428,6 +543,7 @@ fn print_catalog(response: &serde_json::Value) {
             }
         }
         print_withheld(response);
+        print_uncertain(response);
         return;
     }
 
@@ -437,6 +553,7 @@ fn print_catalog(response: &serde_json::Value) {
     }
 
     print_withheld(response);
+    print_uncertain(response);
 }
 
 /// Report facts the read refused to answer.
@@ -478,6 +595,59 @@ fn print_withheld(response: &serde_json::Value) {
                 );
             }
         }
+    }
+}
+
+/// Facts whose value at the read instant may already have been superseded.
+///
+/// Printed after the models rather than folded into them, because unlike a
+/// withheld fact the value IS returned — this qualifies an answer rather than
+/// replacing one. An operator who sees the value alone reads it as what was in
+/// force; what fusiform actually knows is that it was in force at the start of
+/// an interval containing the read instant, and it did not look again until the
+/// end.
+///
+/// Empty for a read of the current catalog, always: an era covering now has no
+/// successor. So this only appears on a historical read, which is the question
+/// a wrong answer costs money on.
+///
+/// Written after the wire field had been live for three commits with nothing
+/// rendering it — the bracket reached the payload and stopped one layer short
+/// of the only surface an operator uses.
+fn print_uncertain(response: &serde_json::Value) {
+    let Some(uncertain) = response.get("uncertain").and_then(|v| v.as_array()) else {
+        return;
+    };
+    if uncertain.is_empty() {
+        return;
+    }
+
+    println!(
+        "\n{} fact(s) uncertain at this instant — the value is real, and \
+         fusiform did not look during the window it may have changed in:",
+        uncertain.len()
+    );
+    for item in uncertain {
+        let provider = item
+            .get("provider_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let model = item.get("model_id").and_then(|v| v.as_str()).unwrap_or("?");
+        let fact = item.get("fact_key").and_then(|v| v.as_str()).unwrap_or("?");
+        let after = item
+            .get("superseded_after_ms")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let by = item
+            .get("superseded_by_ms")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        println!("  {provider}/{model}  {fact}");
+        println!(
+            "      last confirmed {}, changed by {}",
+            format_instant(after),
+            format_instant(by)
+        );
     }
 }
 
@@ -681,7 +851,7 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         until_ms: None,
         reason: None,
         commit: false,
-        connection_file: subc_core::bootstrap::connection_file_path(),
+        connection_file: None,
         json: false,
     };
 
@@ -729,7 +899,7 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
             }
             "--reason" => args.reason = Some(value()?),
             "--commit" => args.commit = true,
-            "--subc" => args.connection_file = PathBuf::from(value()?),
+            "--subc" => args.connection_file = Some(PathBuf::from(value()?)),
             // Prefixes come from the store's own constants, not string
             // literals here. A prefix that matches nothing returns an empty
             // catalog rather than an error, so a drifted literal would make
@@ -1016,5 +1186,110 @@ mod tests {
         // an empty list after it.
         assert_eq!(line(0, 0, 0), "");
         assert_eq!(render_changes(None), "");
+    }
+}
+
+#[cfg(test)]
+mod connection_discovery_tests {
+    use super::*;
+
+    fn p(s: &str) -> PathBuf {
+        PathBuf::from(s)
+    }
+
+    /// The run dir is tried before the temp fallback.
+    ///
+    /// The defect this pins, reported from a live terminal 2026-08-13: with no
+    /// `XDG_RUNTIME_DIR`, `ck models status` failed naming a temp path while
+    /// `ck health` in the same shell served fine. The CLI had used the DAEMON'S
+    /// WRITER function — "where do I put the file" — to answer a client's
+    /// question, "where do I look for it". Those differ because the daemon
+    /// writes one path and a client must search several: a daemon under a
+    /// launch agent has an environment the operator's shell does not.
+    #[test]
+    fn the_run_dir_is_tried_before_the_temp_fallback() {
+        let got = candidates_with(
+            None,
+            None,
+            None,
+            Some(p("/home/u")),
+            p("/tmp/subc-u.connection.json"),
+        );
+        assert_eq!(
+            got,
+            vec![
+                p("/home/u/.local/share/cortexkit/run/subc-connection.json"),
+                p("/tmp/subc-u.connection.json"),
+            ],
+            "the temp fallback is the LAST rung, not the only one"
+        );
+    }
+
+    /// With a runtime dir set, it goes first — matching the daemon's own choice.
+    #[test]
+    fn the_runtime_dir_leads_when_it_is_set() {
+        let got = candidates_with(
+            None,
+            None,
+            Some(p("/run/user/501")),
+            Some(p("/home/u")),
+            p("/tmp/subc-u.connection.json"),
+        );
+        assert_eq!(got.first(), Some(&p("/run/user/501/subc-connection.json")));
+        assert_eq!(got.len(), 3, "all three rungs, in order: {got:?}");
+    }
+
+    /// `--subc` is EXCLUSIVE, not first-in-a-list.
+    ///
+    /// A path the operator named and got wrong must fail loudly. Falling
+    /// through to discovery would answer from whichever daemon is found — in
+    /// practice production — and the reply would be true and about the wrong
+    /// machine, with every later conclusion inheriting that while the operator
+    /// believes they are reading the one they named.
+    #[test]
+    fn an_explicit_override_is_exclusive() {
+        let got = candidates_with(
+            Some(&p("/lab/subc.json")),
+            Some(p("/env/subc.json")),
+            Some(p("/run/user/501")),
+            Some(p("/home/u")),
+            p("/tmp/subc-u.connection.json"),
+        );
+        assert_eq!(
+            got,
+            vec![p("/lab/subc.json")],
+            "a named path must not fall back to a healthy daemon elsewhere"
+        );
+    }
+
+    /// So is the environment variable, for the same reason.
+    #[test]
+    fn the_environment_variable_is_exclusive_too() {
+        let got = candidates_with(
+            None,
+            Some(p("/env/subc.json")),
+            Some(p("/run/user/501")),
+            Some(p("/home/u")),
+            p("/tmp/subc-u.connection.json"),
+        );
+        assert_eq!(got, vec![p("/env/subc.json")]);
+    }
+
+    /// A duplicate path is tried once.
+    ///
+    /// Reachable in practice: `XDG_RUNTIME_DIR` pointing at the temp dir makes
+    /// the first and last rungs identical, and reporting the same failure twice
+    /// in an error an operator reads during an incident is noise that looks
+    /// like two distinct problems.
+    #[test]
+    fn a_duplicate_rung_appears_once() {
+        let got = candidates_with(
+            None,
+            None,
+            Some(p("/tmp")),
+            None,
+            p("/tmp/subc-connection.json"),
+        );
+        assert_eq!(got, vec![p("/tmp/subc-connection.json")]);
     }
 }
