@@ -380,11 +380,35 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// collapse to `false`, which routes a model to `ReasoningPolicy::None` and
 /// strips thinking blocks from a model that supports them. Nothing fails.
 ///
-/// It is dormant only because models.dev happens to publish the reasoning key
-/// for every model today; they pinned a test that fails if a refresh ever lands
-/// one without it. **A consumer must carry unknown through to the point that
-/// decides what to do about it, rather than resolving it at the parse boundary
-/// where the only available default is a guess.**
+/// **That parse is no longer on BROCA's serving path.** It reads their VENDORED
+/// snapshot, which their catalog cutover took off the path entirely. The
+/// runtime index now treats an absent key as a TYPED ERROR rather than a
+/// default: `Some(Bool)` is known, `Some(Null)` is Unknown, absent fails the
+/// whole catalog load. Fail-closed where the vendored path was fail-quiet.
+///
+/// # What this correction cost, and the rule it earned
+///
+/// This comment previously said the defect was "dormant only because models.dev
+/// happens to publish the reasoning key for every model today; they pinned a
+/// test that fails if a refresh ever lands one without it."
+///
+/// Every clause was true. The upstream does publish it — re-measured
+/// 2026-08-13, 6,292 models, zero missing. The test exists and is
+/// non-vacuous. **And it guards a road nobody drives anymore.** Nobody edited
+/// the test, nobody edited the snapshot: A CUTOVER RETIRED A TRIPWIRE WITHOUT
+/// TOUCHING IT, so the claim became IRRELEVANT rather than false.
+///
+/// A claim citing another system's code usually degrades loudly, because they
+/// would notice editing it. This one degraded silently because the code stayed
+/// exactly as true as ever and simply stopped being on the path. So checking
+/// "is this about code or about data" is not enough — the third question is
+/// **is the code it cites still on the path the data takes today**, which only
+/// somebody who remembers the cutover can answer.
+///
+/// The rule survives the correction: **a consumer must carry unknown through to
+/// the point that decides what to do about it, rather than resolving it at the
+/// parse boundary where the only available default is a guess.** BROCA's
+/// runtime index now does exactly that.
 ///
 /// The three collapsed cases are not one defect with three inputs, and the
 /// difference decides what a fix has to do:

@@ -292,3 +292,66 @@ fn a_correction_the_upstream_has_adopted_is_not_reported() {
         "status must agree with get about a no-op override: {s_over:?}"
     );
 }
+
+/// A correction can only REPLACE a fact the store already holds, never create
+/// one the upstream never published.
+///
+/// # Why this is a contract rather than an implementation detail
+///
+/// ASTRO's accounting derives from `rate.reasoning` PRESENT-OR-ABSENT: an
+/// absent reasoning rate plus a reasoning-capable model means the reasoning
+/// tokens are included in output, which covers 5,726 of their 5,833 models.
+/// The absent arm is the dominant one.
+///
+/// So a correction that CREATED a `rate.reasoning` where the upstream published
+/// none would flip models out of that arm — silently, because every value
+/// involved is real and every row well formed. It would not look like a
+/// pricing change. It would look like the upstream started charging.
+///
+/// The apply loop iterates the facts a model HAS, so an absent fact is never
+/// reached and the property holds by construction. That is exactly why it needs
+/// a test: a property held by construction is one refactor from being held by
+/// nothing, and this one is invisible in a diff — inserting into the map rather
+/// than iterating it reads as a fix for "corrections do not apply to new
+/// models".
+#[test]
+fn a_correction_cannot_create_a_fact_the_upstream_never_published() {
+    // A model with NO reasoning rate, which is the ordinary case upstream and
+    // the arm ASTRO's mapping depends on.
+    let (store, _dir) = store();
+
+    let response = get(&store, r#"{"name":"catalog.get","arguments":{}}"#);
+    let sonnet = &response["models"]["anthropic/claude-sonnet-4-5"];
+
+    assert!(
+        sonnet["limit.context"].is_i64(),
+        "the fixture must reach the corrected fact, or this test proves nothing \
+         about corrections"
+    );
+    assert_eq!(
+        sonnet["limit.context"], 200_000,
+        "the control: the correction under test must actually be applying"
+    );
+
+    // The upstream publishes no reasoning rate for this model, so no correction
+    // may invent one.
+    assert!(
+        sonnet.get("rate.reasoning").is_none(),
+        "a correction created rate.reasoning where the upstream published none. \
+         ASTRO reads an ABSENT reasoning rate as 'reasoning included in output' \
+         for 5,726 of 5,833 models, so inventing this fact moves models out of \
+         that arm with every value looking legitimate. Corrections may replace \
+         what the store holds; they may never add to it."
+    );
+
+    // Stated as a general property rather than one key, so a correction on any
+    // unpublished fact fails here too.
+    let served: Vec<&String> = sonnet.as_object().unwrap().keys().collect();
+    for key in &served {
+        assert!(
+            !key.starts_with("rate.") || *key == "rate.input" || *key == "rate.output",
+            "served fact {key} was not published by this fixture: a correction \
+             has created a fact rather than replacing one"
+        );
+    }
+}
