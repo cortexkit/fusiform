@@ -19,7 +19,7 @@
           "grade": "measured",
           "units": "estimate",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#measured-per-model-findings:gpt-5.6-oauth (operator-confirmed live)",
+          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:gpt-5.6-oauth (operator-confirmed live)",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "window.advertised": {
@@ -59,7 +59,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#measured-per-model-findings:gpt-5.6-platform",
+          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:gpt-5.6-platform",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "output.advertised": {
@@ -70,7 +70,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#measured-per-model-findings:gpt-5.6-platform",
+          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:gpt-5.6-platform",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "geometry": {
@@ -81,7 +81,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#provider-geometry-classes:openai-platform",
+          "source_ref": "mc-geometry-spec@06a0e5ac#provider-geometry-classes:openai-platform",
           "observed_at": "2026-08-13T12:54:15Z"
         }
       },
@@ -99,7 +99,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#measured-per-model-findings:claude-opus-5",
+          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:claude-opus-5",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "output.advertised": {
@@ -110,7 +110,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#measured-per-model-findings:claude-opus-5",
+          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:claude-opus-5",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "geometry": {
@@ -121,7 +121,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Asserted",
-          "source_ref": "mc-geometry-spec@c6a85d85#provider-geometry-classes:anthropic",
+          "source_ref": "mc-geometry-spec@06a0e5ac#provider-geometry-classes:anthropic",
           "observed_at": "2026-08-13T12:54:15Z"
         }
       },
@@ -139,7 +139,7 @@
           "grade": "measured",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#measured-per-model-findings:grok-4.6",
+          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:grok-4.6",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "output.advertised": {
@@ -161,7 +161,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#measured-per-model-findings:grok-4.6",
+          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:grok-4.6",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "geometry": {
@@ -172,7 +172,7 @@
           "grade": "measured",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#provider-geometry-classes:xai (error text 'maximum prompt length is N' is a prompt-only wall)",
+          "source_ref": "mc-geometry-spec@06a0e5ac#provider-geometry-classes:xai (error text 'maximum prompt length is N' is a prompt-only wall)",
           "observed_at": "2026-08-13T12:54:15Z"
         }
       },
@@ -198,7 +198,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#measured-per-model-findings:deepseek-v4-flash-ollama-cloud",
+          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:deepseek-v4-flash-ollama-cloud",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "output.enforced": {
@@ -238,7 +238,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#measured-per-model-findings:kimi-k3",
+          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:kimi-k3",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "output.default": {
@@ -249,7 +249,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#measured-per-model-findings:kimi-k3",
+          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:kimi-k3",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "output.advertised": {
@@ -260,7 +260,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#measured-per-model-findings:kimi-k3",
+          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:kimi-k3",
           "observed_at": "2026-08-13T12:54:15Z"
         }
       },
@@ -278,7 +278,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#measured-per-model-findings:gemini-3.5-flash",
+          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:gemini-3.5-flash",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "output.advertised": {
@@ -289,7 +289,7 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#measured-per-model-findings:gemini-3.5-flash",
+          "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:gemini-3.5-flash",
           "observed_at": "2026-08-13T12:54:15Z"
         },
         "geometry": {
@@ -300,11 +300,12 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@c6a85d85#provider-geometry-classes:google",
+          "source_ref": "mc-geometry-spec@06a0e5ac#provider-geometry-classes:google",
           "observed_at": "2026-08-13T12:54:15Z"
         }
       },
       "note": "NO antigravity id minted: 1M input and 65k output on both the Antigravity and generateContent paths, so nothing has diverged. Antigravity's self-compaction around 135k is harness behaviour, not a window, and does not belong in this dataset. Separate geometry means a smaller output request buys no input headroom \u2014 the input_token_limit is the usable input, full stop."
     }
-  ]
+  ],
+  "source_revision_note": "Cells transcribed from mc-geometry-spec were read at c6a85d85 and their source_ref names 06a0e5ac, the current revision. The bump is verified rather than assumed: every row transcribed here is byte-identical between the two revisions (checked per row with git show). The Codex row DID change between them, and no cell here cites the spec for Codex \u2014 those cells cite codex-rs directly. Pointing at the newer revision matters because c6a85d85 carried a misattributed Codex number, and a reader resolving a source_ref should land on a document without a known bad row in it."
 }
