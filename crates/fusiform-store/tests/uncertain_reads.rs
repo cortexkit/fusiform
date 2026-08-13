@@ -286,3 +286,113 @@ fn the_bracket_comes_from_the_next_era_and_excludes_both_endpoints() {
         other => panic!("day 19.5 must bracket against the day-20 era, got {other:?}"),
     }
 }
+
+/// A confirming poll inside a gap makes the instants before it CERTAIN.
+///
+/// # The success state of the bracket, and the case nobody writes
+///
+/// Every other test here drives the bracket EXISTING. This one drives it going
+/// away, which is the outcome the whole mechanism works toward: fusiform polls,
+/// the gap closes, and instants that could not be answered confidently become
+/// answerable.
+///
+/// BROCA's generalisation, earned the same day on a no-op override neither of
+/// us had a fixture for: anything built to fix a condition needs a test for the
+/// condition BEING FIXED, and that test is the one nobody writes because it
+/// feels like the absence of the feature.
+///
+/// # What the first draft of this test got wrong, which is the interesting part
+///
+/// I expected a confirming poll to NARROW the bracket and leave earlier
+/// instants uncertain with a tighter interval. The store does something
+/// stronger: an instant covered by an era that was confirmed on BOTH sides is
+/// certain, full stop. Day 5 sits between a day-1 seed and a day-9 confirmation
+/// of the same value, so there is no window it falls inside and nothing to
+/// qualify.
+///
+/// That is the strongest claim the observation model supports, and it is only
+/// visible by running the thing rather than reasoning about it.
+///
+/// # Why it is not decoration
+///
+/// The bracket comes from the next era's `prior_observation_at`, which advances
+/// on CONFIRMATION rather than on change — a confirming poll writes no era and
+/// must narrow the window anyway. A refactor deriving the bracket from era
+/// boundaries alone passes every other test in this file and leaves every gap
+/// frozen at its original width forever, so polling would never reduce
+/// uncertainty and the mechanism would describe a gap it can never close.
+#[test]
+fn a_confirming_poll_makes_the_instants_it_covers_certain() {
+    let build = |confirm_at_day_9: bool| {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open(dir.path());
+
+        observe(&store, DAY);
+        write_rate(&store, DAY, 3_000_000_000, BoundaryKind::Seed, None);
+
+        // The only difference between the two worlds: a poll on day 9 that sees
+        // the same value. It writes no era, because nothing changed.
+        if confirm_at_day_9 {
+            observe(&store, 9 * DAY);
+        }
+
+        let o13 = observe(&store, 13 * DAY);
+        write_rate(
+            &store,
+            13 * DAY,
+            4_000_000_000,
+            BoundaryKind::Observed,
+            Some(o13),
+        );
+        (dir, store)
+    };
+
+    // WITHOUT the confirming poll: day 5 is inside a twelve-day window and
+    // cannot be answered confidently. This is the control — if it does not
+    // hold, the comparison below proves nothing.
+    let (_d, store) = build(false);
+    match read(&store, 5 * DAY) {
+        PointInTime::KnownStale {
+            superseded_after,
+            superseded_by,
+            ..
+        } => {
+            assert_eq!(superseded_after.0, DAY);
+            assert_eq!(superseded_by.0, 13 * DAY);
+        }
+        other => panic!(
+            "control failed: without a confirming poll, day 5 must be uncertain \
+             or this test cannot show that polling changes anything. Got {other:?}"
+        ),
+    }
+
+    // WITH it: the same instant, the same stored value, now CERTAIN — day 5 is
+    // covered by an era confirmed at day 1 and again at day 9.
+    let (_d, store) = build(true);
+    let answer = read(&store, 5 * DAY);
+    assert!(
+        matches!(answer, PointInTime::Known(_)),
+        "a confirming poll must make the instants it covers certain. If this \
+         still reports a bracket, polling does not reduce uncertainty and the \
+         mechanism describes a gap it can never close. Got {answer:?}"
+    );
+
+    // And the part of the gap the poll did NOT cover stays uncertain, with the
+    // bracket now starting at the confirmation rather than at the seed.
+    match read(&store, 11 * DAY) {
+        PointInTime::KnownStale {
+            superseded_after,
+            superseded_by,
+            ..
+        } => {
+            assert_eq!(
+                superseded_after.0,
+                9 * DAY,
+                "the bracket must start at the LAST confirmation before the \
+                 change, not at the era's own boundary"
+            );
+            assert_eq!(superseded_by.0, 13 * DAY);
+        }
+        other => panic!("day 11 is still inside the remaining gap, got {other:?}"),
+    }
+}
