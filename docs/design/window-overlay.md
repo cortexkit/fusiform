@@ -845,6 +845,39 @@ Neither catches `amazon-bedrock`, whose 116 ids use a third convention
 simply use an id convention no test knows. The tests have one-directional power:
 present evidence proves multi-vendor, absent evidence proves nothing.
 
+
+#### The admitted candidates, measured 2026-08-13
+
+Running both detectors over the eight largest providers with no cell today.
+This is an ADMIT list, not a classification: every row here needs per-cell
+evidence that its WALL is forwarded before any refusal is minted, because
+`ollama-cloud` is a gateway by both tests and imposes its own ceiling.
+
+| provider | models | exact-match vendors | namespaced prefixes |
+|---|---|---|---|
+| nano-gpt | 622 | 5 | 78 |
+| kilo | 353 | 0 | 61 |
+| openrouter | 345 | 0 | 59 |
+| vercel | 324 | 0 | 35 |
+| llmgateway | 184 | 8 | 0 |
+| merge-gateway | 164 | 0 | 18 |
+| poe | 137 | 0 | 16 |
+| zenmux | 120 | 0 | 17 |
+
+Every one is admitted, and the two detectors disagree about *why* in a way
+worth keeping: `llmgateway` uses bare ids and is caught only by exact match,
+while `kilo`, `vercel` and the rest use vendor namespaces and are caught only
+by prefix. `nano-gpt` trips both. **Neither detector alone admits the whole
+list**, which is the concrete form of "detection is incomplete by
+construction" — a ninth provider using a third convention would appear here as
+first-party and would simply be missing from this table.
+
+These are **2,269 models**, roughly a third of the catalog, sitting behind
+providers where a single measurement may describe one routing decision rather
+than a property of the key. None of them is refused today: an admit list is a
+statement about where evidence is needed, and minting refusals from it would
+be the `ollama-cloud` near-miss at scale.
+
 **The operational form, from SUBC: forwarder detection can only ADMIT
 candidates for per-cell evidence. It can never CLEAR a provider.** A provider
 that passes every detector is UNKNOWN, not first-party, and the difference is
