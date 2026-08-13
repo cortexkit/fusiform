@@ -232,3 +232,44 @@ fn every_response_type_round_trips() {
         serde_json::from_str(&serde_json::to_string(&status).unwrap()).unwrap();
     assert_eq!(back, status);
 }
+
+/// A status response from an older module still parses.
+///
+/// # Why this is a structural guarantee rather than a courtesy
+///
+/// The CLI and the module are deployed by DIFFERENT PARTIES — `ck-models` into
+/// `~/.local/bin` is mine, `ck-fusiform` into the fleet bin dir is SUBC's — so
+/// they are never placed simultaneously. A version skew window is not a risk to
+/// be managed, it is a certainty of the deployment shape, and it is open for as
+/// long as it takes a message to cross a seam.
+///
+/// Observed rather than theorised: a `ck-models` at schema 0.5.0 ran against a
+/// module at 0.4.1 for the whole interval between staging and placement, and
+/// rendered changed polls with no composition and no error.
+///
+/// So every field added to a served response must be optional, and this is the
+/// test that says so. If `changes` were required, the operator's only tool
+/// would fail to parse every status response from an older module — during
+/// exactly the window where someone is most likely to be checking on it.
+#[test]
+fn a_status_response_without_the_newest_fields_still_parses() {
+    // Exactly what a module predating `PollChanges` emits.
+    let older = r#"{
+        "source": "models.dev",
+        "catalog_version": 7,
+        "model_count": 6270,
+        "era_count": 67914,
+        "recent_polls": [
+            {"observed_at_ms": 5000, "outcome": "changed", "duration_ms": 291}
+        ]
+    }"#;
+
+    let parsed: fusiform_protocol::StatusResponse =
+        serde_json::from_str(older).expect("a response from an older module must parse");
+
+    assert_eq!(parsed.recent_polls.len(), 1);
+    assert!(
+        parsed.recent_polls[0].changes.is_none(),
+        "an older module reports no composition, which is absence rather than zero"
+    );
+}
