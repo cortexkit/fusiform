@@ -330,6 +330,24 @@
         }
       },
       "note": "NOT AN ABSENCE OF EVIDENCE \u2014 a positive, evidenced claim that this KEY cannot hold a single geometry. OpenRouter routes to heterogeneous backends, so the wall that fires belongs to whichever upstream served the request; measuring once yields a value correct for that routing decision and wrong for the next. GRADE IS `measured`, NOT `unknown`: the claim rests on evidence (the catalog shows 348 models spanning other providers' offerings; MC confirmed the routing behaviour), and a grade of unknown would say nobody has established it, which is false. This is the first cell where kind=unknown and grade!=unknown, and the two fields are doing different jobs exactly as designed: the VALUE is unknown, the CLAIM ABOUT WHY is measured. The reason value forbids promoting any measured report into a stated or bracket cell at this key without a routing discriminant \u2014 that clause is what makes it load-bearing rather than decorative."
+    },
+    {
+      "provider_id": "anthropic",
+      "model_id": "claude-sonnet-4-5",
+      "facts": {
+        "window.advertised": {
+          "value": {
+            "kind": "stated",
+            "value": 200000
+          },
+          "grade": "provider_asserted_doc",
+          "units": "provider",
+          "boundary": "Observed",
+          "source_ref": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-08-13) \u2014 'Other Claude models, including Claude Sonnet 4.5, have a 200k-token context window'",
+          "observed_at": "2026-08-13T18:20:00Z"
+        }
+      },
+      "note": "THE CATALOG AND THE PROVIDER DISAGREE, AND THIS IS THE FIRST CELL THAT CONTRADICTS A PUBLISHED NUMBER RATHER THAN FILLING A GAP. models.dev publishes context=1000000 for claude-sonnet-4-5; Anthropic's own documentation names this exact model as an example of the 200k class. THREE INDEPENDENT REASONS TO BELIEVE THE PROVIDER. (1) The doc names the model explicitly, not a family. (2) Anthropic's window and output caps come in fixed pairs throughout their documentation \u2014 1M models get 128k output, 200k models get 64k \u2014 and the catalog gives this model 1M context with 64k output, a pairing that appears nowhere in Anthropic's docs and matches the 200k class on the output side. (3) Every other anthropic row in the catalog obeys the pairing exactly, so this is a lone exception rather than a systematic difference in what the catalog measures. A consumer trusting 1M here sends a prompt five times the real ceiling and gets a 400 'prompt is too long' \u2014 the wall is prompt-only on every Anthropic model, so there is no truncation to soften it. Only window.advertised is corrected. The 64k output cap is consistent with the 200k class and needs no cell."
     }
   ],
   "source_revision_note": "Cells transcribed from mc-geometry-spec were read at c6a85d85 and their source_ref names 06a0e5ac, the current revision. The bump is verified rather than assumed: every row transcribed here is byte-identical between the two revisions (checked per row with git show). The Codex row DID change between them, and no cell here cites the spec for Codex \u2014 those cells cite codex-rs directly. Pointing at the newer revision matters because c6a85d85 carried a misattributed Codex number, and a reader resolving a source_ref should land on a document without a known bad row in it.",
