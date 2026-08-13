@@ -95,10 +95,21 @@ MC's proposal had `value: number|string|null`. That silently drops the
 bracket, which is the room's own decision and the reason it exists:
 
 ```json
-{ "kind": "stated",  "value": 272000 }
-{ "kind": "bracket", "at_least": 350000, "below": 372001 }
+{ "kind": "stated",  "value": 0 }
+{ "kind": "bracket", "at_least": 0, "below": 1 }
 { "kind": "unknown", "why": "placeholder_output_equals_context" }
 ```
+
+**The numbers above are deliberately absurd.** An earlier version of this
+section used plausible ones — `at_least: 350000, below: 372001` — to illustrate
+the Codex case, and within the hour a consumer had taken `below: 372001` into a
+fixture as though it were measured. It never was: I invented it to show the
+shape, and it had the exact form a real bracket takes, in a document whose
+subject is provenance.
+
+A plausible example in a schema document is indistinguishable from data once it
+leaves the paragraph that framed it. Illustrations here use values that cannot
+survive being mistaken for measurements.
 
 A 400 at 372,001 proves the ceiling is **below 372,001**. It does not prove the
 ceiling *is* 372,000. A scalar cannot say that, so serializing it as one is
