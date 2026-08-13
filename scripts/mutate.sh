@@ -115,7 +115,27 @@ OUT="$(cargo test "${TEST_ARGS[@]}" 2>&1)"
 #
 # Reached by a filter matching no tests, a target that builds nothing, or a
 # `--test` name that does not exist — all of which print a clean, cheerful zero.
-RAN="$(echo "$OUT" | awk '/^test result:/ {gsub(/[^0-9]/, "", $4); total += $4} END {print total + 0}')"
+# PASSED PLUS FAILED, not passed alone.
+#
+# The seventh way this harness has reported a non-result as a result: `$4` is
+# the PASSED count, so a mutation caught by EVERY test in its target summarises
+# as `test result: FAILED. 0 passed; 2 failed` and totalled zero — reported as
+# NO TESTS RAN, which reads as "check your filter" when the truth is "your guard
+# worked perfectly". The two readings demand opposite responses, which is the
+# same reason ANCHOR MISSING and SURVIVED had to be distinguished.
+#
+# Fields are located by the WORD that follows them rather than by position, so a
+# change to libtest's summary wording fails loudly here instead of silently
+# returning zero.
+RAN="$(echo "$OUT" | awk '
+  /^test result:/ {
+    for (i = 1; i <= NF; i++) {
+      if ($i ~ /^passed;?$/ || $i ~ /^failed;?$/) {
+        n = $(i - 1); gsub(/[^0-9]/, "", n); total += n
+      }
+    }
+  }
+  END { print total + 0 }')"
 if [ "$RAN" -eq 0 ]; then
   echo "NO TESTS RAN"
   echo "  Nothing was tested. The suite executed zero tests, so SURVIVED would"
