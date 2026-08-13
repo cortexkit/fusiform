@@ -14,14 +14,35 @@ there unless a module joins or leaves.
 
 ```sh
 sqlite3 ~/.local/share/cortexkit/engram/store.db \
-  "SELECT device_seq, entry_count, published FROM generations \
-   ORDER BY device_seq DESC LIMIT 3;"
+  "SELECT device_seq, entry_count, published, \
+          datetime(created_at,'unixepoch') AS created \
+   FROM generations ORDER BY device_seq DESC LIMIT 5;"
 ```
 
-The descriptor existing on disk is NOT the witness. It was present for over an
-hour before any capture carried it, and during that window fusiform was
+**Read `published` and `created`, not just `entry_count`.** The count answers
+"is fusiform in the backup set", which is a different question from "is fusiform
+backed up", and the two diverge exactly when publication stalls — the case the
+check exists to catch.
+
+Measured 2026-08-13 03:33 UTC: generation 166 published at 23:37 with 7 entries,
+then 167, 168 and 169 staged with `published=0` and nothing uploaded. Engram had
+halted capture on backpressure at three unpublished generations and reported it
+as `degraded` with the cause named. **`entry_count` on the newest published
+generation still read 7 and was still correct** — correct about a generation four
+hours old.
+
+So the shape to look for is a run of `published=0` rows above the newest
+`published=1`, and the age of that newest one. A count that has not moved is not
+evidence that captures are happening; it is evidence about the last capture that
+finished.
+
+The descriptor existing on disk is NOT the witness either. It was present for
+over an hour before any capture carried it, and during that window fusiform was
 correctly enrolled and entirely uncaptured — a state that looks identical, from
 the file system, to being backed up.
+
+Both are the same error one step apart: a fact that is true, checked correctly,
+and about the wrong object.
 
 The descriptor lives at `crates/fusiform-module/data/engram-catalog.json` in
 this repository and must be **installed to the module's data directory** to
