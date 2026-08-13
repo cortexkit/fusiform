@@ -81,11 +81,11 @@
           "grade": "provider_asserted_doc",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "mc-geometry-spec@06a0e5ac#provider-geometry-classes:openai-platform",
+          "source_ref": "https://platform.openai.com/docs/guides/conversation-state (read 2026-08-13) \u2014 'The context window is the maximum number of tokens that can be used in a single request. This max tokens number includes input, output, and reasoning tokens.'",
           "observed_at": "2026-08-13T12:54:15Z"
         }
       },
-      "note": "The catalog row agrees with both numbers for THIS path, which is why the access-path split matters: the same catalog row is correct here and wrong for openai-chatgpt-oauth. 400 up front when prompt plus requested output exceed the window, with truncation disabled."
+      "note": "GEOMETRY VERIFIED AGAINST OPENAI'S OWN DOCS 2026-08-13: 'The context window is the maximum number of tokens that can be used in a single request. This max tokens number includes input, output, and reasoning tokens.' That establishes the wall COUNTS the combined total, which is the half of shared_upfront this cell asserts. WHAT THE DOC DOES NOT ESTABLISH is the other half \u2014 whether an over-window request is rejected up front or truncated. The seed spec attributes rejection to `truncation: disabled`, implying the same endpoint truncates when truncation is enabled, and this page does not mention truncation at all (the API reference that would is behind a 403 from here). So shared_upfront is correct for the truncation-disabled path and is NOT established as a property of the provider. See the design note's section 12: the combined-and-truncating combination has no enum value, and this is the request mode that reaches it. The window and output numbers are relayed from the seed spec; the catalog agrees with both for this path, which is exactly why the access-path split matters \u2014 the same catalog row is right here and wrong for openai-chatgpt-oauth."
     },
     {
       "provider_id": "anthropic",
