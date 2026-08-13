@@ -544,6 +544,7 @@ fn print_catalog(response: &serde_json::Value) {
         }
         print_withheld(response);
         print_uncertain(response);
+        print_overridden(response);
         return;
     }
 
@@ -554,6 +555,67 @@ fn print_catalog(response: &serde_json::Value) {
 
     print_withheld(response);
     print_uncertain(response);
+    print_overridden(response);
+}
+
+/// Report facts whose served value differs from what the upstream published.
+///
+/// # Why a silent correction is the failure this exists to prevent
+///
+/// The value IS in the model list above, and it is the right one — which is
+/// exactly the problem. An operator reading `limit.context  200000` for
+/// claude-sonnet-4-5 has no way to know models.dev publishes 1,000,000 there
+/// and fusiform overrode it. If the override is ever wrong, the wrong direction
+/// is silent: a window under-used forever, nothing failing, nobody looking.
+///
+/// This surface was built on the wire, tested on the wire, pinned in the golden
+/// fixture, and rendered nowhere — found by testing a peer's prediction that
+/// recent attention on an artifact makes its UNEXAMINED dimensions less visible,
+/// because the artifact as a whole feels checked. It is the second instance of
+/// exactly this defect in this file today; the first was `uncertain`.
+fn print_overridden(response: &serde_json::Value) {
+    print!("{}", render_overridden(response));
+}
+
+/// The rendered block, returned rather than printed so it can be asserted.
+///
+/// The defect this file has already shipped once was in a COMPOSED sentence
+/// ("1 models arrived"), where every unit test of the part passed because the
+/// part was correct. So the artifact under test is the text an operator reads.
+fn render_overridden(response: &serde_json::Value) -> String {
+    let Some(overridden) = response.get("overridden").and_then(|v| v.as_array()) else {
+        return String::new();
+    };
+    if overridden.is_empty() {
+        return String::new();
+    }
+
+    let mut out = format!(
+        "\n{} {} overridden — fusiform serves a different value than the \
+         upstream published:\n",
+        overridden.len(),
+        plural(overridden.len() as i64, "fact")
+    );
+    for o in overridden {
+        let field = |k: &str| o.get(k).and_then(|v| v.as_str()).unwrap_or("?");
+        out.push_str(&format!(
+            "  {}/{}  {}\n",
+            field("provider_id"),
+            field("model_id"),
+            field("fact_key")
+        ));
+        out.push_str(&format!(
+            "      upstream {} -> served {}\n",
+            field("upstream_value"),
+            field("served_value")
+        ));
+        // The authority on its own line and in full: an operator asking "says
+        // who" must be able to answer from what is on screen. A line they
+        // cannot re-check is one they learn to skip, and a skipped line is the
+        // same as no line.
+        out.push_str(&format!("      {}\n", field("authority")));
+    }
+    out
 }
 
 /// Report facts the read refused to answer.
@@ -1020,6 +1082,64 @@ fn print_correction(response: &serde_json::Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The override block renders, and says everything an operator needs.
+    ///
+    /// Written because the block existed on the wire, in the golden fixture,
+    /// and in three integration tests while rendering NOWHERE — the same defect
+    /// as `uncertain` earlier the same day, in the same file. Found by testing
+    /// BROCA's prediction that recent attention on an artifact makes its
+    /// unexamined dimensions less visible, and the prediction paid out on the
+    /// most recent thing I had built.
+    #[test]
+    fn an_override_names_the_values_and_the_authority() {
+        // Real shape, taken from the live response rather than invented.
+        let response = serde_json::json!({
+            "overridden": [{
+                "provider_id": "anthropic",
+                "model_id": "claude-sonnet-4-5",
+                "fact_key": "limit.context",
+                "upstream_value": "1000000",
+                "served_value": "200000",
+                "authority": "https://docs.claude.com/... — '200k-token context window'"
+            }]
+        });
+
+        let out = render_overridden(&response);
+
+        // Singular, because one override is the common case rather than a
+        // boundary. "1 facts overridden" shipped to production once already, in
+        // this file, from a composed sentence whose parts were each correct.
+        assert!(
+            out.contains("1 fact overridden"),
+            "the count must agree with its noun: {out}"
+        );
+        assert!(
+            out.contains("anthropic/claude-sonnet-4-5"),
+            "the row must be identified: {out}"
+        );
+        assert!(
+            out.contains("upstream 1000000 -> served 200000"),
+            "BOTH values must appear. Showing only the served one leaves an \
+             operator unable to see that anything was changed: {out}"
+        );
+        assert!(
+            out.contains("docs.claude.com"),
+            "the authority must be present, or 'says who' cannot be answered \
+             from the screen: {out}"
+        );
+    }
+
+    /// Nothing is printed when nothing was overridden.
+    ///
+    /// The ordinary case, and the one that decides whether the block is read at
+    /// all: a header printed on every response is noise an operator learns to
+    /// skip, which is the same as not printing it.
+    #[test]
+    fn an_ordinary_response_prints_no_override_block() {
+        assert!(render_overridden(&serde_json::json!({})).is_empty());
+        assert!(render_overridden(&serde_json::json!({"overridden": []})).is_empty());
+    }
 
     /// Date arithmetic, against instants whose rendering is known independently.
     ///
