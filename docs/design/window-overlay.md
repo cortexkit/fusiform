@@ -50,27 +50,49 @@ Choosing between advertised and enforced is **interpretation and belongs in the
 consumer**. MC's reservation math consumes enforced with a fallback to
 advertised-minus-margin; that fallback is MC's code, not this dataset's.
 
-## 3. Cell shape
+## 3. The contract: `fusiform-window-overlay/v1`
+
+MC proposed the envelope and it is ratified with four amendments, each below
+with the reason. Field names are final as of this commit.
 
 ```json
 {
-  "provider_id": "openai-chatgpt-oauth",
-  "model_id": "gpt-5.6",
-  "fact": "window.enforced",
-  "value": { "kind": "bracket", "at_least": 350000, "below": 372001 },
-  "units": "provider_counted",
-  "provenance": "measured_overflow",
-  "source_ref": "mc-report:2026-08-13T09:14:22Z:a91f",
-  "observed_at_ms": 1786600000000,
-  "note": "400 at 372,001; largest success 350,000"
+  "schema": "fusiform-window-overlay/v1",
+  "generated_at": "2026-08-13T13:02:44Z",
+  "minted_provider_ids": ["openai-chatgpt-oauth"],
+  "cells": [
+    {
+      "provider_id": "openai-chatgpt-oauth",
+      "model_id": "gpt-5.6-sol",
+      "facts": {
+        "window.advertised": { "...": "FACT" },
+        "window.enforced":   { "...": "FACT" }
+      }
+    }
+  ]
 }
 ```
 
-Every field is required except `note`.
+```json
+FACT = {
+  "value":       VALUE,
+  "grade":       "provider_asserted_runtime" | "measured" | "provider_asserted_doc"
+               | "catalog" | "unknown",
+  "units":       "provider" | "estimate",
+  "boundary":    "Observed" | "Asserted" | "Corrected",
+  "source_ref":  "https://... | mc-report:<id> | codex-rs@<sha>:<path>",
+  "observed_at": "2026-08-13T09:14:22Z"
+}
+```
 
-### 3.1 `value` — a bracket, not a number
+Every FACT field is required. A fact that is absent from `facts` was never
+considered; a fact present with `grade: "unknown"` was considered and has no
+answer. **Those are different and a consumer may act on the difference.**
 
-Three kinds, and the distinction is the point:
+### 3.1 AMENDMENT 1 — `value` is a bracket, not a scalar
+
+MC's proposal had `value: number|string|null`. That silently drops the
+bracket, which is the room's own decision and the reason it exists:
 
 ```json
 { "kind": "stated",  "value": 272000 }
@@ -78,83 +100,121 @@ Three kinds, and the distinction is the point:
 { "kind": "unknown", "why": "placeholder_output_equals_context" }
 ```
 
-**`stated`** — an authority named the number. A doc page, or an error body
-carrying the provider's own limit.
-
-**`bracket`** — witnessed, never stated. `at_least` is the largest attempt
-known to succeed; `below` is the smallest known to fail. Either may be absent
-when there is no witness on that side.
-
 A 400 at 372,001 proves the ceiling is **below 372,001**. It does not prove the
-ceiling *is* 372,000. Serializing that as a point is the placeholder class in a
-subtler costume — precision the source never established. A consumer needing one
-number takes `at_least`, which is conservative in the direction that never 400s.
+ceiling *is* 372,000. A scalar cannot say that, so serializing it as one is
+precision the source never established — the placeholder class in a subtler
+costume.
 
-A bisecting canary narrows a bracket over time with no schema change.
+`at_least` is the largest attempt known to succeed, `below` the smallest known
+to fail; either may be absent when there is no witness on that side. **A
+consumer needing one number takes `at_least`**, which is conservative in the
+direction that never 400s. A bisecting canary narrows a bracket over time with
+no schema change.
 
-**`unknown`** — nobody has said, or what was said is a placeholder. `why` is a
-closed vocabulary:
+`why` on an unknown is a closed vocabulary:
 
-| `why`                                | meaning                              |
-| ------------------------------------ | ------------------------------------ |
-| `placeholder_output_equals_context`   | Grok 500k/500k class                 |
-| `placeholder_zero`                    | `output: 0`, the upstream's "unstated" |
-| `never_measured`                      | no evidence either way               |
-| `retracted`                           | a cell was withdrawn; see `note`     |
+| `why`                               | meaning                                |
+| ----------------------------------- | -------------------------------------- |
+| `placeholder_output_equals_context` | Grok 500k/500k class                   |
+| `placeholder_zero`                  | `output: 0`, the upstream's "unstated"  |
+| `never_measured`                    | no evidence either way                 |
+| `retracted`                         | a cell was withdrawn; see `source_ref` |
 
-**A detected placeholder becomes an explicit unknown, never a served bound.**
-Per FIELD, not per row: 90 models mix real and placeholder limits in the same
-row, so a row-level predicate discards real data.
+### 3.2 AMENDMENT 2 — five grades, keeping the one MC invented
 
-### 3.2 `units` — and the asymmetry that makes it load-bearing
+MC's enum was `measured | asserted | catalog | unknown`, which drops
+`provider_asserted_runtime` — MC's own contribution, and the strongest grade in
+the set.
+
+| grade                       | what happened                                            |
+| --------------------------- | -------------------------------------------------------- |
+| `provider_asserted_runtime` | the enforcing system named the limit in-band, in a 400 body |
+| `measured`                  | a client hit a wall and recorded the attempt              |
+| `provider_asserted_doc`     | a first-party doc page states it                          |
+| `catalog`                   | models.dev says it                                        |
+| `unknown`                   | nobody has said                                            |
+
+`provider_asserted_runtime` outranks a doc page because **a doc describes
+intent and a 400 body describes behaviour** — the system doing the enforcing is
+speaking, dated to the second. Collapsing it into `measured` would lose the
+distinction between *the provider told me its limit* and *I found the wall by
+hitting it*, which have different reliability and different staleness.
+
+### 3.3 AMENDMENT 3 — `model_id: "*"` accepted, and it asserts uniformity
+
+Accepted: ollama-cloud's 65,536 output cap applies to every model regardless of
+native capability, and writing it 200 times would be worse in every way.
+
+**But a wildcard asserts that the provider enforces this REGARDLESS of model.
+It does not fill a gap.** The tempting second reading — "the value for models I
+have not measured yet" — manufactures a claim from absence, which is the defect
+this whole dataset exists to remove. If a fact varies by model, it does not get
+a wildcard; the models that lack it get no cell.
+
+Resolution is **specific-beats-wildcard**, per fact rather than per cell: a
+model with `window.enforced` and no `output.cap` takes its own window and the
+provider's wildcard cap.
+
+### 3.4 AMENDMENT 4 — output splits three ways, not two
+
+MC proposed `output.cap` and `output.default`. The second is a real fact I did
+not have and it is not a limit at all — it is what you get when you do not ask.
+Kimi K3's widely-quoted "131k" is exactly this, misread as a context window.
+
+But `cap` needs the same advertised/enforced split as `window`, for the same
+reason: ollama-cloud publishes models claiming 1M output and enforces 64k.
+Both are true statements about different systems.
 
 ```
-provider_counted     the provider's own tokenizer said this
-consumer_estimated   a client's tokenizer estimated this
+window.advertised    what this path SAYS its window is
+window.enforced      what the backend actually ADMITS
+output.advertised    what this path says the output cap is
+output.enforced      what output length actually returns a 400
+output.default       what you get when you do not ask   <- not a limit
+geometry             shared_upfront | shared_truncating | separate
+```
+
+`geometry` takes MC's vocabulary over mine — it names what the wall *does*
+rather than what gets counted, which is the question a consumer is asking.
+
+### 3.5 `units`, and the asymmetry that makes it load-bearing
+
+```
+provider     the provider's own tokenizer said this
+estimate     a client's tokenizer estimated this
 ```
 
 **A bound in one unit must never be compared to a point in the other**, and the
 error is not symmetric. If a client sends what it estimates as N tokens and the
 provider counts M:
 
-- **Client undercounts (N < M).** The true ceiling C satisfies `C < M`, and
-  recording `C < N` claims something narrower than the evidence supports. **The
-  recorded bound may be false** — C could sit between N and M. It errs toward
-  reserving too much, which is safe but is still a claim the evidence does not
-  carry.
-- **Client overcounts (N > M).** `C < N` is true and loose. Harmless.
+- **Client undercounts (N < M).** The true ceiling C satisfies `C < M`, so
+  recording `C < N` claims something narrower than the evidence supports and
+  **the recorded bound may be false** — C could sit between N and M. It errs
+  toward reserving too much, which is safe. Safe-and-possibly-false is not the
+  same as true.
+- **Client overcounts (N > M).** `C < N` is true and merely loose. Harmless.
 
-So a `consumer_estimated` bracket is **safe-but-possibly-false in the `below`
-direction**, and that is different from being true. Recorded here so a future
-reader does not treat the two units as interchangeable because both are
-integers.
+So an `estimate` bracket is safe-but-possibly-false in the `below` direction
+only. Recorded because both units are integers and nothing about their shape
+warns that they are not interchangeable.
 
-### 3.3 `provenance` — five grades, strongest first
+### 3.6 `boundary` — kept, because it is orthogonal to `grade`
 
-| grade                        | what happened                                          |
-| ---------------------------- | ------------------------------------------------------ |
-| `provider_asserted_runtime`  | the enforcing system named the limit in-band, in a 400 body |
-| `measured_overflow`          | a client hit a wall and recorded the attempt            |
-| `provider_asserted_doc`      | a first-party doc page states it                        |
-| `catalog_claim`              | models.dev says it                                      |
-| `unknown`                    | nobody has said                                          |
+`grade` says how strong the evidence is. `boundary` says **whose clock
+`observed_at` is on**:
 
-`provider_asserted_runtime` is MC's contribution and it outranks a doc page:
-the system doing the enforcing is speaking, dated to the second. A doc describes
-intent; a 400 body describes behaviour.
+- `Observed` — fusiform saw this at that instant. The value may have been true
+  earlier; this is when it was witnessed.
+- `Asserted` — the source stated an effective date and `observed_at` is the
+  source's claim, not fusiform's.
+- `Corrected` — this cell replaces one that was wrong. A consumer should
+  invalidate anything derived from the previous value.
 
-`measured_overflow` sits second because it is one client's observation at one
-moment and could be quota, a transient, or a provider incident. **A measured
-overflow is evidence, not a fact** — see §5.
-
-### 3.4 `source_ref`
-
-An opaque, resolvable string naming where the cell came from: a doc URL for
-`provider_asserted_doc`, a report id for the measured grades. **Required on
-every cell**, so a future reader can distinguish a cell someone decided from a
-cell a rule produced. Unmarked cells become the generated-versus-authored
-ambiguity that cost BROCA a morning to eliminate in their pins, and the seed
-corpus is where it is cheapest to prevent.
+A doc page reading "as of 2026-08-01, 272k" is `provider_asserted_doc` +
+`Asserted`. The same page with no date, read today, is `provider_asserted_doc` +
+`Observed`. Same grade, different clock, and only the second tells a consumer
+that the value might predate its own timestamp by a year.
 
 ## 4. Access-path identity
 
@@ -222,21 +282,61 @@ the reporter's units. **Both are recorded** — the pair is what lets a bracket
 narrow, and dropping the succeeding attempt is what makes a bracket collapse
 into a false point.
 
-## 6. File shape
+## 6. Report shape: `fusiform-window-report/v1`
+
+MC submits these; fusiform mints cells. Pinned so the context.db backlog can
+export today.
 
 ```json
 {
-  "schema_version": 1,
-  "minted_at_ms": 1786600000000,
+  "schema": "fusiform-window-report/v1",
+  "reporter": "magic-context@0.4.1",
+  "reports": [
+    {
+      "report_id": "a91f3c",
+      "provider_id": "anthropic",
+      "model_id": "claude-sonnet-4-5",
+      "status": 400,
+      "matched_pattern": "anthropic_prompt_too_long",
+      "extracted_limit": 200000,
+      "attempted_tokens": 214311,
+      "largest_success": 198002,
+      "units": "estimate",
+      "geometry": "shared_truncating",
+      "observed_at": "2026-08-13T09:14:22Z"
+    }
+  ]
+}
+```
+
+`extracted_limit` is `provider` units when present regardless of the report's
+`units`, which describes `attempted_tokens` and `largest_success`. **Send
+`largest_success` whenever you have it** — dropping the succeeding attempt is
+what collapses a bracket into a false point, and it is unrecoverable afterwards.
+
+`report_id` is the reporter's, and it becomes the cell's `source_ref` as
+`mc-report:<report_id>`.
+
+## 7. File shape and version refusal
+
+```json
+{
+  "schema": "fusiform-window-overlay/v1",
+  "generated_at": "2026-08-13T13:02:44Z",
   "minted_provider_ids": ["openai-chatgpt-oauth"],
   "cells": [ ... ]
 }
 ```
 
-`schema_version` moves on any change to cell shape. A consumer that does not
-recognise the version **must refuse the file rather than merge what it
-understands** — a partially-understood overlay silently drops the cells that
-matter most, since new cells are added for facts the old schema could not carry.
+`minted_provider_ids` lists every id fusiform invented rather than received
+from the upstream, so an audit against models.dev can tell "this id should not
+resolve there" from "this row is stale".
+
+**A consumer that does not recognise `schema` must refuse the file, not merge
+what it understands.** A partially-understood overlay silently drops the cells
+that matter most, because new cells get added for facts the old schema could
+not carry — so the failure lands precisely on the newest and most consequential
+data.
 
 ## 7. What this dataset will never carry
 
