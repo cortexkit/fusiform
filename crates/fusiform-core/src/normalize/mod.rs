@@ -121,7 +121,25 @@ pub struct NormalizedProvider {
     pub provider_id: String,
     pub display_name: Option<String>,
     pub doc_url: Option<String>,
-    pub api_base: Option<String>,
+    /// Whether the provider publishes an `api` base URL, WITHOUT its value.
+    ///
+    /// The value is deliberately not carried, for the same reason `npm` is not.
+    /// A base URL decides which company receives the request, so serving a
+    /// wrong one is not a degraded answer — it is a request sent to the wrong
+    /// host, with credentials attached. That is renderer selection, which is a
+    /// consumer's to author and never fusiform's to supply.
+    ///
+    /// It was previously carried as `api_base: Option<String>` and read by
+    /// nothing. That is an UNREAD field rather than a quarantined one, and the
+    /// difference is not academic: a quarantine is a promise the code makes, an
+    /// unread field is an accident of parsing. A base URL sitting in a
+    /// serializable domain type is one refactor away from a wire it must never
+    /// reach, and nothing about its name would have warned the person doing it.
+    ///
+    /// Found 2026-08-13 when BROCA measured that 156 of 183 providers depend on
+    /// this field for their endpoint and discovered they had it on the
+    /// stays-mine side of a split while not authoring it.
+    pub api_base_quarantined: bool,
     pub env_vars: Vec<String>,
     pub models: Vec<NormalizedModel>,
     /// The provider's `npm` field: which SDK adapter speaks to it. The single
@@ -266,7 +284,7 @@ pub fn normalize_models_dev(bytes: &[u8]) -> Result<NormalizeOutcome, NormalizeE
         providers.push(NormalizedProvider {
             display_name: raw_provider.name.clone(),
             doc_url: raw_provider.doc.clone(),
-            api_base: raw_provider.api.clone(),
+            api_base_quarantined: raw_provider.api.is_some(),
             env_vars: raw_provider.env.clone(),
             npm_quarantined: raw_provider.npm.is_some(),
             provider_id,

@@ -343,6 +343,39 @@ fn renderer_selecting_fields_are_quarantined() {
         vec!["fast".to_string()]
     );
 
+    // The provider's API base URL is flagged, never carried as a value.
+    //
+    // A base URL decides which company receives the request, with credentials
+    // attached, so a wrong one is not a degraded answer. It was previously
+    // normalized into `api_base: Option<String>` and read by nothing — UNREAD
+    // rather than quarantined, which is one refactor away from a wire it must
+    // never reach.
+    //
+    // Asserted as a flag rather than by checking the value is absent, because
+    // "the value is not there" would also pass if the field were dropped
+    // entirely, and the flag is what tells a consumer the upstream HAS one.
+    // Both directions, because a flag that is always true says nothing. The
+    // fixture happens to carry both kinds, which is what caught the first
+    // version of this assertion: I reached for `openai` and it publishes no
+    // `api` at all.
+    let provider = |id: &str| {
+        outcome
+            .catalog
+            .providers
+            .iter()
+            .find(|p| p.provider_id == id)
+            .unwrap_or_else(|| panic!("{id} is in the fixture"))
+    };
+    assert!(
+        provider("anyapi").api_base_quarantined,
+        "a provider publishing an api base must be flagged"
+    );
+    assert!(
+        !provider("openai").api_base_quarantined,
+        "a provider publishing none must not be; a flag that is always true \
+         cannot tell a consumer anything"
+    );
+
     // The provider's npm adapter is flagged, never served as a field.
     let anthropic = outcome
         .catalog
