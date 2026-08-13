@@ -508,3 +508,91 @@ fn a_key_closed_to_promotion_stays_closed() {
         );
     }
 }
+
+/// Anthropic publishes context and output caps in fixed pairs.
+///
+/// From their model comparison table and the context-window guide, read
+/// 2026-08-13: a 1M-token context window carries a 128k output cap, a 200k
+/// window carries 64k. Every anthropic row in the catalog obeys this except the
+/// two sonnet-4.5 spellings, which publish 1M context with 64k output — a
+/// pairing that appears nowhere in Anthropic's documentation.
+///
+/// The row disagrees with ITSELF, which is what makes this checkable without a
+/// network call: the output side says 200k-class, the context side says
+/// 1M-class, and only one can be right.
+const ANTHROPIC_PAIRS: &[(i64, i64)] = &[(1_000_000, 128_000), (200_000, 64_000)];
+
+#[test]
+fn every_self_contradicting_anthropic_row_has_a_corrective_cell() {
+    // A fence at the producer, not a state of affairs. The two known rows were
+    // found by reading a doc passage and then by running this rule across the
+    // provider block; a THIRD such row appearing in a future seed must fail
+    // here rather than wait for someone to notice.
+    //
+    // One-directional deliberately: a failing row without a cell is the hazard,
+    // and it is a hard failure. A cell whose row has been fixed upstream is
+    // merely redundant, so it does not fail — removing it is a judgment call
+    // about whether the fix is durable, and this test has no standing to make
+    // it.
+    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    let doc = overlay();
+
+    let corrected: BTreeSet<String> = doc["cells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["provider_id"] == "anthropic")
+        .filter(|c| c["facts"].get("window.advertised").is_some())
+        .map(|c| c["model_id"].as_str().unwrap().to_string())
+        .collect();
+
+    let mut unguarded = Vec::new();
+    let models = seed["anthropic"]["models"].as_object().unwrap();
+    for (model_id, model) in models {
+        let limit = &model["limit"];
+        let (Some(context), Some(output)) = (limit["context"].as_i64(), limit["output"].as_i64())
+        else {
+            continue;
+        };
+        let Some((_, expected)) = ANTHROPIC_PAIRS.iter().find(|(c, _)| *c == context) else {
+            // A context size outside both documented classes. Not a
+            // contradiction — a new class, which needs a human to read the doc.
+            continue;
+        };
+        if output != *expected && !corrected.contains(model_id) {
+            unguarded.push(format!(
+                "{model_id} (context {context}, output {output}, 1M class wants {expected})"
+            ));
+        }
+    }
+
+    assert!(
+        unguarded.is_empty(),
+        "anthropic rows publish a context/output pairing Anthropic's own docs do \
+         not have, and no corrective cell covers them: {unguarded:?}. The row \
+         contradicts itself, so one of its two numbers is wrong. Read the \
+         context-window guide for that model and mint a cell, or record why the \
+         pairing rule no longer holds."
+    );
+
+    // The control: the rule must actually convict something, or a future
+    // refactor that breaks the pairing lookup would leave this test green and
+    // silent.
+    let known_failures = models
+        .iter()
+        .filter(|(_, m)| {
+            let l = &m["limit"];
+            match (l["context"].as_i64(), l["output"].as_i64()) {
+                (Some(c), Some(o)) => ANTHROPIC_PAIRS.iter().any(|(pc, pe)| *pc == c && *pe != o),
+                _ => false,
+            }
+        })
+        .count();
+    assert_eq!(
+        known_failures, 2,
+        "the seed should contain exactly the two known self-contradicting rows; \
+         found {known_failures}. If the upstream fixed them, this number drops \
+         and the corrective cells become redundant — a judgment call, not a \
+         failure. If it rose, a new row needs a cell."
+    );
+}

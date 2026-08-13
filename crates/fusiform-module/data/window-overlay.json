@@ -348,6 +348,24 @@
         }
       },
       "note": "THE CATALOG AND THE PROVIDER DISAGREE, AND THIS IS THE FIRST CELL THAT CONTRADICTS A PUBLISHED NUMBER RATHER THAN FILLING A GAP. models.dev publishes context=1000000 for claude-sonnet-4-5; Anthropic's own documentation names this exact model as an example of the 200k class. THREE INDEPENDENT REASONS TO BELIEVE THE PROVIDER. (1) The doc names the model explicitly, not a family. (2) Anthropic's window and output caps come in fixed pairs throughout their documentation \u2014 1M models get 128k output, 200k models get 64k \u2014 and the catalog gives this model 1M context with 64k output, a pairing that appears nowhere in Anthropic's docs and matches the 200k class on the output side. (3) Every other anthropic row in the catalog obeys the pairing exactly, so this is a lone exception rather than a systematic difference in what the catalog measures. A consumer trusting 1M here sends a prompt five times the real ceiling and gets a 400 'prompt is too long' \u2014 the wall is prompt-only on every Anthropic model, so there is no truncation to soften it. Only window.advertised is corrected. The 64k output cap is consistent with the 200k class and needs no cell."
+    },
+    {
+      "provider_id": "anthropic",
+      "model_id": "claude-sonnet-4-5-20250929",
+      "facts": {
+        "window.advertised": {
+          "value": {
+            "kind": "stated",
+            "value": 200000
+          },
+          "grade": "provider_asserted_doc",
+          "units": "provider",
+          "boundary": "Observed",
+          "source_ref": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-08-13) \u2014 'Other Claude models, including Claude Sonnet 4.5, have a 200k-token context window'; this is the dated id the claude-sonnet-4-5 alias resolves to, per Anthropic's versioning convention",
+          "observed_at": "2026-08-13T18:45:00Z"
+        }
+      },
+      "note": "THE DATED VARIANT OF THE SAME DEFECT, and arguably the more dangerous row: a consumer pinning a dated model id is doing so FOR REPRODUCIBILITY, which is exactly the caller least likely to re-check a limit. FOUND BY A MECHANICAL TEST RATHER THAN BY READING. The claude-sonnet-4-5 cell was found by reading a documentation passage; this one was found by running the pairing rule that cell's reasoning established (1M context pairs with 128k output, 200k with 64k) across all 13 anthropic rows. Two rows fail, both sonnet-4.5 spellings, both with the same 1M/64k self-contradiction. THE SWEEP ALSO CLEARED A ROW A CONSUMER HAD FLAGGED. BROCA reported claude-opus-5 as carrying a suspect 1M; it passes the pairing test at 1M/128k and Anthropic's doc names it explicitly in the 1M list, so the catalog is right there and the alarm was the inverse error. A test that only convicts is worth less than one that also acquits."
     }
   ],
   "source_revision_note": "Cells transcribed from mc-geometry-spec were read at c6a85d85 and their source_ref names 06a0e5ac, the current revision. The bump is verified rather than assumed: every row transcribed here is byte-identical between the two revisions (checked per row with git show). The Codex row DID change between them, and no cell here cites the spec for Codex \u2014 those cells cite codex-rs directly. Pointing at the newer revision matters because c6a85d85 carried a misattributed Codex number, and a reader resolving a source_ref should land on a document without a known bad row in it.",
