@@ -385,6 +385,35 @@ named in an error body, a vendor prefix on the model id, a response header
 identifying the backend. Free-form on purpose: it is evidence to be read by a
 person, not a value to branch on.
 
+#### Absent is not `false`, and absent is not `null` either
+
+Both fields are optional, and a reporter omitting them is the ordinary case —
+MC's exporter omits absent optional fields rather than emitting `null`. For
+every field in a report **absent and `null` are equivalent**: they both mean
+*the reporter did not observe this*, and there is no third state a report could
+be trying to express.
+
+That differs from the overlay's own absent-versus-unknown discipline (§2), and
+the difference is worth stating because it looks like an inconsistency. In the
+overlay, `unknown` is a **positive claim** — somebody established that nobody
+knows — so it must be distinguishable from a missing cell. In a report there is
+no such claim available: a reporter has either seen a thing or not.
+
+**`path_may_forward` is the one that would bite.** It is a boolean the capture
+site always knows, so it is tempting to read its absence as `false`. That is
+wrong, and it is the exact shape of the defect BROCA carried on
+`capabilities.reasoning`, where `as_bool()` returning `None` on a JSON null
+collapsed absent, false, and null into one confident `false`.
+
+A report that omits the field comes from **a reporter that predates it**. That
+reporter is not asserting the path does not forward; it has no opinion. Reading
+`false` there would admit a report as safely non-forwarded when nobody checked,
+which is the one direction that can promote a cell it should not.
+
+So: absent means **unknown routing**, which refuses promotion exactly as
+`true` does. Only an explicit `false` from a reporter that knows the field
+permits it.
+
 **The distinction matters because the boolean alone can never promote a cell.**
 SUBC's framing was that capture-time tagging makes the routing discriminant
 exist when the day comes. It half does: `path_may_forward: true` is enough to
