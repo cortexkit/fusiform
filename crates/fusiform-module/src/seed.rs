@@ -125,6 +125,25 @@ pub fn catalog() -> Result<NormalizedCatalog, SeedError> {
 /// the database it describes, and the question being asked — "does this store
 /// already know anything" — is answerable directly.
 pub fn seed_if_empty(store: &CatalogStore) -> Result<SeedOutcome, SeedError> {
+    // "Is this a fresh install?" answered by "have I written any models.dev
+    // eras?", which is a fact about the WRITE PIPELINE standing in for a fact
+    // about the INSTALL.
+    //
+    // They coincide, and the reason is a property rather than luck: the seed
+    // writes its eras under `SourceId::ModelsDev`, so the rows it checks are
+    // exactly the rows it would create. Nothing else writes models.dev eras
+    // before the first poll.
+    //
+    // The property is worth stating because it would break QUIETLY. Add a
+    // second source, seed it, and this gate reads zero models.dev eras on a
+    // store that is not fresh at all — then re-seeds over a populated catalog
+    // with a snapshot that may be months old. The check would still be correct
+    // about what it asks and wrong about what it is being asked.
+    //
+    // ENGRAM lost nine hours to that shape on 2026-08-13: a gate asking "is my
+    // newest head registered?" used to answer "is there history to backfill?",
+    // where a head is unregistered by construction while its generation is in
+    // flight, so the check never fired.
     let existing = store
         .era_count(SourceId::ModelsDev)
         .map_err(SeedError::Store)?;
