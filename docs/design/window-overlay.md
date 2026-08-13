@@ -413,3 +413,41 @@ Some windows are knowable only by measuring against a live endpoint. Every model
 whose window cannot be sourced gets an explicit `unknown/never_measured` cell
 rather than silence, so a consumer can tell "nobody has established this" from
 "nobody has looked".
+
+## 10. Standing checks before minting from a bulk source
+
+Two lanes that look like evidence and are not. Both were found the hard way on
+2026-08-13, within an hour of each other, and both would have passed a
+provenance check.
+
+**Look at the value distribution first. Repeats at a small number of exact
+points mean you are reading a configuration, not a measurement.**
+
+MC's usage-reported limit lane held 3,900+ rows for the Codex path — real rows,
+right path, right units, honestly recorded by a lane that genuinely observes
+traffic. They clustered at exactly 244k / 308k / 372k, which are MC's own
+override eras. The lane was echoing resolved harness config back at itself.
+
+Provenance would have passed: every link in that chain is sound. The dataset was
+right about what it recorded and wrong about what it was evidence of. What
+catches it is shape — external systems produce distributions, configurations
+produce repeats — and the shape test needs no knowledge of the override history
+that caused it.
+
+**For a number lifted from source, read the enclosing function's PURPOSE, not
+just the line.**
+
+`272_000` is really in `codex-rs`, quoted accurately, and it is the fallback
+constant for unrecognised model slugs. The tell was one field away:
+`used_fallback_model_metadata: true`. A real number in a real source, doing a
+different job than the sentence quoting it implies — indistinguishable, on
+arrival, from an invented one.
+
+**Do not mint a cell for anything a harness applies to itself.** Codex clamps
+its own usable window to 95% and auto-compacts at 90%. Those are real,
+server-configurable, and not provider walls. A consumer computing its own
+reservation on that path stacks a second clamp on the first, which is worth
+knowing when diagnosing early compaction and is not a fact about the provider.
+
+**Known contaminated lanes**, so no future transcriber rediscovers them as a
+find: MC's usage-reported limit rows for the Codex path (config echo, above).
