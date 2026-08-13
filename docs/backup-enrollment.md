@@ -31,6 +31,21 @@ as `degraded` with the cause named. **`entry_count` on the newest published
 generation still read 7 and was still correct** — correct about a generation four
 hours old.
 
+**What `created` means, confirmed by ENGRAM from their source rather than
+inferred from the column name**: it is written when capture STARTS the
+generation row, before any sealing or upload. `published` flips at head CAS,
+which under a stall is hours later.
+
+So the honest exposure sentence is **"the backup is current through the newest
+published generation's `created`"** — not its publish instant. If generation 169
+was created at 02:55 and publishes at 09:00, the cloud holds the state as of
+02:55.
+
+That is conservative in the right direction. A large capture takes minutes to
+seal, so bytes are captured at various instants AFTER `created` and never
+before: the sentence understates freshness slightly rather than overstating it.
+For an exposure statement that is the direction to be wrong in.
+
 So the shape to look for is a run of `published=0` rows above the newest
 `published=1`, and the age of that newest one. A count that has not moved is not
 evidence that captures are happening; it is evidence about the last capture that
