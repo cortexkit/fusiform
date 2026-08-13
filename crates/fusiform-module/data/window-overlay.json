@@ -163,9 +163,20 @@
           "boundary": "Observed",
           "source_ref": "mc-geometry-spec@06a0e5ac#provider-geometry-classes:xai (error text 'maximum prompt length is N' is a prompt-only wall)",
           "observed_at": "2026-08-13T12:54:15Z"
+        },
+        "window.advertised": {
+          "value": {
+            "kind": "stated",
+            "value": 500000
+          },
+          "grade": "provider_asserted_doc",
+          "units": "provider",
+          "boundary": "Observed",
+          "source_ref": "https://docs.x.ai/developers/models/grok-4.6.md (read 2026-08-13) \u2014 'Context window: 500,000 tokens'",
+          "observed_at": "2026-08-13T16:30:00Z"
         }
       },
-      "note": "No output.enforced cell: the documented behaviour is no fixed cap, with the ceiling being window minus prompt. That is a FUNCTION of the request, not a constant, and this schema has no shape for it \u2014 geometry plus window is what a consumer needs to derive it. Writing a number here would state a constant that does not exist. The catalog's output=500000 equals its context and is a placeholder by the spec's own rule. This model arrived AFTER the embedded seed snapshot (seed fetched 2026-08-12T10:07:29Z, model first observed 16:12:49Z), so it cannot be join-checked against the seed; post_seed records how its existence was verified instead.",
+      "note": "No output.enforced cell: the documented behaviour is no fixed cap, with the ceiling being window minus prompt. That is a FUNCTION of the request, not a constant, and this schema has no shape for it \u2014 geometry plus window is what a consumer needs to derive it. Writing a number here would state a constant that does not exist. The catalog's output=500000 equals its context and is a placeholder by the spec's own rule. This model arrived AFTER the embedded seed snapshot (seed fetched 2026-08-12T10:07:29Z, model first observed 16:12:49Z), so it cannot be join-checked against the seed; post_seed records how its existence was verified instead. ADVERTISED ADDED FROM XAI'S OWN MODEL PAGE 2026-08-13, and it AGREES with the measured enforced wall. That is the dataset's first corroboration rather than a correction, and it is worth recording as such: the advertised/enforced split exists because they CAN differ, not because they always do, and a split that only ever shows divergence would be evidence the measurement is biased toward cases someone went looking at. Two independent sources, one number. Note the two facts remain separate cells rather than being collapsed: they agree today, and collapsing them would destroy the ability to notice when they stop. The page states no output cap at all, which is consistent with the spec's 'no fixed cap' but does not establish it \u2014 an absent statement is not a statement of absence.",
       "post_seed": {
         "verified_at": "2026-08-13T15:12:00Z",
         "evidence": "fusiform era history: existence observed present at 2026-08-12T16:12:49Z, changed between 15:42:49Z and 16:12:49Z",
