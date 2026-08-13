@@ -36,7 +36,44 @@ use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, FactKey, NewEra, NewObservation};
 
 const UPSTREAM: &str = include_str!("../../fusiform-core/fixtures/models-dev-excerpt.json");
+
+/// A SYNTHETIC upstream document: one model publishing no `reasoning` key.
+///
+/// Inline rather than in the fixtures directory, deliberately. A file sitting
+/// beside `models-dev-excerpt.json` would read as another real cut, and this is
+/// not one — no model in today's live document omits the key. Keeping it here,
+/// next to the reason, makes it impossible to mistake for measured data.
+const UNKNOWN_REASONING: &str = r#"{
+  "synthetic": {
+    "id": "synthetic",
+    "name": "Synthetic (not a real provider)",
+    "models": {
+      "unknown-reasoning": {
+        "id": "unknown-reasoning",
+        "name": "A model whose reasoning capability the upstream did not state",
+        "limit": { "context": 128000, "output": 8192 }
+      }
+    }
+  }
+}"#;
 const GOLDEN: &str = include_str!("../fixtures/served-payloads.json");
+
+/// The real upstream cut with the synthetic unknown-reasoning provider added.
+///
+/// Merged as JSON rather than concatenated as text, so a malformed splice fails
+/// here instead of producing a document that parses into something unintended.
+fn merged_upstream() -> String {
+    let mut doc: serde_json::Value = serde_json::from_str(UPSTREAM).unwrap();
+    let synthetic: serde_json::Value = serde_json::from_str(UNKNOWN_REASONING).unwrap();
+    let obj = doc.as_object_mut().expect("the upstream is an object");
+    for (k, v) in synthetic.as_object().expect("synthetic is an object") {
+        assert!(
+            obj.insert(k.clone(), v.clone()).is_none(),
+            "the synthetic provider must not collide with a real one"
+        );
+    }
+    serde_json::to_string(&doc).unwrap()
+}
 
 /// A store whose contents are fixed, so the payload is reproducible.
 ///
@@ -75,9 +112,39 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_models_dev(UPSTREAM.as_bytes()).unwrap().catalog;
+    // ONE document, not two.
+    //
+    // A second `plan_ingest` at the same instant would diff the synthetic
+    // document against the store and tombstone every model from the first --
+    // ingest treats "absent from this document" as a withdrawal, which is
+    // correct and is exactly why a fixture must present one document rather
+    // than two. Caught by the schema's uniqueness constraint on first run.
+    let catalog = normalize_models_dev(merged_upstream().as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
+
+    // A model whose reasoning capability is UNKNOWN, from a document that is
+    // deliberately synthetic and labelled as such.
+    //
+    // Every other row in this fixture comes from a real upstream cut, which is
+    // this repository's rule: a hand-written fixture encodes its author's
+    // understanding of the format. This one cannot, and the reason is worth
+    // stating rather than hiding. Measured on the live document today: all
+    // 6,291 models publish the `reasoning` key, so ABSENT does not occur
+    // upstream and cannot be cut from it.
+    //
+    // It is pinned anyway because the null is the whole point of BROCA's
+    // parser fix — `as_bool()` returns None on a JSON null, so absent, false
+    // and null all collapse to false, and a capable model silently stops
+    // reasoning. Their deny-drift test vendors THIS fixture, so without a null
+    // row their check cannot cover the case it exists for.
+    //
+    // The alternative was to leave the wire shape unpinned until the upstream
+    // produces one, which means the first real occurrence is also the first
+    // test of the path.
+
 
     // A failed poll, so the status payload carries a failure class. An
     // all-successful history would leave the fields a consumer reads during an
@@ -140,6 +207,14 @@ fn cases() -> Vec<(&'static str, String)> {
         (
             "catalog.history — a corrected fact",
             r#"{"name":"catalog.history","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","fact_key":"rate.input"}}"#.to_string(),
+        ),
+        (
+            // The wire shape of an UNKNOWN capability, which is the case
+            // BROCA's parser fix is entirely about. Pinned here because the
+            // null was proven at the core boundary and never proven to survive
+            // to the wire -- correct at one layer, unverified at the next.
+            "catalog.get — a model whose reasoning capability is unknown",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"synthetic","model_id":"unknown-reasoning"}}"#.to_string(),
         ),
         (
             "catalog.status",

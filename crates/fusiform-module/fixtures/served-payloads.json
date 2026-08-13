@@ -1,4 +1,30 @@
 {
+  "catalog.get — a model whose reasoning capability is unknown": {
+    "request": {
+      "arguments": {
+        "model_id": "unknown-reasoning",
+        "provider_id": "synthetic"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "synthetic/unknown-reasoning": {
+          "capability.attachment": null,
+          "capability.input_modalities": null,
+          "capability.output_modalities": null,
+          "capability.reasoning": null,
+          "capability.tool_call": null,
+          "existence": "present",
+          "limit.context": 128000,
+          "limit.output": 8192
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — inside a corrected interval": {
     "request": {
       "arguments": {
@@ -183,8 +209,8 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 156,
-      "model_count": 14,
+      "era_count": 164,
+      "model_count": 15,
       "models_priced": 9,
       "recent_polls": [
         {
