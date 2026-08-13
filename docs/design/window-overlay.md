@@ -692,3 +692,54 @@ git show <sha>:<path>
 
 Not `grep`, not the file on disk, not memory. The working tree is a different
 subject from the commit, and on the day this rule was learned they differed.
+
+## 14. Gateways, and why being one does not settle anything
+
+`not_single_valued_at_key` was minted for OpenRouter because it routes to
+heterogeneous backends. The obvious generalisation — *find the other gateways
+and refuse their cells too* — is wrong, and the reason matters more than the
+list.
+
+### 14.1 Detecting a gateway takes several tests, and none is complete
+
+Measured 2026-08-13 against the live document. Two independent tests, each blind
+where the other sees:
+
+| test | catches | misses |
+| --- | --- | --- |
+| vendor-namespaced ids (`anthropic/claude-opus-5`) | openrouter (348 ids, 59 vendors) | bedrock (dots), copilot (bare names) |
+| exact-id intersection with first-party catalogs | github-copilot (5 origins), ollama-cloud (3) | openrouter (namespacing defeats exact match) |
+
+Neither catches `amazon-bedrock`, whose 116 ids use a third convention
+(`global.anthropic.claude-opus-4-8`).
+
+**So a provider passing every test is not established as first-party** — it may
+simply use an id convention no test knows. The tests have one-directional power:
+present evidence proves multi-vendor, absent evidence proves nothing. Recorded
+that way rather than as a classifier.
+
+### 14.2 The criterion is who OWNS THE WALL, not who owns the models
+
+ollama-cloud is a gateway by the directional test — it carries models from at
+least three other first-party catalogs. Applying "gateway implies
+not-single-valued" would have refused its cell.
+
+**That cell is the most valuable one in the batch.** Its 65,536 output cap is
+ollama's own serving-infrastructure ceiling, applied regardless of whose weights
+are behind it, and it stands against an advertised 1,048,576 that would
+otherwise have a consumer reserving 16x the real limit.
+
+The distinction:
+
+- **OpenRouter forwards** — the wall that fires belongs to whichever upstream
+  served the request, so the key holds no single fact.
+- **ollama-cloud imposes** — the wall is theirs, uniform across the models they
+  serve, so the key holds one fact and it is measurable.
+
+Both carry other people's models. Only one of them lets other people's walls
+through. **The question is never "does this provider originate the model" but
+"whose wall fires when the request is too big".**
+
+A wrong answer here is expensive in both directions: refusing ollama-cloud loses
+the batch's best cell, and accepting an OpenRouter measurement mints a value
+correct for one routing decision and wrong for the next.
