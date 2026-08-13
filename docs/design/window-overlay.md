@@ -507,3 +507,37 @@ Shipping the derivable ones would swamp the irreplaceable ones at a ratio of
 about 150 to 1, and a dataset whose bulk is recomputable trains its consumer to
 skim it. The measurement above is reported so a consumer knows the scale of the
 problem; the cells are reserved for what only measurement can supply.
+
+## 12. `geometry` bundles two dimensions, and the fourth combination is real
+
+Recorded 2026-08-13, NOT acted on. The three-value enum is ratified and a
+consumer has implemented against it; this is the boundary condition it does not
+express, written down before someone rediscovers it as a bug.
+
+`geometry` answers two independent questions with one value:
+
+| what the wall counts | over-window output   | enum value          |
+| -------------------- | -------------------- | ------------------- |
+| combined             | rejected up front    | `shared_upfront`    |
+| prompt only          | truncated            | `shared_truncating` |
+| prompt only          | independent quota    | `separate`          |
+| combined             | truncated            | **no enum value**   |
+
+The fourth row is reachable today. The seed corpus records OpenAI's platform API
+as `shared_upfront` with the parenthetical "400 with `truncation: disabled`" —
+so with truncation enabled the same provider counts the combined total and
+truncates rather than refusing. Same wall, different behaviour on hitting it.
+
+**Which makes geometry partly a property of the REQUEST, not only the provider.**
+A consumer setting `truncation: auto` gets different behaviour from the same
+endpoint, and no cell keyed on `(provider, model)` can express that.
+
+Not proposing a change. The enum covers every combination measured so far, the
+fourth is request-controlled rather than a provider fact, and splitting a
+ratified contract after a consumer has built against it would cost more than the
+gap. What is written here is the trigger: **if a report ever shows a combined
+wall that truncates, the enum is the thing that is wrong, not the report.**
+
+This is the same shape as the advertised/enforced split that started this
+dataset — two facts wearing one number — caught early enough to be a note rather
+than a correction.
