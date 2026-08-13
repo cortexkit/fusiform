@@ -6,6 +6,17 @@ shape unchanged. Agreed in `#model-window-truth` with MC and SUBC.
 MC merges this file plugin-side today. When fusiform serves it over subc, the
 cell shape does not change — only the transport.
 
+**The file lives at `crates/fusiform-module/data/window-overlay.json`, and until
+fusiform serves it, THAT PATH IS THE DELIVERY MECHANISM.** A consumer in another
+repository reads those bytes from there. Moving the file is a breaking change
+for them that nothing in their build will report — they get a stale vendored
+copy or a missing file, and neither says why.
+
+Held by `the_overlay_is_where_the_consumer_expects_it`, which resolves the path
+from the workspace root rather than relative to the test, so it fails on exactly
+the move that breaks a consumer. `include_str!` is not sufficient: moving the
+file and updating the include in one commit leaves the suite green.
+
 ---
 
 ## 1. What this dataset is for

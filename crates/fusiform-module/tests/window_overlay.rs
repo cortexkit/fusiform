@@ -15,6 +15,24 @@
 
 use std::collections::BTreeSet;
 
+/// The overlay's path is a CROSS-REPO CONTRACT, not an implementation detail.
+///
+/// Fusiform does not serve this dataset yet — no route reads it, and that is
+/// deliberate: MC merges the file plugin-side today, and when fusiform serves
+/// it over subc the cell shape does not change, only the transport.
+///
+/// Which means the DELIVERY MECHANISM IS THIS PATH. A consumer in another
+/// repository reads these bytes from here, and until today that fact lived only
+/// in a chat message — reachable by no check on either side.
+///
+/// `include_str!` already fails to compile if the file vanishes, but that is an
+/// accidental fence and it does not fire on the case that matters: moving the
+/// file and updating this path in the same commit leaves the suite green and
+/// breaks the consumer silently. The constant below exists so the path is a
+/// stated contract a reader must decide to change, rather than a string they
+/// can follow while refactoring.
+const OVERLAY_PATH: &str = "crates/fusiform-module/data/window-overlay.json";
+
 const OVERLAY: &str = include_str!("../data/window-overlay.json");
 const SEED: &str = include_str!("../data/models-dev-seed.json");
 
@@ -50,6 +68,37 @@ const GEOMETRIES: &[&str] = &["shared_upfront", "shared_truncating", "separate"]
 
 fn overlay() -> serde_json::Value {
     serde_json::from_str(OVERLAY).expect("the overlay must be valid JSON")
+}
+
+#[test]
+fn the_overlay_is_where_the_consumer_expects_it() {
+    // Resolved from the workspace root rather than from this crate, because the
+    // consumer's path is repository-relative — they check out fusiform and read
+    // that path. Checking `../data/x.json` from here would pass after a move
+    // that breaks them.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("crates/<name> is two levels below the workspace root");
+    let at = root.join(OVERLAY_PATH);
+    assert!(
+        at.is_file(),
+        "{OVERLAY_PATH} is the path a consumer in another repository reads. \
+         Moving it is a breaking change for them and nothing in their build \
+         will say so — they will read a stale vendored copy or fail to find it. \
+         If the move is intended, tell the consumer before changing this \
+         constant."
+    );
+
+    // And the bytes at that path must be the bytes under test, or this file is
+    // validating something the consumer does not read.
+    let on_disk = std::fs::read_to_string(&at).expect("the contract path must be readable");
+    assert_eq!(
+        on_disk, OVERLAY,
+        "the file at the contract path differs from the one this test compiled \
+         in: the guards above are checking a different document than the \
+         consumer receives"
+    );
 }
 
 #[test]
