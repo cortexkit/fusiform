@@ -346,3 +346,59 @@ fine; an access path's base URL, auth shaping, or SDK adapter is not.
 If the window dataset starts wanting those, it has crossed into BROCA's
 territory and belongs there. This is the same fence as the catalog's, restated
 for a new dataset rather than rediscovered.
+
+## 8. Consumer guidance: merge precedence
+
+Recorded here at SUBC's request rather than living in one consumer, because
+every consumer of this dataset faces the same ordering question and MC's answer
+is right. From strongest to weakest:
+
+```
+user config  >  runtime provider hooks  >  overlay  >  models.dev
+```
+
+with the **detected-overflow lane capping any of them downward**.
+
+Two things about that shape are worth stating, because a consumer reproducing
+the order without them will get the behaviour wrong:
+
+**The overlay outranks models.dev but not a runtime hook.** A hook speaks for
+the live connection — it knows which auth door is open and what the server just
+said. This dataset is a recorded belief, and a recorded belief must never
+override a running system's own report about itself.
+
+**The overflow cap is one-directional and that is deliberate.** A witnessed 400
+may lower any layer's number; it may never raise one. Raising on evidence of a
+*success* would be inferring a ceiling from a floor — the same
+absence-becomes-claim defect as the wildcard's tempting second reading (§3.3).
+
+## 9. Method for the sweep
+
+The research method is MC's, in `#model-window-truth` post 13, in their yield
+order. Cited rather than restated so it does not drift from the version its
+author maintains:
+
+1. **First-party client source** for OAuth and backend paths. The highest-yield
+   lane, and the only one that catches advertised-versus-enforced splits — the
+   window is often a client constant or server-delivered there and appears in
+   no catalog.
+2. **Provider error formats** as enforcement ground truth. MC's
+   `overflow-detection.ts` carries ~20 providers' patterns already tagged
+   prompt-only versus combined: a free geometry classifier seed.
+3. **Official docs** for geometry class and reasoning-token accounting, watching
+   version gates — Anthropic's geometry changed at 4.5.
+4. **GitHub issues** on serving infrastructure for caps no doc states.
+5. **Cross-aggregator disagreement** as a research queue: where models.dev,
+   openrouter and bedrock disagree on one model, one of them is a placeholder
+   or a path difference, and both are cells worth minting.
+
+Priority is by fleet exposure, delivered in batches rather than held for a
+complete file: anthropic (+oauth), openai (+chatgpt-oauth), google
+(+antigravity), ollama-cloud, xai, moonshot, deepseek, openrouter, groq,
+mistral, github-copilot, amazon-bedrock, then the tail.
+
+**This dataset cannot be complete and must not be delivered as though it were.**
+Some windows are knowable only by measuring against a live endpoint. Every model
+whose window cannot be sourced gets an explicit `unknown/never_measured` cell
+rather than silence, so a consumer can tell "nobody has established this" from
+"nobody has looked".
