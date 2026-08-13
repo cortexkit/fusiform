@@ -213,6 +213,7 @@ fn every_response_type_round_trips() {
         source: "models.dev".into(),
         catalog_version: 7,
         model_count: 6_270,
+        models_priced: Some(5_850),
         era_count: 67_914,
         recent_polls: vec![StatusPoll {
             observed_at_ms: 5_000,

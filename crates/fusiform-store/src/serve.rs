@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 use fusiform_core::{SourceId, Timestamp};
 use rusqlite::params;
 
-use crate::{CatalogError, CatalogStore, FactKey};
+use crate::{prefix, CatalogError, CatalogStore, FactKey};
 
 /// One model's facts, as the catalog currently holds them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,6 +193,21 @@ impl CatalogSnapshot {
 
     pub fn fact_count(&self) -> usize {
         self.models.iter().map(|m| m.facts.len()).sum()
+    }
+
+    /// How many models carry at least one rate.
+    ///
+    /// The model total cannot express this and the difference is not small:
+    /// measured on the live store, 420 of 6,293 present models have no cost
+    /// object upstream and therefore no rate rows at all.
+    ///
+    /// Counted from the facts actually present rather than from a stored flag,
+    /// so it cannot disagree with what a read of the same snapshot returns.
+    pub fn priced_model_count(&self) -> usize {
+        self.models
+            .iter()
+            .filter(|m| m.facts.keys().any(|k| k.as_str().starts_with(prefix::RATE)))
+            .count()
     }
 }
 

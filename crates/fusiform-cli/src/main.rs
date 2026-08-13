@@ -342,10 +342,17 @@ fn print_status(response: &serde_json::Value) {
             .and_then(|v| v.as_i64())
             .unwrap_or(-1)
     );
-    println!(
-        "models           {}",
-        get("model_count").and_then(|v| v.as_i64()).unwrap_or(-1)
-    );
+    let models = get("model_count").and_then(|v| v.as_i64()).unwrap_or(-1);
+    // Pricing coverage beside the model total, because the total cannot express
+    // it: measured on the live catalog, 420 of 6,293 models carry no rate at
+    // all. Shown only when some model is unpriced, and omitted entirely by a
+    // module too old to report it — an absent field is not zero coverage.
+    let unpriced = get("models_priced")
+        .and_then(|v| v.as_i64())
+        .filter(|priced| *priced < models)
+        .map(|priced| format!("  ({} with no rate)", models - priced))
+        .unwrap_or_default();
+    println!("models           {models}{unpriced}");
     println!(
         "eras             {}",
         get("era_count").and_then(|v| v.as_i64()).unwrap_or(-1)

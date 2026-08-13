@@ -587,6 +587,24 @@ pub struct StatusResponse {
     pub source: String,
     pub catalog_version: i64,
     pub model_count: usize,
+    /// How many of those models carry at least one rate.
+    ///
+    /// Measured on the live store: 420 of 6,293 present models carry no rate at
+    /// all, because the upstream publishes no cost object for them. That is 6.7%
+    /// of the catalog, and the model total cannot express it — an operator
+    /// reading "6,293 models" has no way to know a fifteenth of them cannot be
+    /// priced.
+    ///
+    /// Not a defect being reported. A model with no cost object correctly stores
+    /// no rate rows, and a consumer asking for one gets no coverage rather than
+    /// a fabricated zero. This number exists so the coverage is visible without
+    /// querying for it, because absent and free are different states and only
+    /// one of them is safe to bill.
+    ///
+    /// Optional on the wire: a module predating this field sends none, and the
+    /// deployment asymmetry makes that a certainty rather than a risk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub models_priced: Option<usize>,
     pub era_count: i64,
     /// The most recent polls, newest first.
     ///

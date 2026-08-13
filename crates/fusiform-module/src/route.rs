@@ -188,6 +188,9 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
         source: source.as_str().to_string(),
         catalog_version,
         model_count: snapshot.model_count(),
+        // Counted from the same snapshot as the model total, so the two cannot
+        // disagree about which models exist.
+        models_priced: Some(snapshot.priced_model_count()),
         era_count,
         recent_polls: polls
             .into_iter()

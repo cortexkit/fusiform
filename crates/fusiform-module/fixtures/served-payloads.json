@@ -185,6 +185,7 @@
       "catalog_version": 0,
       "era_count": 156,
       "model_count": 14,
+      "models_priced": 9,
       "recent_polls": [
         {
           "detail": "upstream returned 503",

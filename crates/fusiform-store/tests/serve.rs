@@ -510,3 +510,37 @@ fn the_point_in_time_query_seeks_rather_than_scans() {
         "the point-in-time read is scanning the era table: {plan_text}"
     );
 }
+
+/// The priced count against a real store, when one is available.
+///
+/// Runs only with FUSIFORM_LIVE_STORE pointing at a copy of a production
+/// database. The fixture proves the counting rule; this proves the rule
+/// produces the number a live catalog actually has, which is the part a
+/// synthetic fixture cannot establish.
+#[test]
+fn priced_count_matches_a_real_catalog() {
+    let Ok(path) = std::env::var("FUSIFORM_LIVE_STORE") else {
+        return;
+    };
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".to_string(),
+        storage_namespace: "default".to_string(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite { path },
+    })
+    .unwrap();
+
+    let snap = store
+        .read_catalog(&CatalogQuery::current(SourceId::ModelsDev))
+        .unwrap();
+    let priced = snap.priced_model_count();
+    let total = snap.model_count();
+    eprintln!(
+        "live catalog: {total} models, {priced} priced, {} with no rate",
+        total - priced
+    );
+    assert!(
+        priced > 0 && priced < total,
+        "a real catalog has both kinds"
+    );
+}

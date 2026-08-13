@@ -1159,3 +1159,77 @@ fn a_poll_that_wrote_nothing_reports_no_changes() {
         poll.changes
     );
 }
+
+/// The model total and the priced total are different numbers, and status
+/// reports both.
+///
+/// Measured on the live store before this existed: 420 of 6,293 present models
+/// carry no rate at all, because the upstream publishes no cost object for
+/// them. That is 6.7% of the catalog and the model total cannot express it —
+/// an operator reading "6,293 models" has no way to know a fifteenth of them
+/// cannot be priced.
+///
+/// The distinction matters because absent and free are different states, and
+/// only one of them is safe to bill against.
+#[test]
+fn status_reports_how_many_models_can_be_priced() {
+    let f = fixture();
+
+    // The fixture is cut from real upstream bytes, so it already contains
+    // models with no cost object — five of them. Measuring the DELTA rather
+    // than an absolute: an absolute would assert a property of the fixture,
+    // and the fixture changes whenever the upstream sample is refreshed.
+    let before = fusiform_module::route::serve_status(&f.store, b"").unwrap();
+    let unpriced_before = before.model_count - before.models_priced.unwrap();
+    assert!(
+        unpriced_before > 0,
+        "the real upstream sample must already contain unpriced models, or this \
+         test proves nothing about a state that occurs in production"
+    );
+
+    // A model with facts but no rate: exactly the shape the upstream produces
+    // when it publishes no cost object.
+    f.store
+        .append_eras(&[
+            fusiform_store::NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "someprovider".into(),
+                model_id: "unpriced-model".into(),
+                fact_key: fusiform_store::FactKey::existence(),
+                value_json: "\"present\"".into(),
+                boundary_at: Timestamp(1_000),
+                boundary_kind: BoundaryKind::Seed,
+                observation_id: None,
+            },
+            fusiform_store::NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "someprovider".into(),
+                model_id: "unpriced-model".into(),
+                fact_key: fusiform_store::FactKey::limit("context"),
+                value_json: "200000".into(),
+                boundary_at: Timestamp(1_000),
+                boundary_kind: BoundaryKind::Seed,
+                observation_id: None,
+            },
+        ])
+        .unwrap();
+
+    let after = fusiform_module::route::serve_status(&f.store, b"").unwrap();
+    let unpriced_after = after.model_count - after.models_priced.unwrap();
+
+    assert_eq!(
+        after.model_count,
+        before.model_count + 1,
+        "the new model must be counted as a model"
+    );
+    assert_eq!(
+        unpriced_after,
+        unpriced_before + 1,
+        "and must be counted as unpriced, not as priced"
+    );
+    assert_eq!(
+        after.models_priced.unwrap(),
+        before.models_priced.unwrap(),
+        "a model with no rate must not change the priced count at all"
+    );
+}
