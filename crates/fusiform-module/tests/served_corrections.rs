@@ -129,6 +129,28 @@ fn a_point_in_time_read_serves_what_the_upstream_published() {
         r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","at_ms":1500}}"#,
     );
 
+    // The read INSIDE era coverage returned something, asserted before anything
+    // is concluded from what it did not contain.
+    //
+    // SUBC's rider, from running the acceptance check on the shipped binary: my
+    // suggested instant predated era coverage and returned ZERO MODELS, which
+    // would have passed the override assertion below vacuously — an empty
+    // result contains no override entry either. The value assertion happens to
+    // protect this test by ordering, and protection by accident is not a
+    // property anyone can rely on when the test is next edited.
+    //
+    // This is the absent-versus-unknown discipline the whole overlay rests on,
+    // applied to a test's own inputs: "no correction was applied" and "there
+    // was nothing to correct" are different facts, and only one of them is
+    // being asserted.
+    assert!(
+        response["models"]
+            .get("anthropic/claude-sonnet-4-5")
+            .is_some(),
+        "the point-in-time instant must fall INSIDE era coverage, or every \
+         assertion below holds vacuously on an empty result"
+    );
+
     assert_eq!(
         response["models"]["anthropic/claude-sonnet-4-5"]["limit.context"], 1_000_000,
         "history must report what models.dev published. The overlay says what \
