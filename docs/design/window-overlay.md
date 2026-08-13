@@ -331,10 +331,32 @@ export today.
 }
 ```
 
-`extracted_limit` is `provider` units when present regardless of the report's
-`units`, which describes `attempted_tokens` and `largest_success`. **Send
-`largest_success` whenever you have it** — dropping the succeeding attempt is
-what collapses a bracket into a false point, and it is unrecoverable afterwards.
+**Send `largest_success` whenever you have it** — dropping the succeeding
+attempt is what collapses a bracket into a false point, and it is unrecoverable
+afterwards.
+
+**Units are PER FIELD, not per report** (MC's correction, 2026-08-13). A report
+carries numbers in two different units at once: `extracted_limit` comes from the
+provider's own error body and is provider-counted, while `attempted_tokens` and
+`largest_success` are whatever the reporter counted.
+
+An earlier version of this section had one `units` field plus a prose rule
+saying which numbers it applied to. That works only while every producer reads
+and follows the paragraph — and §3.5 exists precisely because mixing the two
+units silently produces a bound that may be false. **A rule that prevents a
+silent falsehood should not itself be a convention.**
+
+```json
+"extracted_limit": 200000,
+"extracted_limit_units": "provider",
+"attempted_tokens": 214311,
+"attempted_tokens_units": "estimate",
+"largest_success": 198002,
+"largest_success_units": "estimate"
+```
+
+A report using the old single `units` field is still valid and is read as
+applying to the reporter's own counts, never to `extracted_limit`.
 
 `report_id` is the reporter's, and it becomes the cell's `source_ref` as
 `mc-report:<report_id>`.
