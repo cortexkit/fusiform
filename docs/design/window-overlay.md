@@ -369,7 +369,7 @@ addition bumps `schema`, the refusal rule fires at the FILE level — and a
 consumer loses every cell over one value affecting one of them.
 
 Found 2026-08-13 by bumping to `v1.1` for the
-`not_single_valued_at_this_key` addition and then re-reading this section.
+`not_single_valued_at_key` addition and then re-reading this section.
 The bump was the tidy-looking move and it would have cost a consumer 8 good
 cells to protect them from 1 they could already skip.
 
@@ -391,7 +391,7 @@ differently:
 - **Evidence-absence reasons** (`never_measured`, `placeholder_*`, `retracted`)
   assert *nobody has established this*. There is nothing to grade, so the grade
   must be `unknown` — anything else claims evidence the value denies.
-- **`not_single_valued_at_this_key`** asserts *the key cannot hold one fact*.
+- **`not_single_valued_at_key`** asserts *the key cannot hold one fact*.
   That is a positive claim resting on evidence, so it carries the grade of that
   evidence and a real `source_ref`. Grading it `unknown` would say nobody
   established it, which is what the reason denies.

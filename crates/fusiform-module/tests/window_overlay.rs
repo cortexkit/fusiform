@@ -56,7 +56,7 @@ const UNKNOWN_WHY: &[&str] = &[
     // fact, so measurement samples a routing decision rather than settling
     // anything. `never_measured` would be an instruction to go and measure,
     // aimed at the catalog's largest provider.
-    "not_single_valued_at_this_key",
+    "not_single_valued_at_key",
 ];
 
 /// Every fact key the schema defines.
@@ -310,7 +310,7 @@ fn a_value_is_one_of_the_three_kinds_and_says_what_it_must() {
                     // the grade must be unknown or it claims evidence the value
                     // denies.
                     //
-                    // `not_single_valued_at_this_key` asserts something else
+                    // `not_single_valued_at_key` asserts something else
                     // entirely: that the KEY cannot hold one fact. That is a
                     // positive claim resting on evidence — for OpenRouter, 348
                     // models spanning other providers' catalogs plus the
@@ -450,4 +450,61 @@ fn no_cell_states_something_the_consumer_can_derive() {
             .expect("output.enforced must still carry its measured value"),
         65536
     );
+}
+
+/// Keys established as not-single-valued, and therefore closed to promotion.
+///
+/// The vocabulary check asserts the `why` STRING is legal. This list asserts
+/// the CLAIM survives — a different property enforced at a different site,
+/// because the failures differ. A transcriber who replaces OpenRouter's refusal
+/// with a `stated` geometry from one measured report writes a perfectly legal
+/// cell: every legal `why` value is still legal, because the refusal is simply
+/// gone.
+///
+/// SUBC's promotion clause made mechanical: presence of
+/// `not_single_valued_at_key` forbids promoting any measured report into a
+/// stated or bracket cell at that key WITHOUT a routing discriminant. The v1
+/// schema has no discriminant sub-key, so today the clause means: do not
+/// promote.
+///
+/// Removing an entry here is the decision point, and it must be a deliberate
+/// edit rather than a side effect of adding a cell.
+const NOT_SINGLE_VALUED: &[(&str, &str, &str)] = &[("openrouter", "*", "geometry")];
+
+#[test]
+fn a_key_closed_to_promotion_stays_closed() {
+    let doc = overlay();
+    for (provider, model, fact) in NOT_SINGLE_VALUED {
+        let cell = doc["cells"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["provider_id"] == *provider && c["model_id"] == *model)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{provider}/{model} is established as not-single-valued for \
+                     {fact:?} and its cell is gone. Deleting the refusal does not \
+                     make the key measurable — it removes the only thing telling \
+                     the next transcriber not to try."
+                )
+            });
+
+        let value = &cell["facts"][fact]["value"];
+        let kind = value["kind"].as_str().unwrap_or("<missing>");
+        assert_eq!(
+            kind, "unknown",
+            "{provider}/{model} {fact}: promoted to {kind:?}. This key cannot \
+             hold a single fact — the wall that fires belongs to whichever \
+             upstream served the request, so a measurement samples a routing \
+             decision rather than settling one. A stated value is correct for \
+             one route and wrong for the next."
+        );
+        assert_eq!(
+            value["why"].as_str().unwrap_or("<missing>"),
+            "not_single_valued_at_key",
+            "{provider}/{model} {fact}: still unknown, but the reason no longer \
+             says the key is unmeasurable. Downgrading to an evidence-absence \
+             reason invites exactly the measurement this cell exists to refuse."
+        );
+    }
 }
