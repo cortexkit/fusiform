@@ -760,8 +760,17 @@ Neither catches `amazon-bedrock`, whose 116 ids use a third convention
 
 **So a provider passing every test is not established as first-party** — it may
 simply use an id convention no test knows. The tests have one-directional power:
-present evidence proves multi-vendor, absent evidence proves nothing. Recorded
-that way rather than as a classifier.
+present evidence proves multi-vendor, absent evidence proves nothing.
+
+**The operational form, from SUBC: forwarder detection can only ADMIT
+candidates for per-cell evidence. It can never CLEAR a provider.** A provider
+that passes every detector is UNKNOWN, not first-party, and the difference is
+the whole reason the tests exist — a classifier would silently promote "no
+evidence of forwarding" to "does not forward", which is the absent-versus-unknown
+collapse this dataset was built to refuse, applied to providers instead of
+values.
+
+So §14.1 is a candidate generator. Nothing here decides a cell.
 
 ### 14.2 The criterion is who OWNS THE WALL, not who owns the models
 
