@@ -451,3 +451,59 @@ knowing when diagnosing early compaction and is not a fact about the provider.
 
 **Known contaminated lanes**, so no future transcriber rediscovers them as a
 find: MC's usage-reported limit rows for the Codex path (config echo, above).
+
+## 11. Why placeholder detection does NOT belong in the normalizer
+
+Measured 2026-08-13 against the live document: **1,175 of 6,292 models publish
+`output == context`** across 111 providers, plus 186 publishing `output: 0`.
+Together 21.6% of the catalog. Of the equal-output rows, **560 are provably
+placeholders** — a sibling provider publishes the same model with a distinct
+smaller output, so the equality is contradicted by the upstream's own data
+rather than merely suspected:
+
+```
+glm-5    crof says 202752 == 202752  |  zhipuai says output=131072 of 204800
+glm-5.2  digitalocean says 262144 == 262144  |  zhipuai says output=131072 of 1000000
+```
+
+Fusiform already collapses `output: 0` to absence in the normalizer, so
+extending the same treatment to `output == context` looks like consistency. It
+is not, and the reason is decisive.
+
+**A normalizer change would write 1,175 era rows recording a change that did not
+happen upstream.** Ingest diffs normalized facts against stored eras; flipping a
+value to null is a change, so the next poll after such an edit would tombstone
+1,175 facts and stamp them with an observation boundary. Every one of those eras
+would assert that models.dev stopped publishing an output limit at that instant.
+It did not. **Fusiform's own reading changed, and the history would record it as
+an upstream event** — indistinguishable, a month later, from a real withdrawal.
+
+That is worse than the placeholder. A wrong value in a served row is a wrong
+value; a wrong era is a falsified observation, and the whole point of the
+observation/era split is that those never blur.
+
+The zero rule predates any stored history, so it never had this problem. The
+distinction is not which rule is more justified — it is that **one was applied
+before there was a history to falsify and the other would not be.**
+
+So placeholder judgement lives here, in the overlay, where it is a stated
+correction carrying its own provenance and cannot masquerade as something the
+upstream did.
+
+### 11.1 What that implies about which cells are worth minting
+
+The rule `output >= context implies placeholder` is one line, and it is already
+in the consumer's own spec. A cell asserting it tells a consumer nothing it
+could not compute from the catalog row in front of it.
+
+**The test for whether a cell earns its place: does it carry something the
+consumer cannot derive?**
+
+- A placeholder flag: **derivable**. Not worth 1,175 cells.
+- A real enforced value behind a placeholder — ollama-cloud's 65,536 against an
+  advertised 1,048,576: **not derivable from anything**. Worth a cell on its own.
+
+Shipping the derivable ones would swamp the irreplaceable ones at a ratio of
+about 150 to 1, and a dataset whose bulk is recomputable trains its consumer to
+skim it. The measurement above is reported so a consumer knows the scale of the
+problem; the cells are reserved for what only measurement can supply.
