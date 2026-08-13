@@ -81,7 +81,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       # `--all-targets` so the integration tests run, which is where every
       # guard in this repository lives.
@@ -91,7 +91,19 @@ jobs:
       # document, and a suite whose result depends on a third party's uptime
       # reports someone else's outage as this repository's failure.
       - name: Test
-        run: cargo test --workspace --all-targets
+        # --locked proves the committed tree can reproduce its own build.
+        #
+        # Without it, a stale Cargo.lock passes silently: cargo updates it in
+        # place during the run and the change is discarded with the runner. The
+        # only thing that catches it is the release script at deploy time,
+        # which is the worst moment to discover a tree cannot build from what
+        # it committed.
+        #
+        # This is not hypothetical here — a wire-crate version bump landed
+        # without its lock update, CI went green, and the release build refused
+        # minutes later. A version and its lock entry are two artifacts of one
+        # change, and nothing was comparing them.
+        run: cargo test --locked --workspace --all-targets
 
       # The served schema is what consumers compile against, and a consumer
       # that path-depends on this repo cannot see a code change that does not
