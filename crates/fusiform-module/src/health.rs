@@ -164,12 +164,37 @@ pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
             HealthStatus::Ok,
             Some("no observation yet; started recently".to_string()),
         ),
+        // Stale, and the message names the CAUSE rather than only the symptom.
+        //
+        // This arm is checked before the failure-streak arm, so without the
+        // class an operator gets "catalog is 120 minutes old" for the case where
+        // the real answer -- the upstream has been refusing every poll -- is
+        // already recorded one field away. The staleness is the consequence; the
+        // failure class is the thing to act on, and only one of them tells you
+        // whether to look at the network, the upstream's status page, or a
+        // schema change.
+        //
+        // Same defect as the loop's "tick failed" log line, in the surface an
+        // operator reads first.
         Some(age) if age > STALE_AFTER_MS => (
             HealthStatus::Degraded,
-            Some(format!(
-                "catalog is {} minutes old; serving correct history of a world that may have moved",
-                age / 60_000
-            )),
+            Some(match signals.last_failure_class() {
+                Some(_) => format!(
+                    "catalog is {} minutes old and not refreshing ({}); serving \
+                     correct history of a world that may have moved",
+                    age / 60_000,
+                    describe_failure(signals)
+                ),
+                // Stale with no recorded failure: the polls are not failing, so
+                // this is not an upstream problem. Said explicitly, because the
+                // absence of a cause is itself the diagnostic -- it points at
+                // the loop or the store rather than the network.
+                None => format!(
+                    "catalog is {} minutes old with no recent poll failure; the \
+                     upstream is not refusing, so check the loop and the store",
+                    age / 60_000
+                ),
+            }),
         ),
         Some(_) if failures >= FAILURE_STREAK_DEGRADED => (
             HealthStatus::Degraded,

@@ -145,7 +145,6 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
     // produces one, which means the first real occurrence is also the first
     // test of the path.
 
-
     // A failed poll, so the status payload carries a failure class. An
     // all-successful history would leave the fields a consumer reads during an
     // incident unpinned.
