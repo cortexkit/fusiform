@@ -32,8 +32,8 @@ use serde::Deserialize;
 pub use fusiform_protocol::{
     CatalogGetRequest, CatalogGetResponse, CorrectRequest, CorrectResponse, CorrectedFact,
     CorrectionDetail, HistoryEra, HistoryRequest, HistoryResponse, PollChanges, StatusPoll,
-    StatusRequest, StatusResponse, ToolResponse, WithheldFactWire, TOOLS, TOOL_CORRECT, TOOL_GET,
-    TOOL_HISTORY, TOOL_STATUS,
+    StatusRequest, StatusResponse, ToolResponse, UncertainFactWire, WithheldFactWire, TOOLS,
+    TOOL_CORRECT, TOOL_GET, TOOL_HISTORY, TOOL_STATUS,
 };
 
 /// Why a request could not be served.
@@ -422,12 +422,36 @@ fn single_model_snapshot(
         }
     }
 
+    // The same uncertainty the bulk read reports, scoped to this model.
+    //
+    // Resolved from the store rather than carried through `read_model`, so the
+    // two surfaces cannot disagree: a consumer asking for one model and a
+    // consumer asking for the catalog must get the same qualification on the
+    // same fact. The single-model path is the one that silently lacked
+    // correction handling for hours, and this is the same seam.
+    let uncertain = store
+        .uncertain_facts_at(source, resolved_at)
+        .map_err(|e| store_error(&e))?
+        .into_iter()
+        .filter(|((p, m, _), _)| p == provider_id && m == model_id)
+        .map(|((provider_id, model_id, fact_key), (prior, boundary))| {
+            fusiform_store::serve::UncertainFact {
+                provider_id,
+                model_id,
+                fact_key,
+                superseded_after: prior,
+                superseded_by: boundary,
+            }
+        })
+        .collect();
+
     Ok(CatalogSnapshot {
         source,
         resolved_at,
         catalog_version,
         models,
         withheld,
+        uncertain,
     })
 }
 
@@ -475,12 +499,25 @@ fn render(source: SourceId, snapshot: CatalogSnapshot) -> CatalogGetResponse {
         })
         .collect();
 
+    let uncertain = snapshot
+        .uncertain
+        .into_iter()
+        .map(|u| UncertainFactWire {
+            provider_id: u.provider_id,
+            model_id: u.model_id,
+            fact_key: u.fact_key.as_str().to_string(),
+            superseded_after_ms: u.superseded_after.0,
+            superseded_by_ms: u.superseded_by.0,
+        })
+        .collect();
+
     CatalogGetResponse {
         source: source.as_str().to_string(),
         resolved_at_ms: snapshot.resolved_at.0,
         catalog_version: snapshot.catalog_version,
         models,
         withheld,
+        uncertain,
     }
 }
 

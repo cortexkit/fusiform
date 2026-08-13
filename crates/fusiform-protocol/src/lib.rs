@@ -147,6 +147,44 @@ pub struct CatalogGetResponse {
     /// action and is the one that costs money.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub withheld: Vec<WithheldFactWire>,
+
+    /// Facts whose value is included but may already have been superseded at
+    /// the read instant.
+    ///
+    /// **Always empty for a read of the current catalog**, so a consumer
+    /// tracking today's models never sees this. It appears on historical reads,
+    /// where the recorded value sits inside a later era's observation window —
+    /// fusiform confirmed the value at `superseded_after`, saw it changed at
+    /// `superseded_by`, and did not look in between.
+    ///
+    /// Distinct from `withheld` in the direction that matters: the value IS in
+    /// `models`. This qualifies an answer rather than refusing one, because
+    /// fusiform knows something about the instant and dropping the value would
+    /// discard information it holds. A caller can act on a qualified answer and
+    /// cannot act on a refusal.
+    ///
+    /// What to do with it depends on the width. At the normal 30-minute cadence
+    /// the bracket is 30 minutes and most consumers will ignore it. A bracket of
+    /// days means nobody looked for days, and a ledger repricing usage inside it
+    /// is repricing against a value that may not have been in force.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uncertain: Vec<UncertainFactWire>,
+}
+
+/// A fact whose recorded value at the read instant may already have ended.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UncertainFactWire {
+    pub provider_id: String,
+    pub model_id: String,
+    pub fact_key: String,
+    /// The last instant fusiform confirmed this value.
+    pub superseded_after_ms: i64,
+    /// The instant fusiform observed it had changed.
+    ///
+    /// The change happened somewhere in `(superseded_after_ms,
+    /// superseded_by_ms]`. Both ends are real observation instants rather than
+    /// estimates, so the bracket is arithmetic a consumer can act on.
+    pub superseded_by_ms: i64,
 }
 
 /// The commit this binary was built from, or `"unknown"`.

@@ -184,6 +184,31 @@ pub struct CatalogSnapshot {
     /// Empty in the ordinary case. Non-empty means the answer is incomplete in
     /// a specific, named way rather than in an invisible one.
     pub withheld: Vec<WithheldFact>,
+    /// Facts whose value is real but may already have been superseded at this
+    /// instant, each with the interval the change happened in.
+    ///
+    /// The values ARE included in `models` — unlike `withheld`, this is a
+    /// qualification rather than a refusal. Fusiform knows something about the
+    /// instant, just not everything, and dropping the value would discard
+    /// information the store holds.
+    ///
+    /// **Always empty for a read of the current catalog**, because an era
+    /// covering `now` has no successor. It is the historical read — "what was
+    /// the rate on the 9th" — that can be uncertain, which is the question a
+    /// wrong answer costs money on.
+    pub uncertain: Vec<UncertainFact>,
+}
+
+/// A fact whose recorded value at the read instant may already have ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UncertainFact {
+    pub provider_id: String,
+    pub model_id: String,
+    pub fact_key: FactKey,
+    /// The last instant fusiform confirmed this value.
+    pub superseded_after: Timestamp,
+    /// The instant it observed the change.
+    pub superseded_by: Timestamp,
 }
 
 impl CatalogSnapshot {
@@ -236,7 +261,66 @@ pub const POINT_IN_TIME_SQL: &str = "SELECT e.provider_id, e.model_id, e.fact_ke
              AND e2.boundary_at_ms <= ?2 \
        )";
 
+/// Facts whose value at an instant sits inside a later era's observation
+/// window, for one source.
+///
+/// One query for the whole read rather than one per fact, the same shape as
+/// the corrections lookup: a bulk read resolves ~68,000 facts and asking about
+/// each separately would be 68,000 queries to discover that nearly all of them
+/// are certain.
+///
+/// Empty for a read of the current catalog, always: an era covering `now`
+/// cannot have a successor.
+pub const UNCERTAIN_FACTS_SQL: &str =
+    "SELECT provider_id, model_id, fact_key, prior_observation_at_ms, boundary_at_ms \
+     FROM era \
+     WHERE source = ?1 \
+       AND prior_observation_at_ms IS NOT NULL \
+       AND prior_observation_at_ms < ?2 AND boundary_at_ms > ?2";
+
+/// Uncertainty brackets keyed by fact identity: provider, model, fact key.
+///
+/// The value is the interval the change happened in — `(last confirmed, first
+/// observed changed)`.
+pub type UncertaintyByFact = BTreeMap<(String, String, FactKey), (Timestamp, Timestamp)>;
+
 impl CatalogStore {
+    /// Facts whose recorded value at an instant may already have been
+    /// superseded, keyed by identity.
+    ///
+    /// The era answering a read for `at` ended somewhere inside the returned
+    /// bracket, so the value is real and its continued force at `at` is not
+    /// established. See [`PointInTime::KnownStale`].
+    pub fn uncertain_facts_at(
+        &self,
+        source: SourceId,
+        at: Timestamp,
+    ) -> Result<UncertaintyByFact, CatalogError> {
+        let rows = self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(UNCERTAIN_FACTS_SQL)?;
+            let mapped = stmt.query_map(params![source.as_str(), at.0], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            })?;
+            mapped.collect::<rusqlite::Result<Vec<_>>>()
+        })?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(p, m, k, prior, boundary)| {
+                (
+                    (p, m, FactKey::from_stored(k)),
+                    (Timestamp(prior), Timestamp(boundary)),
+                )
+            })
+            .collect())
+    }
+
     /// Read the catalog.
     pub fn read_catalog(&self, query: &CatalogQuery) -> Result<CatalogSnapshot, CatalogError> {
         // Resolve "now" to a concrete instant ONCE, before the read. Two rows
@@ -263,8 +347,14 @@ impl CatalogStore {
         // read it as data.
         let corrections = self.all_corrections_covering(query.source, resolved_at)?;
 
+        // Facts whose value at this instant sits inside a later era's window.
+        // One query for the whole read, and empty by construction for a read of
+        // the current catalog.
+        let uncertainty = self.uncertain_facts_at(query.source, resolved_at)?;
+
         let mut by_model: BTreeMap<(String, String), BTreeMap<FactKey, String>> = BTreeMap::new();
         let mut withheld: Vec<WithheldFact> = Vec::new();
+        let mut uncertain: Vec<UncertainFact> = Vec::new();
         for (provider_id, model_id, fact_key, value_json) in rows {
             let fact_key = FactKey::from_stored(fact_key);
             if !corrections.is_empty() {
@@ -281,6 +371,21 @@ impl CatalogStore {
                     continue;
                 }
             }
+            // Uncertain rather than withheld: the value is real and is
+            // returned. What is not established is that it was still in force
+            // at the read instant.
+            if let Some((prior, boundary)) =
+                uncertainty.get(&(provider_id.clone(), model_id.clone(), fact_key.clone()))
+            {
+                uncertain.push(UncertainFact {
+                    provider_id: provider_id.clone(),
+                    model_id: model_id.clone(),
+                    fact_key: fact_key.clone(),
+                    superseded_after: *prior,
+                    superseded_by: *boundary,
+                });
+            }
+
             by_model
                 .entry((provider_id, model_id))
                 .or_default()
@@ -332,6 +437,7 @@ impl CatalogStore {
             catalog_version: self.catalog_version()?,
             models,
             withheld,
+            uncertain,
         })
     }
 

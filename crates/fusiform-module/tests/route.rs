@@ -1233,3 +1233,120 @@ fn status_reports_how_many_models_can_be_priced() {
         "a model with no rate must not change the priced count at all"
     );
 }
+
+/// A historical read carries its uncertainty onto the wire.
+///
+/// The store learned to mark a read inside a later era's observation window,
+/// and that distinction is worthless if it stops at the store boundary — which
+/// is exactly what happened for hours with corrections, where `read_model`
+/// honoured none and the defect was invisible because the bulk path did.
+///
+/// So this asserts on the served response, and asserts BOTH read paths agree:
+/// a consumer asking for one model and a consumer asking for the catalog must
+/// get the same qualification on the same fact.
+#[test]
+fn a_historical_read_reports_uncertainty_on_the_wire() {
+    let f = fixture();
+
+    // A fact observed at 1_000, then changed at 9_000 with the previous
+    // confirming observation at 2_000 — a poll gap from 2_000 to 9_000.
+    f.store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(2_000),
+            outcome: ObservationOutcome::Unchanged,
+            normalized_hash: Some("h2".into()),
+            raw_hash: None,
+            etag: None,
+            duration_ms: Some(5),
+            detail: None,
+        })
+        .unwrap();
+    let obs = f
+        .store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(9_000),
+            outcome: ObservationOutcome::Changed { snapshot_seq: 9 },
+            normalized_hash: Some("h9".into()),
+            raw_hash: None,
+            etag: None,
+            duration_ms: Some(5),
+            detail: None,
+        })
+        .unwrap();
+    f.store
+        .append_eras(&[fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: fusiform_store::FactKey::rate(TokenClass::Input),
+            value_json: r#"{"state":"priced","units":7000000000}"#.into(),
+            boundary_at: Timestamp(9_000),
+            boundary_kind: BoundaryKind::Observed,
+            observation_id: Some(obs),
+        }])
+        .unwrap();
+
+    // A read at 5_000 sits inside (2_000, 9_000].
+    let bulk = get(&f, r#"{"at_ms": 5000}"#);
+    let entry = bulk
+        .uncertain
+        .iter()
+        .find(|u| u.fact_key == "rate.input")
+        .expect("the bulk read must report the uncertainty");
+    assert_eq!(entry.provider_id, "anthropic");
+    assert_eq!(entry.model_id, "claude-sonnet-4-5");
+    assert_eq!(entry.superseded_after_ms, 2_000);
+    assert_eq!(entry.superseded_by_ms, 9_000);
+
+    // The value is STILL SERVED. This qualifies rather than withholds.
+    let facts = bulk
+        .models
+        .get("anthropic/claude-sonnet-4-5")
+        .expect("the model is served");
+    assert!(
+        facts.contains_key("rate.input"),
+        "an uncertain fact is qualified, not omitted"
+    );
+
+    // The single-model path must agree, fact for fact and bracket for bracket.
+    let single = get(
+        &f,
+        r#"{"at_ms": 5000, "provider_id": "anthropic", "model_id": "claude-sonnet-4-5"}"#,
+    );
+    assert_eq!(
+        single.uncertain, bulk.uncertain,
+        "the two read paths must report the same uncertainty"
+    );
+
+    // And a read of the CURRENT catalog reports none, because the newest era
+    // has no successor. If this ever fires, every consumer sees the field on
+    // every response and stops reading it.
+    let now = get(&f, "{}");
+    assert!(
+        now.uncertain.is_empty(),
+        "a current read is never uncertain, got {:?}",
+        now.uncertain
+    );
+
+    // THE ENDPOINTS, because the predicate exists twice.
+    //
+    // `value_at` computes it in Rust; the bulk read computes it in SQL. Two
+    // implementations of one belief, and nothing forces them to agree -- the
+    // shape that has produced a defect in this repository more than once. The
+    // interior case above passes with either open or closed ends, so it cannot
+    // tell them apart; a mutation widening the SQL to `<=` and `>=` survived
+    // until these existed.
+    //
+    // Both instants are CERTAIN. At 2_000 fusiform confirmed the value; at
+    // 9_000 it observed the new one, and the new era is in force from there.
+    for at in [2_000i64, 9_000] {
+        let edge = get(&f, &format!(r#"{{"at_ms": {at}}}"#));
+        assert!(
+            edge.uncertain.is_empty(),
+            "t={at} is an observation instant and is certain, got {:?}",
+            edge.uncertain
+        );
+    }
+}

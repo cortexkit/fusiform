@@ -180,6 +180,13 @@ fn every_response_type_round_trips() {
                 fields: serde_json::json!([{"field":"rate","class":"output"}]),
             }],
         }],
+        uncertain: vec![fusiform_protocol::UncertainFactWire {
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: "rate.cache_read".into(),
+            superseded_after_ms: 1_786_400_000_000,
+            superseded_by_ms: 1_786_488_349_024,
+        }],
     };
     let text = serde_json::to_string(&catalog).unwrap();
     let back: CatalogGetResponse = serde_json::from_str(&text).unwrap();
