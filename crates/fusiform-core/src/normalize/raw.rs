@@ -19,9 +19,19 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 pub struct RawProvider {
     pub id: Option<String>,
+    /// Display label. Declared so the upstream's shape is enumerated here, and
+    /// deliberately NOT carried into the normalized type — see
+    /// [`super::NormalizedProvider`] for why an unread field is a decision
+    /// nobody made.
     pub name: Option<String>,
+    /// Documentation URL. Declared, not carried, per `name`.
     pub doc: Option<String>,
+    /// The provider's API base URL. Renderer-selection: it decides which host
+    /// receives the request. Quarantined as a flag, never carried as a value.
     pub api: Option<String>,
+    /// The credential environment variable a provider conventionally uses.
+    /// Declared, not carried — credential-adjacent, so it is the last field
+    /// that should sit unread in a serializable type.
     #[serde(default)]
     pub env: Vec<String>,
     /// Which SDK adapter speaks to this provider. Quarantined: this is the

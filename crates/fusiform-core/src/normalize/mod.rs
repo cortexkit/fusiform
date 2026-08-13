@@ -115,12 +115,41 @@ pub struct Quarantine {
     pub experimental_modes: Vec<String>,
 }
 
-/// One provider's entry, normalized.
+/// One provider, reduced to what fusiform has decided to keep.
+///
+/// # Why the operator-metadata fields are not here
+///
+/// The upstream publishes `name`, `doc` and `env` per provider. They were
+/// carried here as values and read by nothing, which is the state this type now
+/// refuses: **an unread field is a decision nobody made.**
+///
+/// Each of the three needed a decision rather than a rule applied to all of
+/// them, and the decision was "do not parse it into the domain":
+///
+/// - `name` is a display label, harmless and unused. If a consumer wants it, it
+///   becomes a served fact with a name and a test, not a field that is already
+///   in the struct waiting to be plumbed.
+/// - `doc` is a documentation URL, same disposition.
+/// - `env` names the credential environment variable a provider conventionally
+///   uses. Not a secret, and not renderer selection either — but it is
+///   credential-ADJACENT, and a credential-adjacent field with no decision
+///   behind it is the last one that should sit in a serializable type on the
+///   chance it turns out useful.
+///
+/// Contrast the two fields that ARE here as flags. `npm` and `api` are
+/// renderer-selection: they decide which adapter speaks and which host
+/// receives the request. Those are quarantined — recorded as present, never
+/// carried — because fusiform must be able to say it never serves them.
+///
+/// So the disposition splits three ways rather than two: quarantine what
+/// decides bytes, serve what a consumer has asked for, and do not parse the
+/// rest. All three are recoverable in one line from `raw.rs` when someone has
+/// an actual use; what is not recoverable is the refactor that quietly plumbs
+/// an unread value onto a wire.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedProvider {
     pub provider_id: String,
-    pub display_name: Option<String>,
-    pub doc_url: Option<String>,
+
     /// Whether the provider publishes an `api` base URL, WITHOUT its value.
     ///
     /// The value is deliberately not carried, for the same reason `npm` is not.
@@ -140,7 +169,6 @@ pub struct NormalizedProvider {
     /// this field for their endpoint and discovered they had it on the
     /// stays-mine side of a split while not authoring it.
     pub api_base_quarantined: bool,
-    pub env_vars: Vec<String>,
     pub models: Vec<NormalizedModel>,
     /// The provider's `npm` field: which SDK adapter speaks to it. The single
     /// most renderer-selecting fact in the document, and never served.
@@ -282,10 +310,7 @@ pub fn normalize_models_dev(bytes: &[u8]) -> Result<NormalizeOutcome, NormalizeE
             )?);
         }
         providers.push(NormalizedProvider {
-            display_name: raw_provider.name.clone(),
-            doc_url: raw_provider.doc.clone(),
             api_base_quarantined: raw_provider.api.is_some(),
-            env_vars: raw_provider.env.clone(),
             npm_quarantined: raw_provider.npm.is_some(),
             provider_id,
             models,

@@ -582,3 +582,58 @@ fn a_zero_limit_and_an_absent_limit_are_both_unknown() {
         "and in the other direction"
     );
 }
+
+/// The normalized provider carries only what fusiform decided to keep.
+///
+/// An unread field is a decision nobody made. `name`, `doc` and `env` were all
+/// normalized into the domain type and read by nothing, which is the state that
+/// produced the `api_base` hazard: a value sitting in a serializable struct is
+/// one refactor from a wire, and nothing about its name warns the person doing
+/// the refactor.
+///
+/// This test is a FENCE at the producer rather than a value check. It fails
+/// when a field is added, which is the moment the decision has to be made —
+/// quarantine it, serve it, or do not parse it. Any of the three is fine; what
+/// is not fine is a fourth field arriving with no decision behind it.
+///
+/// The mechanism is a total destructuring: adding a field to
+/// `NormalizedProvider` makes this stop compiling.
+#[test]
+fn a_normalized_provider_carries_no_undecided_fields() {
+    let outcome = catalog();
+    let p = outcome.catalog.providers.first().expect("one provider");
+
+    // Exhaustive by construction. A new field breaks the build here.
+    let fusiform_core::normalize::NormalizedProvider {
+        provider_id: _,
+        npm_quarantined: _,
+        api_base_quarantined: _,
+        models: _,
+    } = p;
+
+    // And the quarantined values are not reachable from the whole catalog by
+    // ANY rendering. Checked against the debug output rather than a serialized
+    // one, because `NormalizedCatalog` does not implement `Serialize` at all --
+    // which is a stronger property than this test first assumed and worth
+    // stating: the domain type cannot be handed to serde by accident, so a wire
+    // leak would take a deliberate mapping step.
+    //
+    // Debug is the widest rendering available, so a value absent from it is
+    // absent from the type.
+    let rendered = format!("{:?}", outcome.catalog);
+    assert!(
+        !rendered.contains("api.anyapi.ai"),
+        "a quarantined base URL must not be reachable from the catalog at all"
+    );
+    assert!(
+        !rendered.contains("@ai-sdk/"),
+        "a quarantined npm adapter must not be reachable either"
+    );
+
+    // The control: a value that SHOULD be there is, so the two assertions above
+    // are not passing because the rendering is empty.
+    assert!(
+        rendered.contains("claude-sonnet-4-5"),
+        "the rendering must actually contain the catalog"
+    );
+}
