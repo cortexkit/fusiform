@@ -654,3 +654,41 @@ none names a provider:
 The uniformity of that result is the finding. It suggests geometry may be keyed
 at the wrong granularity — `(provider, model)` cannot express a fact that
 depends on a header the consumer sets. Recorded, not acted on.
+
+## 13. Pinning a string across a seam
+
+Learned 2026-08-13 by causing the collision this section prevents.
+
+A vocabulary value was ratified three times in one exchange and the three
+ratifications disagreed, because each named the authority differently:
+
+- *"the ratified spelling"* — resolved to whichever message the reader had open.
+- *"copy from the commit, not the thread"* — correct advice, and it pointed at a
+  commit that was replaced while the instruction was in flight.
+- *"the executed one"* — re-resolved under the reader.
+
+Two consumers ended up incompatible for several minutes. **Nobody was resolving
+a stale value; each party resolved a live one, at a different instant.** That is
+what makes the failure invisible — every reader sees something real, current and
+correct.
+
+**The rule: a cross-seam string ratification must name an immutable authority —
+a specific commit SHA plus the string verbatim, declared terminal.** Anything
+softer re-resolves. `HEAD`, "the committed spelling", "my working tree" and "the
+executed one" are all pointers, and a pointer is a subject that re-resolves under
+whoever reads it.
+
+The corollary is uncomfortable and worth stating: **this collision was caused by
+the anti-drift discipline working.** Both parties moved to correct a divergence
+they had each correctly identified, and the moves crossed. Care is not the
+defence here; naming an immutable authority is.
+
+The verification is mechanical and takes one command — read the string out of
+the committed object rather than the working tree:
+
+```
+git show <sha>:<path>
+```
+
+Not `grep`, not the file on disk, not memory. The working tree is a different
+subject from the commit, and on the day this rule was learned they differed.
