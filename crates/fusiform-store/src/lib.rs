@@ -884,6 +884,56 @@ impl CatalogStore {
     /// restore — after a rewind to 5, writing 6 passes it — which is exactly why
     /// the floor above is the actual protection. It catches a bug in fusiform's
     /// own arithmetic, which is a different failure and worth catching.
+    ///
+    /// # What this derivation costs a consumer, measured with BROCA 2026-08-13
+    ///
+    /// The wall-clock floor protects the counter and, in doing so, makes a
+    /// restore INVISIBLE at the version. After a restore the version goes UP
+    /// while the content goes BACK, because the restored store holds fewer
+    /// identities — models arrive daily, 6,310 live against 6,280 at a seed two
+    /// days earlier.
+    ///
+    /// That is the one combination which passes a consumer's version check and
+    /// lands in their content check. BROCA's stale guard passes exactly as this
+    /// derivation guarantees; their completeness guard then fires, and because
+    /// it compares against identities they HOLD and a refused refresh never
+    /// installs, the refusal is PERMANENT. Proven by their test, not inferred.
+    ///
+    /// A POINT-IN-TIME READ IS BYTE-IDENTICAL TO THAT SIGNATURE. `catalog.get`
+    /// with `at_ms` returns an older identity set carrying the CURRENT version,
+    /// because `catalog_version` describes the store at read time rather than
+    /// the snapshot resolved. Correct as documented, and it makes the two
+    /// situations indistinguishable to a consumer by construction.
+    ///
+    /// # The refinement, and why this is not simply a bug
+    ///
+    /// A counter that shares its artifact's fate is a DEFECT when it must
+    /// survive a restore and a FEATURE when it must REFLECT one. Same property,
+    /// opposite value, decided by whether the counter protects the data or
+    /// describes it. This one was built for the first job and is doing the
+    /// second badly — a design used outside its purpose rather than a mistake,
+    /// which is why it took two seats to see.
+    ///
+    /// # If this is ever changed to derive from content, do it in this order
+    ///
+    /// A content-derived version (the newest era boundary) makes a restore
+    /// VISIBLE: the consumer refuses loudly and it SELF-HEALS on the next poll
+    /// that writes an era — a jump, not a climb, so the consumer's high-water
+    /// does not lengthen it.
+    ///
+    /// The wait is therefore the gap between era-writing polls. Measured on the
+    /// live store over 30 gaps: average 62 minutes, p90 120, max 208, with 9 of
+    /// 30 exceeding an hour.
+    ///
+    /// BROCA degrades after three consecutive refusals, which is 60 minutes.
+    /// That threshold is correct ONLY because this derivation makes a refusal
+    /// permanent — under a content-derived version, 30% of ordinary quiet
+    /// periods would alarm a consumer that is recovering correctly, and an
+    /// alarm that fires during its own recovery trains itself away.
+    ///
+    /// So: measure the worst case, tell BROCA, let them re-pick the threshold,
+    /// THEN ship. Not the reverse. The dependency is invisible from inside
+    /// either repository.
     pub fn advance_catalog_version(
         &self,
         observation_id: i64,
