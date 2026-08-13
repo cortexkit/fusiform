@@ -411,8 +411,40 @@ reporter is not asserting the path does not forward; it has no opinion. Reading
 which is the one direction that can promote a cell it should not.
 
 So: absent means **unknown routing**, which refuses promotion exactly as
-`true` does. Only an explicit `false` from a reporter that knows the field
-permits it.
+`true` does.
+
+#### `false` is unrepresentable, because nothing can establish it
+
+The sentence above originally ended *"only an explicit `false` from a reporter
+that knows the field permits it"*, and that contradicted §11 of this document
+four hundred lines below.
+
+**Forwarder detection has one-directional power.** Present evidence proves
+multi-vendor; absent evidence proves nothing, because a provider may simply use
+an id convention no detector knows. A provider passing every test is UNKNOWN,
+not first-party. So a reporter writing `false` is not reporting a measurement —
+there is no measurement available that yields it. It is reporting *"not in my
+forwarder set"*, which is a statement about the reporter's list rather than
+about the world.
+
+Under the promotion rule that is the one direction that costs something:
+`false` would admit a report as safely non-forwarded **at a key where nobody
+checked anything**.
+
+MC found this in their shipped emitter within the hour of the pin above — it
+wrote `false` for every non-forwarder, exactly the collapse. Their fix is
+better than a documented caution: the field is type-narrowed to
+`path_may_forward?: true`, so `false` is **unrepresentable** rather than
+discouraged.
+
+Adopted here as the schema rule: **`path_may_forward` is `true` or absent. A
+report carrying `false` is malformed** and is rejected rather than read,
+because reading it requires deciding what a reporter meant by a value it could
+not have measured.
+
+The general form, MC's: **when a field's absence has semantics, the
+present-value type must exclude the value that lies.** If absent means unknown,
+`false` must be unrepresentable unless somebody can actually establish it.
 
 **The distinction matters because the boolean alone can never promote a cell.**
 SUBC's framing was that capture-time tagging makes the routing discriminant
