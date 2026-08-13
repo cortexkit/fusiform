@@ -1463,6 +1463,34 @@ database — a different failure. **The rewind is unavoidable at the storage
 layer**, so the counter has to be immune to it instead: see §10, where the
 version is derived as `max(now_ms, current + 1)`.
 
+#### Everything else a restore rewinds, swept rather than assumed
+
+The version was found by accident — it was the one piece of state anyone had
+thought about. The general shape is: **any value a restore rewinds, whose
+correctness depends on it only moving forward.** ASTRO hit the same structure
+from the other side (a fence row restored along with the thing it protects), and
+both instances were found by noticing rather than by looking, so this is the
+sweep.
+
+Every piece of state fusiform persists, and what a restore does to it:
+
+| State | Rewinds? | Consequence | Status |
+|---|---|---|---|
+| `catalog_version` | yes | every consumer refuses every push until the counter re-crosses its old high-water — silent at the producer, total at the consumer | immune by derivation (§10), tested across a real restore |
+| `observation` rows | yes | history loses recent polls; the next poll's window opens against an older prior observation, so a window is WIDER than the truth | acceptable: a wider window is a weaker claim, which is the honest direction. An era's window is a bound, and a bound that over-covers is not a lie |
+| `era` rows | yes | recent facts revert to older values | self-healing: the next poll diffs against the restored state and rewrites what moved. Costs one cadence, and the eras it writes carry honest `Observed` boundaries |
+| stored `etag` | yes | fusiform sends a stale conditional GET | **harmless, and measured rather than reasoned**: models.dev answers a stale `If-None-Match` with `200` and the full body, not `304`. Verified against the live upstream 2026-08-13. The correctness of the restore path here depends on the upstream honouring conditional GET properly, which is a fact about someone else's server, so it is measured and dated rather than assumed |
+| `cortexkit_fence` epoch | yes | the lease epoch goes backwards | harmless here: the fence defends against a concurrent superseded writer within one process lifetime, and a restore is not that. Measured — the epoch does rewind, and the next fenced write re-claims |
+| health signals | n/a | not persisted | atomics, adopted from the store at startup (§12) |
+
+The one that needed measuring rather than reasoning is the ETag, and the reason
+generalises: **its safety is a property of the upstream's behaviour, not of
+fusiform's code.** A server that answered `304` to an unrecognised ETag would
+leave a restored fusiform believing its stale catalog was current, indefinitely,
+with every poll confirming it. Nothing in this repository could detect that, and
+nothing in this repository can prevent the upstream from changing it — so the
+date on that row is load-bearing.
+
 ## 10. Serve and push
 
 ### Two consumers, two envelope shapes, on purpose
