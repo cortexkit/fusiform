@@ -142,17 +142,6 @@
           "source_ref": "mc-geometry-spec@06a0e5ac#measured-per-model-findings:grok-4.6",
           "observed_at": "2026-08-13T12:54:15Z"
         },
-        "output.advertised": {
-          "value": {
-            "kind": "unknown",
-            "why": "placeholder_output_equals_context"
-          },
-          "grade": "unknown",
-          "units": "provider",
-          "boundary": "Observed",
-          "source_ref": "models.dev@2026-08-13:xai/grok-4.6 (output=500000, context=500000)",
-          "observed_at": "2026-08-13T15:12:00Z"
-        },
         "output.default": {
           "value": {
             "kind": "stated",
@@ -211,17 +200,6 @@
           "boundary": "Observed",
           "source_ref": "https://github.com/ollama/ollama/issues/16890",
           "observed_at": "2026-08-13T12:54:15Z"
-        },
-        "output.advertised": {
-          "value": {
-            "kind": "unknown",
-            "why": "placeholder_output_equals_context"
-          },
-          "grade": "unknown",
-          "units": "provider",
-          "boundary": "Observed",
-          "source_ref": "models.dev@2026-08-13:ollama-cloud/deepseek-v4-flash (output=1048576, context=1048576)",
-          "observed_at": "2026-08-13T15:12:00Z"
         }
       },
       "note": "The catalog row is wrong twice over here, which is why this cell leads the batch: output equals context so it is a placeholder by the spec's rule, AND the real cap is 16x smaller. A consumer trusting the row reserves 1M against a 64k wall and gets an HTTP 400. NOT written as a provider-wide wildcard: the evidence names this model, and asserting it for all 20 ollama-cloud models would manufacture a claim from absence. If the cap is genuinely path-wide, one report naming a second model promotes it."

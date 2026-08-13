@@ -302,47 +302,58 @@ fn a_minted_id_is_declared_and_a_declared_mint_is_used() {
 }
 
 #[test]
-fn a_placeholder_unknown_names_a_row_that_is_genuinely_a_placeholder() {
-    // The strongest check in this file: a cell claiming the catalog publishes a
-    // placeholder is checked AGAINST the catalog. Writing
-    // `placeholder_output_equals_context` for a row whose output does not equal
-    // its context is a false accusation, and it would suppress a real value.
+fn no_cell_states_something_the_consumer_can_derive() {
+    // The uniformity rule, settled with MC 2026-08-13. It replaces a test that
+    // checked placeholder CLAIMS were accurate — accuracy stopped being the
+    // question once the answer became "do not ship them at all".
+    //
+    // A placeholder flag is one line of the consumer's own spec, computable
+    // from the catalog row in front of them. Shipping even one makes absence
+    // ambiguous: a consumer cannot tell "not a placeholder" from "fusiform did
+    // not ship the derivable cell here". Shipping zero makes absence mean one
+    // thing again — the same absent-versus-unknown discipline the schema was
+    // built for, applied to the dataset's own contents.
+    //
+    // Note this is NOT a claim that those rows are fine. 1,175 models publish
+    // output == context and 186 publish output: 0, measured 2026-08-13. The
+    // scale is reported in the design note; the cells stay reserved for what
+    // only measurement can supply.
     let doc = overlay();
-    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
-
-    let mut checked = 0usize;
     for cell in doc["cells"].as_array().unwrap() {
-        let provider = cell["provider_id"].as_str().unwrap();
-        let model = cell["model_id"].as_str().unwrap();
+        let id = format!(
+            "{}/{}",
+            cell["provider_id"].as_str().unwrap(),
+            cell["model_id"].as_str().unwrap()
+        );
         for (key, fact) in cell["facts"].as_object().unwrap() {
             let why = fact["value"].get("why").and_then(|v| v.as_str());
-            if why != Some("placeholder_output_equals_context") {
-                continue;
-            }
-            // For a post-seed model the seed cannot answer, so the values
-            // measured at verification time are used instead. They are recorded
-            // in the cell rather than re-fetched, so this test needs no network
-            // and a future reader sees exactly what was observed.
-            let limit = match cell.get("post_seed") {
-                Some(ps) => ps["catalog_limit_at_verification"].clone(),
-                None => seed[provider]["models"][model]["limit"].clone(),
-            };
-            let (ctx, out) = (
-                limit["context"].as_i64().unwrap_or(-1),
-                limit["output"].as_i64().unwrap_or(-1),
-            );
             assert!(
-                out >= ctx && ctx > 0,
-                "{provider}/{model} {key}: claimed output-equals-context \
-                 placeholder, but the catalog says context={ctx} output={out}"
+                !matches!(
+                    why,
+                    Some("placeholder_output_equals_context") | Some("placeholder_zero")
+                ),
+                "{id} {key}: this states a placeholder, which the consumer \
+                 derives itself. Shipping one makes the absence of the others \
+                 ambiguous."
             );
-            checked += 1;
         }
     }
 
-    assert!(
-        checked >= 2,
-        "the batch must exercise the placeholder path — the two rows where the \
-         catalog is actively harmful are its highest-value cells; found {checked}"
+    // And the enforced value BEHIND a harmful advertisement must survive, or
+    // this rule has quietly deleted the cells it was meant to preserve. The
+    // ollama-cloud row advertises 1,048,576 output and enforces 65,536; that
+    // number is available from nowhere else and is the reason the row leads the
+    // batch.
+    let ollama = doc["cells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["provider_id"] == "ollama-cloud")
+        .expect("the ollama-cloud cell must survive the placeholder drop");
+    assert_eq!(
+        ollama["facts"]["output.enforced"]["value"]["value"]
+            .as_i64()
+            .expect("output.enforced must still carry its measured value"),
+        65536
     );
 }

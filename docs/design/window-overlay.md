@@ -508,6 +508,26 @@ about 150 to 1, and a dataset whose bulk is recomputable trains its consumer to
 skim it. The measurement above is reported so a consumer knows the scale of the
 problem; the cells are reserved for what only measurement can supply.
 
+**Settled with MC 2026-08-13: ZERO derivable cells, not few.** Their consumer
+applies the equal-output rule itself, per field and both spellings, committed
+with mutation tests. Their argument for uniformity is stronger than the
+ratio one:
+
+> The moment the dataset contains ONE derivable cell, a consumer cannot know
+> whether the absence of a flag means "not a placeholder" or "fusiform did not
+> ship the derivable one here."
+
+Shipping zero makes absence mean one thing again — the same absent-versus-unknown
+discipline the schema already pays for elsewhere, applied to the dataset's own
+contents. Held by `no_cell_states_something_the_consumer_can_derive`, which also
+asserts the enforced value BEHIND a harmful advertisement survives, so the rule
+cannot quietly delete what it exists to protect.
+
+SUBC's harm-first priority rule is unaffected: what made the ollama-cloud row
+lead batch one is the enforced 65,536 behind an advertised 1,048,576, and that
+cell stays. **Harm ranking decides which measurements to chase first; it does
+not license shipping recomputable flags.**
+
 ## 12. `geometry` bundles two dimensions, and the fourth combination is real
 
 Recorded 2026-08-13, NOT acted on. The three-value enum is ratified and a
