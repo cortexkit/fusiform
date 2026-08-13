@@ -219,18 +219,41 @@ fn describe_failure(signals: &Signals) -> &'static str {
     }
 }
 
+/// The metrics an operator reads.
+///
+/// # Two scopes, and the names say which
+///
+/// A `process_` prefix means the value counts what THIS PROCESS has done since
+/// it started. Everything else describes the CATALOG, and survives a restart by
+/// being adopted from the store.
+///
+/// The distinction is not pedantry. Before it, `poll_attempts` read `1` on a
+/// module that had been running all day against a store holding fourteen
+/// observations — true of the process, and read as a statement about fusiform.
+/// It sat in the same flat object as `observation_age_ms`, which describes the
+/// catalog, with nothing to say they answer different questions.
+///
+/// SUBC's rule, from the null-write-age defect one field over: a process-scoped
+/// and a subject-scoped metric need different names or different values, never
+/// the same field. The counters cannot be adopted from the store — the
+/// conservation identity only holds within one process, since a restart resets
+/// both halves together — so the name is what has to carry it.
 fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
     let (attempts, recorded) = signals.attempt_ledger();
     serde_json::json!({
         // Both halves of the conservation identity, so an operator can see the
         // divergence rather than take health's word for it. Named for what
         // they count: ticks that started, and ticks that reached a verdict.
-        "poll_attempts": attempts,
-        "polls_recorded": recorded,
+        "process_poll_attempts": attempts,
+        "process_polls_recorded": recorded,
         // Ticks that started and recorded nothing. Non-zero means writes are
         // failing, and there is no other signal for that state.
-        "polls_unrecorded": attempts.saturating_sub(recorded),
-        "consecutive_failures": signals.consecutive_failures(),
+        "process_polls_unrecorded": attempts.saturating_sub(recorded),
+        // Deliberately process-scoped and deliberately NOT adopted: a restart
+        // genuinely does clear the streak, because the new process has failed
+        // nothing yet. The staleness clock is the signal that survives an
+        // outage across a restart, and it is a catalog-scoped one.
+        "process_consecutive_failures": signals.consecutive_failures(),
         // Present so a machine reading health can branch on the cause without
         // parsing the detail sentence.
         "last_failure_class": signals.last_failure_class().map(|c| match c {
@@ -239,13 +262,25 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
             FailureClass::Parse => "parse",
             FailureClass::Implausible => "implausible",
         }),
+        // Catalog-scoped from here down: adopted from the store at startup, so
+        // these describe the catalog rather than the process reading it.
         "observation_age_ms": signals.observation_age_ms(now_ms),
+        "last_write_age_ms": signals.last_write_age_ms(now_ms),
+        "store_open": signals.store_is_open(),
         // How long since the loop last ATTEMPTED, distinct from how long since
         // it last observed. A failing loop keeps this current while
         // observation_age_ms grows; a stopped loop leaves both behind.
-        "attempt_age_ms": signals.attempt_age_ms(now_ms),
-        "last_write_age_ms": signals.last_write_age_ms(now_ms),
-        "store_open": signals.store_is_open(),
+        //
+        // Process-scoped, and correctly so: the stopped-loop check it feeds is
+        // asking whether THIS process's loop is running, which is not a
+        // property of the catalog. Null right after a restart is the honest
+        // answer — nothing has attempted yet — and the check does not fire on
+        // null, so a fresh process is never called stopped.
+        //
+        // An earlier version of this comment said it was adopted from the
+        // observation clock at startup. It is not, and the scope test caught
+        // that within a minute of the sentence being written.
+        "process_attempt_age_ms": signals.attempt_age_ms(now_ms),
     })
 }
 
@@ -348,9 +383,9 @@ mod tests {
         // Both halves of the ledger, and their difference. A tick that started
         // and recorded a verdict contributes one to each, so the difference is
         // zero on a healthy module.
-        assert_eq!(m["poll_attempts"], 1);
-        assert_eq!(m["polls_recorded"], 1);
-        assert_eq!(m["polls_unrecorded"], 0);
+        assert_eq!(m["process_poll_attempts"], 1);
+        assert_eq!(m["process_polls_recorded"], 1);
+        assert_eq!(m["process_polls_unrecorded"], 0);
         assert_eq!(m["observation_age_ms"], 1_000);
         assert_eq!(m["last_write_age_ms"], 900);
         assert_eq!(m["store_open"], true);

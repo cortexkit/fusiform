@@ -156,3 +156,108 @@ fn the_two_constructors_agree_about_never() {
         "a module that has done nothing reports null, not an age since the epoch: {from_new}"
     );
 }
+
+/// Every metric is either process-scoped by name, or survives a restart.
+///
+/// The convention SUBC drew out of the null-write-age defect: a process-scoped
+/// and a subject-scoped metric need different names or different values, never
+/// the same field. `poll_attempts` read 1 on a module running all day against a
+/// store holding fourteen observations — true of the process, and sitting in a
+/// flat object beside `observation_age_ms`, which describes the catalog.
+///
+/// This is the mechanical form of that rule, so it fires on a metric added
+/// later rather than depending on someone remembering the convention. Written
+/// as an enumeration over the real metrics object, so a new field is covered
+/// the day it appears rather than the day someone updates a list.
+#[test]
+fn every_metric_is_process_scoped_by_name_or_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = 10 * HOUR;
+    seed_history(dir.path(), Timestamp(now - 3 * HOUR));
+
+    let (_store, signals) = restart(dir.path());
+    let metrics = health::report(&signals, now).metrics.unwrap();
+    let object = metrics.as_object().expect("metrics is an object");
+
+    // A restart against a store with real history. Anything describing the
+    // CATALOG must have been adopted and therefore be non-null; anything
+    // describing the PROCESS is legitimately empty and must say so in its name.
+    for (key, value) in object {
+        if key.starts_with("process_") {
+            continue;
+        }
+        // `store_open` is a boolean about the process's own store handle rather
+        // than an adopted instant, and it is true here because the store opened.
+        if key == "store_open" {
+            assert_eq!(value, true, "the store is open in this fixture");
+            continue;
+        }
+        // `last_failure_class` is null when there is no current failure, which
+        // is the honest answer rather than an unadopted one.
+        if key == "last_failure_class" {
+            continue;
+        }
+
+        assert!(
+            !value.is_null(),
+            "{key} is not process-scoped by name, so it must describe the catalog \
+             and be adopted from the store at startup — it reported null on a \
+             restart against a store with real history"
+        );
+    }
+
+    // And the process-scoped ones are genuinely reset, which is what makes the
+    // naming meaningful rather than decorative.
+    assert_eq!(metrics["process_poll_attempts"], 0);
+    assert_eq!(metrics["process_polls_recorded"], 0);
+    assert_eq!(metrics["process_consecutive_failures"], 0);
+}
+
+/// Every metric name is accounted for, so a new one forces a scope decision.
+///
+/// The null check above has a gap it cannot close on its own: a new
+/// process-scoped COUNTER would read `0` after a restart, and zero is not null,
+/// so it would pass while telling an operator the catalog has never been
+/// polled. No value-based test can separate a process counter from a catalog
+/// one — both are numbers and both can legitimately be zero.
+///
+/// So the fence is on the key set instead. Adding a metric fails this test
+/// until its name is listed here, which is the moment to decide which question
+/// it answers. That is an exhaustiveness check at the producer rather than a
+/// convention someone has to remember.
+#[test]
+fn the_metric_names_are_pinned() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_store, signals) = restart(dir.path());
+    let metrics = health::report(&signals, 10 * HOUR).metrics.unwrap();
+
+    let mut actual: Vec<&str> = metrics
+        .as_object()
+        .expect("metrics is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    actual.sort_unstable();
+
+    // Process-scoped: what this process has done since it started. Reset by a
+    // restart, and the prefix says so.
+    // Catalog-scoped: adopted from the store, so a restart does not erase it.
+    let expected = [
+        "last_failure_class",
+        "last_write_age_ms",
+        "observation_age_ms",
+        "process_attempt_age_ms",
+        "process_consecutive_failures",
+        "process_poll_attempts",
+        "process_polls_recorded",
+        "process_polls_unrecorded",
+        "store_open",
+    ];
+
+    assert_eq!(
+        actual, expected,
+        "the metric names changed. Each one is either process-scoped (prefixed \
+         `process_`, reset by a restart) or describes the catalog (adopted from \
+         the store at startup). Pick one and add the name here."
+    );
+}

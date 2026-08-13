@@ -367,9 +367,9 @@ fn ticks_that_reach_no_verdict_are_reported_as_a_write_problem() {
     // The metrics carry both halves, so an operator can check the arithmetic
     // rather than take health's word for it.
     let m = report.metrics.unwrap();
-    assert_eq!(m["poll_attempts"], 4);
-    assert_eq!(m["polls_recorded"], 1);
-    assert_eq!(m["polls_unrecorded"], 3);
+    assert_eq!(m["process_poll_attempts"], 4);
+    assert_eq!(m["process_polls_recorded"], 1);
+    assert_eq!(m["process_polls_unrecorded"], 3);
 }
 
 /// One unrecorded tick is not a problem, because it is reachable while healthy.
