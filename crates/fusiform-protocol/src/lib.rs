@@ -169,6 +169,58 @@ pub struct CatalogGetResponse {
     /// is repricing against a value that may not have been in force.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub uncertain: Vec<UncertainFactWire>,
+    /// Facts whose served value differs from what the upstream published.
+    ///
+    /// # The served value is fusiform's judgment, not the upstream's word
+    ///
+    /// models.dev publishes a 1,000,000-token context window for
+    /// `anthropic/claude-sonnet-4-5`; Anthropic's own documentation names that
+    /// model as its example of the 200k class. Fusiform serves 200,000, because
+    /// a consumer trusting 1M sends five times the real ceiling into a hard 400
+    /// — the Anthropic wall is prompt-only, so nothing truncates.
+    ///
+    /// Every entry names the upstream value, the served value, and the
+    /// AUTHORITY behind the change. The authority is load-bearing: a divergence
+    /// an operator cannot answer "says who" about makes distrusting the
+    /// correction their cheapest move.
+    ///
+    /// **Always empty on a point-in-time read.** A correction records what a
+    /// source says NOW and carries no validity interval, so applying it to a
+    /// past instant would manufacture a claim about a window nobody observed.
+    /// History serves what the upstream published, which is the true statement
+    /// about the record.
+    ///
+    /// A consumer ignoring this list gets the safe value; one reading it can
+    /// audit. Both are correct, and the default is the safe one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overridden: Vec<OverriddenFactWire>,
+}
+
+/// One fact whose served value differs from the upstream's.
+///
+/// # Not to be confused with `CorrectedFact`, which is a different claim
+///
+/// `CorrectedFact` says FUSIFORM'S OWN RECORD was wrong over a past window —
+/// a defect in this module's reading, marked so historical queries refuse.
+///
+/// This says THE UPSTREAM'S PUBLISHED VALUE is wrong right now, and fusiform is
+/// serving something else. The upstream's record is intact and history still
+/// reports it; only the current served view differs.
+///
+/// The names had to diverge because a consumer meeting both in one crate would
+/// reasonably assume they were related. They are not: one is an admission, the
+/// other is an override.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OverriddenFactWire {
+    pub provider_id: String,
+    pub model_id: String,
+    pub fact_key: String,
+    /// What the upstream published, verbatim, as JSON text.
+    pub upstream_value: String,
+    /// What fusiform serves instead.
+    pub served_value: String,
+    /// WHO says so, and specific enough to go and read.
+    pub authority: String,
 }
 
 /// A fact whose recorded value at the read instant may already have ended.

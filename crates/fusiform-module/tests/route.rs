@@ -107,10 +107,16 @@ fn fact_values_are_values_not_strings() {
         Some(3_000_000_000)
     );
 
+    // The TYPE is what this test is about, so the assertion is on the type.
+    //
+    // It used to assert the value was 1,000,000, which was incidental to the
+    // test's subject and became wrong the day fusiform started correcting this
+    // model's context limit to Anthropic's documented 200k. A value pinned in
+    // passing inside a test about something else is a claim nobody decided to
+    // make, and it fails for a reason unrelated to what the test is named for.
     let limit = sonnet.get("limit.context").expect("a context limit");
-    assert_eq!(
-        limit.as_u64(),
-        Some(1_000_000),
+    assert!(
+        limit.is_number(),
         "a limit must arrive as a number, got {limit:?}"
     );
 }

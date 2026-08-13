@@ -19,6 +19,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::overlay;
 use fusiform_core::{FieldId, SourceId, Timestamp};
 use fusiform_store::correct::{apply_correction, plan_correction};
 use fusiform_store::serve::{CatalogQuery, CatalogSnapshot, Presence};
@@ -31,9 +32,9 @@ use serde::Deserialize;
 // a route should not have to know which crate the type is declared in.
 pub use fusiform_protocol::{
     CatalogGetRequest, CatalogGetResponse, CorrectRequest, CorrectResponse, CorrectedFact,
-    CorrectionDetail, HistoryEra, HistoryRequest, HistoryResponse, PollChanges, StatusPoll,
-    StatusRequest, StatusResponse, ToolResponse, UncertainFactWire, WithheldFactWire, TOOLS,
-    TOOL_CORRECT, TOOL_GET, TOOL_HISTORY, TOOL_STATUS,
+    CorrectionDetail, HistoryEra, HistoryRequest, HistoryResponse, OverriddenFactWire, PollChanges,
+    StatusPoll, StatusRequest, StatusResponse, ToolResponse, UncertainFactWire, WithheldFactWire,
+    TOOLS, TOOL_CORRECT, TOOL_GET, TOOL_HISTORY, TOOL_STATUS,
 };
 
 /// Why a request could not be served.
@@ -401,7 +402,7 @@ pub fn serve_catalog_get(
         snapshot
     };
 
-    Ok(render(source, snapshot))
+    Ok(render(source, snapshot, at, overlay::corrections()))
 }
 
 fn single_model_snapshot(
@@ -521,7 +522,17 @@ fn single_model_snapshot(
 /// that. A value that does not parse is a stored row this build cannot read,
 /// which is loud rather than silently dropped: dropping it would present a
 /// model as having no rate.
-fn render(source: SourceId, snapshot: CatalogSnapshot) -> CatalogGetResponse {
+/// Render a snapshot onto the wire.
+///
+/// Takes `at` so it can tell a current-view read from a point-in-time one:
+/// corrections apply only to the former, and the distinction is not derivable
+/// from the snapshot, which always carries a concrete resolved instant.
+fn render(
+    source: SourceId,
+    snapshot: CatalogSnapshot,
+    at: Option<Timestamp>,
+    corrections: &overlay::Corrections,
+) -> CatalogGetResponse {
     let mut models = BTreeMap::new();
     for model in snapshot.models {
         let identity = format!("{}/{}", model.provider_id, model.model_id);
@@ -570,6 +581,18 @@ fn render(source: SourceId, snapshot: CatalogSnapshot) -> CatalogGetResponse {
         })
         .collect();
 
+    // Corrections apply to the CURRENT VIEW only.
+    //
+    // `at` is Some for a point-in-time read, and an overlay cell carries
+    // observed_at with no validity interval — so applying today's reading to a
+    // past instant would state something about a window nobody observed. The
+    // record keeps saying what models.dev said.
+    let overridden = if at.is_none() {
+        apply_corrections(&mut models, corrections)
+    } else {
+        Vec::new()
+    };
+
     CatalogGetResponse {
         source: source.as_str().to_string(),
         resolved_at_ms: snapshot.resolved_at.0,
@@ -577,6 +600,7 @@ fn render(source: SourceId, snapshot: CatalogSnapshot) -> CatalogGetResponse {
         models,
         withheld,
         uncertain,
+        overridden,
     }
 }
 
@@ -589,4 +613,69 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// Replace upstream values with fusiform's corrections, for a CURRENT-VIEW read.
+///
+/// # The point-in-time exclusion is the whole reason the caller passes a flag
+///
+/// An overlay cell carries `observed_at` and no validity interval. "Anthropic's
+/// documentation, read today, says 200k" does not establish what was true in
+/// July — they may have reduced it, and the catalog may have been right at the
+/// time. Applying a present-day reading to a past instant manufactures a claim
+/// about a window nobody observed: not a forged observation, a forged
+/// inference.
+///
+/// So a point-in-time read never reaches this function, and history keeps
+/// saying what models.dev said — the true statement about the record.
+fn apply_corrections(
+    models: &mut BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+    corrections: &overlay::Corrections,
+) -> Vec<OverriddenFactWire> {
+    let mut applied = Vec::new();
+
+    for (identity, facts) in models.iter_mut() {
+        // The identity is `provider/model`, and a model id may itself contain a
+        // slash (`openai/gpt-oss-120b` under 28 providers). Split ONCE from the
+        // left: the provider id never contains one.
+        let Some((provider_id, model_id)) = identity.split_once('/') else {
+            continue;
+        };
+
+        for (fact_key, value) in facts.iter_mut() {
+            let key = (
+                provider_id.to_string(),
+                model_id.to_string(),
+                FactKey::from_stored(fact_key.clone()),
+            );
+            let Some(correction) = corrections.get(&key) else {
+                continue;
+            };
+
+            let served: serde_json::Value = match correction.served_value.parse::<i64>() {
+                Ok(n) => serde_json::Value::from(n),
+                Err(_) => serde_json::Value::String(correction.served_value.clone()),
+            };
+
+            // A correction that changes nothing is not reported. The upstream
+            // may have fixed the row, leaving the cell redundant rather than
+            // wrong — and a line reading "1000000 -> 1000000" trains an
+            // operator to skim the ones that matter.
+            if *value == served {
+                continue;
+            }
+
+            applied.push(OverriddenFactWire {
+                provider_id: provider_id.to_string(),
+                model_id: model_id.to_string(),
+                fact_key: fact_key.clone(),
+                upstream_value: value.to_string(),
+                served_value: correction.served_value.clone(),
+                authority: correction.authority.clone(),
+            });
+            *value = served;
+        }
+    }
+
+    applied
 }

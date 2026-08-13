@@ -119,7 +119,7 @@
           "capability.reasoning": true,
           "capability.tool_call": true,
           "existence": "present",
-          "limit.context": 1000000,
+          "limit.context": 200000,
           "limit.output": 64000,
           "rate.cache_read": {
             "currency": "USD",
@@ -147,6 +147,16 @@
           }
         }
       },
+      "overridden": [
+        {
+          "authority": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-08-13) — 'Other Claude models, including Claude Sonnet 4.5, have a 200k-token context window'",
+          "fact_key": "limit.context",
+          "model_id": "claude-sonnet-4-5",
+          "provider_id": "anthropic",
+          "served_value": "200000",
+          "upstream_value": "1000000"
+        }
+      ],
       "resolved_at_ms": -1,
       "source": "models.dev"
     }

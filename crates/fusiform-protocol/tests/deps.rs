@@ -180,6 +180,14 @@ fn every_response_type_round_trips() {
                 fields: serde_json::json!([{"field":"rate","class":"output"}]),
             }],
         }],
+        overridden: vec![fusiform_protocol::OverriddenFactWire {
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: "limit.context".into(),
+            upstream_value: "1000000".into(),
+            served_value: "200000".into(),
+            authority: "https://docs.claude.com/...".into(),
+        }],
         uncertain: vec![fusiform_protocol::UncertainFactWire {
             provider_id: "anthropic".into(),
             model_id: "claude-sonnet-4-5".into(),
