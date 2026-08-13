@@ -1382,8 +1382,30 @@ Opening the store *before* connecting means guessing that path — "self-keyed"
 path at `astrocyte/store.db` is a 0-byte decoy that misleads every audit,
 including mine an hour ago).
 
-Tables: `observation`, `snapshot`, `provider_era`, `model_era`, `rate_era`,
-`raw_document`.
+Tables, as shipped: **`observation`, `era`, `catalog_version`**, plus
+`cortexkit_schema_version` owned by the store crate, and `cortexkit_fence`
+which the store crate creates on the **first fenced write** rather than at open
+(measured, not assumed — a freshly migrated store does not have it). An operator
+inspecting a store that has never been written to will not see the fence table,
+and that is not a fault.
+
+This line previously named `snapshot`, `provider_era`, `model_era`, `rate_era`
+and `raw_document` — a specification written before any code, four of whose six
+tables do not exist, and which omitted `era`, the table that holds every fact
+fusiform serves. It sat under a §0.1 row reading **built**, so a reader had no
+way to tell the sentence was a plan.
+
+The eras collapsed into one table because the era row is the same shape for
+every fact — identity, fact key, value, boundary, boundary kind — and splitting
+by fact family would have made "every current value for this model" a union of
+four queries with four indexes to keep aligned. `snapshot` and `raw_document`
+were dropped for the reason two paragraphs down: one store, one capture, one
+restore.
+
+The list is pinned by a test now (`crates/fusiform-store/tests/schema_doc.rs`)
+rather than by anyone remembering to update it, because ASTRO's finding on
+2026-08-13 is that **a note cannot say whether it describes an intention or the
+shipped artifact**, and attention is not a fix for that.
 
 Snapshot history lives as **rows, not content-addressed blob files**. At this
 scale a snapshot is single-digit megabytes and eras only grow on change, so a
