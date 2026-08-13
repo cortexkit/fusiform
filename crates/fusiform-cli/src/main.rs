@@ -537,19 +537,7 @@ fn print_catalog(response: &serde_json::Value) {
     // A single model prints its facts; a whole catalog prints one line each,
     // because 6,253 models times eleven facts is not something to read.
     if models.len() == 1 {
-        for (identity, facts) in models {
-            println!("\n{identity}");
-            let facts: BTreeMap<_, _> = facts
-                .as_object()
-                .map(|o| o.iter().collect())
-                .unwrap_or_default();
-            for (key, value) in facts {
-                println!("  {key:<34}  {value}");
-            }
-        }
-        print_withheld(response);
-        print_uncertain(response);
-        print_overridden(response);
+        print!("{}", render_single_model(response, models));
         return;
     }
 
@@ -621,6 +609,49 @@ fn render_overridden(response: &serde_json::Value) -> String {
         out.push_str(&format!("      {}\n", field("authority")));
     }
     out
+}
+
+/// One model's facts, with the qualification blocks that belong beside them.
+///
+/// # The co-location is load-bearing, not layout
+///
+/// An override is reported by its ABSENCE returning to normal: when the
+/// upstream adopts fusiform's value the block disappears, and the only thing
+/// telling an operator the override ended is the fact value printed above it
+/// having reverted. Those two must be in ONE output or the transition is
+/// invisible — a block that goes quiet is indistinguishable from an override
+/// still holding.
+///
+/// BROCA's point, and they are right that it was accidental: the property lived
+/// in the layout rather than in a decision, so moving the block to another
+/// command would silently lose it and the change would look like tidying.
+/// Returned as text so a test can hold the two together.
+fn render_single_model(
+    response: &serde_json::Value,
+    models: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    let mut out = String::new();
+    for (identity, facts) in models {
+        out.push_str(&format!("\n{identity}\n"));
+        let facts: BTreeMap<_, _> = facts
+            .as_object()
+            .map(|o| o.iter().collect())
+            .unwrap_or_default();
+        for (key, value) in facts {
+            out.push_str(&format!("  {key:<34}  {value}\n"));
+        }
+    }
+    // withheld and uncertain still print directly; only the override block is
+    // returned, because the override is the one whose ABSENCE carries meaning.
+    // Converting the other two would be churn for a property they do not have.
+    print!("{out}");
+    print_withheld(response);
+    print_uncertain(response);
+    let overridden = render_overridden(response);
+    print!("{overridden}");
+    // Returned for the test that holds the fact value and the override block
+    // together: everything printed above, plus the block.
+    format!("{out}{overridden}")
 }
 
 /// Report facts the read refused to answer.
@@ -1132,6 +1163,46 @@ mod tests {
             out.contains("docs.claude.com"),
             "the authority must be present, or 'says who' cannot be answered \
              from the screen: {out}"
+        );
+    }
+
+    /// The fact value and the override block appear in ONE output.
+    ///
+    /// The property BROCA identified as accidental. An override ending is
+    /// reported by its block DISAPPEARING, so the only thing telling an
+    /// operator it ended is the value above having reverted — and that only
+    /// works if the two are in the same output. A block that goes quiet is
+    /// otherwise indistinguishable from an override still holding.
+    ///
+    /// This test exists because nothing stopped someone moving the block to
+    /// another command, where the change would look like tidying and the
+    /// transition would be silently lost.
+    #[test]
+    fn the_fact_value_and_its_override_are_rendered_together() {
+        let response = serde_json::json!({
+            "resolved_at_ms": 1_786_600_000_000_i64,
+            "catalog_version": 1_786_600_000_000_i64,
+            "models": { "anthropic/claude-sonnet-4-5": { "limit.context": 200_000 } },
+            "overridden": [{
+                "provider_id": "anthropic", "model_id": "claude-sonnet-4-5",
+                "fact_key": "limit.context",
+                "upstream_value": "1000000", "served_value": "200000",
+                "authority": "https://docs.claude.com/... — '200k-token context window'"
+            }]
+        });
+        let models = response["models"].as_object().unwrap().clone();
+        let out = render_single_model(&response, &models);
+
+        let value_at = out
+            .find("limit.context")
+            .expect("the fact must be rendered");
+        let block_at = out
+            .find("overridden")
+            .expect("the override block must be rendered in the SAME output");
+        assert!(
+            value_at < block_at,
+            "the served value must appear before its override block, so a \
+             reverted value and a vanished block read as one transition: {out}"
         );
     }
 
