@@ -398,10 +398,10 @@ fn print_status(response: &serde_json::Value) {
 
             let mut parts = Vec::new();
             if changed > 0 {
-                parts.push(format!("{changed} facts changed"));
+                parts.push(format!("{changed} {} changed", plural(changed, "fact")));
             }
             if arrived > 0 {
-                parts.push(format!("{arrived} models arrived"));
+                parts.push(format!("{arrived} {} arrived", plural(arrived, "model")));
             }
             if withdrawn > 0 {
                 parts.push(format!("{withdrawn} withdrawn"));
@@ -577,6 +577,21 @@ fn print_history(response: &serde_json::Value) {
                 format_instant(until)
             );
         }
+    }
+}
+
+/// The singular or plural form of a noun, for a count.
+///
+/// Every count in this output is a real quantity that is genuinely 1 sometimes
+/// — many polls change exactly one fact, and a single model arriving is the
+/// most common non-zero arrival — so "1 models arrived" is not a rare edge
+/// case, it is the ordinary reading. Operator output that looks like a debug
+/// print invites being read like one.
+fn plural(n: i64, noun: &str) -> String {
+    if n == 1 {
+        noun.to_string()
+    } else {
+        format!("{noun}s")
     }
 }
 
@@ -925,5 +940,24 @@ mod tests {
             }
         }
         assert_eq!(expected_month, 13, "the walk must cover all twelve months");
+    }
+
+    /// Counts read as English, including when they are 1.
+    ///
+    /// Not cosmetic. Every count in the status output is genuinely 1 sometimes
+    /// — many polls change exactly one fact, and a single model arriving is
+    /// the most common non-zero arrival — so "1 models arrived" is the
+    /// ordinary reading rather than a rare edge case. It shipped to production
+    /// and appeared in the first status read after placement.
+    #[test]
+    fn a_count_of_one_reads_as_english() {
+        assert_eq!(plural(1, "fact"), "fact");
+        assert_eq!(plural(1, "model"), "model");
+
+        // Zero is plural in English, and the boundary is worth pinning because
+        // the obvious implementation (`n > 1`) gets it wrong.
+        assert_eq!(plural(0, "fact"), "facts");
+        assert_eq!(plural(2, "model"), "models");
+        assert_eq!(plural(24, "fact"), "facts");
     }
 }
