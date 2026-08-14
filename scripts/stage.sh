@@ -55,7 +55,6 @@ for bin in ck-fusiform ck-models; do
 done
 
 echo
-echo "staged at $STAGE"
 echo "rev       $HEAD_REV (self-reported by both binaries)"
 echo
 echo "sha256:"
@@ -65,3 +64,18 @@ echo "LC_UUID:"
 for bin in ck-fusiform ck-models; do
   printf '%-14s %s\n' "$bin" "$(dwarfdump --uuid "$STAGE/$bin" | awk '{print $2}')"
 done
+
+# THE DIRECTORY PRINTS LAST, and that ordering is the fix for a real error.
+#
+# It used to print first. A handoff was published naming
+# fusiform-20260814T103634Z when the artifact was at 103529Z: the stage output
+# had been read through `tail -9`, which cut the locator line while keeping the
+# hashes, and the path was then typed from the clock rather than copied. SUBC
+# placed from the sha-verified directory instead of refusing, which is the
+# resolution-identity rule working — the locator missed and the identity held.
+#
+# Printing it last means a truncated read loses the HASHES, which are the half
+# nobody can reconstruct from memory. A missing locator is recoverable; a
+# fabricated one that happens to resolve is not.
+echo
+echo "staged at $STAGE"
