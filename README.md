@@ -24,16 +24,28 @@ cortexkit/
   engram/        <- engram-core (dev-dependency, enrollment test only)
 ```
 
-Three of those are private repositories, so **cloning fusiform is not enough
-to build it** — you need read access to the siblings as well. Cargo loads
-every workspace manifest before honouring `-p` or `--exclude`, so a missing
-sibling gates the whole workspace: no partial build, no single-crate build,
-no test run.
+Cargo loads every workspace manifest before honouring `-p` or `--exclude`, so
+one missing sibling gates everything: no partial build, no single-crate build,
+no test run. Measured from a fresh clone with no siblings — `cargo build -p
+fusiform-cli` and `cargo build --workspace --exclude fusiform-module` both
+fail at manifest load, before any compilation.
 
-Written down because it cost an external contributor an afternoon to discover
-(issue #1), and because the failure names a path rather than a permission:
-cargo reports the directory it could not find, which reads as a broken
-manifest rather than a repository you cannot see.
+**The failures come in a ladder, and only the second rung is a wall:**
+
+| # | missing dep | repo | |
+|---|---|---|---|
+| 1 | `cortexkit-store` | commons | **public** — clone it and you pass |
+| 2 | `subc-client-rs` | subconscious | **private**, and a *regular* dependency |
+| 3 | `engram-core` | engram | **private**, but only a *dev*-dependency |
+
+Worth knowing before you start: the first error names commons, which anyone
+can fix, so the first rung gives no hint that a permission wall waits behind
+it. Cargo reports a directory it could not find, so *"you cannot see this
+repository"* arrives spelled as *"this path is wrong"*.
+
+Issue #1 was filed against rung 3 for that reason — the dev-dependency is the
+one that looks unusual, and removing it would move the failure to rung 2 rather
+than clearing it.
 
 `engram-core` is a **dev**-dependency and powers one test
 (`crates/fusiform-module/tests/enrollment.rs`), which validates the backup
