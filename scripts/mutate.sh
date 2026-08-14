@@ -174,7 +174,18 @@ if [ -n "$FAILED" ]; then
 fi
 
 echo "*** SURVIVED ***"
-echo "  The mutation built, the suite ran, and nothing objected. Either the"
-echo "  guard has a gap, or the mutant is equivalent — if equivalent, say so in"
-echo "  a comment at the site so nobody chases it again."
+echo "  The mutation built, the suite ran, and nothing objected. THREE causes,"
+echo "  and only the first is a finding:"
+echo
+echo "    1. the guard has a gap"
+echo "    2. the mutant is EQUIVALENT — it computes the same thing. Say so in a"
+echo "       comment at the site, or the next sweeper spends the same minutes"
+echo "       and then writes a test for a case that cannot exist."
+echo "    3. YOUR --test FILTER EXCLUDED THE TESTS THAT COVER IT. Before"
+echo "       concluding anything, re-run without the filter. Measured"
+echo "       2026-08-14: removing \"seeded\" from CONFIRMING_OUTCOMES survived"
+echo "       under --test history and was caught by TWELVE tests crate-wide."
+echo
+echo "  Cause 3 is the same shape as ANCHOR MISSING: the tool did not ask the"
+echo "  question, and the output looks exactly like the answer no."
 exit 1

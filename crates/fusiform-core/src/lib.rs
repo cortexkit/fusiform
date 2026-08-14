@@ -412,6 +412,19 @@ impl ObservationOutcome {
     ///
     /// The distinction is the whole point of recording failures separately: a
     /// poll that failed is not a poll that returned nothing.
+    ///
+    /// # A surviving mutant here is EQUIVALENT, not a gap
+    ///
+    /// Rewriting this as `!matches!(self, Failed { .. })` survives the whole
+    /// suite, and it should: the variants are exactly the four confirming ones
+    /// plus `Failed`, so the two expressions compute the same predicate today.
+    /// Recorded because a sweeper who finds it and reads it as missing coverage
+    /// will go looking for a test of a case that cannot exist.
+    ///
+    /// The lookup is still the right form. The negation is only equivalent
+    /// while `Failed` is the sole non-confirming outcome — an `Implausible` or
+    /// `Refused` variant would make it silently wrong, and the list would
+    /// force the decision at the moment the variant is added.
     pub fn confirms_current_values(&self) -> bool {
         CONFIRMING_OUTCOMES.contains(&self.wire_str())
     }
