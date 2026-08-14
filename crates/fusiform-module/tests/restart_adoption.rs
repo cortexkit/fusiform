@@ -609,3 +609,79 @@ fn a_first_failure_reports_when_it_happened() {
          which `tick` records before anything can fail. Got {after}"
     );
 }
+
+/// Every durable field is populated by a fresh process doing its own work.
+///
+/// # The window closes on its own
+///
+/// SUBC's deployment-scale rule, from the missing-instant defect: every
+/// deployed store acquires history immediately, so a fresh process's readings
+/// get permanently harder to observe from the moment they start mattering. The
+/// live store's 23-hour-old failure populated `last_failure_ms` at startup, so
+/// production certified a path that was broken — a store with history is a
+/// fixture that CANNOT construct the fresh-process case.
+///
+/// The specific defect was found by enumerating writers. This is the general
+/// form as a fence: for every durable field, a process that adopts NOTHING and
+/// then does the work must end up with a value. A field reachable only through
+/// adoption is one whose fresh-process path nobody has driven.
+///
+/// Deliberately asserts on the RENDERED metrics rather than the atomics, so a
+/// field that is stamped internally but not surfaced still fails here.
+#[test]
+fn a_fresh_process_populates_every_durable_field() {
+    let signals = Signals::new();
+    signals.store_opened();
+
+    // The control: with no adoption and no work, the durable fields must read
+    // as "nothing has happened" — otherwise the assertions below cannot tell a
+    // populated field from a defaulted one.
+    let fresh = health::report(&signals, 1_000)
+        .metrics
+        .expect("metrics are always present");
+    for key in ["last_write_age_ms", "last_failure_age_ms"] {
+        assert!(
+            fresh[key].is_null(),
+            "control: {key} must start null on a process that has adopted \
+             nothing, or this test cannot distinguish work from a default"
+        );
+    }
+    assert_eq!(fresh["failures_ever"], 0, "control: no failures yet");
+
+    // Now the work a poll loop does, with no adoption anywhere: one failed
+    // poll, then one that observes and writes.
+    signals.attempted(2_000);
+    signals.failed(fusiform_core::FailureClass::Parse);
+    signals.attempted(3_000);
+    signals.observed(3_000);
+    signals.wrote(3_000);
+
+    let after = health::report(&signals, 4_000)
+        .metrics
+        .expect("metrics are always present");
+
+    // Each field, with the reason it must be populated rather than a bare
+    // non-null check, so a failure says which mechanism is missing.
+    assert_eq!(
+        after["failures_ever"], 1,
+        "the durable count must come from `failed()`, not from adoption"
+    );
+    assert_eq!(
+        after["last_failure_age_ms"], 2_000,
+        "the failure instant must be stamped by the failing poll: this is the \
+         field that read null on a fresh process until b09d51b, reporting a \
+         failure of a known kind that never happened"
+    );
+    assert_eq!(
+        after["last_failure_class"], "parse",
+        "and its class must survive the successful poll that followed"
+    );
+    assert_eq!(
+        after["last_write_age_ms"], 1_000,
+        "the write instant must be stamped by the writing poll, not adopted"
+    );
+    assert_eq!(
+        after["observation_age_ms"], 1_000,
+        "and the observation instant likewise"
+    );
+}
