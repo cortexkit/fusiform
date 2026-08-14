@@ -486,17 +486,7 @@ fn print_status(response: &serde_json::Value) {
     // them to look further. This line is what tells them, and it names the flag
     // that would show it — a count with no way to reach the detail is a
     // diagnostic an operator has to guess at.
-    if let Some(f) = get("failures") {
-        if let (Some(ever), Some(at)) = (
-            f.get("ever").and_then(|v| v.as_i64()),
-            f.get("last_at_ms").and_then(|v| v.as_i64()),
-        ) {
-            println!(
-                "failed polls     {ever} ever, last {}  (--polls 60 to see it)",
-                format_instant(at)
-            );
-        }
-    }
+    print!("{}", render_failures(response));
 
     let Some(polls) = get("recent_polls").and_then(|v| v.as_array()) else {
         return;
@@ -595,6 +585,42 @@ fn print_overridden(response: &serde_json::Value) {
 /// The defect this file has already shipped once was in a COMPOSED sentence
 /// ("1 models arrived"), where every unit test of the part passed because the
 /// part was correct. So the artifact under test is the text an operator reads.
+/// The failed-poll history line, or nothing when no poll has ever failed.
+///
+/// Returned rather than printed so the COMPOSED SENTENCE is what gets tested.
+/// This file has already shipped `1 models arrived` to production: every unit
+/// test of the pluralisation passed, because the pluralisation was correct and
+/// the defect was in the caller. Nothing exercised the line an operator reads.
+fn render_failures(response: &serde_json::Value) -> String {
+    let Some(f) = response.get("failures") else {
+        return String::new();
+    };
+    let (Some(ever), Some(at)) = (
+        f.get("ever").and_then(|v| v.as_i64()),
+        f.get("last_at_ms").and_then(|v| v.as_i64()),
+    ) else {
+        return String::new();
+    };
+
+    // The CLASS is what routes an operator: `network` sends them to the
+    // upstream, `parse` to the payload, `implausible` to the shrink guard. A
+    // count and an instant say THAT and WHEN; without the class the line says
+    // something went wrong and not what.
+    //
+    // Omitted rather than filled when the module is too old to send it, because
+    // an invented class sends an operator somewhere specific and wrong.
+    let class = f
+        .get("last_class")
+        .and_then(|v| v.as_str())
+        .map(|c| format!(" ({c})"))
+        .unwrap_or_default();
+
+    format!(
+        "failed polls     {ever} ever, last {}{class}  (--polls 60 to see it)\n",
+        format_instant(at)
+    )
+}
+
 fn render_overridden(response: &serde_json::Value) -> String {
     let Some(overridden) = response.get("overridden").and_then(|v| v.as_array()) else {
         return String::new();
@@ -1402,6 +1428,55 @@ mod tests {
         // an empty list after it.
         assert_eq!(line(0, 0, 0), "");
         assert_eq!(render_changes(None), "");
+    }
+
+    #[test]
+    fn the_failure_line_routes_an_operator() {
+        // With a class: the line must name where to look.
+        let with_class = serde_json::json!({
+            "failures": { "ever": 1, "last_at_ms": 1_786_609_178_000i64,
+                          "last_class": "network" }
+        });
+        let line = render_failures(&with_class);
+        assert!(
+            line.contains("(network)"),
+            "the class routes the operator and must appear: {line}"
+        );
+        assert!(
+            line.contains("--polls 60"),
+            "a count with no way to reach the rows is a diagnostic an operator \
+             must guess at: {line}"
+        );
+
+        // Without one — an older module. The line must still report, and must
+        // NOT invent a class.
+        let no_class = serde_json::json!({
+            "failures": { "ever": 2, "last_at_ms": 1_786_609_178_000i64 }
+        });
+        let line = render_failures(&no_class);
+        assert!(
+            line.contains("2 ever"),
+            "the count must survive a module too old to send the class: {line}"
+        );
+        // Named classes rather than any parenthesis: the line legitimately
+        // carries "(--polls 60 to see it)", so a bare paren check fails on
+        // correct output. My first version did exactly that — an assertion
+        // testing a character rather than the property.
+        for word in ["network", "http_status", "parse", "implausible"] {
+            assert!(
+                !line.contains(word),
+                "no class must be invented when the producer sent none — a \
+                 wrong cause sends an operator somewhere specific and wrong. \
+                 Found {word:?} in: {line}"
+            );
+        }
+
+        // Nothing ever failed: silence, not a zero.
+        assert_eq!(
+            render_failures(&serde_json::json!({})),
+            "",
+            "a clean history must print nothing rather than a zero line"
+        );
     }
 }
 
