@@ -98,6 +98,37 @@ pub struct CatalogGetRequest {
 pub struct CatalogGetResponse {
     pub source: String,
     /// The instant this snapshot resolves to, always concrete.
+    ///
+    /// # This is the field that tells a shrunken catalog from a historical one
+    ///
+    /// A response whose identity set is SMALLER than the one you hold has two
+    /// causes, and they need opposite responses:
+    ///
+    /// - **You asked for the past.** `resolved_at_ms` is the instant you sent.
+    ///   Fewer models is correct — models arrive daily, so any past instant has
+    ///   fewer than now.
+    /// - **Fusiform's store went backwards** (an engram restore returns it to an
+    ///   older generation). `resolved_at_ms` is approximately NOW, and the
+    ///   missing models are missing from the current catalog.
+    ///
+    /// `catalog_version` cannot tell you which. It is `max(now_ms, current + 1)`
+    /// — derived so a restore cannot rewind it — so after a restore the version
+    /// goes UP while the content goes BACK, and a point-in-time read carries the
+    /// current high version with an older identity set. Both cases present as
+    /// "version rose, identities shrank".
+    ///
+    /// **So a completeness check must read this field, not just the version.**
+    /// A consumer that refuses on a shrunken set without checking whether it
+    /// asked for the past will refuse its own historical query; one that refuses
+    /// without noticing `resolved_at_ms ≈ now` cannot tell a restore from a
+    /// routine read, and a refusal that never installs is a refusal that never
+    /// clears.
+    ///
+    /// Recorded because the field has carried this discriminator since the first
+    /// response and nothing said so — I described the two cases as
+    /// indistinguishable to a consumer, having compared the versions and not the
+    /// rest of the response. Detectability is not detection: a property nobody
+    /// is told to check is a property of the source, not of the system.
     pub resolved_at_ms: i64,
     /// The monotonic catalog version at the time of the read.
     ///

@@ -355,3 +355,79 @@ fn a_correction_cannot_create_a_fact_the_upstream_never_published() {
         );
     }
 }
+
+/// A point-in-time read and a current read are distinguishable on the wire.
+///
+/// # The property BROCA's completeness guard needs and nothing asserted
+///
+/// A response whose identity set is smaller than the one a consumer holds has
+/// two causes needing opposite responses: the consumer asked for the past
+/// (correct, models arrive daily), or fusiform's store went backwards (an
+/// engram restore, and the missing models are missing from the CURRENT
+/// catalog).
+///
+/// `catalog_version` cannot tell them apart — it is `max(now_ms, current + 1)`,
+/// so a restore raises it while the content goes back, and a historical read
+/// carries the current high version with an older identity set. Both present as
+/// "version rose, identities shrank".
+///
+/// `resolved_at_ms` CAN: it is the requested instant for a point-in-time read
+/// and approximately now for a current one. I told two seats these responses
+/// were byte-identical, having compared the versions and not the rest of the
+/// response — the discriminator has been on the wire since the first response
+/// and nothing asserted it, which is exactly how a field a consumer needs stops
+/// being one a consumer can rely on.
+#[test]
+fn a_historical_read_is_distinguishable_from_a_current_one() {
+    let (store, _dir) = store();
+
+    let current = get(&store, r#"{"name":"catalog.get","arguments":{}}"#);
+    let past = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"at_ms":1500}}"#,
+    );
+
+    // The control: the versions really are the same, or there is nothing to
+    // discriminate and this test proves nothing.
+    assert_eq!(
+        current["catalog_version"], past["catalog_version"],
+        "control: both reads must carry the SAME version, which is why the \
+         version cannot be the discriminator"
+    );
+
+    let current_at = current["resolved_at_ms"].as_i64().unwrap();
+    let past_at = past["resolved_at_ms"].as_i64().unwrap();
+
+    assert_eq!(
+        past_at, 1500,
+        "a point-in-time read must resolve to the REQUESTED instant. If it \
+         reports now, a consumer cannot tell its own historical query from a \
+         store that went backwards, and a completeness guard has nothing to \
+         branch on."
+    );
+    assert!(
+        current_at > past_at,
+        "a current read must resolve to now, not to a stored instant: {current_at} \
+         is not later than {past_at}"
+    );
+
+    // THE SINGLE-MODEL PATH TOO, because it computes `resolved_at` separately.
+    //
+    // A mutation neutering only that path survived this test until this block
+    // existed: the bulk read and the per-model read are two surfaces answering
+    // one question, and this file has already found `read_model` silently
+    // lacking correction handling that `read_catalog` had. A consumer asking
+    // for one model must get the same discriminator as one asking for the
+    // catalog, or the guard works until someone narrows their query.
+    let one = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","at_ms":1500}}"#,
+    );
+    assert_eq!(
+        one["resolved_at_ms"].as_i64().unwrap(),
+        1500,
+        "the single-model path must resolve to the requested instant as well: \
+         a consumer that narrows its query must not lose the field its \
+         completeness check branches on"
+    );
+}
