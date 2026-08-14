@@ -68,6 +68,28 @@ pub struct RawModel {
 pub struct RawLimit {
     pub context: Option<u64>,
     pub output: Option<u64>,
+    /// The maximum input the model accepts, when the upstream states it
+    /// separately from the total.
+    ///
+    /// Read but NOT YET SERVED, and the distinction is the point. This field
+    /// was measured on day one (`docs/upstream-models-dev-measured.md` records
+    /// the shape as `{context, output, input?}` and counts its zeros), and the
+    /// struct shipped without it — so serde dropped it in silence on 1,199
+    /// rows for three days.
+    ///
+    /// It is worth more than a missing number. On 470 rows
+    /// `input + output == context` EXACTLY, including 18 first-party openai
+    /// rows (`gpt-5`: 272,000 + 128,000 = 400,000). That is a model's window
+    /// GEOMETRY stated in the payload — the same fact this project has been
+    /// sourcing from provider documentation one page at a time.
+    ///
+    /// Not served yet because the name is not the meaning. `limit.output` was
+    /// classified byte-affecting for two days on exactly that kind of reading,
+    /// until BROCA walked their render path and found it is never rendered.
+    /// Serving this needs a source for what the field MEANS, and whether the
+    /// 470 sums are observed or computed by the upstream from the other two —
+    /// which decides whether it is evidence or restatement.
+    pub input: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
