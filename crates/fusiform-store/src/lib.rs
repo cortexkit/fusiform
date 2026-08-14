@@ -1248,17 +1248,46 @@ fn confirming_in_list() -> String {
         .join(", ")
 }
 
+/// The class a stored `failure_class` string names.
+///
+/// Beside its encoder deliberately. The two directions of one mapping are a
+/// single belief, and splitting them across files is how a stored word and a
+/// read word drift apart with nothing able to notice — the store would keep
+/// writing "http_status" while a reader looking for "http" reported no class
+/// and an operator concluded the failure had none.
+///
+/// Returns `None` for an unrecognised word rather than guessing: a wrong cause
+/// sends an operator somewhere specific and wrong, which is worse than sending
+/// them nowhere.
+pub fn failure_class_word(class: FailureClass) -> &'static str {
+    match class {
+        FailureClass::Network => "network",
+        FailureClass::HttpStatus => "http_status",
+        FailureClass::Parse => "parse",
+        FailureClass::Implausible => "implausible",
+    }
+}
+
+pub fn failure_class_from_stored(word: &str) -> Option<FailureClass> {
+    match word {
+        "network" => Some(FailureClass::Network),
+        "http_status" => Some(FailureClass::HttpStatus),
+        "parse" => Some(FailureClass::Parse),
+        "implausible" => Some(FailureClass::Implausible),
+        _ => None,
+    }
+}
+
 fn outcome_columns(outcome: &ObservationOutcome) -> (&'static str, Option<&'static str>) {
     // The outcome word comes from the domain's own spelling, so a new variant
     // cannot be stored under a name the queries do not know. Only the failure
     // class is decided here, because only a failure has one.
     let failure_class = match outcome {
-        ObservationOutcome::Failed { class } => Some(match class {
-            FailureClass::Network => "network",
-            FailureClass::HttpStatus => "http_status",
-            FailureClass::Parse => "parse",
-            FailureClass::Implausible => "implausible",
-        }),
+        // Through the exported mapping rather than a local match, so the word
+        // this writes and the word `failure_class_from_stored` reads are the
+        // same function's output. Two matches would be one belief written
+        // twice, with nothing able to notice them diverging.
+        ObservationOutcome::Failed { class } => Some(failure_class_word(*class)),
         _ => None,
     };
     (outcome.wire_str(), failure_class)

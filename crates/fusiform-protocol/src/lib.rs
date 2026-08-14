@@ -841,6 +841,28 @@ pub struct FailureHistoryWire {
     pub ever: i64,
     /// When the most recent failure was.
     pub last_at_ms: i64,
+    /// What kind the most recent failure was: `network`, `http_status`,
+    /// `parse`, or `implausible`.
+    ///
+    /// # Why this is here as well as on health
+    ///
+    /// Health's `last_failure_class` is stamped by the current failure streak
+    /// and clears with it, which is correct for "what is failing now" and null
+    /// for a failure that healed. Measured on the live module the day the
+    /// durable count shipped: `failures_ever: 1, last_failure_age_ms:
+    /// 84628131, last_failure_class: null` — something went wrong, 23 hours
+    /// ago, kind unknown.
+    ///
+    /// The class is what decides where an operator looks. `network` sends them
+    /// to the upstream, `parse` to the payload, `implausible` to the shrink
+    /// guard. A count and an age without it says something went wrong and not
+    /// what.
+    ///
+    /// `None` when the stored word is one this build does not recognise, which
+    /// reports no class rather than guessing one — a wrong cause sends an
+    /// operator somewhere specific and wrong.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_class: Option<String>,
 }
 
 /// A `catalog.correct` request: record that fusiform's own record was wrong.

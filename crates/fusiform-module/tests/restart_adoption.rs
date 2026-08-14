@@ -223,9 +223,19 @@ fn every_metric_is_process_scoped_by_name_or_survives_a_restart() {
         // survive. Two adjacent fields about failure, one legitimately null
         // here and one not — which is exactly the pair this fence exists to
         // keep apart.
-        if key == "last_failure_class" {
-            continue;
-        }
+        // NO EXEMPTION for `last_failure_class` any more, and the expiry is the
+        // point.
+        //
+        // It was skipped here because "null is the honest answer when there is
+        // no current failure" — true while the field was stamped only by the
+        // live streak. Once the class is adopted from history, null on a restart
+        // against a store holding a failure is exactly the unadopted reading
+        // this fence exists to catch.
+        //
+        // The exemption did not become wrong by being edited. It became wrong
+        // because the field's meaning moved underneath it, and a skip carries no
+        // signal when its justification expires: the fence kept passing, and
+        // passing was the failure.
 
         assert!(
             !value.is_null(),
@@ -379,5 +389,85 @@ fn a_healed_failure_is_still_readable() {
          after a failure has healed sees a zero streak and a null class; if the \
          total also reads zero, the event is unreadable and the metric answers \
          'is it failing now' while appearing to answer 'has it ever failed'."
+    );
+}
+
+/// A live failure's class is not overwritten by history.
+///
+/// # Why this condition is load-bearing rather than defensive
+///
+/// `adopt_from_store` runs at startup in `main.rs`, where the streak is always
+/// zero — so the guard is trivially true at the only shipped call site, and a
+/// mutation making it unconditional was caught only incidentally, by the golden
+/// fixture noticing a wire change.
+///
+/// That is the shape I have been calling dead defensiveness all day: a
+/// condition defending a state no caller reaches. The resolution is not to
+/// delete it, because `adopt_from_store` is public and adopting mid-life is a
+/// plausible future call — a supervisor re-adopting after a store swap, or a
+/// test. The resolution is to DRIVE that call so the condition is exercised and
+/// the precedence is stated.
+///
+/// The precedence matters because the two sources disagree about the present:
+/// history says "the last failure was a parse error, 23 hours ago", the streak
+/// says "the upstream is unreachable right now". An operator needs the second.
+#[test]
+fn a_live_failure_class_survives_adoption() {
+    let dir = tempfile::tempdir().unwrap();
+    seed_history(dir.path(), Timestamp(1_000));
+    let store = open(dir.path());
+
+    // A store whose HISTORY holds a parse failure.
+    store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(500),
+            outcome: ObservationOutcome::Failed {
+                class: fusiform_core::FailureClass::Parse,
+            },
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: Some(10),
+            detail: None,
+        })
+        .unwrap();
+
+    // A process that is failing RIGHT NOW, for a different reason.
+    let signals = Signals::new();
+    signals.failed(fusiform_core::FailureClass::Network);
+
+    // The control: the live class is in place before adoption, or the assertion
+    // below cannot distinguish "adoption preserved it" from "adoption set it".
+    let before = health::report(&signals, 10 * HOUR)
+        .metrics
+        .expect("metrics are always present");
+    assert_eq!(
+        before["last_failure_class"], "network",
+        "control: the live failure must be stamped before adoption runs"
+    );
+
+    signals.adopt_from_store(&store, SourceId::ModelsDev);
+
+    let after = health::report(&signals, 10 * HOUR)
+        .metrics
+        .expect("metrics are always present");
+    assert_eq!(
+        after["last_failure_class"], "network",
+        "a live failure's class must survive adoption: history says parse, the \
+         streak says network, and the operator needs to know what is failing \
+         NOW. Got {after}"
+    );
+    // And the durable half is still adopted, so the guard narrows what it must.
+    //
+    // TWO, not one: `seed_history` already puts a healed failure in the store —
+    // added earlier so the naming fence could tell an unadopted null from an
+    // honest one — and this test adds the parse failure above. I wrote 1 here
+    // from my model of the fixture rather than from its contents, which is the
+    // unquestioned-input shape at the smallest possible scale.
+    assert_eq!(
+        after["failures_ever"], 2,
+        "the count must still be adopted even when the class is not: the \
+         fixture's healed failure plus this test's parse failure"
     );
 }

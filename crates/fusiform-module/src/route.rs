@@ -214,11 +214,16 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
     // The window is ten by default, and the live store's only failure sits
     // about forty polls back — an operator asking what fusiform has been doing
     // sees ten clean rows and nothing suggesting there is more to see.
-    let (failures_ever, last_failure_at) =
+    let (failures_ever, last_failure_at, last_failure_class) =
         store.failure_history(source).map_err(|e| store_error(&e))?;
     let failures = last_failure_at.map(|at| fusiform_protocol::FailureHistoryWire {
         ever: failures_ever,
         last_at_ms: at.0,
+        // The class of the NEWEST failure, which decides where an operator
+        // looks: `network` sends them to the upstream, `parse` to the payload,
+        // `implausible` to the shrink guard. A count and an age without it says
+        // something went wrong and not what.
+        last_class: last_failure_class.map(|c| fusiform_store::failure_class_word(c).to_string()),
     });
 
     Ok(StatusResponse {

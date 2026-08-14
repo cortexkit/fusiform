@@ -833,16 +833,47 @@ impl CatalogStore {
     pub fn failure_history(
         &self,
         source: SourceId,
-    ) -> Result<(i64, Option<Timestamp>), CatalogError> {
+    ) -> Result<(i64, Option<Timestamp>, Option<fusiform_core::FailureClass>), CatalogError> {
+        // The CLASS comes with the count and the instant, from the same row.
+        //
+        // Health already reports `last_failure_class`, and that field clears
+        // with the failure streak — correct for "what is failing now", null for
+        // a failure that healed. So the durable half said "1 failure, 23 hours
+        // ago" and could not say WHAT KIND, which is the reading that decides
+        // whether an operator investigates the upstream or the payload.
+        //
+        // Measured on the live module after the durable count shipped:
+        //   failures_ever: 1, last_failure_age_ms: 84628131,
+        //   last_failure_class: null
+        //
+        // The correlated subquery rather than a GROUP BY, because the class
+        // belongs to the NEWEST failure specifically and a grouped query would
+        // silently pick an arbitrary one when classes differ.
         let row = self.raw_conn(|conn| {
             conn.query_row(
-                "SELECT COUNT(*), MAX(observed_at_ms) FROM observation \
+                "SELECT COUNT(*), MAX(observed_at_ms), \
+                        (SELECT failure_class FROM observation \
+                          WHERE source = ?1 AND outcome = 'failed' \
+                          ORDER BY observed_at_ms DESC LIMIT 1) \
+                 FROM observation \
                  WHERE source = ?1 AND outcome = 'failed'",
                 params![source.as_str()],
-                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?)),
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, Option<i64>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                },
             )
         })?;
-        Ok((row.0, row.1.map(Timestamp)))
+        // Decoded through the store's own mapping rather than by the caller,
+        // so a reader never re-parses a word this crate wrote.
+        Ok((
+            row.0,
+            row.1.map(Timestamp),
+            row.2.as_deref().and_then(crate::failure_class_from_stored),
+        ))
     }
 
     /// How many eras the store holds, for one source.

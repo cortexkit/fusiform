@@ -245,7 +245,23 @@ impl Signals {
         // DURING THE EVENT IS ONLY AS GOOD AS THE ODDS SOMEONE IS LOOKING AT
         // THE RIGHT MOMENT.
         match store.failure_history(source) {
-            Ok((count, at)) => {
+            Ok((count, at, class)) => {
+                // The class of the last failure, even after the streak cleared.
+                //
+                // `last_failure_class` is stamped by the streak and clears with
+                // it, so a healed failure reported a count and an age with a
+                // NULL class — measured live: "failures_ever: 1,
+                // last_failure_age_ms: 84628131, last_failure_class: null".
+                // Something went wrong, 23 hours ago, kind unknown.
+                //
+                // Adopted only when the current streak is empty, so a live
+                // failure's class always wins over history.
+                if self.consecutive_failures() == 0 {
+                    if let Some(c) = class {
+                        self.last_failure_class
+                            .store(encode_class(c), Ordering::Relaxed);
+                    }
+                }
                 self.failures_ever.store(count as u64, Ordering::Relaxed);
                 if let Some(at) = at {
                     self.last_failure_ms.store(at.0, Ordering::Relaxed);

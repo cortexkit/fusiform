@@ -228,6 +228,7 @@ fn every_response_type_round_trips() {
         failures: Some(fusiform_protocol::FailureHistoryWire {
             ever: 2,
             last_at_ms: 1_786_500_000_000,
+            last_class: Some("network".into()),
         }),
         overridden: vec![],
         source: "models.dev".into(),
