@@ -83,21 +83,51 @@ cp "$FILE" "$BACKUP"
 # like a result.
 trap 'cp "$BACKUP" "$FILE"; rm -f "$BACKUP"' EXIT INT TERM
 
-if ! grep -qF -- "$OLD" "$FILE"; then
-  echo "ANCHOR MISSING: $OLD"
-  echo "  Nothing was tested. The pattern is not in $FILE — check whitespace"
-  echo "  and formatting against the real source rather than what you expect."
-  exit 1
-fi
-
-# Replace the first occurrence only. A pattern matching several sites mutates
-# them together, and a test reddening tells you nothing about which one.
-python3 - "$FILE" "$OLD" "$NEW" <<'PY'
+# THE CHECK AND THE EDIT ARE ONE OPERATION, and they were not until
+# 2026-08-14. The check was `grep -qF -- "$OLD" "$FILE"` while the edit was
+# python's `str.replace` — two definitions of "does this pattern occur", and
+# they disagree on exactly one input: A MULTI-LINE PATTERN.
+#
+# `grep -F` treats a multi-line pattern as SEVERAL patterns and matches if ANY
+# ONE LINE appears. So an anchor that does not exist as a block still passed
+# the check whenever its individual lines were common — `});`, `continue;` and
+# `corrections: records.clone(),` all occur somewhere. The replacement then
+# changed nothing, the file was untouched, the suite passed, and the script
+# reported SURVIVED.
+#
+# That is the worst output this tool can produce: it says "your guard has a
+# gap" when the truth is "your mutation never applied". Multi-line anchors are
+# the normal case for Rust blocks, so an unknown number of past SURVIVED
+# results on multi-line patterns were anchor failures wearing a result's
+# clothes — found by noticing a mutation that should have been impossible to
+# survive.
+#
+# The fix is not a better check. It is refusing to have a second definition:
+# the edit reports whether it changed the file, and that report IS the check.
+CHANGED=$(python3 - "$FILE" "$OLD" "$NEW" <<'PYEDIT'
 import sys, pathlib
 path, old, new = sys.argv[1], sys.argv[2], sys.argv[3]
 p = pathlib.Path(path)
-p.write_text(p.read_text().replace(old, new, 1))
-PY
+text = p.read_text()
+# First occurrence only. A pattern matching several sites mutates them
+# together, and a test reddening tells you nothing about which one.
+if old not in text:
+    print("no")
+else:
+    p.write_text(text.replace(old, new, 1))
+    print("yes")
+PYEDIT
+)
+
+if [ "$CHANGED" != "yes" ]; then
+  echo "ANCHOR MISSING: $OLD"
+  echo "  Nothing was tested. The pattern is not in $FILE — check whitespace"
+  echo "  and formatting against the real source rather than what you expect."
+  echo "  For a MULTI-LINE anchor every line must match, indentation included."
+  echo "  This is reported by the edit itself, so it cannot disagree with what"
+  echo "  was actually changed."
+  exit 1
+fi
 
 # BUILD, as its own step, judged by its EXIT CODE.
 #

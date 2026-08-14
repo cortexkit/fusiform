@@ -685,3 +685,208 @@ fn history_discloses_an_override_only_where_one_applies() {
         "a fact with no correction must disclose nothing"
     );
 }
+
+/// An operator correction and an overlay override on the SAME fact.
+///
+/// # Why this is worth pinning even though nothing collides
+///
+/// Two mechanisms change what fusiform serves and they have never been driven
+/// together. The dangerous output would be a fact that is BOTH withheld and
+/// overridden — "fusiform refuses to answer this" beside "fusiform serves
+/// 200000 for this" — which is not a wrong number but a response that contains
+/// its own contradiction.
+///
+/// It cannot happen today, for two independent reasons, and BOTH are worth a
+/// test because each could be removed alone:
+///
+/// 1. A withheld fact never enters the models map that the override pass
+///    iterates, so there is nothing for it to attach an override to.
+/// 2. A correction's window is bounded in the past (`affected_until` cannot
+///    exceed the instant it was recorded) while overrides apply only to
+///    CURRENT reads, so the two never address the same instant.
+///
+/// Either alone would be enough. Together they make the contradiction
+/// unconstructable — but nothing states that, so a change to withholding OR to
+/// the point-in-time rule could remove one silently while the other still
+/// masks it, which is exactly the failure that stays hidden longest.
+#[test]
+fn a_corrected_fact_is_never_also_reported_as_overridden() {
+    use fusiform_core::{CapabilityId, FieldId, LimitId};
+    use fusiform_store::correct::{apply_correction, plan_correction};
+
+    let (store, _dir) = store();
+
+    // Move the fact so there is a history to correct within.
+    let moved = {
+        let mut doc: serde_json::Value = serde_json::from_str(UPSTREAM).unwrap();
+        doc["anthropic"]["models"]["claude-sonnet-4-5"]["limit"]["context"] =
+            serde_json::json!(900_000);
+        serde_json::to_string(&doc).unwrap()
+    };
+    let catalog = normalize_models_dev(moved.as_bytes()).unwrap().catalog;
+    let obs = store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(2_000),
+            outcome: ObservationOutcome::Changed { snapshot_seq: 1 },
+            normalized_hash: Some("h2".into()),
+            raw_hash: Some("r2".into()),
+            etag: None,
+            duration_ms: Some(10),
+            detail: None,
+        })
+        .unwrap();
+    let plan = plan_ingest(
+        &store,
+        &catalog,
+        Timestamp(2_000),
+        BoundaryKind::Observed,
+        Some(obs),
+    )
+    .unwrap();
+    store.append_eras(&plan.eras).unwrap();
+
+    // An operator marks the first era's window as wrong.
+    let now = Timestamp(3_000);
+    let planned = plan_correction(
+        &store,
+        SourceId::ModelsDev,
+        "anthropic",
+        "claude-sonnet-4-5",
+        &[FieldId::Limit {
+            limit: LimitId::Context,
+        }],
+        Timestamp(1_000),
+        Timestamp(1_500),
+        "fusiform misread the window during this interval",
+        now,
+    )
+    .expect("planning must not error");
+
+    let planned = match planned {
+        Ok(p) => p,
+        Err(refusals) => panic!("the correction must be plannable: {refusals:?}"),
+    };
+    apply_correction(&store, SourceId::ModelsDev, &planned, now).expect("the correction applies");
+
+    // CURRENT read: the override applies and nothing is withheld, because a
+    // correction's window cannot reach now.
+    let current = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5"}}"#,
+    );
+    let overridden: Vec<&serde_json::Value> = current["overridden"]
+        .as_array()
+        .map(|a| a.iter().collect())
+        .unwrap_or_default();
+    assert!(
+        overridden.iter().any(|o| o["fact_key"] == "limit.context"),
+        "control: the override must still apply on a current read, or the \
+         assertion below proves nothing about the interaction"
+    );
+    let withheld_now: Vec<&serde_json::Value> = current["withheld"]
+        .as_array()
+        .map(|a| a.iter().collect())
+        .unwrap_or_default();
+    assert!(
+        !withheld_now
+            .iter()
+            .any(|w| w["fact_key"] == "limit.context"),
+        "a correction bounded in the past must not withhold a CURRENT read: {:?}",
+        current["withheld"]
+    );
+
+    // POINT-IN-TIME read inside the corrected window: the fact is withheld,
+    // and no override may be reported for it.
+    let past = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","at_ms":1200}}"#,
+    );
+    let withheld_then: Vec<&serde_json::Value> = past["withheld"]
+        .as_array()
+        .map(|a| a.iter().collect())
+        .unwrap_or_default();
+    assert!(
+        withheld_then
+            .iter()
+            .any(|w| w["fact_key"] == "limit.context"),
+        "control: the corrected interval must withhold the fact, or the \
+         contradiction below cannot arise and this test is vacuous: {:?}",
+        past["withheld"]
+    );
+
+    let overridden_then: Vec<&serde_json::Value> = past["overridden"]
+        .as_array()
+        .map(|a| a.iter().collect())
+        .unwrap_or_default();
+    assert!(
+        !overridden_then
+            .iter()
+            .any(|o| o["fact_key"] == "limit.context"),
+        "a WITHHELD fact must not also be reported as overridden: the response \
+         would refuse to answer and simultaneously claim what it serves. Got: {:?}",
+        past["overridden"]
+    );
+
+    // THE INVARIANT WITH NO OTHER COVERAGE: a withheld fact must be ABSENT
+    // from the served facts, not merely listed alongside them.
+    //
+    // Found by mutation while probing the interaction above. Making the store
+    // push a WithheldFact and then FALL THROUGH — cloning the ids instead of
+    // moving them — compiles and survives the entire suite. The fact would be
+    // served with the value the correction exists to suppress, while the same
+    // response lists it as withheld: a consumer reading `models` gets the bad
+    // value and never looks at the refusal.
+    //
+    // Note what protects it today: the ids are MOVED into the WithheldFact, so
+    // the naive fall-through does not compile. That is real protection and it
+    // is accidental — it survives only while nobody needs those values after
+    // the push, and cloning to get them back is a change someone would make
+    // without noticing what it removed.
+    let facts = &past["models"]["anthropic/claude-sonnet-4-5"];
+    assert!(
+        facts.get("limit.context").is_none(),
+        "a withheld fact must not also be SERVED: the correction exists to          stop this value reaching a consumer, and a response carrying it in          `models` delivers it to anyone who does not read `withheld`. Got: {facts}"
+    );
+
+    // THE SAME INVARIANT ON THE BULK PATH, which is a different function.
+    //
+    // `read_model` and `read_catalog` each withhold separately, and the leak
+    // above was proven uncovered on the BULK one — a narrowed read and a whole
+    // catalog read are the two-surface split this repo keeps finding. A test
+    // driving only the narrowed read certifies the half that was already fine.
+    let bulk = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"at_ms":1200}}"#,
+    );
+    let bulk_facts = &bulk["models"]["anthropic/claude-sonnet-4-5"];
+    assert!(
+        bulk_facts.get("limit.context").is_none(),
+        "a withheld fact must not be served by the BULK read either: {bulk_facts}"
+    );
+    assert!(
+        bulk["withheld"]
+            .as_array()
+            .map(|a| a.iter().any(|w| w["fact_key"] == "limit.context"))
+            .unwrap_or(false),
+        "control: the bulk read must withhold it, or the assertion above holds \
+         for the wrong reason — a fact absent because the read found nothing \
+         proves nothing about withholding"
+    );
+
+    // And the withheld entry must carry the operator's reason, or an operator
+    // meeting a refusal cannot tell a correction from a defect.
+    let entry = withheld_then
+        .iter()
+        .find(|w| w["fact_key"] == "limit.context")
+        .unwrap();
+    assert!(
+        !entry["corrections"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(true),
+        "a withheld fact must name the correction that withheld it: {entry}"
+    );
+
+    let _ = CapabilityId::Reasoning; // the import is shared with sibling tests
+}
