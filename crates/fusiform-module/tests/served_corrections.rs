@@ -532,3 +532,156 @@ fn a_failure_older_than_the_poll_window_is_still_reported() {
          back to look"
     );
 }
+
+/// Drive the real `catalog.history` route and read what it DISCLOSES.
+///
+/// # The production defect this pins
+///
+/// The first version of history's override disclosure did the correction
+/// lookup by hand instead of through the function `catalog.get` uses, and got
+/// both of that function's rules wrong at once. In production it printed:
+///
+/// ```text
+/// NOTE: fusiform serves 200000 for this fact, not the  recorded below
+/// ```
+///
+/// — one value where the sentence promises two, because it read
+/// `Correction::upstream_value`, which is a SLOT filled from the served row
+/// rather than a value the overlay carries. And it printed the same note for
+/// `claude-opus-5`, whose overlay value AGREES with the catalog, where the
+/// sentence is affirmatively false: nothing differs there.
+///
+/// The second is the worse half. A note on every history query destroys the
+/// distinction the disclosure exists to draw.
+///
+/// # Why the test that passed could not have caught it
+///
+/// It rendered a HAND-BUILT response object with the fields already correct.
+/// That tests the sentence and says nothing about whether the module ever
+/// produces those fields — the two halves were verified separately and never
+/// met. This drives the real route over a real store, so the values are
+/// whatever the code actually computes.
+#[test]
+fn history_discloses_an_override_only_where_one_applies() {
+    let (store, _dir) = store();
+
+    // A second poll moving limit.context, so the fact has a history rather than
+    // a single row. The disclosure must report the value in force NOW.
+    // Edited through JSON rather than string replacement: BOTH anthropic models
+    // in this fixture publish context 1000000, so a textual replace moves
+    // opus-5 too — which makes its overlay cell genuinely differ and the
+    // control below fire for a real reason. The control caught exactly that,
+    // which is why this edit is scoped to one model.
+    let moved = {
+        let mut doc: serde_json::Value = serde_json::from_str(UPSTREAM).unwrap();
+        let limit = &mut doc["anthropic"]["models"]["claude-sonnet-4-5"]["limit"];
+        assert_eq!(limit["context"], 1_000_000, "the fixture must start here");
+        limit["context"] = serde_json::json!(900_000);
+        serde_json::to_string(&doc).unwrap()
+    };
+    let catalog = normalize_models_dev(moved.as_bytes()).unwrap().catalog;
+    let obs = store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(2_000),
+            outcome: ObservationOutcome::Changed { snapshot_seq: 1 },
+            normalized_hash: Some("h2".into()),
+            raw_hash: Some("r2".into()),
+            etag: None,
+            duration_ms: Some(10),
+            detail: None,
+        })
+        .unwrap();
+    let plan = plan_ingest(
+        &store,
+        &catalog,
+        Timestamp(2_000),
+        BoundaryKind::Observed,
+        Some(obs),
+    )
+    .unwrap();
+    store.append_eras(&plan.eras).unwrap();
+
+    let history = |body: &str| -> serde_json::Value {
+        match serve_tool_call(&store, body.as_bytes()).expect("must serve") {
+            ToolResponse::History(h) => serde_json::to_value(h).unwrap(),
+            other => panic!("expected history, got {other:?}"),
+        }
+    };
+
+    // The overridden fact.
+    let overridden = history(
+        r#"{"name":"catalog.history","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","fact_key":"limit.context"}}"#,
+    );
+
+    // TWO eras, deliberately. With one, `first()` and `last()` are the same row
+    // and a mutation swapping them survives — the fixture cannot tell the
+    // newest value from the oldest, so it certifies neither. This query orders
+    // OLDEST-first, so the current value is the last, and reaching for `first`
+    // is the natural mistake that would compare against a model's original
+    // value forever.
+    assert!(
+        overridden["eras"].as_array().map(|e| e.len()).unwrap_or(0) >= 2,
+        "the fixture must carry more than one era for this fact, or the \
+         newest-versus-oldest distinction is untested"
+    );
+    let o = &overridden["overridden"];
+    assert!(
+        !o.is_null(),
+        "history must disclose the override on a fact whose served value \
+         differs from the record"
+    );
+    assert_eq!(
+        o["served_value"].as_str(),
+        Some("200000"),
+        "the served value must be the one the catalog actually returns"
+    );
+    assert_eq!(
+        o["upstream_value"].as_str(),
+        Some("900000"),
+        "the upstream value must come from the ROW, not from \
+         Correction::upstream_value, which is an unfilled slot — reading it \
+         yields an empty string and a sentence naming one value where it \
+         promises two"
+    );
+    assert!(
+        !o["authority"].as_str().unwrap_or_default().is_empty(),
+        "an override without its authority asserts without a source"
+    );
+
+    // The eras themselves must be untouched: an override is a serve-time
+    // judgment, and editing history to match would forge the record.
+    let eras = overridden["eras"].as_array().expect("eras is an array");
+    assert!(
+        eras.iter().any(|e| e["value"] == 1_000_000) && eras.iter().any(|e| e["value"] == 900_000),
+        "the recorded eras must still say what the upstream published, both \
+         before and after it moved"
+    );
+    assert!(
+        !eras.iter().any(|e| e["value"] == 200_000),
+        "no era may carry the served value: the record is disclosed against, \
+         never rewritten"
+    );
+
+    // THE CONTROL, and it is the arm that failed in production. This model
+    // carries an overlay cell whose value AGREES with the catalog, so the
+    // correction exists and must produce no disclosure.
+    let agreeing = history(
+        r#"{"name":"catalog.history","arguments":{"provider_id":"anthropic","model_id":"claude-opus-5","fact_key":"limit.context"}}"#,
+    );
+    assert!(
+        agreeing["overridden"].is_null(),
+        "a correction that changes nothing must not be disclosed: a note on \
+         every response destroys the distinction the note exists to draw. Got: {}",
+        agreeing["overridden"]
+    );
+
+    // And a fact with no correction at all.
+    let untouched = history(
+        r#"{"name":"catalog.history","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","fact_key":"limit.output"}}"#,
+    );
+    assert!(
+        untouched["overridden"].is_null(),
+        "a fact with no correction must disclose nothing"
+    );
+}

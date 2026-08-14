@@ -136,7 +136,7 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
         .fact_history(source, &request.provider_id, &request.model_id, &fact)
         .map_err(|e| store_error(&e))?;
 
-    let eras = rows
+    let eras: Vec<HistoryEra> = rows
         .into_iter()
         .map(|row| HistoryEra {
             value: serde_json::from_str(&row.value_json)
@@ -156,25 +156,34 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
 
     // Disclose an override on this fact WITHOUT applying it to the eras.
     //
+    // Through the SAME function `catalog.get` uses, because the first version
+    // of this did the lookup by hand and got both halves wrong in production:
+    // it reported an override on a model whose overlay value AGREES with the
+    // catalog, and it printed an empty upstream value. Two rules live in that
+    // function and a hand-written second copy had neither.
+    //
+    // The current value is the LAST era: this query orders oldest-first, and a
+    // reader reaching for `first()` would compare against the model's original
+    // value forever.
+    //
     // The eras are what the upstream published and stay that way; an override
     // is a judgment about the current view. But an operator reading history for
     // an overridden fact was seeing the upstream's number alone, with nothing
     // reconciling it against what catalog.get serves — two surfaces
     // disagreeing, both correct, which reads as one of them being wrong.
-    let overridden = overlay::corrections()
-        .get(&(
-            request.provider_id.clone(),
-            request.model_id.clone(),
-            FactKey::from_stored(request.fact_key.clone()),
-        ))
-        .map(|c| OverriddenFactWire {
-            provider_id: request.provider_id.clone(),
-            model_id: request.model_id.clone(),
-            fact_key: request.fact_key.clone(),
-            upstream_value: c.upstream_value.clone(),
-            served_value: c.served_value.to_string(),
-            authority: c.authority.clone(),
-        });
+    let overridden = eras.last().and_then(|newest| {
+        override_for(
+            &newest.value,
+            &request.provider_id,
+            &request.model_id,
+            &request.fact_key,
+            overlay::corrections().get(&(
+                request.provider_id.clone(),
+                request.model_id.clone(),
+                FactKey::from_stored(request.fact_key.clone()),
+            ))?,
+        )
+    });
 
     Ok(HistoryResponse {
         source: source.as_str().to_string(),
@@ -183,6 +192,50 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
         fact_key: request.fact_key,
         eras,
         overridden,
+    })
+}
+
+/// The disclosure a correction produces against a value the store actually
+/// holds, or `None` when there is nothing to say.
+///
+/// # Why this is one function and not a rule written down twice
+///
+/// It encodes two decisions that are easy to state and easy to omit, and a
+/// second hand-written copy omitted BOTH in production:
+///
+/// 1. **A correction that changes nothing is not reported.** The upstream may
+///    have fixed the row, leaving the cell redundant rather than wrong. A line
+///    reading `1000000 -> 1000000` trains an operator to skim the ones that
+///    matter — and worse, a note on every response destroys the very
+///    distinction the disclosure exists to draw.
+///
+/// 2. **The upstream value comes from the ROW, never from the correction.**
+///    `Correction::upstream_value` is a slot filled in here, not a value
+///    carried by the overlay: the line must report what THIS poll published,
+///    not what the overlay's author saw. Reading the unfilled slot yields an
+///    empty string, which renders as a sentence naming one value where it
+///    promises two.
+fn override_for(
+    value: &serde_json::Value,
+    provider_id: &str,
+    model_id: &str,
+    fact_key: &str,
+    correction: &overlay::Correction,
+) -> Option<OverriddenFactWire> {
+    let served: serde_json::Value = match correction.served_value.parse::<i64>() {
+        Ok(n) => serde_json::Value::from(n),
+        Err(_) => serde_json::Value::String(correction.served_value.clone()),
+    };
+    if *value == served {
+        return None;
+    }
+    Some(OverriddenFactWire {
+        provider_id: provider_id.to_string(),
+        model_id: model_id.to_string(),
+        fact_key: fact_key.to_string(),
+        upstream_value: value.to_string(),
+        served_value: correction.served_value.clone(),
+        authority: correction.authority.clone(),
     })
 }
 
@@ -744,21 +797,11 @@ fn overrides_in_effect(
             let Some(correction) = corrections.get(&key) else {
                 continue;
             };
-            let served: serde_json::Value = match correction.served_value.parse::<i64>() {
-                Ok(n) => serde_json::Value::from(n),
-                Err(_) => serde_json::Value::String(correction.served_value.clone()),
-            };
-            if *value == served {
+            let Some(wire) = override_for(value, provider_id, model_id, fact_key, correction)
+            else {
                 continue;
-            }
-            out.push(OverriddenFactWire {
-                provider_id: provider_id.to_string(),
-                model_id: model_id.to_string(),
-                fact_key: fact_key.clone(),
-                upstream_value: value.to_string(),
-                served_value: correction.served_value.clone(),
-                authority: correction.authority.clone(),
-            });
+            };
+            out.push(wire);
         }
     }
     out
@@ -793,22 +836,13 @@ fn apply_corrections(
                 Err(_) => serde_json::Value::String(correction.served_value.clone()),
             };
 
-            // A correction that changes nothing is not reported. The upstream
-            // may have fixed the row, leaving the cell redundant rather than
-            // wrong — and a line reading "1000000 -> 1000000" trains an
-            // operator to skim the ones that matter.
-            if *value == served {
+            let Some(wire) = override_for(value, provider_id, model_id, fact_key, correction)
+            else {
+                // Nothing to report AND nothing to apply: the two go together,
+                // since a value already equal to the correction needs no write.
                 continue;
-            }
-
-            applied.push(OverriddenFactWire {
-                provider_id: provider_id.to_string(),
-                model_id: model_id.to_string(),
-                fact_key: fact_key.clone(),
-                upstream_value: value.to_string(),
-                served_value: correction.served_value.clone(),
-                authority: correction.authority.clone(),
-            });
+            };
+            applied.push(wire);
             *value = served;
         }
     }
