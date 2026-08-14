@@ -934,6 +934,49 @@ impl CatalogStore {
     /// So: measure the worst case, tell BROCA, let them re-pick the threshold,
     /// THEN ship. Not the reverse. The dependency is invisible from inside
     /// either repository.
+    /// # The content-derived alternative was examined and REJECTED, 2026-08-14
+    ///
+    /// The obvious fix for the restore hazard documented above is to derive the
+    /// version from content — the highest version the restored rows ever issued,
+    /// i.e. the newest era boundary — so a restore makes the version go BACK and
+    /// a consumer refuses loudly on staleness instead of silently on
+    /// completeness. It is not being built, and the reasoning is here so the
+    /// next person to notice the hazard does not re-derive it.
+    ///
+    /// MEASURED FIRST: on the live store the two derivations produce the SAME
+    /// NUMBER, and structurally so — the version advances only inside the
+    /// eras-written branch of a changed poll, with `now_ms`, in the same
+    /// transaction that writes eras at that instant. So `max(now_ms, current+1)`
+    /// reduces to `now_ms` every time and equals the newest era boundary. They
+    /// diverge in exactly one case: a restore.
+    ///
+    /// WHY IT LOSES ANYWAY, from BROCA reading their own guards. Both of their
+    /// guards freeze their comparison basis on refusal, but the PRODUCER's half
+    /// moves in only one case: a rewound version climbs back with wall clock, a
+    /// shrunken identity set does not until the models are re-observed. So a
+    /// content-derived version does not replace the permanent refusal — it
+    /// inserts a bounded stale phase in FRONT of the same completeness refusal.
+    /// They pinned that sequence as a test rather than asserting it.
+    ///
+    /// And the case it would uniquely fix does not exist: a restore that rewinds
+    /// eras WITHOUT shrinking identities is already accepted today, because the
+    /// identities are intact and the version is high.
+    ///
+    /// WHAT I GOT WRONG IN BOTH DIRECTIONS, worth keeping because the corrected
+    /// version is the useful one: I offered BROCA "permanent completeness versus
+    /// bounded staleness". The completeness refusal is ALSO bounded — the ingest
+    /// diff visits every fact in the store as well as every fact in the
+    /// document, so a model absent from the document gets a tombstone era rather
+    /// than a deleted row, and a restored store's identity set is whole again
+    /// after one changed poll, retired models included. The real comparison is
+    /// bounded-versus-bounded, and the alternative adds a phase.
+    ///
+    /// THE CLAIM THAT WOULD REVERSE THIS, stated so it can be falsified: after a
+    /// restore plus one changed poll, a `catalog.get` with `include_retired`
+    /// returns an identity set no smaller than the pre-restore one. That is
+    /// reasoned from the diff's design and has never been driven — no store has
+    /// been restored and polled. If it is ever false, the completeness refusal
+    /// really is permanent and this decision should be revisited.
     pub fn advance_catalog_version(
         &self,
         observation_id: i64,
