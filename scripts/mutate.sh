@@ -64,6 +64,23 @@ cp "$FILE" "$BACKUP"
 # Restore on any exit path, including interrupt. A mutation left applied is
 # worse than no mutation run: the next thing anyone does is against modified
 # source they do not know is modified.
+#
+# SEEING A MUTATED FILE DOES NOT MEAN THIS TRAP FAILED. A run takes tens of
+# seconds, and for almost all of that the mutation IS applied — that is the
+# point. An agent whose tool call times out at 25s sees a modified file and the
+# available reading is "the script died before restoring", which is wrong: the
+# process outlives the wait and restores normally.
+#
+# The discriminator costs nothing and is the one nobody runs: IS THE PROCESS
+# STILL ALIVE. Measured 2026-08-13 — mutated mid-run with the script alive,
+# clean after it exited, git tree clean.
+#
+# It matters because the intuitive repair is `git checkout` on the file, and
+# doing that WHILE a run is in flight removes the mutation before the test
+# executes. The suite then passes and the harness reports SURVIVED — a false
+# clean bill produced by the act of tidying up. That is the same defect class as
+# the seven this harness has already had: an action that makes a non-result look
+# like a result.
 trap 'cp "$BACKUP" "$FILE"; rm -f "$BACKUP"' EXIT INT TERM
 
 if ! grep -qF -- "$OLD" "$FILE"; then
