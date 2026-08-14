@@ -403,6 +403,34 @@ fn implausible_shrink(
 
     let incoming = catalog.model_count();
     if incoming >= held {
+        // GROWTH IS DELIBERATELY UNGUARDED, and this line is where a reader
+        // would otherwise have to guess whether that was reasoned or missed.
+        //
+        // The two directions fail differently, and the difference is the same
+        // loud-versus-silent one that decides most of this crate's design:
+        //
+        //   - A spurious SHRINK writes tombstones. A consumer stops offering a
+        //     model that really exists, nothing errors, and nobody looks. That
+        //     is the failure the guard was built for, from a measured event: a
+        //     collapsed response took a seeded store from 14 models to 1.
+        //
+        //   - A spurious GROWTH writes arrivals. A consumer routes to a model
+        //     the provider does not have and gets a 404 on the first request —
+        //     immediate, attributable, and self-correcting on the next poll
+        //     that omits it.
+        //
+        // So the direction that needs a guard is the one that cannot announce
+        // itself. Refusing growth would trade a loud failure for a refused
+        // poll, and a real batch arrival is ordinary: 51 models landed in a
+        // single poll on 2026-08-14, and models.dev adds roughly 45 a day.
+        //
+        // WHAT WOULD CHANGE THIS: growth is not harmless in the store, only at
+        // the consumer. A duplicated provider index would append tens of
+        // thousands of arrival eras that append-only history can never remove,
+        // only tombstone. No such event has been observed, so building for it
+        // would be designing against an imagined failure — but if one is ever
+        // seen, this is the line that needs the counterpart, and the argument
+        // above is what it has to beat.
         return Ok(None);
     }
 
