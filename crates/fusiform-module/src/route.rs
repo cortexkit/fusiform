@@ -438,6 +438,27 @@ fn single_model_snapshot(
     at: Option<Timestamp>,
     request: &CatalogGetRequest,
 ) -> Result<CatalogSnapshot, RouteError> {
+    // Must agree with the bulk path's resolution, and the reason is a consumer
+    // dependency rather than tidiness.
+    //
+    // `resolved_at_ms` is what tells a consumer a SHRUNKEN identity set apart
+    // from a HISTORICAL one — the requested instant for a point-in-time read,
+    // now for a current one. `catalog_version` cannot: it is
+    // `max(now_ms, current + 1)`, so a restore raises it while the content goes
+    // back, and both cases present as "version rose, identities shrank".
+    //
+    // This path recomputes rather than reusing, so a mutation neutering it
+    // survived a test that drove only the bulk read. The consumer consequence:
+    // NARROWING A QUERY TO ONE MODEL WOULD SILENTLY LOSE THE FIELD A
+    // COMPLETENESS GUARD BRANCHES ON.
+    //
+    // ASTRO's disposition for it, which is why this comment says more than "keep
+    // these in sync": they consume whole-document snapshots and depend on
+    // nothing here today — and would acquire the dependency the moment someone
+    // narrows a read for efficiency. That is an optimisation a reviewer
+    // approves without noticing, and the acquisition has no diff: nothing about
+    // adding `provider_id` to a request says a different function now computes
+    // the field a guard reads.
     let resolved_at = at.unwrap_or_else(|| Timestamp(now_ms()));
     let (found, withheld) = store
         .read_model(source, provider_id, model_id, Some(resolved_at))
