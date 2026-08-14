@@ -162,9 +162,27 @@ impl Signals {
         self.last_attempt_ms.store(at_ms, Ordering::Relaxed);
         self.last_observation_ms.store(at_ms, Ordering::Relaxed);
         self.consecutive_failures.store(0, Ordering::Relaxed);
-        // Cleared with the streak it describes. A class outliving its streak
-        // would have health explaining a failure that is no longer happening.
-        self.last_failure_class.store(CLASS_NONE, Ordering::Relaxed);
+        // The class is NOT cleared here, and the removal of that line is the
+        // fix rather than an omission.
+        //
+        // It used to be, with a good reason: "a class outliving its streak
+        // would have health explaining a failure that is no longer happening".
+        // Correct while the field described the STREAK. 785ea37 made it
+        // DURABLE — adopted from the store so a healed failure keeps its cause
+        // — and this line kept the old meaning, so the first successful poll
+        // after startup erased the class the adoption had just stamped.
+        //
+        // Measured in production: `ck models status` showed "(network)" from
+        // the store while `ck health` showed `last_failure_class: null`, two
+        // surfaces disagreeing about one fact. Neither adoption nor the
+        // mapping was wrong; a SECOND WRITER with the old semantics undid the
+        // first, thirty minutes later.
+        //
+        // The original concern is answered by a different field:
+        // `process_consecutive_failures` says whether a failure is happening
+        // NOW, and health's degraded sentence is gated on the streak rather
+        // than on the class. So the class can describe the last failure
+        // whenever it happened, which is what an operator asks after the fact.
     }
 
     /// Adopt everything the store knows that a restart would otherwise erase.

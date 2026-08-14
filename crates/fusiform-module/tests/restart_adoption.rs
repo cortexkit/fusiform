@@ -379,14 +379,29 @@ fn a_healed_failure_is_still_readable() {
         after["process_consecutive_failures"], 0,
         "the streak must clear on success — it describes the CURRENT state"
     );
-    assert!(
-        after["last_failure_class"].is_null(),
-        "the class clears with the streak it describes"
+    // THE CLASS NO LONGER CLEARS, and this assertion flipping is the record of
+    // a contract change rather than a test being loosened.
+    //
+    // It read `is_null()` when the class described the STREAK — true then, and
+    // the reason `observed()` cleared it. Making the class durable in 785ea37
+    // changed what the field means: it now answers "what was the last failure",
+    // which stays true after recovery. The streak below is what answers "is
+    // something failing now".
+    //
+    // Production caught the two writers disagreeing before this test did: the
+    // status surface read the class from the store and showed "(network)" while
+    // health showed null, because the first successful poll after startup
+    // erased what adoption had stamped.
+    assert_eq!(
+        after["last_failure_class"], "network",
+        "the class must survive recovery: it describes the LAST failure, not \
+         the current streak, and an operator asking what went wrong yesterday \
+         needs it after the failure has healed"
     );
     assert_eq!(
         after["failures_ever"], 2,
         "the durable total must NOT clear on success. An operator reading health \
-         after a failure has healed sees a zero streak and a null class; if the \
+         after a failure has healed sees a zero streak; if the \
          total also reads zero, the event is unreadable and the metric answers \
          'is it failing now' while appearing to answer 'has it ever failed'."
     );
@@ -469,5 +484,75 @@ fn a_live_failure_class_survives_adoption() {
         after["failures_ever"], 2,
         "the count must still be adopted even when the class is not: the \
          fixture's healed failure plus this test's parse failure"
+    );
+}
+
+/// A successful poll does not erase the adopted failure class.
+///
+/// # The second writer, which is what production actually caught
+///
+/// Adoption stamps the class at startup. `observed()` used to clear it on every
+/// successful poll — correct while the field described the STREAK, and wrong the
+/// moment it became durable. So the class survived exactly until the first
+/// successful poll, about thirty minutes.
+///
+/// Measured in production on `ebe975b`: `ck models status` showed `(network)`,
+/// read from the store, while `ck health` showed `last_failure_class: null`.
+/// Two surfaces disagreeing about one fact, and SUBC's dual-surface acceptance
+/// is the only reason it was visible — a single-surface check passes on status.
+///
+/// Neither the adoption nor the mapping was wrong. A second writer with the old
+/// semantics undid the first, later, which no test of either writer alone can
+/// see.
+#[test]
+fn a_successful_poll_does_not_erase_the_adopted_class() {
+    let dir = tempfile::tempdir().unwrap();
+    seed_history(dir.path(), Timestamp(1_000));
+    let store = open(dir.path());
+    store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(2_000),
+            outcome: ObservationOutcome::Failed {
+                class: fusiform_core::FailureClass::Network,
+            },
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: Some(10),
+            detail: None,
+        })
+        .unwrap();
+
+    let signals = Signals::new();
+    signals.adopt_from_store(&store, SourceId::ModelsDev);
+
+    // The control: adoption really did stamp it, or the assertion below cannot
+    // tell "survived a poll" from "was never there".
+    let after_adopt = health::report(&signals, 10 * HOUR)
+        .metrics
+        .expect("metrics are always present");
+    assert_eq!(
+        after_adopt["last_failure_class"], "network",
+        "control: adoption must stamp the class before a poll can erase it"
+    );
+
+    // The event: a poll succeeds, which is the ordinary case within half an
+    // hour of any restart.
+    signals.observed(11 * HOUR);
+
+    let after_poll = health::report(&signals, 11 * HOUR)
+        .metrics
+        .expect("metrics are always present");
+    assert_eq!(
+        after_poll["last_failure_class"], "network",
+        "a successful poll must not erase the adopted class: the durable \
+         history says a network failure happened, and that stays true after \
+         the next poll succeeds. Got {after_poll}"
+    );
+    assert_eq!(
+        after_poll["process_consecutive_failures"], 0,
+        "and the streak must still clear — it is the field that says whether \
+         something is failing NOW"
     );
 }

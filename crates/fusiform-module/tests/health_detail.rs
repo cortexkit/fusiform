@@ -86,3 +86,54 @@ fn a_stale_catalog_with_no_failures_says_the_upstream_is_not_refusing() {
         "must not name a failure class it does not have, got {detail:?}"
     );
 }
+
+/// A stale catalog is not blamed on a failure that already healed.
+///
+/// # Why the durable class needs a gate here
+///
+/// The class used to imply a live failure, because it cleared on every success.
+/// Now it is durable, so its presence says only that something failed ONCE —
+/// possibly yesterday, possibly healed thirty seconds later.
+///
+/// Reading it as a gate makes health attribute today's staleness to that old
+/// failure: "catalog is 120 minutes old (upstream unreachable)" when the
+/// upstream is answering fine and the real fault is the loop or the store. That
+/// sends an operator to the one place that is definitely working, which is the
+/// exact defect the class was added to prevent, inverted.
+///
+/// The streak is what answers "is something failing now"; the class only says
+/// what kind.
+#[test]
+fn a_healed_failure_does_not_explain_todays_staleness() {
+    let signals = Signals::new();
+    signals.store_opened();
+
+    // A failure that happened and healed: the class is stamped, the streak is
+    // clear. This is the ordinary state of any module that has ever failed.
+    signals.failed(FailureClass::Network);
+    signals.observed(0);
+
+    // The catalog is stale for an unrelated reason, with the loop still ALIVE —
+    // otherwise the stopped-loop arm fires first and correctly says so, which
+    // is a different (and better) message than the one under test here. Found
+    // by running: my first fixture forgot to stamp an attempt and got
+    // "the poll loop has not attempted a fetch in 121 minutes", a true
+    // diagnosis of a condition I had accidentally created.
+    let now = health::STALE_AFTER_MS + 60_000;
+    signals.adopt_last_observation(0);
+    signals.attempted(now);
+    let report = health::report(&signals, now);
+    let detail = report.detail.expect("a stale catalog reports why");
+
+    assert!(
+        detail.contains("no recent poll failure"),
+        "a stale catalog with a HEALED failure must not be blamed on the \
+         upstream: the class is durable now, so its presence no longer means \
+         polls are failing. Got: {detail}"
+    );
+    assert!(
+        !detail.contains("upstream unreachable"),
+        "the healed network failure must not be presented as the cause of \
+         today's staleness. Got: {detail}"
+    );
+}

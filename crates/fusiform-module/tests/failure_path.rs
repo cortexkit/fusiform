@@ -421,13 +421,27 @@ async fn health_names_the_cause_of_a_failure_streak() {
     }
 }
 
-/// A recovery clears the recorded cause along with the streak.
+/// A recovery clears the STREAK and keeps the cause, and health stops
+/// explaining a failure that is over.
 ///
-/// A class outliving its streak would have health explaining a failure that is
-/// no longer happening — which is worse than saying nothing, because it reads
-/// as current.
+/// # This test's name and assertion both changed, which is the record
+///
+/// It read "a recovery clears the recorded cause", and that was right while the
+/// class described the current streak: a class outliving its streak would have
+/// health explaining a failure that is no longer happening.
+///
+/// The class became DURABLE — adopted from the store so a healed failure keeps
+/// its cause, which is what an operator asks about after the fact. So clearing
+/// it is now the defect: production showed `ck models status` reporting
+/// "(network)" from the store while `ck health` reported null, because a
+/// successful poll erased what startup adoption had stamped.
+///
+/// The original concern survives and is asserted below, in the place it
+/// actually belongs: health must not PRESENT an old failure as the current
+/// state. That is a property of the report's prose, not of whether the field
+/// retains a value — and separating them is what lets both be true.
 #[tokio::test]
-async fn a_recovery_clears_the_recorded_cause() {
+async fn a_recovery_keeps_the_cause_and_stops_explaining_it() {
     let upstream = Upstream::start(Behaviour::ServeCatalog);
     let h = harness(&upstream.url);
     tick(&h.ctx, 1_000).await.unwrap();
@@ -443,8 +457,16 @@ async fn a_recovery_clears_the_recorded_cause() {
 
     assert_eq!(
         h.signals.last_failure_class(),
-        None,
-        "the cause belongs to the streak and must clear with it"
+        Some(fusiform_core::FailureClass::HttpStatus),
+        "the cause must SURVIVE recovery: it describes the last failure, which \
+         stays true after the next poll succeeds, and an operator asking what \
+         went wrong needs it once the streak has cleared"
+    );
+    assert_eq!(
+        h.signals.consecutive_failures(),
+        0,
+        "the streak is what clears — it is the field that says whether \
+         something is failing NOW"
     );
     let report = health::report(&h.signals, 9_500);
     assert_eq!(report.status, HealthStatus::Ok);

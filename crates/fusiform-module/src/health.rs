@@ -178,7 +178,17 @@ pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
         // operator reads first.
         Some(age) if age > STALE_AFTER_MS => (
             HealthStatus::Degraded,
-            Some(match signals.last_failure_class() {
+            // Gated on the STREAK, not on the class.
+            //
+            // The class is durable now — adopted from the store so a healed
+            // failure keeps its cause — which means a class being present no
+            // longer implies polls are failing. Reading it as a gate would
+            // attribute today's staleness to a failure that healed yesterday
+            // and send an operator to an upstream that is fine.
+            //
+            // The streak answers the question this arm is asking: is something
+            // failing RIGHT NOW. The class then says what kind.
+            Some(match (failures > 0).then(|| signals.last_failure_class()).flatten() {
                 Some(_) => format!(
                     "catalog is {} minutes old and not refreshing ({}); serving \
                      correct history of a world that may have moved",
