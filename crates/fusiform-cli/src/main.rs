@@ -795,6 +795,33 @@ fn print_uncertain(response: &serde_json::Value) {
     }
 }
 
+/// The override in force on a fact whose history is being read.
+///
+/// Printed BEFORE the eras rather than after, which is the opposite of
+/// `withheld` and deliberate: this line changes how every row below should be
+/// read. A reader who reaches the eras first has already taken the newest one
+/// as the current value, and a footnote afterwards is a correction to a
+/// conclusion they have made rather than context for one they have not.
+///
+/// Returns the text so the artifact under test is the sentence an operator
+/// reads. This file shipped "1 models arrived" to production once because the
+/// pluralisation was correct and nothing exercised the composed line.
+fn render_history_override(response: &serde_json::Value) -> String {
+    let Some(o) = response.get("overridden").filter(|v| !v.is_null()) else {
+        return String::new();
+    };
+    let get = |k: &str| o.get(k).and_then(|v| v.as_str()).unwrap_or("?");
+    format!(
+        "  NOTE: fusiform serves {} for this fact, not the {} recorded below.\n\
+         \x20       The eras are what the upstream published and are not rewritten;\n\
+         \x20       the override applies to the current catalog only.\n\
+         \x20       {}\n\n",
+        get("served_value"),
+        get("upstream_value"),
+        get("authority"),
+    )
+}
+
 fn print_history(response: &serde_json::Value) {
     println!(
         "{}/{}  {}",
@@ -811,6 +838,9 @@ fn print_history(response: &serde_json::Value) {
             .and_then(|v| v.as_str())
             .unwrap_or("?"),
     );
+
+    // Before the eras: this note changes how every row below reads.
+    print!("\n{}", render_history_override(response));
 
     let Some(eras) = response.get("eras").and_then(|v| v.as_array()) else {
         return;
@@ -1428,6 +1458,60 @@ mod tests {
         // an empty list after it.
         assert_eq!(line(0, 0, 0), "");
         assert_eq!(render_changes(None), "");
+    }
+
+    /// History must reconcile itself with what the catalog serves.
+    ///
+    /// The defect this pins: `ck models history --fact limit.context` for
+    /// claude-sonnet-4-5 printed the upstream's 1,000,000 and said nothing
+    /// about the 200,000 that `catalog.get` returns. Both surfaces correct,
+    /// neither mentioning the other, which reads as one of them being wrong —
+    /// and the reader most likely to hit it is one checking a suspicious number
+    /// against the record.
+    #[test]
+    fn history_reconciles_itself_with_what_is_served() {
+        let with = serde_json::json!({
+            "overridden": {
+                "provider_id": "anthropic",
+                "model_id": "claude-sonnet-4-5",
+                "fact_key": "limit.context",
+                "upstream_value": "1000000",
+                "served_value": "200000",
+                "authority": "docs.claude.com — 'a 200k-token context window'"
+            }
+        });
+        let line = render_history_override(&with);
+        // BOTH numbers, because showing only the served one leaves a reader
+        // unable to see that anything was changed.
+        assert!(
+            line.contains("200000") && line.contains("1000000"),
+            "the note must name both values or a reader cannot see a change \
+             occurred: {line}"
+        );
+        assert!(
+            line.contains("docs.claude.com"),
+            "the note must carry the authority, or it asserts without a source: {line}"
+        );
+        // And it must not claim the eras were rewritten.
+        assert!(
+            line.contains("not rewritten"),
+            "the note must say the record is intact, or an operator reads it as \
+             history having been edited: {line}"
+        );
+
+        // The ordinary case prints nothing. A note on every response is noise a
+        // reader learns to skip, which is the same as no note at all.
+        assert_eq!(
+            render_history_override(&serde_json::json!({"eras": []})),
+            "",
+            "a fact with no override must print nothing"
+        );
+        assert_eq!(
+            render_history_override(&serde_json::json!({"overridden": null})),
+            "",
+            "an explicit null must print nothing rather than a header with \
+             question marks in it"
+        );
     }
 
     #[test]

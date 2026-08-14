@@ -696,6 +696,24 @@ pub struct HistoryResponse {
     pub fact_key: String,
     /// Oldest first: a history is read forwards.
     pub eras: Vec<HistoryEra>,
+    /// The override in force on this fact right now, when there is one.
+    ///
+    /// # Why history carries this and does NOT apply it
+    ///
+    /// The eras below are what the upstream published, and they stay that way:
+    /// an override is a serve-time judgment about the CURRENT view, not a
+    /// correction to fusiform's record of what was said. Rewriting them would
+    /// forge the record — the thing this store exists to prevent.
+    ///
+    /// But an operator reading history for `limit.context` on a model whose
+    /// value is overridden was seeing the upstream's number with nothing to
+    /// reconcile it against what `catalog.get` serves. Two surfaces
+    /// disagreeing, both correct, with no cross-reference — which reads as one
+    /// of them being wrong.
+    ///
+    /// Absent when no override applies, which is the ordinary case.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overridden: Option<OverriddenFactWire>,
 }
 
 /// A `catalog.status` request.

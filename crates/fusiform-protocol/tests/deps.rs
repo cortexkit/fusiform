@@ -219,6 +219,7 @@ fn every_response_type_round_trips() {
             correction: None,
             window_from_ms: Some(1_000),
         }],
+        overridden: None,
     };
     let back: HistoryResponse =
         serde_json::from_str(&serde_json::to_string(&history).unwrap()).unwrap();

@@ -154,12 +154,35 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
         })
         .collect();
 
+    // Disclose an override on this fact WITHOUT applying it to the eras.
+    //
+    // The eras are what the upstream published and stay that way; an override
+    // is a judgment about the current view. But an operator reading history for
+    // an overridden fact was seeing the upstream's number alone, with nothing
+    // reconciling it against what catalog.get serves — two surfaces
+    // disagreeing, both correct, which reads as one of them being wrong.
+    let overridden = overlay::corrections()
+        .get(&(
+            request.provider_id.clone(),
+            request.model_id.clone(),
+            FactKey::from_stored(request.fact_key.clone()),
+        ))
+        .map(|c| OverriddenFactWire {
+            provider_id: request.provider_id.clone(),
+            model_id: request.model_id.clone(),
+            fact_key: request.fact_key.clone(),
+            upstream_value: c.upstream_value.clone(),
+            served_value: c.served_value.to_string(),
+            authority: c.authority.clone(),
+        });
+
     Ok(HistoryResponse {
         source: source.as_str().to_string(),
         provider_id: request.provider_id,
         model_id: request.model_id,
         fact_key: request.fact_key,
         eras,
+        overridden,
     })
 }
 
