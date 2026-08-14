@@ -814,3 +814,208 @@ fn the_digest_does_not_depend_on_provider_order() {
         "reversing model order changed the digest"
     );
 }
+
+/// A store BEHIND the document converges after one changed poll.
+///
+/// # Why this test exists, and what it does not establish
+///
+/// This is the load-bearing half of the argument that REJECTED the
+/// content-derived catalog version (`f8eedf0`, reasoning at
+/// `advance_catalog_version`). BROCA refuses a refresh whose identity set is
+/// smaller than the one they hold, and freeze their comparison basis on
+/// refusal — so if a store that has fallen behind could never catch up, that
+/// refusal would be permanent and the rejected fix would have been the right
+/// one after all.
+///
+/// I argued from the diff's design that it cannot be permanent: `plan_ingest`
+/// visits every fact in the DOCUMENT as well as every fact in the STORE, so a
+/// model the store has never seen is an arrival like any other, and one
+/// changed poll installs it. That reasoning was never driven. This drives it.
+///
+/// WHAT THIS IS NOT: a restore. Nobody has restored a fusiform store and
+/// polled it, and a truncated copy would be my guess at what engram leaves
+/// behind — a synthetic reproduction of an event nobody has observed tests the
+/// model of the event and reports as if it tested the event (BROCA's form).
+/// What this establishes is narrower and is the part the argument actually
+/// used: THE DIFF HAS NO MEMORY OF HAVING BEEN BEHIND. A store missing a model
+/// converges on the next changed poll regardless of why it was missing.
+#[test]
+fn a_store_behind_the_document_catches_up_in_one_changed_poll() {
+    let f = fixture();
+
+    // Seed from a document with one model REMOVED: a store that is behind,
+    // however it got that way.
+    let mut behind: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    behind["anthropic"]["models"]
+        .as_object_mut()
+        .expect("the fixture's anthropic provider publishes models")
+        .remove("claude-sonnet-4-5")
+        .expect("the model this test removes must be in the fixture");
+    let behind_doc = serde_json::to_string(&behind).unwrap();
+
+    let catalog = normalize_models_dev(behind_doc.as_bytes()).unwrap().catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(1_000),
+        BoundaryKind::Seed,
+        None,
+    )
+    .unwrap();
+    f.store.append_eras(&plan.eras).unwrap();
+
+    // The control. Without it, the convergence below is consistent with the
+    // model having been present all along, and this test would assert nothing.
+    let missing = f
+        .store
+        .value_at(
+            SourceId::ModelsDev,
+            "anthropic",
+            "claude-sonnet-4-5",
+            &FactKey::existence(),
+            Timestamp(1_500),
+        )
+        .unwrap();
+    assert!(
+        missing.known().is_none(),
+        "control: the store must genuinely not hold this model, or the \
+         convergence assertion proves nothing"
+    );
+
+    // One changed poll against the FULL document.
+    //
+    // The confirming observation first: the store refuses an observed boundary
+    // with no prior confirming poll, because such a boundary would carry a
+    // window it cannot bound. That refusal caught the first version of this
+    // test, which is the invariant working rather than an inconvenience.
+    observe(&f, 1_500, ObservationOutcome::Unchanged);
+    let detecting = observe(&f, 2_000, ObservationOutcome::Changed { snapshot_seq: 1 });
+    let full = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &full,
+        Timestamp(2_000),
+        BoundaryKind::Observed,
+        Some(detecting),
+    )
+    .unwrap();
+
+    assert_eq!(
+        plan.new_models, 1,
+        "the model the store lacks must be counted as an ARRIVAL: the diff \
+         reads the document as well as the store, so it has no memory of \
+         having been behind"
+    );
+    f.store.append_eras(&plan.eras).unwrap();
+
+    let now = f
+        .store
+        .value_at(
+            SourceId::ModelsDev,
+            "anthropic",
+            "claude-sonnet-4-5",
+            &FactKey::existence(),
+            Timestamp(2_500),
+        )
+        .unwrap();
+    assert_eq!(
+        now.known().map(|r| r.value_json.as_str()),
+        Some("\"present\""),
+        "one changed poll must close the gap"
+    );
+
+    // And the identity set is no smaller than it was: convergence must not be
+    // achieved by dropping something else. This is the property BROCA's
+    // completeness guard actually compares.
+    let all = f
+        .store
+        .read_catalog(&fusiform_store::serve::CatalogQuery::current(
+            SourceId::ModelsDev,
+        ))
+        .unwrap();
+    assert_eq!(
+        all.models.len(),
+        full.model_count(),
+        "after catching up, the store must describe every model the document \
+         does — a refusal that never clears is what the rejected fix existed \
+         to prevent"
+    );
+}
+
+/// The limit of the claim above, stated so nobody reads it as more.
+///
+/// Convergence is toward the DOCUMENT, not toward whatever a consumer happens
+/// to hold. A model that has left the upstream does not come back, and a
+/// consumer holding it will keep finding it absent from the present tense
+/// forever — correctly, because it is absent.
+///
+/// This matters because the convergence argument is easy to over-read as "any
+/// consumer refusal clears itself". It clears a refusal caused by the store
+/// being BEHIND. It does not clear one caused by the upstream having
+/// genuinely retired something the consumer still lists.
+#[test]
+fn convergence_is_toward_the_document_not_toward_a_consumer() {
+    let f = fixture();
+    seed(&f, 1_000);
+    observe(&f, 1_500, ObservationOutcome::Unchanged);
+
+    let detecting = observe(&f, 2_000, ObservationOutcome::Changed { snapshot_seq: 1 });
+    let mut retired: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    retired["anthropic"]["models"]
+        .as_object_mut()
+        .unwrap()
+        .remove("claude-sonnet-4-5")
+        .expect("the model this test retires must be in the fixture");
+    let catalog = normalize_models_dev(serde_json::to_string(&retired).unwrap().as_bytes())
+        .unwrap()
+        .catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(2_000),
+        BoundaryKind::Observed,
+        Some(detecting),
+    )
+    .unwrap();
+    assert_eq!(
+        plan.disappeared_models, 1,
+        "control: the retirement happened"
+    );
+    f.store.append_eras(&plan.eras).unwrap();
+
+    // A second changed poll against the same reduced document adds nothing
+    // back. Convergence has a direction.
+    let detecting = observe(&f, 3_000, ObservationOutcome::Changed { snapshot_seq: 2 });
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        Some(detecting),
+    )
+    .unwrap();
+    assert_eq!(
+        plan.new_models, 0,
+        "polling again must not resurrect a retired model: the store converges \
+         on what the upstream publishes, not on what a consumer remembers"
+    );
+
+    // It stays readable as history, which is the distinction that makes the
+    // refusal survivable: the fact is recoverable even though the identity is
+    // no longer present.
+    let then = f
+        .store
+        .value_at(
+            SourceId::ModelsDev,
+            "anthropic",
+            "claude-sonnet-4-5",
+            &FactKey::existence(),
+            Timestamp(1_500),
+        )
+        .unwrap();
+    assert_eq!(
+        then.known().map(|r| r.value_json.as_str()),
+        Some("\"present\""),
+        "the retired model's history must survive the retirement"
+    );
+}
