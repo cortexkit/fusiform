@@ -39,8 +39,6 @@ const OVERLAY: &str = include_str!("../data/window-overlay.json");
 /// One correction, ready to serve.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Correction {
-    /// What models.dev published.
-    pub upstream_value: String,
     /// What fusiform serves instead.
     pub served_value: String,
     /// WHO says so — the authority, not the correction event.
@@ -167,10 +165,20 @@ fn parse(doc: &serde_json::Value) -> (Corrections, Vec<String>) {
                 FactKey::limit("context"),
             ),
             Correction {
-                // Filled in at apply time from the row actually served, so the
-                // line reports what THIS poll published rather than what the
-                // overlay's author saw.
-                upstream_value: String::new(),
+                // NO `upstream_value` HERE, and its absence is the point.
+                //
+                // This struct used to carry one, empty, documented as "filled
+                // in at apply time from the row actually served". `catalog.get`
+                // filled it. Then a new `catalog.history` disclosure read it
+                // directly and shipped `"serves 200000 ... not the  recorded
+                // below"` to production — one value where the sentence promises
+                // two, because a slot is not a value and nothing said so at the
+                // point of reading.
+                //
+                // A reader-side assertion that the slot was filled would have
+                // caught it. Removing the slot means there is nowhere to read
+                // it from: the upstream value can only come from the row, which
+                // is the only place it was ever correct.
                 served_value: served.to_string(),
                 authority: fact["source_ref"].as_str().unwrap_or_default().to_string(),
             },
