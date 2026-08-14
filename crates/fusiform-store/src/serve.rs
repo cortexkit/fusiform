@@ -808,6 +808,43 @@ impl CatalogStore {
         Ok(at.map(Timestamp))
     }
 
+    /// How many polls have ever failed, and when the most recent one was.
+    ///
+    /// # Why this is durable and `process_consecutive_failures` is not
+    ///
+    /// The streak is a CURRENT-STATE gauge: it resets on the first success, so
+    /// reading health at 09:00 after a failure at 02:00 that recovered by 03:00
+    /// reports zero — indistinguishable from nothing ever having gone wrong.
+    /// That is correct for "is fusiform failing NOW" and useless for "has
+    /// fusiform ever failed", and only the second question survives the
+    /// operator not being present while the event holds.
+    ///
+    /// BROCA found the same shape in their own refusal gauge tonight and fixed
+    /// it by adding a total. The general form is my own rare-event argument
+    /// turned on an instrument rather than an experiment: AN INSTRUMENT THAT
+    /// ONLY READS DURING THE EVENT IS ONLY AS GOOD AS THE ODDS SOMEONE IS
+    /// LOOKING AT THE RIGHT MOMENT.
+    ///
+    /// Read from the observation table rather than counted in an atomic,
+    /// because the count must survive a restart — a process-scoped total would
+    /// have exactly the gap it exists to close, one level up. The live store
+    /// holds one failed poll, network class, from 2026-08-13 08:19:38Z: outside
+    /// the default ten-poll status window and invisible in every health metric.
+    pub fn failure_history(
+        &self,
+        source: SourceId,
+    ) -> Result<(i64, Option<Timestamp>), CatalogError> {
+        let row = self.raw_conn(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*), MAX(observed_at_ms) FROM observation \
+                 WHERE source = ?1 AND outcome = 'failed'",
+                params![source.as_str()],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?)),
+            )
+        })?;
+        Ok((row.0, row.1.map(Timestamp)))
+    }
+
     /// How many eras the store holds, for one source.
     pub fn era_count(&self, source: SourceId) -> Result<i64, CatalogError> {
         let n = self.raw_conn(|conn| {

@@ -99,6 +99,12 @@ pub struct Signals {
     last_observation_ms: AtomicI64,
     /// Consecutive failed polls. Reset on any observation.
     consecutive_failures: AtomicU64,
+    /// How many polls have EVER failed, adopted from the store at startup and
+    /// incremented on each failure. Distinct from the streak above, which
+    /// resets on success and cannot answer "has this ever happened".
+    failures_ever: AtomicU64,
+    /// When the most recent failure was, adopted from the store at startup.
+    last_failure_ms: AtomicI64,
     /// What the most recent failure WAS, encoded as a small integer.
     ///
     /// A count of failures says a module is failing; it does not say whether
@@ -142,6 +148,8 @@ impl Signals {
             last_attempt_ms: AtomicI64::new(NEVER),
             last_observation_ms: AtomicI64::new(NEVER),
             consecutive_failures: AtomicU64::new(0),
+            failures_ever: AtomicU64::new(0),
+            last_failure_ms: AtomicI64::new(NEVER),
             last_failure_class: AtomicU64::new(CLASS_NONE),
             last_write_ms: AtomicI64::new(NEVER),
             store_open: AtomicU64::new(0),
@@ -215,6 +223,40 @@ impl Signals {
                  rather than 'not adopted': {e}"
             ),
         }
+
+        // And the failure HISTORY, which no atomic can supply.
+        //
+        // `process_consecutive_failures` is a current-state gauge: it resets on
+        // the first success, so an operator reading health at 09:00 after a
+        // failure at 02:00 that recovered by 03:00 sees zero —
+        // indistinguishable from nothing ever having gone wrong. Correct for
+        // "is fusiform failing now", useless for "has fusiform ever failed",
+        // and only the second question survives the operator not being present
+        // while the event holds.
+        //
+        // Read from the store rather than counted here, because a
+        // process-scoped total would have the same gap one level up: it would
+        // reset on restart, which is exactly when someone is looking.
+        //
+        // BROCA found the identical shape in their own refusal gauge tonight,
+        // after I promoted it to sole observer of an event neither of us can
+        // construct. The general form is the rare-event argument turned on an
+        // instrument rather than an experiment: AN INSTRUMENT THAT ONLY READS
+        // DURING THE EVENT IS ONLY AS GOOD AS THE ODDS SOMEONE IS LOOKING AT
+        // THE RIGHT MOMENT.
+        match store.failure_history(source) {
+            Ok((count, at)) => {
+                self.failures_ever.store(count as u64, Ordering::Relaxed);
+                if let Some(at) = at {
+                    self.last_failure_ms.store(at.0, Ordering::Relaxed);
+                }
+            }
+            Err(e) => eprintln!(
+                "fusiform: could not read the failure history at startup, so health \
+                 will report failures_ever as 0 — which reads as 'never failed' \
+                 rather than 'not adopted': {e}"
+            ),
+        }
     }
 
     /// Adopt the last observation instant recorded in the store.
@@ -262,6 +304,9 @@ impl Signals {
     pub fn failed(&self, class: FailureClass) {
         self.polls_recorded.fetch_add(1, Ordering::Relaxed);
         self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
+        // The durable count advances with the streak and NEVER resets: a
+        // recovered failure must stay readable after it has healed.
+        self.failures_ever.fetch_add(1, Ordering::Relaxed);
         self.last_failure_class
             .store(encode_class(class), Ordering::Relaxed);
     }
@@ -324,6 +369,17 @@ impl Signals {
     /// How many polls reached a verdict, successful or failed.
     pub fn polls_recorded(&self) -> u64 {
         self.polls_recorded.load(Ordering::Relaxed)
+    }
+
+    /// How many polls have ever failed, and how long ago the last one was.
+    ///
+    /// Survives recovery AND restart, which the streak does not. Reading
+    /// `(0, None)` means no poll has ever failed; `(n, Some(age))` with a zero
+    /// streak means it happened and healed — go and read `ck models status`.
+    pub fn failure_history(&self, now_ms: i64) -> (u64, Option<i64>) {
+        let at = self.last_failure_ms.load(Ordering::Relaxed);
+        let age = (at != NEVER).then(|| now_ms.saturating_sub(at));
+        (self.failures_ever.load(Ordering::Relaxed), age)
     }
 
     pub fn consecutive_failures(&self) -> u64 {

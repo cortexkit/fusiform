@@ -50,6 +50,30 @@ fn seed_history(dir: &std::path::Path, at: Timestamp) {
             detail: None,
         })
         .unwrap();
+    // A poll that FAILED and then healed, an hour before the successful one.
+    //
+    // Without it, `last_failure_age_ms` is null on a restart — correct, because
+    // nothing ever failed, and INDISTINGUISHABLE from the metric not being
+    // adopted. The fence below cannot tell those apart from a value, so the
+    // fixture has to contain the event.
+    //
+    // This is the whole reason the durable count exists: an operator arriving
+    // after recovery sees a zero streak and a cleared class, and the failure is
+    // unreadable from health without this pair.
+    store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(at.0 - HOUR),
+            outcome: ObservationOutcome::Failed {
+                class: fusiform_core::FailureClass::Network,
+            },
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: Some(50),
+            detail: Some("upstream unreachable".into()),
+        })
+        .unwrap();
     store
         .append_eras(&[NewEra {
             source: SourceId::ModelsDev,
@@ -193,7 +217,12 @@ fn every_metric_is_process_scoped_by_name_or_survives_a_restart() {
             continue;
         }
         // `last_failure_class` is null when there is no current failure, which
-        // is the honest answer rather than an unadopted one.
+        // is the honest answer rather than an unadopted one. Note the contrast
+        // with `last_failure_age_ms` directly below: the CLASS describes the
+        // current streak and clears with it, the AGE describes history and must
+        // survive. Two adjacent fields about failure, one legitimately null
+        // here and one not — which is exactly the pair this fence exists to
+        // keep apart.
         if key == "last_failure_class" {
             continue;
         }
@@ -243,6 +272,8 @@ fn the_metric_names_are_pinned() {
     // restart, and the prefix says so.
     // Catalog-scoped: adopted from the store, so a restart does not erase it.
     let expected = [
+        "failures_ever",
+        "last_failure_age_ms",
         "last_failure_class",
         "last_write_age_ms",
         "observation_age_ms",
@@ -259,5 +290,94 @@ fn the_metric_names_are_pinned() {
         "the metric names changed. Each one is either process-scoped (prefixed \
          `process_`, reset by a restart) or describes the catalog (adopted from \
          the store at startup). Pick one and add the name here."
+    );
+}
+
+/// A restart adopts the failure COUNT, not just the instant.
+///
+/// Split from the naming fence deliberately. That fence asserts
+/// `last_failure_age_ms` is non-null on a restart, which is satisfied by
+/// adopting only `last_failure_ms` — so dropping the count's adoption passed it
+/// while a restarted module reported `failures_ever: 0` beside a real age.
+///
+/// Two fields from one query, and a check on either is not a check on both.
+/// Found by mutation: neutering the count survived every test until this one.
+#[test]
+fn a_restart_adopts_the_failure_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = 10 * HOUR;
+    seed_history(dir.path(), Timestamp(now - 3 * HOUR));
+
+    let (_store, signals) = restart(dir.path());
+    let metrics = health::report(&signals, now).metrics.unwrap();
+
+    assert_eq!(
+        metrics["failures_ever"], 1,
+        "the fixture holds one failed poll, so a restarted module must report \
+         it. Reading 0 means the count was not adopted — and 0 is the same \
+         value a module with a clean history reports, so the difference is \
+         invisible from the metric alone: {metrics}"
+    );
+    assert!(
+        !metrics["last_failure_age_ms"].is_null(),
+        "the instant must be adopted too — the pair comes from one query and \
+         either half can be dropped independently"
+    );
+}
+
+/// A failure stays readable after it has healed.
+///
+/// # The gap the adoption fence cannot see
+///
+/// `every_metric_is_process_scoped_by_name_or_survives_a_restart` proves
+/// `failures_ever` is ADOPTED from the store. It says nothing about what
+/// happens next: a success arriving in the same process could reset the total
+/// and the fence would still pass, because the fence only ever looks at a
+/// freshly restarted module.
+///
+/// That reset is the exact defect BROCA found in their own refusal gauge — a
+/// current-state reading dressed as a history. Both conditions this counts are
+/// rare AND self-clearing, so the realistic read is hours after the event, and
+/// a total that clears on recovery reports zero exactly when someone is finally
+/// looking.
+///
+/// AN INSTRUMENT THAT ONLY READS DURING THE EVENT IS ONLY AS GOOD AS THE ODDS
+/// SOMEONE IS LOOKING AT THE RIGHT MOMENT. This is that argument applied to an
+/// instrument rather than to an experiment.
+#[test]
+fn a_healed_failure_is_still_readable() {
+    let signals = Signals::new();
+    let now = 10 * HOUR;
+
+    signals.failed(fusiform_core::FailureClass::Network);
+    signals.failed(fusiform_core::FailureClass::Network);
+
+    // The control: while it is happening, both readings agree.
+    let during = health::report(&signals, now).metrics.unwrap();
+    assert_eq!(during["process_consecutive_failures"], 2);
+    assert_eq!(
+        during["failures_ever"], 2,
+        "control: the total must count the failures, or the recovery assertion \
+         below proves nothing"
+    );
+
+    // Recovery.
+    signals.observed(now);
+
+    let after = health::report(&signals, now).metrics.unwrap();
+    assert_eq!(
+        after["process_consecutive_failures"], 0,
+        "the streak must clear on success — it describes the CURRENT state"
+    );
+    assert!(
+        after["last_failure_class"].is_null(),
+        "the class clears with the streak it describes"
+    );
+    assert_eq!(
+        after["failures_ever"], 2,
+        "the durable total must NOT clear on success. An operator reading health \
+         after a failure has healed sees a zero streak and a null class; if the \
+         total also reads zero, the event is unreadable and the metric answers \
+         'is it failing now' while appearing to answer 'has it ever failed'."
     );
 }

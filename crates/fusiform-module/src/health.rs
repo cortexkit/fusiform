@@ -265,6 +265,7 @@ fn describe_failure(signals: &Signals) -> &'static str {
 /// both halves together — so the name is what has to carry it.
 fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
     let (attempts, recorded) = signals.attempt_ledger();
+    let (failures_ever, last_failure_age) = signals.failure_history(now_ms);
     serde_json::json!({
         // Both halves of the conservation identity, so an operator can see the
         // divergence rather than take health's word for it. Named for what
@@ -279,6 +280,16 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
         // nothing yet. The staleness clock is the signal that survives an
         // outage across a restart, and it is a catalog-scoped one.
         "process_consecutive_failures": signals.consecutive_failures(),
+        // The DURABLE half, which the streak above cannot supply: it resets on
+        // the first success, so an operator reading at 09:00 after a failure at
+        // 02:00 that healed by 03:00 sees a zero streak and no other trace.
+        //
+        // Unprefixed because it describes the CATALOG's history and is adopted
+        // from the store at startup, so a restart does not erase it. The live
+        // store holds one failed poll from 2026-08-13 that no health metric
+        // could report until now.
+        "failures_ever": failures_ever,
+        "last_failure_age_ms": last_failure_age,
         // Present so a machine reading health can branch on the cause without
         // parsing the detail sentence.
         "last_failure_class": signals.last_failure_class().map(|c| match c {
