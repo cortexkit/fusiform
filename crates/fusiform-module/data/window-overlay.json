@@ -210,7 +210,8 @@
           "units": "provider",
           "boundary": "Observed",
           "source_ref": "https://github.com/ollama/ollama/issues/16890 (read 2026-08-14) \u2014 ollama-cloud /api/chat rejects num_predict > 65,536 for deepseek-v4-pro despite a published 1M context. THE RUNTIME asserted this, which is why the grade is provider_asserted_runtime rather than provider_asserted_doc: a doc describes intent, a refusal describes behaviour. TWO LIMITS THIS CITATION CARRIES AND THE GRADE CANNOT: the observation is THIRD-PARTY (reported by a user, not by this seat and not by Ollama), and the issue was still OPEN when read, so the provider has not confirmed it. No grade in the vocabulary distinguishes an observation I made from one I read, which is a gap raised with MC rather than papered over by picking a flattering value.",
-          "observed_at": "2026-08-13T12:54:15Z"
+          "observed_at": "2026-08-13T12:54:15Z",
+          "observed_by": "third_party"
         }
       },
       "note": "The catalog row is wrong twice over here, which is why this cell leads the batch: output equals context so it is a placeholder by the spec's rule, AND the real cap is 16x smaller. A consumer trusting the row reserves 1M against a 64k wall and gets an HTTP 400. NOT written as a provider-wide wildcard: the evidence names this model, and asserting it for all 20 ollama-cloud models would manufacture a claim from absence. If the cap is genuinely path-wide, one report naming a second model promotes it."

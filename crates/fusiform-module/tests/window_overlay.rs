@@ -85,6 +85,36 @@ const FACT_KEYS: &[&str] = &[
 /// Who owns the wall on a serving path.
 const WALL_OWNERSHIP: &[&str] = &["forwards", "imposes"];
 
+/// Who made the observation behind a behavioural claim.
+///
+/// An axis ORTHOGONAL to `grade`, added 2026-08-14 on MC's ruling and for their
+/// reason: mixing provenance into the strength enum is exactly how the two got
+/// conflated in `provider_asserted_doc`, and prose is where facts go to stop
+/// being machine-checkable — the swap-check two functions down could not have
+/// read a citation.
+///
+/// Absent means UNSTATED, never a default. Same rule as everywhere else in this
+/// schema: silence is not the flattering value.
+///
+/// # The ambiguity these two names carry, stated rather than guessed
+///
+/// The motivating case is unambiguous under either reading — ollama-cloud's
+/// ceiling was reported by a stranger on an open ticket, which is
+/// `third_party` however you slice it. The case that has NOT arisen yet is a
+/// refusal THIS SEAT triggers and observes directly:
+///
+///   - read as "relative to the provider", fusiform is a third party to
+///     everyone, so its own measurements are `third_party` and the axis
+///     collapses to "did the provider say it";
+///   - read as "relative to the record", an observation this seat made is
+///     `first_party` and one it read is `third_party`, which is the
+///     made-versus-read distinction that prompted the field.
+///
+/// Those disagree on every future self-measured cell. Not encoded until MC
+/// pins it, because a value minted into a closed decoder under the wrong
+/// reading is this morning's spelling collision with a longer fuse.
+const OBSERVED_BY: &[&str] = &["first_party", "third_party"];
+
 /// A wall-ownership cell states one of exactly two things, and the two license
 /// OPPOSITE consumer behaviour.
 ///
@@ -94,6 +124,48 @@ const WALL_OWNERSHIP: &[&str] = &["forwards", "imposes"];
 /// serving path and is correct. So a typo here is not a missing cell, it is a
 /// cell that licenses the wrong action — which is why the vocabulary is pinned
 /// rather than left to prose.
+/// `observed_by`, where present, is in the vocabulary and sits on a claim it
+/// can qualify.
+///
+/// A provenance mark on a DOC-graded cell would be noise: the provider asserted
+/// it, so who read the page is not a property of the evidence. The axis only
+/// bites on behavioural grades, where the same refusal can be seen by the
+/// provider, by this seat, or by a stranger.
+#[test]
+fn a_provenance_mark_is_in_vocabulary_and_qualifies_a_behavioural_claim() {
+    let overlay = overlay();
+    let mut checked = 0usize;
+    for cell in overlay["cells"].as_array().expect("cells is an array") {
+        let id = format!(
+            "{}/{}",
+            cell["provider_id"].as_str().unwrap_or("?"),
+            cell["model_id"].as_str().unwrap_or("?")
+        );
+        for (key, fact) in cell["facts"].as_object().expect("facts is an object") {
+            let Some(by) = fact.get("observed_by").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            assert!(
+                OBSERVED_BY.contains(&by),
+                "{id} {key}: observed_by {by:?} is outside the vocabulary"
+            );
+            let grade = fact["grade"].as_str().unwrap_or("");
+            assert!(
+                matches!(grade, "measured" | "provider_asserted_runtime"),
+                "{id} {key}: observed_by qualifies an OBSERVATION, and this cell \
+                 is graded {grade:?}. On a doc-sourced claim the provider is the \
+                 asserter and who read the page says nothing about the evidence."
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked >= 1,
+        "no provenance marks found; the field was added for ollama-cloud's \
+         third-party ceiling report and a parse finding none is reading nothing"
+    );
+}
+
 #[test]
 fn a_wall_ownership_cell_states_one_of_the_two_claims() {
     let overlay = overlay();
