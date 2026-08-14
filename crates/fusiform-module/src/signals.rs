@@ -343,6 +343,30 @@ impl Signals {
         self.failures_ever.fetch_add(1, Ordering::Relaxed);
         self.last_failure_class
             .store(encode_class(class), Ordering::Relaxed);
+        // AND THE INSTANT, which the durable count and class were missing.
+        //
+        // Found by enumerating the WRITERS of every durable field after the
+        // second-writer defect — the same sweep, the opposite direction: not a
+        // field written twice with different meanings, but a field written by
+        // FEWER writers than its siblings. `failures_ever` and
+        // `last_failure_class` were stamped here; `last_failure_ms` was only
+        // ever stamped by startup adoption.
+        //
+        // The reading that produces: a module with no prior failure that fails
+        // now reports `failures_ever: 1, last_failure_class: network,
+        // last_failure_age_ms: null` — one failure, of a known kind, that never
+        // happened. Two of three fields describing one event, and the missing
+        // one is the only clue to WHEN.
+        //
+        // The instant comes from the attempt stamp rather than a parameter:
+        // `tick` stamps `attempted(now)` at its top before anything can fail,
+        // so on every path that reaches here the failing poll's instant is
+        // already recorded. A parameter would let seventeen call sites each
+        // supply a different answer to a question this struct can answer.
+        self.last_failure_ms.store(
+            self.last_attempt_ms.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
     }
 
     /// Stamp that the loop attempted a poll, whatever came of it.

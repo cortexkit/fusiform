@@ -556,3 +556,56 @@ fn a_successful_poll_does_not_erase_the_adopted_class() {
          something is failing NOW"
     );
 }
+
+/// A first failure in a fresh process reports WHEN, not just what.
+///
+/// # The opposite of the second-writer defect, found by the same sweep
+///
+/// After the class arc, I enumerated the writers of every durable field. The
+/// class had two writers disagreeing about meaning. `last_failure_ms` had the
+/// opposite problem: FEWER writers than its siblings. `failures_ever` and
+/// `last_failure_class` were stamped by `failed()`; the instant was only ever
+/// stamped by startup adoption.
+///
+/// So a module whose store held no prior failure, failing for the first time,
+/// reported `failures_ever: 1, last_failure_class: network,
+/// last_failure_age_ms: null` — one failure, of a known kind, that never
+/// happened. Two of three fields describing one event and the third silent
+/// about the only question they cannot answer between them.
+///
+/// This is not a variant of a startup gap: it needs no restart, no adoption,
+/// and no store history. It is the ordinary first failure of any fresh process.
+#[test]
+fn a_first_failure_reports_when_it_happened() {
+    let signals = Signals::new();
+    signals.store_opened();
+
+    // A fresh process with no history at all: the control is that the instant
+    // starts null, or "not null afterwards" proves nothing.
+    let before = health::report(&signals, 1_000)
+        .metrics
+        .expect("metrics are always present");
+    assert!(
+        before["last_failure_age_ms"].is_null(),
+        "control: a process that has never failed must report no instant"
+    );
+
+    // The ordinary path: a poll is attempted, and it fails.
+    signals.attempted(5_000);
+    signals.failed(fusiform_core::FailureClass::Network);
+
+    let after = health::report(&signals, 9_000)
+        .metrics
+        .expect("metrics are always present");
+    assert_eq!(
+        after["failures_ever"], 1,
+        "the count must record the failure"
+    );
+    assert_eq!(after["last_failure_class"], "network", "and its kind");
+    assert_eq!(
+        after["last_failure_age_ms"], 4_000,
+        "AND WHEN: a count and a class describing an event with no instant is \
+         two thirds of one fact. The age is measured from the attempt stamp, \
+         which `tick` records before anything can fail. Got {after}"
+    );
+}
