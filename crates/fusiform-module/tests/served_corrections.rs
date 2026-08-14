@@ -431,3 +431,104 @@ fn a_historical_read_is_distinguishable_from_a_current_one() {
          completeness check branches on"
     );
 }
+
+/// A failed poll outside the status window is still reported.
+///
+/// # The window hides exactly what an operator came to find
+///
+/// `recent_polls` is windowed — ten by default. The live store's only failed
+/// poll sits about forty polls back, so an operator asking "what has fusiform
+/// been doing" sees ten clean rows and nothing suggesting there is more. It is
+/// reachable with `--polls 60` and nothing tells them to pass it.
+///
+/// This is the rare-event argument applied to a WINDOW rather than to a gauge:
+/// a failure that self-clears leaves no trace in the current state, and a
+/// windowed history only shows it if someone looks soon enough. Both conditions
+/// have to hold, and neither is under the operator's control.
+#[test]
+fn a_failure_older_than_the_poll_window_is_still_reported() {
+    let (store, _dir) = store();
+
+    // A failure old enough to fall outside any reasonable window, then enough
+    // successes after it that the recent-polls list cannot contain it.
+    store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(100),
+            outcome: ObservationOutcome::Failed {
+                class: fusiform_core::FailureClass::Network,
+            },
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: Some(50),
+            detail: Some("upstream unreachable".into()),
+        })
+        .unwrap();
+    // A SECOND failure, because one cannot distinguish a count from a constant.
+    //
+    // With a single failure in the fixture, `ever: 1` hardcoded in the producer
+    // passes every assertion here. Found by mutation, and it is the third time
+    // in this repo that a fixture holding one of a thing hid exactly that: the
+    // count and the constant are the same value.
+    store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(200),
+            outcome: ObservationOutcome::Failed {
+                class: fusiform_core::FailureClass::Parse,
+            },
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: Some(60),
+            detail: Some("malformed document".into()),
+        })
+        .unwrap();
+    for i in 0..15 {
+        store
+            .record_observation(&NewObservation {
+                source: SourceId::ModelsDev,
+                observed_at: Timestamp(1_000 + i * 100),
+                outcome: ObservationOutcome::NotModified,
+                normalized_hash: None,
+                raw_hash: None,
+                etag: None,
+                duration_ms: Some(10),
+                detail: None,
+            })
+            .unwrap();
+    }
+
+    let status = match serve_tool_call(
+        &store,
+        br#"{"name":"catalog.status","arguments":{"polls":5}}"#,
+    )
+    .expect("must serve")
+    {
+        ToolResponse::Status(s) => serde_json::to_value(s).unwrap(),
+        other => panic!("expected status, got {other:?}"),
+    };
+
+    // The control: the window really does exclude the failure, or this test is
+    // asserting against a list that happens to contain it anyway.
+    let polls = status["recent_polls"].as_array().unwrap();
+    assert!(
+        polls.iter().all(|p| p["outcome"] != "failed"),
+        "control: the poll window must NOT contain the failure, or the total \
+         below proves nothing about reaching past the window"
+    );
+
+    let failures = &status["failures"];
+    assert_eq!(
+        failures["ever"], 2,
+        "a failed poll outside the window must still be counted: an operator \
+         reading a clean ten-row list has no reason to pass --polls 60, so the \
+         windowed history is the only surface and it is silent. Got {status}"
+    );
+    assert_eq!(
+        failures["last_at_ms"], 200,
+        "and the instant must be the failure's, so an operator knows how far \
+         back to look"
+    );
+}

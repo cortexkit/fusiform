@@ -478,6 +478,26 @@ fn print_status(response: &serde_json::Value) {
         get("era_count").and_then(|v| v.as_i64()).unwrap_or(-1)
     );
 
+    // Failed polls across the WHOLE history, printed before the poll window
+    // rather than inside it.
+    //
+    // The window is ten by default and the live store's only failure sits about
+    // forty polls back, so an operator sees ten clean rows and nothing telling
+    // them to look further. This line is what tells them, and it names the flag
+    // that would show it — a count with no way to reach the detail is a
+    // diagnostic an operator has to guess at.
+    if let Some(f) = get("failures") {
+        if let (Some(ever), Some(at)) = (
+            f.get("ever").and_then(|v| v.as_i64()),
+            f.get("last_at_ms").and_then(|v| v.as_i64()),
+        ) {
+            println!(
+                "failed polls     {ever} ever, last {}  (--polls 60 to see it)",
+                format_instant(at)
+            );
+        }
+    }
+
     let Some(polls) = get("recent_polls").and_then(|v| v.as_array()) else {
         return;
     };

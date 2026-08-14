@@ -209,10 +209,23 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
     }
     let overridden = overrides_in_effect(&wire_models, overlay::corrections());
 
+    // Failed polls across the whole history, not just the poll window.
+    //
+    // The window is ten by default, and the live store's only failure sits
+    // about forty polls back — an operator asking what fusiform has been doing
+    // sees ten clean rows and nothing suggesting there is more to see.
+    let (failures_ever, last_failure_at) =
+        store.failure_history(source).map_err(|e| store_error(&e))?;
+    let failures = last_failure_at.map(|at| fusiform_protocol::FailureHistoryWire {
+        ever: failures_ever,
+        last_at_ms: at.0,
+    });
+
     Ok(StatusResponse {
         source: source.as_str().to_string(),
         catalog_version,
         overridden,
+        failures,
         model_count: snapshot.model_count(),
         // Counted from the same snapshot as the model total, so the two cannot
         // disagree about which models exist.

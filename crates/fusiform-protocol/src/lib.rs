@@ -760,6 +760,25 @@ pub struct StatusResponse {
     pub source: String,
     pub catalog_version: i64,
     pub model_count: usize,
+    /// How many polls have EVER failed, and when the last one was.
+    ///
+    /// # Why a total, when the recent polls are right there
+    ///
+    /// The poll list is windowed — ten by default. The live store's only failed
+    /// poll sits about forty polls back, so an operator asking "what has
+    /// fusiform been doing" sees ten clean rows and no reason to look further.
+    /// It is reachable with `--polls 60`, and nothing tells them to pass it.
+    ///
+    /// The health surface carries the same pair, and this is not redundancy:
+    /// health answers "is this module OK" for a supervisor, status answers
+    /// "what has this module been doing" for a person. A history visible only
+    /// in the first is one most readers never see.
+    ///
+    /// `None` when nothing has ever failed. Omitted from the wire when absent,
+    /// so a module too old to report it degrades to silence rather than to a
+    /// false clean bill.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failures: Option<FailureHistoryWire>,
     /// Facts fusiform is currently serving against what the upstream publishes.
     ///
     /// # Why this belongs on the status surface and not only on a read
@@ -809,6 +828,19 @@ impl CatalogGetResponse {
     pub fn fact_count(&self) -> usize {
         self.models.values().map(|f| f.len()).sum()
     }
+}
+
+/// Failed polls across the store's whole history.
+///
+/// Read from the observation table rather than from a process counter, so it
+/// survives both a recovery and a restart. A process-scoped total would reset
+/// at exactly the moment someone is looking.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FailureHistoryWire {
+    /// How many polls have failed, ever. Never zero when this is present.
+    pub ever: i64,
+    /// When the most recent failure was.
+    pub last_at_ms: i64,
 }
 
 /// A `catalog.correct` request: record that fusiform's own record was wrong.

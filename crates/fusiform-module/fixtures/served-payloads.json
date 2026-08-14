@@ -220,6 +220,10 @@
     "response": {
       "catalog_version": 0,
       "era_count": 164,
+      "failures": {
+        "ever": 1,
+        "last_at_ms": 2000
+      },
       "model_count": 15,
       "models_priced": 9,
       "overridden": [
