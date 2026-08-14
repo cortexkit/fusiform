@@ -90,30 +90,31 @@ const WALL_OWNERSHIP: &[&str] = &["forwards", "imposes"];
 /// An axis ORTHOGONAL to `grade`, added 2026-08-14 on MC's ruling and for their
 /// reason: mixing provenance into the strength enum is exactly how the two got
 /// conflated in `provider_asserted_doc`, and prose is where facts go to stop
-/// being machine-checkable — the swap-check two functions down could not have
-/// read a citation.
+/// being machine-checkable — the swap-check below could not have read a
+/// citation.
 ///
-/// Absent means UNSTATED, never a default. Same rule as everywhere else in this
-/// schema: silence is not the flattering value.
+/// Absent means UNSTATED, never a default. Silence is not the flattering value.
 ///
-/// # The ambiguity these two names carry, stated rather than guessed
+/// # The names are record-relative, and that is load-bearing
 ///
-/// The motivating case is unambiguous under either reading — ollama-cloud's
-/// ceiling was reported by a stranger on an open ticket, which is
-/// `third_party` however you slice it. The case that has NOT arisen yet is a
-/// refusal THIS SEAT triggers and observes directly:
+/// First drafted as `first_party | third_party` and renamed before any second
+/// cell existed, because those two readings disagree on every cell this seat
+/// will ever measure itself:
 ///
-///   - read as "relative to the provider", fusiform is a third party to
-///     everyone, so its own measurements are `third_party` and the axis
-///     collapses to "did the provider say it";
-///   - read as "relative to the record", an observation this seat made is
-///     `first_party` and one it read is `third_party`, which is the
-///     made-versus-read distinction that prompted the field.
+///   - relative to the PROVIDER, fusiform is a stranger to everyone, so its own
+///     measurements are third-party and the axis collapses into "did the
+///     provider say it" — which `grade` already carries, leaving the field
+///     redundant;
+///   - relative to the RECORD, an observation made here is distinct from one
+///     read elsewhere, which is the made-versus-read gap the field exists to
+///     close.
 ///
-/// Those disagree on every future self-measured cell. Not encoded until MC
-/// pins it, because a value minted into a closed decoder under the wrong
-/// reading is this morning's spelling collision with a longer fuse.
-const OBSERVED_BY: &[&str] = &["first_party", "third_party"];
+/// `first_party`/`third_party` is the vocabulary of PROVIDER relationships,
+/// which is precisely the axis this one is orthogonal to, so reusing it invites
+/// the collapsed reading. MC's rule for preferring a rename over a documented
+/// constant: **a constant is read once by whoever writes the decoder; a name is
+/// read every time by everyone.**
+const OBSERVED_BY: &[&str] = &["self_observed", "reported"];
 
 /// A wall-ownership cell states one of exactly two things, and the two license
 /// OPPOSITE consumer behaviour.
