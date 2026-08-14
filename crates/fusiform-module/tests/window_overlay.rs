@@ -67,7 +67,163 @@ const FACT_KEYS: &[&str] = &[
     "output.enforced",
     "output.default",
     "geometry",
+    // Whose wall a request on this path hits. NOT lineage: 3,401 of 6,320 rows
+    // carry a vendor-namespaced model id, so "does this provider originate the
+    // model" is derivable by any consumer holding the catalog and must never
+    // be a cell. This key answers the question the catalog cannot: openrouter
+    // and ollama-cloud are BOTH gateways by every id-based test, and only one
+    // lets other people's walls through.
+    //
+    // The distinction licenses opposite consumer behaviour. MC demotes a
+    // forwarder's authored input to the conservative of two derivations; doing
+    // that to an imposer would be wrong, because its numbers describe its own
+    // path — and a gateway sweep that refused ollama-cloud would have deleted
+    // the measured 16x output correction, the most valuable row in the dataset.
+    "path.wall_ownership",
 ];
+
+/// Who owns the wall on a serving path.
+const WALL_OWNERSHIP: &[&str] = &["forwards", "imposes"];
+
+/// A wall-ownership cell states one of exactly two things, and the two license
+/// OPPOSITE consumer behaviour.
+///
+/// MC demotes a forwarder's authored input to the conservative of two
+/// derivations, because the number describes a backend they did not choose.
+/// Doing that to an imposer would be wrong: its number describes its own
+/// serving path and is correct. So a typo here is not a missing cell, it is a
+/// cell that licenses the wrong action — which is why the vocabulary is pinned
+/// rather than left to prose.
+#[test]
+fn a_wall_ownership_cell_states_one_of_the_two_claims() {
+    let overlay = overlay();
+    let mut checked = 0usize;
+    for cell in overlay["cells"].as_array().expect("cells is an array") {
+        let Some(fact) = cell["facts"].get("path.wall_ownership") else {
+            continue;
+        };
+        let id = format!(
+            "{}/{}",
+            cell["provider_id"].as_str().unwrap_or("?"),
+            cell["model_id"].as_str().unwrap_or("?")
+        );
+        let value = fact["value"]["value"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id}: wall ownership must be a string"));
+        assert!(
+            WALL_OWNERSHIP.contains(&value),
+            "{id}: wall ownership {value:?} is outside the vocabulary. The two \
+             values license opposite consumer behaviour, so an unrecognised one \
+             is worse than an absent cell."
+        );
+        // Behavioural, so it can never be graded from a document alone.
+        assert_eq!(
+            fact["grade"].as_str(),
+            Some("measured"),
+            "{id}: wall ownership is a property of what the path DOES, so it \
+             cannot be sourced from a doc page. If it was not measured, it is \
+             not known."
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 2,
+        "found {checked} wall-ownership cells; the deliverable is two \
+         providers and a parse finding fewer means this test is reading nothing"
+    );
+}
+
+/// A wall-ownership claim agrees with the provider's other cells.
+///
+/// # Why the vocabulary check is not enough
+///
+/// Mutation found this: swapping `forwards` and `imposes` produces two
+/// PERFECTLY LEGAL cells and survives every check above, because both values
+/// are in the vocabulary. The result is two providers each licensing the exact
+/// opposite of the correct consumer action — a forwarder trusted for
+/// pre-carve, an imposer demoted away from its own true numbers.
+///
+/// A vocabulary can only reject a value nobody defined. It cannot reject the
+/// wrong one of two defined values, and that is the failure that matters here.
+///
+/// What separates them is not the string, it is what else the provider says:
+///
+/// - **forwards** means the value at a key belongs to a backend, so the
+///   provider must carry a refusal (`not_single_valued_at_key`) somewhere.
+///   Marking a forwarder while claiming a definite window is incoherent.
+/// - **imposes** means the provider's own ceiling is real and measurable, so it
+///   must carry a measured enforced value. Marking an imposer with nothing
+///   measured is a claim with no observation behind it.
+#[test]
+fn a_wall_ownership_claim_agrees_with_the_providers_other_cells() {
+    let overlay = overlay();
+    let cells = overlay["cells"].as_array().expect("cells is an array");
+    let mut checked = 0usize;
+
+    for cell in cells {
+        let Some(fact) = cell["facts"].get("path.wall_ownership") else {
+            continue;
+        };
+        let provider = cell["provider_id"].as_str().unwrap_or("?");
+        let claim = fact["value"]["value"].as_str().unwrap_or("?");
+
+        // Every other fact this provider states.
+        let siblings: Vec<&serde_json::Value> = cells
+            .iter()
+            .filter(|c| c["provider_id"].as_str() == Some(provider))
+            .flat_map(|c| c["facts"].as_object().into_iter().flat_map(|o| o.values()))
+            .collect();
+
+        match claim {
+            "forwards" => {
+                let refuses = siblings
+                    .iter()
+                    .any(|f| f["value"]["why"].as_str() == Some("not_single_valued_at_key"));
+                assert!(
+                    refuses,
+                    "{provider} is marked as forwarding someone else's wall, but \
+                     states no not_single_valued_at_key refusal. If its values \
+                     really belong to a backend it did not choose, at least one \
+                     key cannot hold a single fact — and if every key holds one, \
+                     it is not forwarding."
+                );
+            }
+            "imposes" => {
+                // Either BEHAVIOURAL grade, not just `measured`.
+                //
+                // The first version of this check demanded `measured` and fired
+                // on real data: ollama-cloud's ceiling is a runtime refusal
+                // reported by a third party, which is `provider_asserted_runtime`.
+                // What an imposed wall requires is an observation of BEHAVIOUR —
+                // a refusal is one whoever watched it happen. A doc assertion is
+                // not, which is the distinction that stays load-bearing here.
+                let measured = siblings.iter().any(|f| {
+                    matches!(
+                        f["grade"].as_str(),
+                        Some("measured") | Some("provider_asserted_runtime")
+                    ) && f["value"]["kind"].as_str() == Some("stated")
+                        && f["value"]["value"].is_number()
+                });
+                assert!(
+                    measured,
+                    "{provider} is marked as imposing its own wall, but states no \
+                     behaviourally-observed numeric value. An imposed ceiling is \
+                     observable by definition — that is what distinguishes it from a forwarded \
+                     one — so a claim with nothing measured behind it is the \
+                     wrong half of the pair."
+                );
+            }
+            other => panic!("{provider}: unknown wall ownership {other:?}"),
+        }
+        checked += 1;
+    }
+
+    assert!(
+        checked >= 2,
+        "checked {checked} claims; both providers must be reached or a swap \
+         goes unexamined at the one that is not"
+    );
+}
 
 /// Every geometry class.
 const GEOMETRIES: &[&str] = &["shared_upfront", "shared_truncating", "separate"];

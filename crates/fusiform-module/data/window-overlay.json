@@ -206,10 +206,10 @@
             "kind": "stated",
             "value": 65536
           },
-          "grade": "provider_asserted_doc",
+          "grade": "provider_asserted_runtime",
           "units": "provider",
           "boundary": "Observed",
-          "source_ref": "https://github.com/ollama/ollama/issues/16890",
+          "source_ref": "https://github.com/ollama/ollama/issues/16890 (read 2026-08-14) \u2014 ollama-cloud /api/chat rejects num_predict > 65,536 for deepseek-v4-pro despite a published 1M context. THE RUNTIME asserted this, which is why the grade is provider_asserted_runtime rather than provider_asserted_doc: a doc describes intent, a refusal describes behaviour. TWO LIMITS THIS CITATION CARRIES AND THE GRADE CANNOT: the observation is THIRD-PARTY (reported by a user, not by this seat and not by Ollama), and the issue was still OPEN when read, so the provider has not confirmed it. No grade in the vocabulary distinguishes an observation I made from one I read, which is a gap raised with MC rather than papered over by picking a flattering value.",
           "observed_at": "2026-08-13T12:54:15Z"
         }
       },
@@ -366,6 +366,40 @@
         }
       },
       "note": "THE DATED VARIANT OF THE SAME DEFECT, and arguably the more dangerous row: a consumer pinning a dated model id is doing so FOR REPRODUCIBILITY, which is exactly the caller least likely to re-check a limit. FOUND BY A MECHANICAL TEST RATHER THAN BY READING. The claude-sonnet-4-5 cell was found by reading a documentation passage; this one was found by running the pairing rule that cell's reasoning established (1M context pairs with 128k output, 200k with 64k) across all 13 anthropic rows. Two rows fail, both sonnet-4.5 spellings, both with the same 1M/64k self-contradiction. THE SWEEP ALSO CLEARED A ROW A CONSUMER HAD FLAGGED. BROCA reported claude-opus-5 as carrying a suspect 1M; it passes the pairing test at 1M/128k and Anthropic's doc names it explicitly in the 1M list, so the catalog is right there and the alarm was the inverse error. A test that only convicts is worth less than one that also acquits."
+    },
+    {
+      "provider_id": "openrouter",
+      "model_id": "*",
+      "facts": {
+        "path.wall_ownership": {
+          "value": {
+            "kind": "stated",
+            "value": "forwards"
+          },
+          "grade": "measured",
+          "boundary": "Asserted",
+          "units": "provider",
+          "observed_at": "2026-08-14T16:05:00Z",
+          "source_ref": "Measured across the live catalog: openrouter serves 348 model ids spanning 59 distinct first-party vendors, and routes a request to whichever backend it selects. The wall a request hits therefore belongs to that backend, not to openrouter \u2014 which is why window.advertised at this provider carries not_single_valued_at_this_key rather than a number."
+        }
+      }
+    },
+    {
+      "provider_id": "ollama-cloud",
+      "model_id": "*",
+      "facts": {
+        "path.wall_ownership": {
+          "value": {
+            "kind": "stated",
+            "value": "imposes"
+          },
+          "grade": "measured",
+          "boundary": "Asserted",
+          "units": "provider",
+          "observed_at": "2026-08-14T16:05:00Z",
+          "source_ref": "Measured: ollama-cloud carries other vendors' weights (glm, deepseek, kimi, minimax) and is a gateway by every id-based test, but enforces its OWN serving-infrastructure ceiling uniformly \u2014 65,536 output against an advertised 1,048,576. The wall is ollama-cloud's, so its authored numbers describe its own path and must NOT be demoted as a forwarder's would be."
+        }
+      }
     }
   ],
   "source_revision_note": "Cells transcribed from mc-geometry-spec were read at c6a85d85 and their source_ref names 06a0e5ac, the current revision. The bump is verified rather than assumed: every row transcribed here is byte-identical between the two revisions (checked per row with git show). The Codex row DID change between them, and no cell here cites the spec for Codex \u2014 those cells cite codex-rs directly. Pointing at the newer revision matters because c6a85d85 carried a misattributed Codex number, and a reader resolving a source_ref should land on a document without a known bad row in it.",
