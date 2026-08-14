@@ -1,7 +1,16 @@
 # Fusiform — charter
 
-Status: chartered 2026-08-11. No code yet; this document is the founding
-contract. The first owner session starts from here.
+Status: chartered 2026-08-11; **shipped and deployed 2026-08-12** as the
+fleet's 17th supervised module. This document remains the founding contract
+and the first thing a new owner reads, so where the code has since decided
+something differently, the difference is marked HERE rather than left for the
+reader to discover downstream.
+
+The v1 scope list below is the charter's original intent, annotated with what
+was actually built. Two items changed on evidence: push was WITHDRAWN, and the
+read surface is wider and differently named than planned. The reasoning for
+each lives in `docs/design/schema-and-store.md` and the findings docs; the
+annotations here exist so nobody builds a mental model the code rejects.
 
 ## What CortexKit is (context for the new owner)
 
@@ -76,8 +85,28 @@ fleet consumers over subc routes and pushed on change.
    (source, fetch time, content hash) in the module store.
 4. **Push**: on change, call broca's `catalog.refresh` over a subc route.
    Fusiform pushes; consumers validate and swap. No consumer polls.
+
+   **WITHDRAWN — fusiform emits no pushes, and `emits_push` is `false` in the
+   manifest.** Not deferred: the mechanism was wrong, not merely
+   untransportable. If push were the ONLY notification path, a dropped push
+   would leave a consumer permanently stale, and an acknowledgement would
+   report that to a producer who cannot repair it. With consumers keeping a
+   poll backstop, a dropped push costs LATENCY ONLY — and the backstop is a
+   better acknowledgement than a message, because it cannot itself be dropped.
+   So "no consumer polls" is exactly inverted: consumer polling is what makes
+   the design sound. See §10 of `docs/design/schema-and-store.md` and
+   `docs/findings/2026-08-11-push-has-no-acknowledgement.md`.
 5. **Serve**: a read surface (`catalog.get`, `catalog.diff`) for any
    consumer that wants pull semantics.
+
+   **`catalog.diff` was never built; the shipped surface is four tools:**
+   `catalog.get` (current or point-in-time, with `withheld`, `uncertain` and
+   `overridden` reported rather than silently applied), `catalog.history`
+   (every era for one fact, with observation windows), `catalog.status`
+   (poll record, counts, overrides), and `catalog.correct` (operator-driven
+   correction of fusiform's own past record). A diff is derivable from
+   `catalog.history` and carries no provenance of its own, which is why it
+   lost to an era history that does.
 
 Image/video/audio rows are v1 **schema**, not v1 content: the schema carries
 modality from day one so non-LLM rows land without a schema migration, but

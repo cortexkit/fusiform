@@ -44,5 +44,21 @@ done
 
 echo
 echo "sha256:"
-shasum -a 256 target/release/ck-fusiform target/release/ck-models \
-  | sed 's|target/release/||'
+# `shasum` is macOS; `sha256sum` is coreutils. This script is otherwise
+# portable — it only builds and stamps, with no signing — so an external
+# report (issue #1) correctly noted that this one call was all that stopped it
+# running on Linux. `stage.sh` is a different case and refuses outright: it
+# signs, and `codesign` has no counterpart to fall back to.
+if command -v shasum >/dev/null 2>&1; then
+  shasum -a 256 target/release/ck-fusiform target/release/ck-models \
+    | sed 's|target/release/||'
+elif command -v sha256sum >/dev/null 2>&1; then
+  sha256sum target/release/ck-fusiform target/release/ck-models \
+    | sed 's|target/release/||'
+else
+  # Refuse rather than print nothing: a provenance block that silently omits
+  # the hashes is worse than a failure, because the omission is invisible in
+  # the output someone copies.
+  echo "no sha256 tool found (looked for shasum, sha256sum)" >&2
+  exit 1
+fi

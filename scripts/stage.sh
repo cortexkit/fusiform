@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 # Build, sign, and stage fusiform's binaries for placement.
 #
+# PLATFORM: macOS ONLY, and it says so at line 1 rather than failing at line 42.
+#
+# This script signs with an Apple Developer identity via `codesign`, which
+# exists nowhere else. External report (issue #1) suggested a
+# `shasum`/`sha256sum` fallback for Linux — a real portability gap, and fixing
+# it alone would have moved the failure NINETEEN LINES EARLIER to `codesign`
+# rather than removing it. A script that gets further before failing is worse
+# than one that refuses immediately: it has already built, and the operator now
+# has a half-staged directory and a less obvious reason.
+#
+# So the refusal is explicit and first. Signing is macOS-bound by the fleet's
+# signing topology, not by an accident of tooling, so there is no portable
+# version of this script to write.
+#
 # WHY THIS EXISTS: A REFUSAL NOBODY SEES IS NOT A GATE
 #
 # The release script refuses to stamp a dirty tree, which is correct. But that
@@ -21,6 +35,15 @@
 # the bytes in the staging directory are the thing that gets placed, and asking
 # them what they are is the only question whose answer cannot be stale.
 set -euo pipefail
+
+# Refuse before building, not after. `codesign` is the binding constraint.
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "stage.sh signs with an Apple Developer identity and runs on macOS only." >&2
+  echo "  this host: $(uname -s)" >&2
+  echo "  for a dev binary on another platform, use: cargo build --release" >&2
+  echo "  (unsigned, unstageable, and fine for local testing)" >&2
+  exit 1
+fi
 
 cd "$(dirname "$0")/.."
 
