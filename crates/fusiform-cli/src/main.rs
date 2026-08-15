@@ -76,7 +76,8 @@ options:
   --model <id>              narrow to one model (requires --provider)
   --fact <key>              which fact, for history
                             (rate.input, limit.context, existence, ...)
-  --at <epoch-ms>           resolve the catalog at a past instant
+  --at <epoch-ms>           resolve the catalog at a past instant (get only:
+                            history returns the whole timeline)
   --rates                   only pricing facts
   --capabilities            only capability and limit facts
   --include-retired         include models the upstream stopped publishing
@@ -189,6 +190,27 @@ struct Args {
 /// which this repo has now produced three times in a day — the artifact under
 /// test has to be the thing that ships.
 fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String> {
+    // A flag that does nothing must SAY so rather than be dropped.
+    //
+    // `--at` is a global option but only `get` resolves an instant: `history`
+    // returns the whole timeline by construction (its request type has no
+    // instant field), `status` describes the module, and `correct` takes a
+    // window through --from/--until. Accepting it elsewhere and ignoring it
+    // means an operator asking for the past gets a confident answer about
+    // something else, with nothing in the output to say the flag was dropped.
+    //
+    // Found by asserting the request body: the test expected history to carry
+    // --at, and the honest resolution is not to add the field but to refuse
+    // the flag.
+    if args.at_ms.is_some() && args.command != "get" {
+        return Err(format!(
+            "--at applies to `get` only; `{}` does not resolve an instant.\n\
+             history returns the whole timeline for a fact, and correct takes \
+             a window through --from and --until.",
+            args.command
+        ));
+    }
+
     match args.command.as_str() {
         "status" => {
             let mut a = serde_json::Map::new();
@@ -1453,6 +1475,140 @@ mod tests {
     /// this catalog — most polls change one fact, most reads withhold one —
     /// so it is the case a hand-picked fixture treats as a boundary and real
     /// data treats as the norm.
+    /// Flags whose absence from the request FAILS SILENTLY, asserted on the
+    /// request body.
+    ///
+    /// `request_for` was extracted so a request could be examined without
+    /// sending one, and this covers the arms whose flags go wrong quietly:
+    ///
+    /// - `--at` dropped means a point-in-time read answers with CURRENT values.
+    ///   The response is well-formed, the numbers are real, and an operator
+    ///   reading history gets today's catalog believing it is the past. That
+    ///   confusion has a precedent: a shrunken current read and a historical
+    ///   read are already hard to tell apart at the version field, and this
+    ///   would make them identical at the values too.
+    /// - a prefix filter dropped means `--rates` returns the WHOLE catalog
+    ///   rather than the rate plane, which is loud enough to notice; but a
+    ///   filter that reaches the wire WRONG returns an empty catalog, which
+    ///   reads as "this catalog has no prices". The constants are held against
+    ///   real fact keys in fusiform-store; what is checked here is that they
+    ///   arrive at all.
+    /// - `--include-retired` dropped silently hides models the upstream
+    ///   stopped publishing, which is the difference between "retired" and
+    ///   "never existed" — the distinction this whole store is built to keep.
+    #[test]
+    fn flags_that_fail_silently_reach_the_request() {
+        let body = |argv: &[&str]| -> serde_json::Value {
+            let full: Vec<std::ffi::OsString> = std::iter::once("ck-models")
+                .chain(argv.iter().copied())
+                .map(std::ffi::OsString::from)
+                .collect();
+            let args = parse_args(full).expect("these arguments must parse");
+            request_for(&args).expect("this request must build").1
+        };
+
+        // --at must reach the wire, and its ABSENCE must leave the field out
+        // rather than send a zero: at_ms 0 is a real instant (1970), and a
+        // read resolved there returns nothing while looking like a valid
+        // point-in-time answer.
+        let past = body(&["get", "--at", "1786000000000"]);
+        assert_eq!(
+            past["at_ms"],
+            serde_json::json!(1_786_000_000_000i64),
+            "--at must reach the request, or a point-in-time read silently \
+             answers with current values"
+        );
+        let now = body(&["get"]);
+        assert!(
+            now.get("at_ms").is_none(),
+            "without --at the field must be ABSENT, not zero: {now}"
+        );
+
+        // The plane filters must arrive, and must differ from each other.
+        let rates = body(&["get", "--rates"]);
+        let caps = body(&["get", "--capabilities"]);
+        assert_eq!(
+            rates["fact_prefixes"],
+            serde_json::json!([fusiform_store::prefix::RATE]),
+            "--rates must send the rate prefix"
+        );
+        assert_eq!(
+            caps["fact_prefixes"],
+            serde_json::json!([
+                fusiform_store::prefix::CAPABILITY,
+                fusiform_store::prefix::LIMIT
+            ]),
+            "--capabilities must send both the capability and limit planes: \
+             a limit is a capacity claim and an operator asking about \
+             capabilities means both"
+        );
+        assert_ne!(
+            rates["fact_prefixes"], caps["fact_prefixes"],
+            "the two filters must differ, or one of them selects the wrong plane"
+        );
+        assert!(
+            body(&["get"]).get("fact_prefixes").is_none(),
+            "with no filter the field must be absent, or every read is filtered"
+        );
+
+        // --include-retired must arrive, and must default to absent.
+        assert_eq!(
+            body(&["get", "--include-retired"])["include_retired"],
+            serde_json::json!(true),
+            "--include-retired must reach the request, or a retired model is \
+             indistinguishable from one that never existed"
+        );
+        assert!(
+            body(&["get"]).get("include_retired").is_none(),
+            "the default must not send the flag"
+        );
+
+        // A verb that cannot use --at must REFUSE it, not drop it.
+        //
+        // This assertion started as "history must carry --at" and failed,
+        // which is how the flag's silent uselessness was found: history has no
+        // instant field at all, so the flag had been accepted and discarded
+        // since the verb existed.
+        let refused = |argv: &[&str]| -> String {
+            let full: Vec<std::ffi::OsString> = std::iter::once("ck-models")
+                .chain(argv.iter().copied())
+                .map(std::ffi::OsString::from)
+                .collect();
+            let args = parse_args(full).expect("these arguments must parse");
+            request_for(&args).expect_err("this must be refused")
+        };
+
+        for argv in [
+            vec![
+                "history",
+                "--provider",
+                "anthropic",
+                "--model",
+                "claude-sonnet-4-5",
+                "--fact",
+                "limit.context",
+                "--at",
+                "1786000000000",
+            ],
+            vec!["status", "--at", "1786000000000"],
+        ] {
+            let msg = refused(&argv);
+            assert!(
+                msg.contains("--at applies to `get` only"),
+                "{:?} must refuse --at rather than ignore it, got: {msg}",
+                argv[0]
+            );
+        }
+
+        // Control: the verb that DOES resolve an instant must still accept it,
+        // or the refusal above is just a broken flag.
+        assert_eq!(
+            body(&["get", "--at", "1786000000000"])["at_ms"],
+            serde_json::json!(1_786_000_000_000i64),
+            "control: get must still carry --at"
+        );
+    }
+
     /// `--commit` and the wire's `dry_run` are OPPOSITE polarities, asserted
     /// on the REQUEST BODY rather than the parsed flag.
     ///
