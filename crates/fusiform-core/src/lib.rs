@@ -39,8 +39,25 @@ pub use normalize::{normalize_models_dev, NormalizeError, NormalizeOutcome, Norm
 #[serde(rename_all = "snake_case")]
 pub enum SourceId {
     ModelsDev,
-    /// The compile-time bootstrap snapshot. Never a fetch: a seed says where
-    /// the store started, never what an upstream did.
+    /// **No row is written under this source, and none ever has been.**
+    ///
+    /// It was declared for the compile-time bootstrap snapshot, on the reading
+    /// that a seed says where the store started rather than what an upstream
+    /// did. The implementation went the other way and was right to: the
+    /// snapshot IS models.dev's data, fetched earlier, so `seed.rs` stores it
+    /// under `ModelsDev` and records how it was learned with
+    /// `BoundaryKind::Seed`. Provenance of a value and identity of a speaker
+    /// are different questions, and only the second belongs here.
+    ///
+    /// This comment used to describe the original intent, which is how the
+    /// route arm accepting `"seed"` looked correct for as long as it did:
+    /// every query for that source matched zero rows and returned an empty
+    /// catalog with a success status. The route refuses it now.
+    ///
+    /// The variant stays because it carries a property the domain needs before
+    /// a second source exists: identity is `(source, provider, model)`, and
+    /// `the_same_model_from_two_sources_is_two_claims` needs two sources to
+    /// prove it.
     Seed,
 }
 
