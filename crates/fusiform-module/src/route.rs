@@ -239,6 +239,56 @@ fn override_for(
     })
 }
 
+/// Refuse a point-in-time read that predates everything this store knows.
+///
+/// # The defect
+///
+/// A read at an instant before the earliest observation returned an EMPTY
+/// CATALOG with a success status — 0 models, well-formed, no signal. Measured
+/// on the live store 2026-08-15: the record begins 2026-08-12 10:07:29Z, and a
+/// read at 02:00:00Z the same morning answered "0 models" rather than "I was
+/// not watching".
+///
+/// A consumer replaying a past decision or re-pricing a past charge gets
+/// "nothing existed then", which is a claim about the world, from a store
+/// whose only honest claim is about its own coverage. It is the same polarity
+/// error as accepting a source no row carries, and the same one the single
+/// model path already avoids for unknown ids — an answer of zero must not be
+/// how a query reports that it could not be asked.
+///
+/// # Why this is not the same as "absent at that instant"
+///
+/// A model that exists and was not published at T is a REAL answer: fusiform
+/// watched at T and did not see it. That case stays an empty result, and the
+/// comment at its site says so. The difference is whether fusiform was
+/// watching at all, which no per-model check can determine and only the
+/// store's coverage bound can.
+fn refuse_before_the_record(
+    store: &CatalogStore,
+    source: SourceId,
+    at: Option<Timestamp>,
+) -> Result<(), RouteError> {
+    let Some(asked) = at else {
+        return Ok(());
+    };
+    let Some(begins) = store
+        .record_begins_at(source)
+        .map_err(|e| store_error(&e))?
+    else {
+        // No records at all: an empty store cannot bound anything, and the
+        // seed writes one on first boot. Refusing here would fail a fresh
+        // install for a coverage claim it has no way to make.
+        return Ok(());
+    };
+    if asked.0 < begins.0 {
+        return Err(RouteError::bad_request(format!(
+            "no record at {}: fusiform's history begins at {}, so it cannot say              what the catalog held before then. An empty answer would claim the              catalog was empty; it was unobserved.",
+            asked.0, begins.0
+        )));
+    }
+    Ok(())
+}
+
 /// Serve `catalog.status`: what fusiform has been doing.
 pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse, RouteError> {
     let request: StatusRequest = if body.is_empty() {
@@ -484,6 +534,14 @@ pub fn serve_catalog_get(
     }
 
     let at = request.at_ms.map(Timestamp);
+
+    // Checked ONCE, before the branch, so both read paths inherit it.
+    //
+    // The single-model and bulk reads have needed the same property three
+    // separate times in this crate and diverged every time it was written
+    // twice. Placing this above the split makes the divergence unwritable
+    // rather than merely absent.
+    refuse_before_the_record(store, source, at)?;
 
     let snapshot = if let (Some(provider_id), Some(model_id)) =
         (request.provider_id.as_deref(), request.model_id.as_deref())

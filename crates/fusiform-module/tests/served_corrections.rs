@@ -990,3 +990,79 @@ fn a_read_can_be_replayed_by_the_instant_it_resolved() {
          means the doc saying so cannot quietly stop being true."
     );
 }
+
+/// A read before the record begins is REFUSED, not answered with nothing.
+///
+/// # The defect, measured on the live store
+///
+/// Fusiform's history begins 2026-08-12 10:07:29Z. A read at 02:00:00Z the
+/// same morning returned `0 models` with a success status — well-formed, no
+/// signal, and a claim about the world from a store whose only honest claim is
+/// about its own coverage.
+///
+/// This is the case a replaying consumer hits first and notices last. ASTRO's
+/// historical charges are priced against observations from 19 July, a month
+/// before this store existed; every replay of those instants would have
+/// returned an empty catalog that reads as "nothing was published then".
+///
+/// # The distinction it must NOT break
+///
+/// A model that exists and was not published at T is a real answer: fusiform
+/// watched at T and did not see it. That stays an empty result. The difference
+/// is whether fusiform was watching at all, which no per-model check can
+/// determine — only the store's coverage bound.
+#[test]
+fn a_read_before_the_record_is_refused_rather_than_answered_empty() {
+    let (store, _dir) = store();
+
+    // The fixture's observation is at 1_000, so anything earlier predates it.
+    let before = r#"{"name":"catalog.get","arguments":{"at_ms":500}}"#;
+    let err = match serve_tool_call(&store, before.as_bytes()) {
+        Err(e) => format!("{e:?}"),
+        Ok(other) => panic!(
+            "a read before the record must be refused; answering it with an \
+             empty catalog claims the catalog was empty when it was unobserved. \
+             Got: {other:?}"
+        ),
+    };
+    assert!(
+        err.contains("no record at"),
+        "the refusal must name the problem and the bound, got: {err}"
+    );
+
+    // BOTH paths, because this crate has produced the single-model/bulk split
+    // three times. The guard sits above the branch precisely so it cannot.
+    let before_one = r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","at_ms":500}}"#;
+    assert!(
+        serve_tool_call(&store, before_one.as_bytes()).is_err(),
+        "the single-model path must refuse it too"
+    );
+
+    // CONTROL 1: an instant INSIDE the record is served, or the refusal above
+    // is just a broken read path.
+    let inside = r#"{"name":"catalog.get","arguments":{"at_ms":1500}}"#;
+    let served = match serve_tool_call(&store, inside.as_bytes()) {
+        Ok(ToolResponse::Catalog(c)) => serde_json::to_value(c).unwrap(),
+        other => panic!("an instant inside the record must be served: {other:?}"),
+    };
+    assert!(
+        !served["models"].as_object().unwrap().is_empty(),
+        "control: a covered instant must return models"
+    );
+
+    // CONTROL 2: the exact boundary is INSIDE the record, not outside it. The
+    // record begins AT that observation, so a read there is answerable — an
+    // off-by-one here would refuse the first instant fusiform ever saw.
+    let boundary = r#"{"name":"catalog.get","arguments":{"at_ms":1000}}"#;
+    assert!(
+        serve_tool_call(&store, boundary.as_bytes()).is_ok(),
+        "the first observed instant must be answerable: the record begins there"
+    );
+
+    // CONTROL 3: a CURRENT read is never affected, since it names no instant.
+    let current = r#"{"name":"catalog.get","arguments":{}}"#;
+    assert!(
+        serve_tool_call(&store, current.as_bytes()).is_ok(),
+        "a current read must not be touched by a coverage bound"
+    );
+}

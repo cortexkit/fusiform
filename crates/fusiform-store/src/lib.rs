@@ -313,6 +313,38 @@ impl CatalogStore {
         self.last_confirming_observation_before(source, Timestamp(i64::MAX))
     }
 
+    /// The earliest instant this store has any record of, or `None` when it
+    /// has none at all.
+    ///
+    /// # What this is for
+    ///
+    /// A point-in-time read BEFORE this instant cannot be answered. Not
+    /// "answered with nothing" — fusiform has no basis to say anything about a
+    /// time it was not watching, and an empty result would state that the
+    /// catalog was empty then.
+    ///
+    /// That distinction is the whole subject of this store: absence must never
+    /// be indistinguishable from never-published. Reading at an instant before
+    /// the record begins is the version of it that survived longest, because
+    /// the response is well-formed and the number zero is a plausible count.
+    ///
+    /// Taken from `observation` rather than `era`, because an observation is
+    /// the claim "fusiform looked at this instant" — which is precisely the
+    /// coverage question. The seed records one at the snapshot's fetch time,
+    /// so a freshly seeded store reports the moment its snapshot was taken and
+    /// not the moment it was installed.
+    pub fn record_begins_at(&self, source: SourceId) -> Result<Option<Timestamp>, CatalogError> {
+        let ts = self.inner.with_conn(|conn| {
+            conn.query_row(
+                "SELECT MIN(observed_at_ms) FROM observation WHERE source = ?1",
+                params![source.as_str()],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .optional()
+        })?;
+        Ok(ts.flatten().map(Timestamp))
+    }
+
     /// The most recent confirming observation STRICTLY BEFORE an instant.
     ///
     /// This is what an era's `prior_observation_at` is, and the strictness is
