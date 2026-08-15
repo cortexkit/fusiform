@@ -329,3 +329,83 @@ fn an_unknown_modality_list_is_stored_as_null() {
         "a published block must store as a list: {input}"
     );
 }
+
+/// A tier rate may exist with NO base rate of the same class, and that is a
+/// real published state rather than a defect to repair.
+///
+/// # Why this is pinned
+///
+/// I told a consumer that every tiered model also publishes a base rate valid
+/// below its threshold — and flagged it as a measurement rather than a
+/// contract. Measuring it properly found the counterexample the same hour:
+/// `auriko/qwen-3.6-plus` publishes `cache_write` at the over-threshold tier
+/// and no base `cache_write` at all, so 1 of 355 tiered models on the payload
+/// of 2026-08-15 breaks the property.
+///
+/// The served result is correct and must stay correct: the model carries
+/// `rate.cache_write.above_context.256000` and NO `rate.cache_write`. A
+/// consumer below the threshold has no cache-write rate, which is
+/// unpriced-for-this-class — an honest absence, distinct from a rate of zero.
+///
+/// The hazard this fences is the repair someone would reach for: synthesising
+/// a base rate from the tier rate, or dropping the tier because it looks
+/// orphaned. The first invents a price the provider never published; the
+/// second discards one they did.
+#[test]
+fn a_tier_rate_without_a_base_rate_of_the_same_class_survives() {
+    let payload = r#"{
+      "acme": {
+        "id": "acme",
+        "name": "Acme",
+        "models": {
+          "m1": {
+            "id": "m1",
+            "name": "M1",
+            "cost": {
+              "input": 5,
+              "output": 30,
+              "tiers": [
+                { "input": 10, "output": 45, "cache_write": 2.5,
+                  "tier": { "type": "context", "size": 256000 } }
+              ]
+            },
+            "limit": { "context": 400000, "output": 128000 },
+            "modalities": { "input": ["text"], "output": ["text"] }
+          }
+        }
+      }
+    }"#;
+
+    let outcome = normalize_models_dev(payload.as_bytes())
+        .expect("a tier rate without a base rate must normalize, not refuse");
+    let model = outcome
+        .catalog
+        .models()
+        .next()
+        .expect("the model must survive");
+
+    let keys: Vec<String> = fact_keys_of(model)
+        .into_iter()
+        .map(|k| k.as_str().to_string())
+        .collect();
+
+    assert!(
+        keys.iter()
+            .any(|k| k == "rate.cache_write.above_context.256000"),
+        "the over-threshold cache-write rate the provider DID publish must be \
+         served: dropping it as orphaned discards a real price. Got: {keys:?}"
+    );
+    assert!(
+        !keys.iter().any(|k| k == "rate.cache_write"),
+        "and no base cache-write rate may be invented from the tier rate: the \
+         provider published none, and an absence is not a zero. Got: {keys:?}"
+    );
+
+    // CONTROL: a class that DOES have both keeps both, or the assertions above
+    // would pass on a normalizer that dropped every cache rate.
+    assert!(
+        keys.iter().any(|k| k == "rate.input")
+            && keys.iter().any(|k| k == "rate.input.above_context.256000"),
+        "control: a class with a base and a tier must carry both: {keys:?}"
+    );
+}
