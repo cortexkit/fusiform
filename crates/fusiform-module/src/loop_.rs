@@ -431,6 +431,17 @@ fn implausible_shrink(
         // would be designing against an imagined failure — but if one is ever
         // seen, this is the line that needs the counterpart, and the argument
         // above is what it has to beat.
+        //
+        // WHAT ORDINARY LOOKS LIKE, measured on the live store 2026-08-15 so a
+        // future threshold is picked against data rather than taste. The
+        // largest single-poll arrival to date: 211 models against ~6,370 held,
+        // which is 3.3% — and 204 of them were one provider (`edenai`) growing
+        // from 16 models to 220 in a day. A real provider onboarding its
+        // catalogue is therefore a THREE PERCENT jump, so any growth guard has
+        // to sit well above that, while the failure it would catch (an index
+        // duplicated into itself) is nearer a hundred percent. That gap is
+        // wide, which is a further reason the guard is not urgent: there is no
+        // ambiguous middle to adjudicate.
         return Ok(None);
     }
 
