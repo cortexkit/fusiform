@@ -1535,3 +1535,61 @@ fn a_known_model_before_it_existed_answers_rather_than_refusing() {
     );
     assert_eq!(after.model_count(), 1);
 }
+
+/// Every source the route ACCEPTS must be one a row can carry.
+///
+/// # The defect this closes
+///
+/// `parse_source` accepted `"seed"` and returned `SourceId::Seed`. Nothing has
+/// ever written a row under that source — the embedded snapshot is models.dev
+/// data fetched earlier, so it is stored under `ModelsDev` and marked with
+/// `BoundaryKind::Seed`. Every query for `"seed"` therefore matched zero rows
+/// and returned an EMPTY CATALOG with a success status.
+///
+/// A consumer reading that gets "fusiform knows of no models", which is the
+/// exact confusion this store is built to prevent: absence must never be
+/// indistinguishable from never-published. Verified against the live store on
+/// 2026-08-15 — 73,584 eras, not one under `seed`.
+///
+/// The CLI never sends `--source`, so only a direct wire consumer could reach
+/// it. That is BROCA, ASTRO and MC.
+///
+/// # Why this is a loop over accepted names rather than a test of one string
+///
+/// A second source will arrive — the charter says so — and the failure is not
+/// "seed is wrong", it is "a name is accepted before anything writes it".
+/// This asserts the property for every name the route takes.
+#[test]
+fn every_accepted_source_can_match_a_row() {
+    // The names a wire caller can send. Anything not here must be refused.
+    let accepted = ["models.dev"];
+
+    let f = fixture();
+
+    for name in accepted {
+        let body = format!(r#"{{"name":"catalog.get","arguments":{{"source":"{name}"}}}}"#);
+        let response = catalog_from_call(&f, body.as_bytes());
+        assert!(
+            !response.models.is_empty(),
+            "source {name:?} is accepted by the route and matches no rows, so \
+             every query for it returns an empty catalog with a success status \
+             — indistinguishable from a catalog that has nothing in it"
+        );
+    }
+
+    // And a source no row carries must be REFUSED, not served empty.
+    for rejected in ["seed", "models.dev.old", "openrouter"] {
+        let body = format!(r#"{{"name":"catalog.get","arguments":{{"source":"{rejected}"}}}}"#);
+        let err = match fusiform_module::route::serve_tool_call(&f.store, body.as_bytes()) {
+            Err(e) => e,
+            Ok(other) => panic!(
+                "source {rejected:?} must be refused; no row carries it, so any \
+                 answer is an empty catalog that reads as a real one. Got: {other:?}"
+            ),
+        };
+        assert!(
+            format!("{err:?}").contains("unknown source"),
+            "the refusal must name the problem, got: {err:?}"
+        );
+    }
+}

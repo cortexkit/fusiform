@@ -431,9 +431,25 @@ pub fn serve_correct(store: &CatalogStore, body: &[u8]) -> Result<CorrectRespons
 fn parse_source(name: Option<&str>) -> Result<SourceId, RouteError> {
     match name {
         None | Some("models.dev") => Ok(SourceId::ModelsDev),
-        Some("seed") => Ok(SourceId::Seed),
+        // `"seed"` IS NOT ACCEPTED, and refusing it is the point.
+        //
+        // `SourceId::Seed` exists in the domain, and no row has ever been
+        // written under it: the embedded snapshot is models.dev's own data
+        // fetched earlier, so `seed.rs` stores it under `ModelsDev` and marks
+        // its provenance with `BoundaryKind::Seed`. Seed-ness is a property of
+        // HOW a value was learned, not of WHO said it.
+        //
+        // This arm used to return `Ok(SourceId::Seed)`. Every query then
+        // matched zero rows and returned an EMPTY CATALOG with a success
+        // status — "fusiform knows of no models" — which is the same defect as
+        // a prefix filter that selects nothing, and the same one the whole
+        // store exists to prevent: absence must not be indistinguishable from
+        // never-published. Verified against the live store, which holds
+        // 73,584 eras and not one under `seed`.
         Some(other) => Err(RouteError::bad_request(format!(
-            "unknown source {other:?}; fusiform serves \"models.dev\""
+            "unknown source {other:?}; fusiform serves \"models.dev\". \
+             A bootstrap snapshot is not a separate source: it is stored under \
+             \"models.dev\" with a seed boundary, visible in catalog.history."
         ))),
     }
 }
