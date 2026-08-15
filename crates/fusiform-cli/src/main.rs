@@ -714,8 +714,8 @@ fn print_withheld(response: &serde_json::Value) {
     }
 
     println!(
-        "\n{} fact(s) withheld — the record fusiform holds for these is known bad:",
-        withheld.len()
+        "\n{} withheld — the record fusiform holds for these is known bad:",
+        count(withheld.len(), "fact")
     );
     for item in withheld {
         let model = item.get("model").and_then(|v| v.as_str()).unwrap_or("?");
@@ -767,9 +767,9 @@ fn print_uncertain(response: &serde_json::Value) {
     }
 
     println!(
-        "\n{} fact(s) uncertain at this instant — the value is real, and \
+        "\n{} uncertain at this instant — the value is real, and \
          fusiform did not look during the window it may have changed in:",
-        uncertain.len()
+        count(uncertain.len(), "fact")
     );
     for item in uncertain {
         let provider = item
@@ -951,6 +951,23 @@ fn render_changes(changes: Option<&serde_json::Value>) -> String {
 /// most common non-zero arrival — so "1 models arrived" is not a rare edge
 /// case, it is the ordinary reading. Operator output that looks like a debug
 /// print invites being read like one.
+/// A count and its noun as ONE string: `1 fact`, `2 facts`, `0 facts`.
+///
+/// # Why this exists rather than a bare pluraliser
+///
+/// The pluraliser below is correct and always was. What shipped
+/// `1 models arrived` to production was the CALLER: a format string with two
+/// holes, one fed the count and the other fed a pluralisation of something
+/// else. Every unit test of the pluraliser passed, because the pluraliser was
+/// never wrong.
+///
+/// Two holes can disagree. One cannot. This takes the count once and renders
+/// both halves from it, so the defect is not a mistake to avoid — it is a
+/// sentence that cannot be written.
+fn count(n: usize, noun: &str) -> String {
+    format!("{n} {}", plural(n as i64, noun))
+}
+
 fn plural(n: i64, noun: &str) -> String {
     if n == 1 {
         noun.to_string()
@@ -1140,11 +1157,11 @@ fn print_correction(response: &serde_json::Value) {
         .unwrap_or_default();
 
     if written {
-        println!("recorded a correction over {} fact(s)", facts.len());
+        println!("recorded a correction over {}", count(facts.len(), "fact"));
     } else {
         println!(
-            "PREVIEW — nothing written. {} fact(s) would be corrected.",
-            facts.len()
+            "PREVIEW — nothing written. {} would be corrected.",
+            count(facts.len(), "fact")
         );
     }
     println!();
@@ -1411,6 +1428,35 @@ mod tests {
     /// the most common non-zero arrival — so "1 models arrived" is the
     /// ordinary reading rather than a rare edge case. It shipped to production
     /// and appeared in the first status read after placement.
+    /// A count and its noun cannot disagree, because there is one of them.
+    ///
+    /// The production defect this closes was never in the pluraliser: it was a
+    /// caller with two holes in a format string. `1` is the COMMON case in
+    /// this catalog — most polls change one fact, most reads withhold one —
+    /// so it is the case a hand-picked fixture treats as a boundary and real
+    /// data treats as the norm.
+    #[test]
+    fn a_count_and_its_noun_are_rendered_together() {
+        assert_eq!(count(1, "fact"), "1 fact");
+        assert_eq!(count(0, "fact"), "0 facts");
+        assert_eq!(count(2, "fact"), "2 facts");
+        assert_eq!(count(1, "model"), "1 model");
+
+        // The composed lines an operator actually reads, at the count that
+        // occurs most.
+        assert_eq!(
+            format!(
+                "PREVIEW — nothing written. {} would be corrected.",
+                count(1, "fact")
+            ),
+            "PREVIEW — nothing written. 1 fact would be corrected."
+        );
+        assert_eq!(
+            format!("recorded a correction over {}", count(1, "fact")),
+            "recorded a correction over 1 fact"
+        );
+    }
+
     #[test]
     fn a_count_of_one_reads_as_english() {
         assert_eq!(plural(1, "fact"), "fact");
