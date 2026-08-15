@@ -189,6 +189,30 @@ pub struct CatalogGetResponse {
     ///   the current view only, so replaying a decision returns what the
     ///   upstream published, which is what the decision was actually made on.
     ///   The `overridden` array names any divergence on a current read.
+    ///
+    /// # Auditing a consumer for this: look at WRITES, not reads
+    ///
+    /// BROCA's, after checking their own uses and finding both correct. The
+    /// misuse is invisible at the read site — every read of this field looks
+    /// the same, and comparing two versions is the field's whole purpose. What
+    /// distinguishes correct from broken is whether the value is PERSISTED and
+    /// later treated as "the catalog we had".
+    ///
+    /// So the audit is: find every place the field is written down — a record,
+    /// a ledger row, a decision log — and ask what reads it back. Comparison
+    /// sites are fine by construction; storage sites are where the defect
+    /// lives.
+    ///
+    /// Their own immunity turned out to be structural rather than careful, and
+    /// the shape is worth knowing: BROCA forbids `at_ms` on refresh requests
+    /// outright, with a test asserting the request shape omits it. That guard
+    /// exists for an unrelated reason — a historical read would resolve an
+    /// identity set they no longer serve — and it happens to make this hazard
+    /// unconstructible, because every read is current and the watermark
+    /// therefore advances monotonically with read time. A request-shape
+    /// prohibition can confer immunity to hazards its author never considered,
+    /// which is only findable by checking where the field is read rather than
+    /// reasoning from the design.
     pub catalog_version: i64,
     /// Model identity to fact map. The identity is `provider_id/model_id`, the
     /// pair that makes a model unique — measured, 6,253 model rows carry only
