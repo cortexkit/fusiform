@@ -678,6 +678,10 @@ fn single_model_snapshot(
         // present model look retired.
         let keep = request.include_retired || model.is_present();
         if keep {
+            // Whether the model had anything READABLE before the plane filter
+            // ran. This separates two emptinesses that look identical in the
+            // response and mean opposite things.
+            let had_readable_facts = !model.facts.is_empty();
             let facts = match &request.fact_prefixes {
                 Some(prefixes) => model
                     .facts
@@ -686,7 +690,42 @@ fn single_model_snapshot(
                     .collect(),
                 None => model.facts,
             };
-            if !facts.is_empty() {
+            // The model is returned even when the FILTER leaves it with no
+            // facts, and that is the whole point of this branch.
+            //
+            // The caller named ONE model. Dropping it because a plane filter
+            // matched nothing answers "no such model" to a question about a
+            // model that exists — the uninformative zero again, and this time
+            // in the plane a pricing consumer reads. 419 of 6,583 present
+            // models publish no rate at all (measured 2026-08-15), so
+            // `--rates` on any of them returned an empty catalog
+            // indistinguishable from a typo.
+            //
+            // For a ledger the difference is the whole question: a model that
+            // is UNPRICED and used means a subscription or a billing gap,
+            // while a model that is UNKNOWN and used means a bad id. An empty
+            // response cannot tell them apart, and the store can.
+            //
+            // Note the comment three lines up already guards the neighbouring
+            // case — a rates-only request must not make a present model look
+            // retired — and this one made a present model look absent.
+            //
+            // The BULK read keeps dropping them, deliberately, because it
+            // answers a different question: "give me the rate plane" is a
+            // request for models that have rates, not a census. Here the
+            // caller named the subject, so the answer is about that subject.
+            //
+            // BUT NOT WHEN WITHHOLDING EMPTIED IT, and an existing test caught
+            // me conflating the two. If every fact is withheld by a
+            // correction, the model's identity is already carried by
+            // `withheld`, and an empty entry here would claim "this model has
+            // no facts" when the truth is "it has facts fusiform refuses to
+            // serve". The emptiness would be reported twice and mean something
+            // different each time.
+            //
+            // So: an empty result AFTER filtering is worth reporting; an empty
+            // result BEFORE filtering is already reported elsewhere.
+            if had_readable_facts {
                 models.push(fusiform_store::serve::ModelFacts {
                     provider_id: provider_id.to_string(),
                     model_id: model_id.to_string(),

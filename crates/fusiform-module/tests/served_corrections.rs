@@ -1066,3 +1066,94 @@ fn a_read_before_the_record_is_refused_rather_than_answered_empty() {
         "a current read must not be touched by a coverage bound"
     );
 }
+
+/// A named model with no facts in the requested plane is still RETURNED.
+///
+/// # The defect, and the population that makes it matter
+///
+/// `catalog.get` with `fact_prefixes: ["rate."]` on a model that publishes no
+/// rate returned an empty models map — indistinguishable from a typo, from a
+/// retired model, and from a provider that does not exist. Measured on the
+/// live store 2026-08-15: 419 of 6,583 present models publish no rate at all,
+/// so 6.4% of the catalog answered a pricing question with silence.
+///
+/// For a ledger the distinction is the question itself. A model that is
+/// UNPRICED and used means a subscription or a billing gap; a model that is
+/// UNKNOWN and used means a bad id. The store holds the difference — it
+/// deliberately writes no rate row rather than a fabricated zero — and the
+/// serve path was collapsing it.
+///
+/// # Why the bulk read still drops them
+///
+/// It answers a different question. "Give me the rate plane" is a request for
+/// models that have rates, not a census, and returning 419 empty entries would
+/// be noise in a 6,583-model response. Here the caller NAMED the subject, so
+/// the answer is about that subject. The two paths differ because the
+/// questions differ, which is worth stating since this crate has three
+/// separate defects from the two paths differing by accident.
+#[test]
+fn a_named_model_with_no_facts_in_the_plane_is_still_returned() {
+    let (store, _dir) = store();
+
+    // claude-sonnet-4-5 in this fixture publishes limits and capabilities.
+    // Ask for a plane it has nothing in.
+    let response = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","fact_prefixes":["nonexistent.plane."]}}"#,
+    );
+    let models = response["models"]
+        .as_object()
+        .expect("models must be an object");
+    assert_eq!(
+        models.len(),
+        1,
+        "a NAMED model must be returned even when the plane filter matches \
+         nothing: an empty map answers 'no such model' to a question about a \
+         model that exists. Got: {models:?}"
+    );
+    let facts = &models["anthropic/claude-sonnet-4-5"];
+    assert!(
+        facts.as_object().unwrap().is_empty(),
+        "and it must carry NO facts, since none matched — the emptiness is the \
+         answer, not the absence of the model: {facts}"
+    );
+
+    // CONTROL 1: an unknown model must still REFUSE rather than return an
+    // empty entry, or the fix above has turned a typo into a plausible answer.
+    let unknown = serve_tool_call(
+        &store,
+        br#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-9-9","fact_prefixes":["rate."]}}"#,
+    );
+    assert!(
+        unknown.is_err(),
+        "an unknown model must refuse, not return an empty fact map — \
+         otherwise this fix makes a typo indistinguishable from an unpriced \
+         model, which is the very distinction it exists to draw"
+    );
+
+    // CONTROL 2: the unfiltered read is unchanged and carries real facts.
+    let full = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5"}}"#,
+    );
+    assert!(
+        !full["models"]["anthropic/claude-sonnet-4-5"]
+            .as_object()
+            .unwrap()
+            .is_empty(),
+        "control: the unfiltered read must still carry facts"
+    );
+
+    // CONTROL 3: the BULK read keeps dropping them, deliberately. If this ever
+    // changes it should be a decision, not a side effect of the line above.
+    let bulk = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"fact_prefixes":["nonexistent.plane."]}}"#,
+    );
+    assert!(
+        bulk["models"].as_object().unwrap().is_empty(),
+        "the bulk read answers 'give me this plane' and returns models that \
+         have it: {}",
+        bulk["models"]
+    );
+}
