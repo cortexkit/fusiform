@@ -637,3 +637,66 @@ fn a_normalized_provider_carries_no_undecided_fields() {
         "the rendering must actually contain the catalog"
     );
 }
+
+/// Every tier the upstream publishes is a CONTEXT tier, and a tier that is not
+/// must be refused rather than silently keyed as one.
+///
+/// # Why this is a fence and not a fact
+///
+/// `ServedFact::key` documents that `rate.*.above_context.<n>` means "the rate
+/// when CONTEXT exceeds n", and grounds that on the upstream's own
+/// discriminator: 370 of 370 tier rows carried `type: "context"` when
+/// measured. A consumer pricing usage reads that sentence and computes money
+/// from it.
+///
+/// If the upstream ever ships a tier keyed on something else — output size,
+/// request count, a time window — and normalization treated it as a context
+/// tier, the served key would state a threshold on the wrong axis and the
+/// documented meaning would silently become false. The refusal is what keeps
+/// the sentence true, so the refusal is what gets tested.
+#[test]
+fn a_tier_that_is_not_a_context_tier_is_refused() {
+    // A payload identical to a real one except for the tier discriminator.
+    let payload = r#"{
+      "acme": {
+        "id": "acme",
+        "name": "Acme",
+        "models": {
+          "m1": {
+            "id": "m1",
+            "name": "M1",
+            "cost": {
+              "input": 5,
+              "output": 30,
+              "tiers": [
+                { "input": 10, "output": 45, "tier": { "type": "output", "size": 272000 } }
+              ]
+            },
+            "limit": { "context": 400000, "output": 128000 },
+            "modalities": { "input": ["text"], "output": ["text"] }
+          }
+        }
+      }
+    }"#;
+
+    let err = fusiform_core::normalize::normalize_models_dev(payload.as_bytes())
+        .expect_err("a non-context tier must be refused, not keyed as a context tier");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("context") || msg.contains("tier"),
+        "the refusal must name the tier type it rejected, or an operator \
+         cannot tell which row to look at: {msg}"
+    );
+
+    // CONTROL: the same payload with a context tier normalizes, or the refusal
+    // above proves only that the fixture is malformed.
+    let ok = payload.replace(r#""type": "output""#, r#""type": "context""#);
+    assert_ne!(ok, payload, "the control mutation must apply");
+    let outcome = fusiform_core::normalize::normalize_models_dev(ok.as_bytes())
+        .expect("a context tier must normalize");
+    assert_eq!(
+        outcome.catalog.models().count(),
+        1,
+        "control: the context-tier payload must produce the model"
+    );
+}

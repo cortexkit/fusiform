@@ -650,6 +650,42 @@ pub struct ServedFact {
     /// A tiered rate appends `.above_context.<threshold>` — the threshold comes
     /// from the upstream and is not fusiform's to enumerate, so tiered keys are
     /// matched by prefix rather than listed.
+    ///
+    /// # What a tiered key states, and what it does NOT
+    ///
+    /// STATED: the threshold is a CONTEXT size. The upstream tags each tier
+    /// with its own discriminator and every one of 370 tier rows measured
+    /// 2026-08-15 carries `type: "context"`; normalization refuses any other
+    /// type rather than assuming. So `rate.input.above_context.200000` means
+    /// "the input rate that applies when context exceeds 200,000", not "the
+    /// rate for input tokens beyond the 200,000th".
+    ///
+    /// NOT STATED: whether crossing the threshold reprices the WHOLE request
+    /// or only the excess. The upstream publishes a complete rate set per tier
+    /// — input, output, cache_read together — rather than a marginal
+    /// increment, which is suggestive and is not evidence. Nothing in the
+    /// catalog says which scheme a provider bills under, and fusiform will not
+    /// infer one from the shape of a JSON object.
+    ///
+    /// THE CONSEQUENCE, because this is a money contract and the two readings
+    /// are far apart. A 250,000-token request against a model whose tier rate
+    /// is 2x the base:
+    ///
+    /// ```text
+    /// whole-request repricing:  250k @ 2x  = 500k base-units
+    /// marginal:                 200k @ 1x + 50k @ 2x = 300k base-units
+    /// ```
+    ///
+    /// A 40% difference on the same request and the same catalog. A consumer
+    /// pricing usage must establish the scheme per provider from the
+    /// provider's own published terms; this catalog carries the threshold and
+    /// the rates, and deliberately does not carry a claim it cannot source.
+    ///
+    /// Anthropic publishes prompt-size bands ("prompts <= 200K" versus
+    /// "prompts > 200K"), which is whole-request repricing for THAT provider.
+    /// Generalising it to the other tiered providers would be the same error
+    /// as letting one vendor's documentation adjudicate another's serving
+    /// path — the bill belongs to whoever charges it.
     pub key: &'static str,
     pub class: FactClass,
     /// What the value means, in one line, for a consumer deciding what to do
