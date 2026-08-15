@@ -575,8 +575,8 @@ fn print_catalog(response: &serde_json::Value) {
         .unwrap_or(&empty);
 
     println!(
-        "{} models at {}  (catalog version {})",
-        models.len(),
+        "{} at {}  (catalog version {})",
+        count(models.len(), "model"),
         format_instant(resolved),
         response
             .get("catalog_version")
@@ -670,10 +670,9 @@ fn render_overridden(response: &serde_json::Value) -> String {
     }
 
     let mut out = format!(
-        "\n{} {} overridden — fusiform serves a different value than the \
+        "\n{} overridden — fusiform serves a different value than the \
          upstream published:\n",
-        overridden.len(),
-        plural(overridden.len() as i64, "fact")
+        count(overridden.len(), "fact")
     );
     for o in overridden {
         let field = |k: &str| o.get(k).and_then(|v| v.as_str()).unwrap_or("?");
@@ -970,10 +969,10 @@ fn render_changes(changes: Option<&serde_json::Value>) -> String {
 
     let mut parts = Vec::new();
     if changed > 0 {
-        parts.push(format!("{changed} {} changed", plural(changed, "fact")));
+        parts.push(format!("{} changed", count(changed as usize, "fact")));
     }
     if arrived > 0 {
-        parts.push(format!("{arrived} {} arrived", plural(arrived, "model")));
+        parts.push(format!("{} arrived", count(arrived as usize, "model")));
     }
     if withdrawn > 0 {
         parts.push(format!("{withdrawn} withdrawn"));
@@ -1008,6 +1007,15 @@ fn count(n: usize, noun: &str) -> String {
     format!("{n} {}", plural(n as i64, noun))
 }
 
+/// The bare pluraliser. **Call [`count`] instead.**
+///
+/// Correct, and never the thing that was wrong. What shipped `1 models
+/// arrived` was a CALLER holding a count in one hole and a pluralisation in
+/// the other; the same shape then produced `1 fact(s) would be corrected` and
+/// `1 models at ...`, three separate times in one binary.
+///
+/// It has exactly one production caller — `count` — and
+/// `every_plural_goes_through_count` fails if a second appears.
 fn plural(n: i64, noun: &str) -> String {
     if n == 1 {
         noun.to_string()
@@ -1468,6 +1476,46 @@ mod tests {
     /// the most common non-zero arrival — so "1 models arrived" is the
     /// ordinary reading rather than a rare edge case. It shipped to production
     /// and appeared in the first status read after placement.
+    /// `plural` has exactly ONE production caller, and it is `count`.
+    ///
+    /// Three times in this binary a caller held the count in one hole and the
+    /// pluralisation in another: `1 models arrived`, `1 fact(s) would be
+    /// corrected`, `1 models at ...`. Each was fixed where it was found, and
+    /// the shape came back, because a fixed instance leaves the pattern
+    /// available to the next person writing a line.
+    ///
+    /// So the shape is fenced rather than the instances: a second production
+    /// caller of `plural` fails here. Reading the source is the only way to
+    /// ask this question — a value-based test cannot distinguish a correct
+    /// two-hole caller from the one that will drift.
+    #[test]
+    fn every_plural_goes_through_count() {
+        let src = include_str!("main.rs");
+        let (production, _tests) = src
+            .split_once("#[cfg(test)]")
+            .expect("this file has a test module");
+
+        let callers: Vec<&str> = production
+            .lines()
+            .filter(|l| l.contains("plural("))
+            .filter(|l| !l.trim_start().starts_with("//") && !l.trim_start().starts_with("///"))
+            .filter(|l| !l.contains("fn plural("))
+            .collect();
+
+        assert_eq!(
+            callers.len(),
+            1,
+            "plural must have exactly one production caller (count). Found: {callers:#?}\n\
+             Use `count(n, noun)`, which renders the number and the noun from \
+             one argument so they cannot disagree."
+        );
+        assert!(
+            callers[0].contains("format!(\"{n} {}\""),
+            "the one caller must be `count`, got: {}",
+            callers[0]
+        );
+    }
+
     /// A count and its noun cannot disagree, because there is one of them.
     ///
     /// The production defect this closes was never in the pluraliser: it was a
