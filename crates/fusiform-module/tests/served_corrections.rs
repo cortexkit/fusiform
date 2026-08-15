@@ -890,3 +890,103 @@ fn a_corrected_fact_is_never_also_reported_as_overridden() {
 
     let _ = CapabilityId::Reasoning; // the import is shared with sibling tests
 }
+
+/// A past read can be REPLAYED: `resolved_at_ms` out, `at_ms` back in.
+///
+/// # The contract this pins, and the field that does not serve it
+///
+/// A consumer reproducing a past decision — "which model did I route to, and
+/// what did the catalog say then" — needs to identify the catalog it read.
+/// The obvious candidate is `catalog_version`, and it is the wrong one: that
+/// field describes the store at READ time, so a point-in-time read stamps
+/// TODAY's watermark on a response carrying values from days earlier. Two
+/// replays of different instants are indistinguishable by it.
+///
+/// `resolved_at_ms` is the snapshot identifier. This drives the full round
+/// trip and asserts the values come back, which is the only claim worth
+/// making: the doc on `catalog_version` describes this behaviour in prose, and
+/// prose has no fence.
+#[test]
+fn a_read_can_be_replayed_by_the_instant_it_resolved() {
+    let (store, _dir) = store();
+
+    // A later poll moves the fact, so "then" and "now" differ.
+    let moved = {
+        let mut doc: serde_json::Value = serde_json::from_str(UPSTREAM).unwrap();
+        doc["anthropic"]["models"]["claude-sonnet-4-5"]["limit"]["output"] =
+            serde_json::json!(32_000);
+        serde_json::to_string(&doc).unwrap()
+    };
+    let catalog = normalize_models_dev(moved.as_bytes()).unwrap().catalog;
+    let obs = store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(5_000),
+            outcome: ObservationOutcome::Changed { snapshot_seq: 1 },
+            normalized_hash: Some("h5".into()),
+            raw_hash: Some("r5".into()),
+            etag: None,
+            duration_ms: Some(10),
+            detail: None,
+        })
+        .unwrap();
+    let plan = plan_ingest(
+        &store,
+        &catalog,
+        Timestamp(5_000),
+        BoundaryKind::Observed,
+        Some(obs),
+    )
+    .unwrap();
+    store.append_eras(&plan.eras).unwrap();
+
+    // The read a decision would have made, at an instant before the change.
+    let then = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","at_ms":2000}}"#,
+    );
+    let recorded = then["resolved_at_ms"]
+        .as_i64()
+        .expect("a response must say which instant it resolved");
+    assert_eq!(
+        recorded, 2_000,
+        "resolved_at_ms must echo the instant asked for, or a decision record \
+         cannot name the catalog it read"
+    );
+    let value_then = then["models"]["anthropic/claude-sonnet-4-5"]["limit.output"].clone();
+
+    // Now: the fact has moved.
+    let now = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5"}}"#,
+    );
+    let value_now = now["models"]["anthropic/claude-sonnet-4-5"]["limit.output"].clone();
+    assert_ne!(
+        value_then, value_now,
+        "control: the fact must differ between the two instants, or the replay \
+         below proves nothing"
+    );
+
+    // THE REPLAY: feed the recorded instant back in.
+    let replayed = get(
+        &store,
+        &format!(
+            r#"{{"name":"catalog.get","arguments":{{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","at_ms":{recorded}}}}}"#
+        ),
+    );
+    assert_eq!(
+        replayed["models"]["anthropic/claude-sonnet-4-5"]["limit.output"], value_then,
+        "replaying a recorded resolved_at_ms must return the values that were \
+         in force then, not the values in force now"
+    );
+
+    // And the field that CANNOT serve this purpose: both reads carry the same
+    // catalog_version despite resolving different catalogs.
+    assert_eq!(
+        then["catalog_version"], now["catalog_version"],
+        "catalog_version must be identical across a historical and a current \
+         read — it describes the store at read time. This is why a decision \
+         record cannot use it to identify a snapshot, and asserting it here \
+         means the doc saying so cannot quietly stop being true."
+    );
+}

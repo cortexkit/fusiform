@@ -155,6 +155,40 @@ pub struct CatalogGetResponse {
     /// The distinction is not visible in the payload — both are integers that
     /// only ever went up in every observation a consumer has made — which is
     /// why it is recorded here rather than left to be inferred.
+    ///
+    /// # NOT A SNAPSHOT IDENTIFIER
+    ///
+    /// This answers "has anything changed since I last looked". It does not
+    /// answer "which catalog did I read", and a consumer that needs to REPLAY
+    /// a past read — a routing decision reproduced against the catalog as it
+    /// stood at decision time — must embed [`CatalogGetResponse::resolved_at_ms`]
+    /// instead.
+    ///
+    /// The reason is that this field describes the store at READ time, not the
+    /// snapshot resolved. Measured on the live module 2026-08-15: a read at
+    /// `at_ms = 1786500000000` returned `resolved_at_ms` 1786500000000 and
+    /// `catalog_version` 1786796896973 — today's watermark, on a response
+    /// carrying values from three days earlier.
+    ///
+    /// So the round trip is `resolved_at_ms` out, `at_ms` back in:
+    ///
+    /// ```text
+    /// decision time:  read catalog.get      -> record resolved_at_ms = T
+    /// replay:         catalog.get {at_ms:T} -> the values in force at T
+    /// ```
+    ///
+    /// Two caveats a replaying consumer needs, and neither is visible in the
+    /// number itself:
+    ///
+    /// - A replayed read may carry `uncertain` entries. Fusiform polls on a
+    ///   cadence, so an instant between two polls has a value that was in
+    ///   force at the last observation and may have changed before the next
+    ///   one. The bracket says which window is unobserved rather than
+    ///   pretending the instant was measured.
+    /// - A replayed read is NOT overridden. Serve-time corrections apply to
+    ///   the current view only, so replaying a decision returns what the
+    ///   upstream published, which is what the decision was actually made on.
+    ///   The `overridden` array names any divergence on a current read.
     pub catalog_version: i64,
     /// Model identity to fact map. The identity is `provider_id/model_id`, the
     /// pair that makes a model unique — measured, 6,253 model rows carry only
