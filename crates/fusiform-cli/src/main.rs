@@ -174,19 +174,31 @@ struct Args {
     json: bool,
 }
 
-async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
-    let args = parse_args(argv)?;
-
-    let (tool, arguments) = match args.command.as_str() {
+/// The tool name and request body a command produces, with no I/O.
+///
+/// # Why this is a function and not the body of `run`
+///
+/// It was inline, so the only way to see a request was to send one — which
+/// meant the REQUEST BODY had never been asserted anywhere. Mutation proved
+/// the cost: flipping `!args.commit` to `args.commit`, turning every preview
+/// into a write and every commit into a no-op, survived the whole suite.
+///
+/// A test of the parsed FLAG cannot catch that, and I wrote one first: it
+/// proved `--commit` sets a bool and said nothing about what crosses the
+/// wire. Same defect as testing a rendered field instead of rendered output,
+/// which this repo has now produced three times in a day — the artifact under
+/// test has to be the thing that ships.
+fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String> {
+    match args.command.as_str() {
         "status" => {
             let mut a = serde_json::Map::new();
             if let Some(n) = args.polls {
                 a.insert("polls".into(), serde_json::json!(n));
             }
-            (
+            Ok((
                 fusiform_module::route::TOOL_STATUS,
                 serde_json::Value::Object(a),
-            )
+            ))
         }
         "get" => {
             let mut a = serde_json::Map::new();
@@ -205,10 +217,10 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
             if args.include_retired {
                 a.insert("include_retired".into(), serde_json::json!(true));
             }
-            (
+            Ok((
                 fusiform_module::route::TOOL_GET,
                 serde_json::Value::Object(a),
-            )
+            ))
         }
         "history" => {
             let provider = args.provider.as_ref().ok_or("history needs --provider")?;
@@ -216,14 +228,14 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
             let fact = args.fact.as_ref().ok_or(
                 "history needs --fact (rate.input, limit.context, capability.reasoning, existence)",
             )?;
-            (
+            Ok((
                 fusiform_module::route::TOOL_HISTORY,
                 serde_json::json!({
                     "provider_id": provider,
                     "model_id": model,
                     "fact_key": fact,
                 }),
-            )
+            ))
         }
         "correct" => {
             let provider = args.provider.as_ref().ok_or("correct needs --provider")?;
@@ -247,7 +259,7 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
                 .map(|k| field_id_for_fact_key(k))
                 .collect::<Result<_, _>>()?;
 
-            (
+            Ok((
                 fusiform_module::route::TOOL_CORRECT,
                 serde_json::json!({
                     "provider_id": provider,
@@ -258,10 +270,16 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
                     "reason": reason,
                     "dry_run": !args.commit,
                 }),
-            )
+            ))
         }
-        other => return Err(format!("unknown command {other:?}\n\n{USAGE}")),
-    };
+        other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
+    }
+}
+
+async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
+    let args = parse_args(argv)?;
+
+    let (tool, arguments) = request_for(&args)?;
 
     let response = call(args.connection_file.as_deref(), tool, arguments).await?;
 
@@ -1435,6 +1453,68 @@ mod tests {
     /// this catalog — most polls change one fact, most reads withhold one —
     /// so it is the case a hand-picked fixture treats as a boundary and real
     /// data treats as the norm.
+    /// `--commit` and the wire's `dry_run` are OPPOSITE polarities, asserted
+    /// on the REQUEST BODY rather than the parsed flag.
+    ///
+    /// The CLI sends `"dry_run": !args.commit`. One flipped `!` turns every
+    /// preview into a write or every commit into a no-op — the first rewrites
+    /// the past for an operator who asked only to look, the second reports a
+    /// correction that never happened.
+    ///
+    /// MY FIRST VERSION OF THIS TEST ASSERTED ON `args.commit` AND THE
+    /// MUTATION SURVIVED. Proving the flag parses says nothing about what
+    /// crosses the wire, and the builder was inline in `run` beside the
+    /// network call, so no test could reach it. That is why `request_for`
+    /// exists: the artifact under test has to be the thing that ships.
+    #[test]
+    fn the_commit_flag_inverts_into_dry_run_on_the_wire() {
+        let body = |extra: &[&str]| -> serde_json::Value {
+            let mut argv: Vec<std::ffi::OsString> = vec![
+                "ck-models".into(),
+                "correct".into(),
+                "--provider".into(),
+                "anthropic".into(),
+                "--model".into(),
+                "claude-sonnet-4-5".into(),
+                "--field".into(),
+                "limit.context".into(),
+                "--from".into(),
+                "1000".into(),
+                "--until".into(),
+                "2000".into(),
+                "--reason".into(),
+                "docs/findings/x.md".into(),
+            ];
+            argv.extend(extra.iter().map(|s| std::ffi::OsString::from(*s)));
+            let args = parse_args(argv).expect("these arguments must parse");
+            request_for(&args).expect("this request must build").1
+        };
+
+        // Absent: the case an operator hits by default, and the one that must
+        // never write.
+        assert_eq!(
+            body(&[])["dry_run"],
+            serde_json::json!(true),
+            "without --commit the wire must carry dry_run TRUE: a preview that \
+             writes is the worst outcome this command has"
+        );
+
+        // Present: a write.
+        assert_eq!(
+            body(&["--commit"])["dry_run"],
+            serde_json::json!(false),
+            "with --commit the wire must carry dry_run FALSE, or an operator \
+             is told a correction was recorded when nothing happened"
+        );
+
+        // And they must differ, which catches a builder that hardcodes either.
+        assert_ne!(
+            body(&[])["dry_run"],
+            body(&["--commit"])["dry_run"],
+            "the flag must change the request, or it does nothing at all"
+        );
+    }
+
     #[test]
     fn a_count_and_its_noun_are_rendered_together() {
         assert_eq!(count(1, "fact"), "1 fact");

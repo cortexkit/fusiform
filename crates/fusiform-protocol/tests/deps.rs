@@ -296,3 +296,43 @@ fn a_status_response_without_the_newest_fields_still_parses() {
         "an older module reports no composition, which is absence rather than zero"
     );
 }
+
+/// An omitted `dry_run` means PREVIEW, not write.
+///
+/// The field's doc comment says "Defaults to true" and names the reason: a
+/// write that happens because a flag was forgotten is the wrong default for
+/// the only operation that changes what the catalog says about the past.
+///
+/// That was prose about a serde attribute, and prose is not a fence. A request
+/// missing the field — an older client, a hand-written body, a proxy that
+/// drops unknown keys — would silently become a WRITE if the attribute were
+/// ever dropped, and `#[serde(default)]` on a bool means `false`, so the
+/// failure is one deleted line away and lands in the destructive direction.
+#[test]
+fn an_omitted_dry_run_previews_rather_than_writes() {
+    let without: fusiform_protocol::CorrectRequest = serde_json::from_str(
+        r#"{"provider_id":"anthropic","model_id":"claude-sonnet-4-5",
+             "fields":["limit.context"],"affected_from_ms":1,
+             "affected_until_ms":2,"reason":"docs/findings/x.md"}"#,
+    )
+    .expect("a request without dry_run must still parse");
+    assert!(
+        without.dry_run,
+        "an omitted dry_run must preview. A forgotten flag becoming a write is \
+         the wrong direction to fail for the only command that rewrites the \
+         past."
+    );
+
+    // And the explicit values must survive, or the default masks a wire bug.
+    let explicit_write: fusiform_protocol::CorrectRequest = serde_json::from_str(
+        r#"{"provider_id":"a","model_id":"m","fields":["limit.context"],
+             "affected_from_ms":1,"affected_until_ms":2,"reason":"r",
+             "dry_run":false}"#,
+    )
+    .unwrap();
+    assert!(
+        !explicit_write.dry_run,
+        "control: an explicit false must reach the module, or nothing could \
+         ever be committed and the default above would look correct anyway"
+    );
+}
