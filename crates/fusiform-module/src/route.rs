@@ -289,6 +289,59 @@ fn refuse_before_the_record(
     Ok(())
 }
 
+/// Fill in the currency provenance of a rate written before the field existed.
+///
+/// # Why absence cannot simply be left alone
+///
+/// `unit_provenance` began being stored in fusiform-protocol 0.11.0. The live
+/// store holds 19,707 rate eras written before it, and an append-only store
+/// never rewrites them — they are what fusiform believed when they were
+/// written, and editing them would destroy the record this store exists to
+/// keep.
+///
+/// So absence would have to mean something on the wire, and it CANNOT mean
+/// nothing: `UnitProvenance::Unknown` is a real variant meaning "no statement
+/// and no policy covers this", which is the state that stops a non-USD
+/// provider being silently priced in dollars. An absent field would be
+/// indistinguishable from that, and a consumer treating a pre-0.11.0 USD row
+/// as unknown-provenance would refuse to price a rate that is perfectly well
+/// established.
+///
+/// # Why filling it in is a fact rather than an invention
+///
+/// The population is CLOSED and its provenance is known with certainty. Every
+/// rate row written before 0.11.0 came through one normalization path, whose
+/// only currency branch is `AssumedByPolicy(models-dev-usd-v1)` — models.dev
+/// publishes no currency field at all, so there has never been another way for
+/// a rate to acquire one. After 0.11.0 every new row carries the field
+/// explicitly, so the defaulted population can only shrink.
+///
+/// This is the one shape where a serve-time default is honest: not "we do not
+/// know so here is a guess", but "we know, and the row predates the column".
+///
+/// The claim's truth rests on there being exactly one policy, which is
+/// enforced by `only_one_currency_policy_has_ever_existed` — a second policy
+/// makes the default ambiguous and must force a decision rather than silently
+/// mislabel rows written under the other one.
+fn name_the_provenance_of_a_pre_0_11_row(value: &mut serde_json::Value) {
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    if obj.get("state").and_then(|s| s.as_str()) != Some("priced") {
+        return;
+    }
+    if obj.contains_key("unit_provenance") {
+        return;
+    }
+    obj.insert(
+        "unit_provenance".to_string(),
+        serde_json::json!({
+            "kind": "assumed_by_policy",
+            "policy": fusiform_core::PolicyId::models_dev_usd_v1().0,
+        }),
+    );
+}
+
 /// Serve `catalog.status`: what fusiform has been doing.
 pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse, RouteError> {
     let request: StatusRequest = if body.is_empty() {
@@ -791,12 +844,13 @@ fn render(
         let identity = format!("{}/{}", model.provider_id, model.model_id);
         let mut facts = BTreeMap::new();
         for (key, raw) in model.facts {
-            let value = serde_json::from_str(&raw).unwrap_or_else(|_| {
+            let mut value = serde_json::from_str(&raw).unwrap_or_else(|_| {
                 // A stored value this build cannot parse. Carried as a string
                 // rather than dropped, so the row is visible and reportable
                 // instead of presenting as an absent fact.
                 serde_json::Value::String(raw.clone())
             });
+            name_the_provenance_of_a_pre_0_11_row(&mut value);
             facts.insert(key.as_str().to_string(), value);
         }
         models.insert(identity, facts);

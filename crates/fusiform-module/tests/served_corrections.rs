@@ -1157,3 +1157,141 @@ fn a_named_model_with_no_facts_in_the_plane_is_still_returned() {
         bulk["models"]
     );
 }
+
+/// A rate written before `unit_provenance` existed still says how its currency
+/// was established, and a rate that carries one is left alone.
+///
+/// # Why a serve-time default rather than absence
+///
+/// The field began being stored in fusiform-protocol 0.11.0, and the live
+/// store holds 19,707 rate eras written before it. An append-only store never
+/// rewrites them, so absence would have to mean something on the wire — and it
+/// cannot mean nothing, because `UnitProvenance::Unknown` is a real variant
+/// meaning "no statement and no policy covers this". That is the state that
+/// stops a non-USD provider being silently priced in dollars, so a consumer
+/// treating an absent field as unknown would refuse to price rates that are
+/// perfectly well established.
+///
+/// The default is a fact rather than a guess: every pre-0.11.0 rate came
+/// through one normalization path whose only currency branch is
+/// `AssumedByPolicy(models-dev-usd-v1)`, because models.dev publishes no
+/// currency field at all. The population is closed and can only shrink.
+#[test]
+fn a_rate_stored_before_the_field_existed_still_names_its_policy() {
+    let (store, _dir) = store();
+
+    // A rate era in the PRE-0.11.0 shape, written directly so the test drives
+    // the real historical payload rather than a reconstruction of it.
+    store
+        .append_eras(&[fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: fusiform_store::FactKey::rate(fusiform_core::TokenClass::Output),
+            value_json: r#"{"state":"priced","units":15000000000,"exponent":9,"currency":"USD"}"#
+                .to_string(),
+            boundary_at: Timestamp(1_500),
+            boundary_kind: BoundaryKind::Observed,
+            observation_id: None,
+        }])
+        .expect("the legacy-shaped era must store");
+
+    let response = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5"}}"#,
+    );
+    let rate = &response["models"]["anthropic/claude-sonnet-4-5"]["rate.output"];
+
+    assert_eq!(
+        rate["units"], 15_000_000_000i64,
+        "control: the legacy row must be the one being served, or the \
+         assertion below is about some other era: {rate}"
+    );
+    assert_eq!(
+        rate["unit_provenance"]["kind"], "assumed_by_policy",
+        "a rate written before the field existed must still say how its \
+         currency was established: an absent field is indistinguishable from \
+         UnitProvenance::Unknown, which means something else entirely: {rate}"
+    );
+    assert_eq!(
+        rate["unit_provenance"]["policy"], "models-dev-usd-v1",
+        "and it must name the policy that supplied it: {rate}"
+    );
+
+    // A NON-PRICED state must not acquire a provenance it has no use for.
+    // `stated_zero` and `unpriced` carry no currency, so stamping a policy on
+    // them would claim a unit for a value that has none.
+    store
+        .append_eras(&[fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: fusiform_store::FactKey::rate(fusiform_core::TokenClass::CacheWrite),
+            value_json: r#"{"state":"stated_zero"}"#.to_string(),
+            boundary_at: Timestamp(1_600),
+            boundary_kind: BoundaryKind::Observed,
+            observation_id: None,
+        }])
+        .expect("a stated zero must store");
+
+    let response = get(
+        &store,
+        r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5"}}"#,
+    );
+    let zero = &response["models"]["anthropic/claude-sonnet-4-5"]["rate.cache_write"];
+    assert_eq!(zero["state"], "stated_zero", "control: the zero must serve");
+    assert!(
+        zero.get("unit_provenance").is_none(),
+        "a stated zero carries no currency, so it must not acquire a policy \
+         that supplied one: {zero}"
+    );
+}
+
+/// Exactly one currency policy has ever existed, which is what makes the
+/// pre-0.11.0 default a fact rather than a guess.
+///
+/// The serve-time backfill labels every provenance-less rate
+/// `models-dev-usd-v1`. That is true only while there is one policy: a second
+/// one means some pre-existing rows were written under it, the backfill would
+/// mislabel them, and there is no way to tell which is which after the fact.
+///
+/// So this fails when a second policy constructor appears, and the decision it
+/// forces is what to do about the rows — not whether to keep defaulting.
+#[test]
+fn only_one_currency_policy_has_ever_existed() {
+    let src = include_str!("../../fusiform-core/src/money.rs");
+    let constructors: Vec<&str> = src
+        .lines()
+        .filter(|l| l.trim_start().starts_with("pub fn "))
+        .filter(|l| l.contains("-> Self"))
+        .collect();
+
+    // Scoped to the PolicyId impl block, which is the only place a policy is
+    // minted.
+    let impl_block = src
+        .split_once("impl PolicyId {")
+        .expect("PolicyId must have an impl block")
+        .1
+        .split_once("\n}")
+        .expect("the impl block must close")
+        .0;
+    let policies: Vec<&str> = impl_block
+        .lines()
+        .filter(|l| l.trim_start().starts_with("pub fn "))
+        .collect();
+
+    assert_eq!(
+        policies.len(),
+        1,
+        "the pre-0.11.0 provenance backfill in route.rs labels every \
+         provenance-less rate `models-dev-usd-v1`, which is only true while \
+         one policy exists. A second policy means some legacy rows were \
+         written under it and the backfill silently mislabels them. Decide \
+         what happens to those rows before adding this. Found: {policies:#?}"
+    );
+    assert!(
+        !constructors.is_empty(),
+        "the detector found no constructors at all, so it would pass on an \
+         empty file"
+    );
+}
