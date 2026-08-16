@@ -58,6 +58,19 @@ const DECLARED_UNREAD: &[(&str, &str)] = &[
          than a label it chose to apply.",
     ),
     (
+        "input",
+        "the third authored field of the `limit` object. Parsed, and \
+         deliberately not carried into the domain: it is real geometry — 1,199 \
+         models publish it and 470 have `input + output == context` exactly — \
+         but WHICH access path it constrains is unstated. A reseller API-path \
+         ceiling and a first-party prompt ceiling are both plausible and the \
+         payload distinguishes neither, so serving it beside `limit.context` \
+         would imply they bound the same thing. The overlay is where a \
+         per-path ceiling belongs, because a cell there names the path it was \
+         measured on. Enforced by total destructuring at the raw -> domain \
+         conversion, not by this list alone.",
+    ),
+    (
         "temperature",
         "whether the model accepts a temperature parameter. Published on 5,791 \
          models, and a KNOB rather than a capacity: it says what a request may \

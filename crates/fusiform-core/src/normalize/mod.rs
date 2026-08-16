@@ -363,9 +363,46 @@ fn normalize_model(
         attachment: raw.attachment,
     };
 
-    let limits = Limits {
-        context_tokens: raw.limit.as_ref().and_then(|l| absent_if_zero(l.context)),
-        output_tokens: raw.limit.as_ref().and_then(|l| absent_if_zero(l.output)),
+    // TOTAL DESTRUCTURING, so a field added to `RawLimit` cannot be parsed and
+    // silently dropped here.
+    //
+    // This is the layer neither other fence covers. `measured_fields_are_read_or
+    // _declared` checks payload -> parser and counts a field as handled once the
+    // parser touches it; `every_capability_field_reaches_a_fact` checks domain ->
+    // wire. Between them sits raw -> domain, and `limit.input` lived there
+    // unnoticed: parsed into `RawLimit`, never carried into `Limits`, never
+    // served, while the payload-side fence reported it as read.
+    let limits = match raw.limit.as_ref() {
+        None => Limits::default(),
+        Some(crate::normalize::raw::RawLimit {
+            context,
+            output,
+            // NOT CARRIED, deliberately, and the reason is what the field means
+            // rather than that nobody asked for it.
+            //
+            // `input` is authored independently upstream — measured 2026-08-15,
+            // 1,199 models publish it and `gpt-5-pro` carries context 400,000 /
+            // input 272,000 / output 272,000, a set that no arithmetic on the
+            // other two produces. On 470 models `input + output == context`
+            // exactly, so it is real geometry rather than noise.
+            //
+            // What is NOT established is which access path it constrains. A
+            // reseller's API-path ceiling and a first-party prompt ceiling are
+            // both plausible readings and the payload distinguishes neither.
+            // Serving it as `limit.input` beside `limit.context` would imply
+            // they bound the same thing, and a consumer sizing a prompt against
+            // it would be right for some providers and wrong for others with no
+            // way to tell which.
+            //
+            // Same posture as the tiered-rate scheme: carry what is sourced,
+            // refuse to carry a claim the source does not make. The overlay is
+            // where a per-path ceiling belongs, because a cell there names the
+            // path it was measured on.
+            input: _,
+        }) => Limits {
+            context_tokens: absent_if_zero(*context),
+            output_tokens: absent_if_zero(*output),
+        },
     };
 
     let rates = match &raw.cost {
