@@ -402,6 +402,29 @@ fn every_cell_joins_a_real_model_or_a_declared_mint() {
                  existence was verified, or a future reader cannot tell a live \
                  check from a stale one"
             );
+
+            // AN EXEMPTION FOR A MODEL THE SEED NOW CARRIES IS REFUSED.
+            //
+            // A seed refresh invalidates its own exemptions: the block exists
+            // because the model arrived after the snapshot was minted, and the
+            // next snapshot contains it. Left in place the exemption is not
+            // merely stale — the `continue` below skips the existence check
+            // that would now PASS, so a bypass stays live for a case that no
+            // longer needs bypassing, and a typo in the model id would be
+            // waved through by an escape hatch nobody needs.
+            //
+            // Found by refreshing the seed on 2026-08-16 and asking which
+            // exemptions the refresh had made unnecessary. Exactly one had:
+            // `xai/grok-4.6`, exempted when it arrived six hours after the
+            // 2026-08-12 snapshot. Nothing would have reported it.
+            assert!(
+                seed[provider]["models"].get(model).is_none(),
+                "{provider}/{model} carries a post_seed exemption AND appears \
+                 in the current seed, so the exemption is unnecessary and is \
+                 suppressing a check that would pass. Delete the post_seed \
+                 block: the cell can be validated against the snapshot \
+                 directly now."
+            );
             checked += 1;
             continue;
         }
