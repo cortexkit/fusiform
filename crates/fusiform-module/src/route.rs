@@ -132,9 +132,50 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
     let source = parse_source(request.source.as_deref())?;
 
     let fact = FactKey::from_stored(request.fact_key.clone());
+
     let rows = store
         .fact_history(source, &request.provider_id, &request.model_id, &fact)
         .map_err(|e| store_error(&e))?;
+
+    // AN EMPTY HISTORY HAS THREE CAUSES AND THEY NEED DIFFERENT ACTIONS.
+    //
+    // `catalog.get` already separates them: a wrong provider means the whole
+    // id is wrong, a wrong model under a real provider usually means a version
+    // suffix, and a real model with nothing recorded for this fact is a
+    // genuine answer. History returned the same empty result for all three,
+    // and the CLI rendered one sentence — "no eras recorded for this fact" —
+    // whose comment named a typo in the KEY as the cause. That is the third
+    // possibility stated as the diagnosis, so an operator with a mistyped
+    // MODEL was told to check the key.
+    //
+    // Reached only when the read found nothing, so the ordinary path pays no
+    // extra query.
+    if rows.is_empty() {
+        if !store
+            .provider_is_known(source, &request.provider_id)
+            .map_err(|e| store_error(&e))?
+        {
+            return Err(RouteError::bad_request(format!(
+                "unknown provider {:?}: fusiform has never recorded a model \
+                 under that id",
+                request.provider_id
+            )));
+        }
+        if !store
+            .model_is_known(source, &request.provider_id, &request.model_id)
+            .map_err(|e| store_error(&e))?
+        {
+            return Err(RouteError::bad_request(format!(
+                "unknown model {:?} under provider {:?}: the provider exists, \
+                 so check the model id — upstream ids often carry a version \
+                 suffix",
+                request.model_id, request.provider_id
+            )));
+        }
+        // Known model, nothing recorded for this fact: a real answer, and now
+        // the only remaining cause is the fact key. The empty response says
+        // which of the three it is by elimination.
+    }
 
     let eras: Vec<HistoryEra> = rows
         .into_iter()

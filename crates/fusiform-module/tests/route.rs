@@ -1593,3 +1593,84 @@ fn every_accepted_source_can_match_a_row() {
         );
     }
 }
+
+/// An empty history says WHICH of its three causes applies.
+///
+/// # The defect
+///
+/// `catalog.history` returned an empty era list for a wrong provider, a wrong
+/// model, and a real model with nothing recorded for the fact — three
+/// situations needing three different actions. The CLI rendered one sentence
+/// for all of them, and its comment named a typo in the KEY as the cause, so
+/// an operator who mistyped the MODEL was told to check the key.
+///
+/// `catalog.get` has separated these since the route refusals landed; history
+/// did not, and the two verbs sit next to each other in the same help output.
+///
+/// # Why the CLI was not the place to fix it
+///
+/// The distinction needs two store lookups the CLI cannot make. Fixing it at
+/// the renderer would have given the operator a better sentence and left every
+/// other consumer with the same collapsed answer.
+#[test]
+fn an_empty_history_names_which_cause_applies() {
+    let f = fixture();
+
+    let history = |provider: &str, model: &str, fact: &str| {
+        let body = format!(
+            r#"{{"name":"catalog.history","arguments":{{"provider_id":"{provider}","model_id":"{model}","fact_key":"{fact}"}}}}"#
+        );
+        fusiform_module::route::serve_tool_call(&f.store, body.as_bytes())
+    };
+
+    // A provider fusiform has never recorded.
+    let err = format!(
+        "{:?}",
+        history("notaprovider", "x", "limit.context").expect_err("must refuse")
+    );
+    assert!(
+        err.contains("unknown provider"),
+        "a wrong provider must be named as such, not answered with an empty \
+         history: {err}"
+    );
+
+    // A real provider, a model it does not have.
+    let err = format!(
+        "{:?}",
+        history("anthropic", "claude-sonnet-9-9", "limit.context").expect_err("must refuse")
+    );
+    assert!(
+        err.contains("unknown model") && err.contains("version suffix"),
+        "a wrong model under a real provider must say the provider exists and \
+         point at the id, which is the actionable half: {err}"
+    );
+
+    // A real model, a fact key with nothing recorded. This is a REAL ANSWER
+    // and must stay one — refusing here would make a fact that genuinely has
+    // no history indistinguishable from a typo.
+    let ok = history("anthropic", "claude-sonnet-4-5", "limit.nonsense")
+        .expect("a known model with an unrecorded fact must answer, not refuse");
+    let value = serde_json::to_value(match ok {
+        fusiform_module::route::ToolResponse::History(h) => h,
+        other => panic!("expected history, got {other:?}"),
+    })
+    .unwrap();
+    assert!(
+        value["eras"].as_array().unwrap().is_empty(),
+        "and its era list must be empty: {value}"
+    );
+
+    // CONTROL: a real fact still returns its history, or the refusals above
+    // could be a broken read path rather than a diagnosis.
+    let ok =
+        history("anthropic", "claude-sonnet-4-5", "limit.context").expect("the control must serve");
+    let value = serde_json::to_value(match ok {
+        fusiform_module::route::ToolResponse::History(h) => h,
+        other => panic!("expected history, got {other:?}"),
+    })
+    .unwrap();
+    assert!(
+        !value["eras"].as_array().unwrap().is_empty(),
+        "control: a recorded fact must return eras: {value}"
+    );
+}

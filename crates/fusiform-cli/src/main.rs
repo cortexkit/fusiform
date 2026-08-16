@@ -885,9 +885,15 @@ fn print_history(response: &serde_json::Value) {
         return;
     };
     if eras.is_empty() {
-        // Not the same as a fact that never changed: no eras means the store
-        // has never recorded this fact at all, usually a typo in the key.
-        println!("\nno eras recorded for this fact");
+        // By the time this renders, the route has already refused an unknown
+        // provider and an unknown model. So the remaining causes really are
+        // about the fact: either the key is mistyped, or the model genuinely
+        // has no era for it — a model with no reasoning rate, for instance.
+        //
+        // The earlier comment here named a typo in the key as the cause while
+        // the route still answered all three cases identically, so an operator
+        // who mistyped the MODEL was pointed at the key.
+        println!("\nno eras recorded for this fact: the model exists, so check the fact key");
         return;
     }
 
