@@ -409,3 +409,102 @@ fn a_tier_rate_without_a_base_rate_of_the_same_class_survives() {
         "control: a class with a base and a tier must carry both: {keys:?}"
     );
 }
+
+/// A served currency says HOW it was established, not just what it is.
+///
+/// # What was dropped, and where
+///
+/// `models.dev` states no currency anywhere. `UnitProvenance` exists so that
+/// "why does the catalog say USD" resolves to a named, versioned policy rather
+/// than a habit — its own doc comment says serving USD without saying why
+/// would launder a convention into a fact.
+///
+/// The domain got that right and `fusiform-core` tested it. The storage
+/// renderer then wrote `"currency":"USD"` and dropped the provenance, so the
+/// distinction died one layer below the test that proved it. Verified against
+/// the live store 2026-08-15: every stored rate read
+/// `{"state":"priced","units":...,"exponent":9,"currency":"USD"}` with no
+/// provenance at all.
+///
+/// The two halves were each correct and never met — the same shape as a
+/// conditional-GET stub that answers 304 regardless of what it is asked.
+///
+/// # Why it matters at a seam and not inside a process
+///
+/// A producer's inference becomes a consumer's fact unless the marker crosses
+/// with the value. A consumer pricing against an assumed USD cannot discover
+/// the assumption was made; they are correct until a non-USD provider arrives,
+/// and at that moment every historical row is ambiguous about whether the
+/// currency was read or supplied.
+#[test]
+fn a_stored_rate_says_how_its_currency_was_established() {
+    // Driven through the real ingest planner rather than a helper, so the
+    // JSON under test is the JSON that reaches the database.
+    let dir = tempfile::tempdir().unwrap();
+    let store = fusiform_store::CatalogStore::open(&cortexkit_store_types::StorageDescriptor {
+        module_id: "fusiform".to_string(),
+        storage_namespace: "default".to_string(),
+        isolation: cortexkit_store_types::Isolation::Module,
+        backend: cortexkit_store_types::StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().to_string(),
+        },
+    })
+    .unwrap();
+    let catalog = normalize_models_dev(FIXTURE)
+        .expect("fixture normalizes")
+        .catalog;
+    let plan = fusiform_store::ingest::plan_ingest(
+        &store,
+        &catalog,
+        fusiform_core::Timestamp(1_000),
+        fusiform_core::BoundaryKind::Seed,
+        None,
+    )
+    .expect("the plan must build");
+
+    let mut checked = 0usize;
+    for era in &plan.eras {
+        if !era.fact_key.as_str().starts_with("rate.") {
+            continue;
+        }
+        let value_json = era.value_json.clone();
+        let v: serde_json::Value =
+            serde_json::from_str(&value_json).expect("a stored rate must be valid JSON");
+        if v["state"] != "priced" {
+            continue;
+        }
+        checked += 1;
+
+        assert!(
+            v.get("currency").is_some(),
+            "a priced rate must state its currency: {value_json}"
+        );
+        let prov = v.get("unit_provenance").unwrap_or_else(|| {
+            panic!(
+                "a priced rate must say how its currency was established, \
+                 or a policy assumption is indistinguishable from a published \
+                 fact: {value_json}"
+            )
+        });
+
+        // The upstream states no currency, so the only honest kind here is a
+        // named policy. `stated` would be a claim about the source that the
+        // source does not make.
+        assert_eq!(
+            prov["kind"], "assumed_by_policy",
+            "models.dev publishes no currency field, so a rate normalized from \
+             it cannot claim the currency was STATED: {value_json}"
+        );
+        assert!(
+            prov.get("policy").is_some(),
+            "an assumed currency must name the policy that supplied it, or the \
+             audit trail ends at 'we assumed': {value_json}"
+        );
+    }
+
+    assert!(
+        checked >= 2,
+        "the fixture must contain priced rates, or this test asserts nothing \
+         about a population it never found: checked {checked}"
+    );
+}

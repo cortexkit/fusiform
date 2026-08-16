@@ -455,13 +455,34 @@ fn modality_name(m: &fusiform_core::Modality) -> String {
 /// consumer can tell them apart. Rendering a stated zero as `0` would make it
 /// indistinguishable from a priced zero, which the money boundary refuses to
 /// produce precisely so this distinction survives.
+///
+/// # The currency carries HOW IT WAS ESTABLISHED, not just what it is
+///
+/// `models.dev` states no currency anywhere. Fusiform serves USD by a named
+/// policy, and `UnitProvenance` exists so that "why does the catalog say USD"
+/// resolves to an auditable rule rather than a habit — its own doc says
+/// serving USD without saying why would launder a convention into a fact.
+///
+/// This function used to do exactly that. It rendered `"currency":"USD"` and
+/// dropped the provenance, so the domain distinguished stated-by-source from
+/// assumed-by-policy, `fusiform-core` tested the distinction, and it died one
+/// layer down: a consumer received a currency indistinguishable from one the
+/// upstream published.
+///
+/// That matters at a seam more than inside a process. A producer's inference
+/// becomes a consumer's fact unless the marker crosses with the value, and the
+/// consumer has no way to discover the inference was made — they price against
+/// it and are correct until a non-USD provider arrives, at which point every
+/// historical row is silently ambiguous about whether USD was read or assumed.
 fn json_rate(value: &RateValue) -> String {
     match value {
         RateValue::Priced { amount } => format!(
-            r#"{{"state":"priced","units":{},"exponent":{},"currency":"{}"}}"#,
+            r#"{{"state":"priced","units":{},"exponent":{},"currency":"{}","unit_provenance":{}}}"#,
             amount.units,
             amount.exponent,
-            amount.currency.as_str()
+            amount.currency.as_str(),
+            serde_json::to_string(&amount.unit_provenance)
+                .expect("UnitProvenance is a plain enum and always serializes")
         ),
         RateValue::StatedZero => r#"{"state":"stated_zero"}"#.to_string(),
         RateValue::Unpriced { reason } => format!(
