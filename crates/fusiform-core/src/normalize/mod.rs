@@ -63,7 +63,6 @@ pub struct Capabilities {
     pub reasoning: Option<bool>,
     pub tool_call: Option<bool>,
     pub attachment: Option<bool>,
-    pub temperature: Option<bool>,
 }
 
 /// Declared capacities, with absence preserved.
@@ -362,7 +361,6 @@ fn normalize_model(
         reasoning: raw.reasoning,
         tool_call: raw.tool_call,
         attachment: raw.attachment,
-        temperature: raw.temperature,
     };
 
     let limits = Limits {

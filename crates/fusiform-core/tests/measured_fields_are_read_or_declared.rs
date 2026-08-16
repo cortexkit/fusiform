@@ -58,6 +58,21 @@ const DECLARED_UNREAD: &[(&str, &str)] = &[
          than a label it chose to apply.",
     ),
     (
+        "temperature",
+        "whether the model accepts a temperature parameter. Published on 5,791 \
+         models, and a KNOB rather than a capacity: it says what a request may \
+         set, not what the model can do. Same line as `reasoning_options`, and \
+         the line is worth stating because the two look different — a bool on \
+         the model object reads like a capability, and `capability.reasoning` \
+         IS one. The difference is that reasoning says the model can reason \
+         while temperature says a field is accepted. \
+         \
+         It was READ into the domain type and dropped there until 2026-08-16, \
+         which is worse than unread: this fence counts a field as handled once \
+         the parser touches it, so a field that reaches a struct and no further \
+         passes while being served to nobody.",
+    ),
+    (
         "reasoning_options",
         "per-model reasoning knobs. Request shaping, which is the consumer's \
          to decide — fusiform describes capacity and never how a request is \

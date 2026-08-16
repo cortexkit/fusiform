@@ -508,3 +508,73 @@ fn a_stored_rate_says_how_its_currency_was_established() {
          about a population it never found: checked {checked}"
     );
 }
+
+/// Every field of `Capabilities` reaches a served fact.
+///
+/// # The gap this closes, which is in the neighbouring fence rather than here
+///
+/// `measured_fields_are_read_or_declared` asks whether the PARSER reads each
+/// measured upstream field. That is the right question for a field the parser
+/// ignores, and it counts a field as handled the moment it lands in a struct —
+/// so a field read into the domain and dropped one layer later passes it.
+///
+/// `temperature` did exactly that until 2026-08-16: parsed from the payload,
+/// copied into `Capabilities`, and never turned into a fact. Read, and served
+/// to nobody. Worse than unread, because the fence that exists to catch unread
+/// fields reported it as handled.
+///
+/// So this asks the other half: does every field of the domain capability type
+/// reach the wire. The two together mean a field cannot hide in the gap
+/// between them.
+///
+/// # Why total destructuring rather than a name list
+///
+/// A list would need updating and would silently pass when it was not. The
+/// destructuring pattern fails to COMPILE when a field is added, which forces
+/// the decision at the moment the field appears rather than at review time.
+#[test]
+fn every_capability_field_reaches_a_fact() {
+    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
+    let model = outcome
+        .catalog
+        .models()
+        .next()
+        .expect("the fixture must produce a model");
+
+    // Total destructuring: adding a field to `Capabilities` breaks this line,
+    // and the fix is to decide whether the new field is served or declared
+    // unread — not to add it here and move on.
+    let fusiform_core::normalize::Capabilities {
+        input_modalities,
+        output_modalities,
+        reasoning,
+        tool_call,
+        attachment,
+    } = &model.capabilities;
+
+    let keys: Vec<String> = fact_keys_of(model)
+        .into_iter()
+        .map(|k| k.as_str().to_string())
+        .collect();
+
+    for (present, key) in [
+        (input_modalities.is_some(), "capability.input_modalities"),
+        (output_modalities.is_some(), "capability.output_modalities"),
+        (reasoning.is_some(), "capability.reasoning"),
+        (tool_call.is_some(), "capability.tool_call"),
+        (attachment.is_some(), "capability.attachment"),
+    ] {
+        assert!(
+            !present || keys.iter().any(|k| k == key),
+            "the domain carries a value for {key:?} and no fact reaches the \
+             wire: a field read into the domain and dropped is invisible to \
+             the parser-side fence, which counts it as handled. Keys: {keys:?}"
+        );
+    }
+
+    assert!(
+        keys.iter().filter(|k| k.starts_with("capability.")).count() >= 3,
+        "the fixture must exercise several capabilities, or this asserts \
+         nothing about a population it never found: {keys:?}"
+    );
+}

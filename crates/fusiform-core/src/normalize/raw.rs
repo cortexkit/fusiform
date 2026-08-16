@@ -53,7 +53,6 @@ pub struct RawModel {
     pub reasoning: Option<bool>,
     pub tool_call: Option<bool>,
     pub attachment: Option<bool>,
-    pub temperature: Option<bool>,
     pub limit: Option<RawLimit>,
     pub modalities: Option<RawModalities>,
     pub cost: Option<RawCost>,
