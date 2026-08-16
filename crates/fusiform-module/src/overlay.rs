@@ -145,6 +145,20 @@ fn parse(doc: &serde_json::Value) -> (Corrections, Vec<String>) {
         // Only a stated scalar can replace a published number. An unknown says
         // nobody established the value, which is not grounds to overwrite one.
         // Also not a reject: most cells are unknowns by design.
+        //
+        // THIS IS A CATCH-ALL, and it is safe only because something else
+        // refuses the third case. A `kind` that is neither `stated` nor
+        // `unknown` — a typo, a renamed field, a vocabulary addition — lands
+        // here and is treated as a DELIBERATE skip, which is the reading that
+        // reports nothing. That would be the malformed-cell hazard taking the
+        // silent path.
+        //
+        // What makes it unreachable is `window_overlay.rs`, which matches the
+        // kind exhaustively and panics on anything outside the vocabulary, and
+        // the overlay being embedded at compile time so the guard runs before
+        // any of it ships. Neither fact is visible from this file, which is why
+        // it is written here: a reader deciding whether this branch needs a
+        // reject arm cannot answer from the code in front of them.
         if value["kind"].as_str() != Some("stated") {
             continue;
         }
