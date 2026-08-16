@@ -578,3 +578,62 @@ fn every_capability_field_reaches_a_fact() {
          nothing about a population it never found: {keys:?}"
     );
 }
+
+/// Every field of `Limits` reaches a served fact.
+///
+/// The sibling of `every_capability_field_reaches_a_fact`, and it completes
+/// the third layer rather than adding a new idea. Three boundaries exist
+/// between the payload and the wire:
+///
+/// ```text
+/// payload -> parser   measured_fields_are_read_or_declared
+/// raw     -> domain   total destructuring at the conversion sites
+/// domain  -> wire     THIS, and the capability sibling
+/// ```
+///
+/// Both of the fields that died unnoticed this week died in a layer that had
+/// no fence: `temperature` between domain and wire, `limit.input` between raw
+/// and domain. Fencing two of three layers for one of the domain types leaves
+/// the same gap in a different shape, which is the failure mode of fixing an
+/// instance rather than a class.
+///
+/// Total destructuring for the same reason as the sibling: a field added to
+/// `Limits` must fail to COMPILE, so the decision happens when the field
+/// appears rather than at review time.
+#[test]
+fn every_limit_field_reaches_a_fact() {
+    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
+    let model = outcome
+        .catalog
+        .models()
+        .next()
+        .expect("the fixture must produce a model");
+
+    let fusiform_core::normalize::Limits {
+        context_tokens,
+        output_tokens,
+    } = &model.limits;
+
+    let keys: Vec<String> = fact_keys_of(model)
+        .into_iter()
+        .map(|k| k.as_str().to_string())
+        .collect();
+
+    for (present, key) in [
+        (context_tokens.is_some(), "limit.context"),
+        (output_tokens.is_some(), "limit.output"),
+    ] {
+        assert!(
+            !present || keys.iter().any(|k| k == key),
+            "the domain carries a value for {key:?} and no fact reaches the \
+             wire. A field read into the domain and dropped is invisible to \
+             the parser-side fence, which counts it as handled. Keys: {keys:?}"
+        );
+    }
+
+    assert!(
+        keys.iter().any(|k| k.starts_with("limit.")),
+        "the fixture must exercise limits, or this asserts nothing about a \
+         population it never found: {keys:?}"
+    );
+}
