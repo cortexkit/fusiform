@@ -655,8 +655,25 @@ fn render_failures(response: &serde_json::Value) -> String {
         .map(|c| format!(" ({c})"))
         .unwrap_or_default();
 
+    // The window that would actually reach the failure, from the module rather
+    // than from a constant.
+    //
+    // This was `(--polls 60 to see it)`, hardcoded. True when written and
+    // false by 2026-08-17: the recorded failure was 196 polls back, so the
+    // hint sent an operator to run a costly query that would not show them the
+    // failure it pointed at. A number describing a moving relationship has to
+    // be computed from it.
+    //
+    // Absent when the module predates the field, because a wrong number is
+    // worse than no number here — the operator acts on it either way.
+    let hint = f
+        .get("polls_back")
+        .and_then(|v| v.as_i64())
+        .map(|n| format!("  (--polls {n} to see it)"))
+        .unwrap_or_default();
+
     format!(
-        "failed polls     {ever} ever, last {}{class}  (--polls 60 to see it)\n",
+        "failed polls     {ever} ever, last {}{class}{hint}\n",
         format_instant(at)
     )
 }
@@ -1855,7 +1872,7 @@ mod tests {
         // With a class: the line must name where to look.
         let with_class = serde_json::json!({
             "failures": { "ever": 1, "last_at_ms": 1_786_609_178_000i64,
-                          "last_class": "network" }
+                          "last_class": "network", "polls_back": 196 }
         });
         let line = render_failures(&with_class);
         assert!(
@@ -1863,9 +1880,11 @@ mod tests {
             "the class routes the operator and must appear: {line}"
         );
         assert!(
-            line.contains("--polls 60"),
-            "a count with no way to reach the rows is a diagnostic an operator \
-             must guess at: {line}"
+            line.contains("--polls 196"),
+            "the hint must carry the window the MODULE derived, not a constant. \
+             It was hardcoded to 60, which was true when written and wrong by \
+             2026-08-17 when the failure sat 196 polls back — the operator ran \
+             a costly query and still did not see it: {line}"
         );
 
         // Without one — an older module. The line must still report, and must
@@ -1874,6 +1893,12 @@ mod tests {
             "failures": { "ever": 2, "last_at_ms": 1_786_609_178_000i64 }
         });
         let line = render_failures(&no_class);
+        assert!(
+            !line.contains("--polls"),
+            "a module too old to derive the window must produce NO hint: a \
+             wrong number is worse than none, because the operator acts on it \
+             either way: {line}"
+        );
         assert!(
             line.contains("2 ever"),
             "the count must survive a module too old to send the class: {line}"

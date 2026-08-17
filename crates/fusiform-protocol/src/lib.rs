@@ -953,6 +953,18 @@ pub struct FailureHistoryWire {
     pub ever: i64,
     /// When the most recent failure was.
     pub last_at_ms: i64,
+    /// How many polls a caller must ask for to reach that failure.
+    ///
+    /// Derived per response rather than fixed, because the answer changes with
+    /// every poll. The operator hint used to be a hardcoded `--polls 60`,
+    /// which was true when it was written and false by 2026-08-17: the
+    /// recorded failure was 196 polls back, so anyone following the hint ran a
+    /// costly query AND did not see the thing it pointed at.
+    ///
+    /// `None` from a module that predates this field, which a renderer must
+    /// treat as "no number to offer" rather than as zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polls_back: Option<i64>,
     /// What kind the most recent failure was: `network`, `http_status`,
     /// `parse`, or `implausible`.
     ///

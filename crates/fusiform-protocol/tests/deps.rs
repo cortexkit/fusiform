@@ -230,6 +230,7 @@ fn every_response_type_round_trips() {
             ever: 2,
             last_at_ms: 1_786_500_000_000,
             last_class: Some("network".into()),
+            polls_back: Some(196),
         }),
         overridden: vec![],
         source: "models.dev".into(),

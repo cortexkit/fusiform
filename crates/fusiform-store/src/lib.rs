@@ -313,6 +313,30 @@ impl CatalogStore {
         self.last_confirming_observation_before(source, Timestamp(i64::MAX))
     }
 
+    /// How many observations sit at or after an instant, newest-inclusive.
+    ///
+    /// Answers "what must I pass to `--polls` to see that". The status route
+    /// needs it for the failure hint, which was a hardcoded 60 until
+    /// 2026-08-17 — true when written, and false once the store had polled
+    /// past it. Measured that day: the recorded failure was 196 polls back, so
+    /// the hint sent an operator to run a costly query that would not show
+    /// them the failure it was pointing at.
+    ///
+    /// A number that describes a moving relationship has to be computed from
+    /// the relationship. This is cheap: the observation table is indexed by
+    /// (source, instant) and a count over the tail is a covering-index scan of
+    /// a few hundred rows.
+    pub fn observations_since(&self, source: SourceId, at: Timestamp) -> Result<i64, CatalogError> {
+        let n = self.inner.with_conn(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM observation WHERE source = ?1 AND observed_at_ms >= ?2",
+                params![source.as_str(), at.0],
+                |r| r.get::<_, i64>(0),
+            )
+        })?;
+        Ok(n)
+    }
+
     /// The earliest instant this store has any record of, or `None` when it
     /// has none at all.
     ///

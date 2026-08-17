@@ -259,7 +259,8 @@
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
-        "last_class": "http_status"
+        "last_class": "http_status",
+        "polls_back": 1
       },
       "model_count": 15,
       "models_priced": 9,

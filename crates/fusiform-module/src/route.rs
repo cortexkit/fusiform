@@ -445,9 +445,13 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
 
     // Failed polls across the whole history, not just the poll window.
     //
-    // The window is ten by default, and the live store's only failure sits
-    // about forty polls back — an operator asking what fusiform has been doing
-    // sees ten clean rows and nothing suggesting there is more to see.
+    // The window is ten by default and a failure can sit far outside it, so an
+    // operator asking what fusiform has been doing sees ten clean rows and
+    // nothing suggesting there is more to see.
+    //
+    // The DISTANCE is derived per response rather than described in a comment,
+    // because it moves with every poll. This comment used to say "about forty
+    // polls back"; by 2026-08-17 the real answer was 196.
     let (failures_ever, last_failure_at, last_failure_class) =
         store.failure_history(source).map_err(|e| store_error(&e))?;
     let failures = last_failure_at.map(|at| fusiform_protocol::FailureHistoryWire {
@@ -458,6 +462,7 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
         // `implausible` to the shrink guard. A count and an age without it says
         // something went wrong and not what.
         last_class: last_failure_class.map(|c| fusiform_store::failure_class_word(c).to_string()),
+        polls_back: store.observations_since(source, at).ok(),
     });
 
     Ok(StatusResponse {
