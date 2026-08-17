@@ -705,6 +705,37 @@ pub enum UnitProvenance {
 So models.dev rates are served as USD with
 `AssumedByPolicy("models-dev-usd-v1")`, never as a stated fact.
 
+**And it is attached at SERVE time, never written into a stored era.** That
+sentence cost 17,455 corrupted rows to learn and is the general rule rather
+than a fact about currency:
+
+> **Storage holds what the upstream said. Annotations the producer invents are
+> attached when serving.**
+
+The reason is the diff. An era boundary is a claim that the SOURCE changed, so
+the ingest comparison must see only what the source stated. A producer
+annotation living in the stored value makes every stored row differ from every
+newly normalized one the moment the annotation's shape changes — and each
+difference is written as an observed era with a bounded window, claiming the
+provider moved a value it never touched.
+
+Measured, on 2026-08-16: `unit_provenance` was written into storage for one
+day, and the first poll afterwards recorded a price change for all 17,455
+priced rates. `anthropic/claude-sonnet-4-5` `rate.input` reads
+`units: 3000000000` on both sides of that boundary. Full account in
+`docs/findings/2026-08-16-provenance-rewrote-the-rate-plane.md`.
+
+Two consequences a later author needs before adding any annotation of their
+own:
+
+- The serve path must supply it for rows that predate it, because absence on
+  the wire would be indistinguishable from `Unknown` — a real variant meaning
+  no policy covers the rate, which is the state that stops a non-USD provider
+  being priced in dollars.
+- The diff and the digest must share one definition of what the upstream
+  claimed (`upstream_claim_of`), or an annotation moves the change signal
+  while writing no eras, and every consumer refetches to find nothing changed.
+
 > **The cost of recording provenance is constant; the cost of not recording it
 > increases monotonically, with a discontinuity at an event nobody controls.**
 > A store whose rows carry no unit provenance can still say truthfully, in one

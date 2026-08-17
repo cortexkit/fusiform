@@ -142,3 +142,44 @@ fn the_design_note_names_the_tables_that_exist() {
         );
     }
 }
+
+/// Functions the design note names as mechanisms must exist.
+///
+/// # Why this is a fence rather than a convention
+///
+/// The note tells a later author where a producer annotation may live and
+/// names the function that enforces it: the diff and the digest share one
+/// definition of the upstream's claim, `upstream_claim_of`. That sentence is
+/// the reason someone will not repeat the incident of 2026-08-16 — and it is
+/// prose, which nothing checks.
+///
+/// This week produced two rots of exactly that shape: a `--polls 60` hint that
+/// was true when written and pointed 136 polls short by the time anyone
+/// followed it, and a route comment describing the same constant in words.
+/// Both were correct at the moment of writing and silently false afterwards.
+///
+/// So a name the note relies on is held against the source. Renaming the
+/// function is fine; renaming it while leaving the note pointing at the old
+/// name is what this refuses.
+#[test]
+fn the_design_note_names_functions_that_exist() {
+    let note = include_str!("../../../docs/design/schema-and-store.md");
+    let ingest = include_str!("../src/ingest.rs");
+
+    // Named in the note as the shared definition of what the upstream said.
+    // One name today; add to this check rather than beside it, so the reason
+    // stays attached to the rule.
+    let symbol = "upstream_claim_of";
+    assert!(
+        note.contains(symbol),
+        "the note must still name {symbol}, or this test is guarding a \
+         sentence nobody wrote"
+    );
+    assert!(
+        ingest.contains(&format!("fn {symbol}")),
+        "the design note names `{symbol}` as the mechanism that keeps the diff \
+         and the digest agreeing about what the upstream claimed, and no such \
+         function exists. Either restore it or correct the note — a reader \
+         deciding where to put a new annotation follows that name."
+    );
+}
