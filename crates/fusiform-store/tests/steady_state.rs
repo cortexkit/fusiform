@@ -272,3 +272,63 @@ fn the_steady_state_read_is_answered_from_an_index() {
         "the steady-state read is scanning the era table: {plan_text}"
     );
 }
+
+/// The status composition counts must SEEK the observation index, not scan.
+///
+/// # What this pins and why a timing assertion would not
+///
+/// `catalog.status` derives what each poll changed by counting the eras that
+/// poll wrote. Without an index on `era.observation_id` each count is a full
+/// table scan, and the route runs four of them per poll.
+///
+/// Measured on the live store 2026-08-16 at 92,425 eras, before the index:
+///
+/// ```text
+/// --polls 1     0.57s
+/// --polls 10    3.25s     (the default)
+/// --polls 60   30.00s
+/// ```
+///
+/// Found the hard way. `catalog.status` timed out on the channel while
+/// `ck health` reported ok — health reads atomic signals and never touches the
+/// store, so it cannot see a slow query. The timeout only happened while a
+/// poll tick held the CPU, which made it look transient rather than structural.
+///
+/// The assertion is on the QUERY PLAN rather than the clock, for the same
+/// reason as the point-in-time guard: a wall-clock bound fails on a loaded
+/// machine and passes on a fast one, so it measures the runner instead of the
+/// query. `SEARCH` versus `SCAN` is a property of the plan and is stable.
+#[test]
+fn the_status_composition_seeks_rather_than_scans() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store(&dir);
+
+    // Opened directly, like the sibling plan test: the store's connection
+    // helper is private, and a plan is a property of the schema on disk.
+    drop(store);
+    let conn = rusqlite::Connection::open(dir.path().join("store.db")).unwrap();
+    let mut stmt = conn
+        .prepare(
+            "EXPLAIN QUERY PLAN \
+             SELECT (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id) \
+             FROM observation o ORDER BY o.observed_at_ms DESC LIMIT 10",
+        )
+        .unwrap();
+    let plan: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(3))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("the plan must be readable");
+
+    let joined = plan.join(" | ");
+    assert!(
+        joined.contains("era_by_observation"),
+        "the per-poll era count must use the observation index, or every count \
+         is a full scan of the era table and status cost grows with both the \
+         poll window AND the catalog. Plan: {joined}"
+    );
+    assert!(
+        !joined.contains("SCAN e\n") && !joined.ends_with("SCAN e"),
+        "no step may scan the era table: {joined}"
+    );
+}

@@ -42,6 +42,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 2,
         statements: SCHEMA_V2,
     },
+    Migration {
+        version: 3,
+        statements: SCHEMA_V3,
+    },
 ];
 
 const SCHEMA_V1: &str = r#"
@@ -232,4 +236,30 @@ const SCHEMA_V2: &str = r#"
 CREATE INDEX era_corrections
     ON era (source, affected_from_ms, affected_until_ms)
     WHERE boundary_kind = 'corrected';
+"#;
+
+// `catalog.status` derives what each poll changed by counting the eras that
+// poll wrote, and without this index every count is a FULL TABLE SCAN.
+//
+// Measured on the live store 2026-08-16, 92,425 eras. The status route runs
+// four correlated subqueries per poll — total eras, arrivals, withdrawals,
+// revisions — and `EXPLAIN QUERY PLAN` reported `SCAN e` for each. So the cost
+// is polls x 4 x 92,425 rows, and it showed up as clean linear scaling:
+//
+//     --polls 1     0.57s
+//     --polls 10    3.25s     (the default)
+//     --polls 60   30.00s
+//
+// Thirty seconds is past any sane request deadline, and the failure-history
+// line in status output literally suggests `--polls 60` to see an older
+// failure. The default of 10 was survivable at 3.25s until a poll tick was
+// running, at which point catalog.status timed out on the channel — which is
+// how this was found: the tool call failed while `ck health` stayed green,
+// because health reads atomic signals and never touches the store.
+//
+// The composition is derived rather than stored on purpose: it is retroactive,
+// so polls recorded before the feature existed still report correctly. That
+// decision is worth keeping and it is what makes the index load-bearing.
+const SCHEMA_V3: &str = r#"
+CREATE INDEX era_by_observation ON era (observation_id);
 "#;

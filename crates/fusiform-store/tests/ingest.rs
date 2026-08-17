@@ -1019,3 +1019,128 @@ fn convergence_is_toward_the_document_not_toward_a_consumer() {
         "the retired model's history must survive the retirement"
     );
 }
+
+/// A change to fusiform's own serialization must not open an era.
+///
+/// # The production incident this pins
+///
+/// On 2026-08-16 a binary shipped that added `unit_provenance` to the stored
+/// rate representation. The ingest diff compared serialized strings, so every
+/// stored rate differed from every freshly normalized one, and the first poll
+/// after placement wrote 17,455 eras — one per priced rate — each with
+/// `boundary_kind = observed` and an observation window implying the provider
+/// had moved its price.
+///
+/// Nothing moved. `anthropic/claude-sonnet-4-5` `rate.input` reads
+/// `units: 3000000000` on both sides of that boundary. A store whose whole
+/// purpose is recording what the upstream said recorded fusiform's own
+/// encoding change as an upstream event, and `normalized_hash` moved with it,
+/// which is the signal consumers watch.
+///
+/// # What the test asserts
+///
+/// An era boundary is a claim about the SOURCE. A stored value carrying an
+/// annotation fusiform added must compare equal to the same value without it,
+/// so re-ingesting an unchanged catalog against an annotated store writes
+/// nothing.
+#[test]
+fn an_annotation_fusiform_added_does_not_open_an_era() {
+    let f = fixture();
+    let store = &f.store;
+
+    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let obs = store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(1_000),
+            outcome: ObservationOutcome::Changed { snapshot_seq: 1 },
+            normalized_hash: Some("h1".into()),
+            raw_hash: Some("r1".into()),
+            etag: None,
+            duration_ms: Some(5),
+            detail: None,
+        })
+        .unwrap();
+    let _ = obs;
+    let plan = plan_ingest(store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
+    store.append_eras(&plan.eras).unwrap();
+
+    // A stored rate WITHOUT the annotation, written directly. This is the real
+    // population: 19,707 such rows existed when the field was introduced, and
+    // an append-only store never rewrites them.
+    let key = fusiform_store::FactKey::rate(fusiform_core::TokenClass::Input);
+    store
+        .append_eras(&[fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: key.clone(),
+            value_json: r#"{"state":"priced","units":3000000000,"exponent":9,"currency":"USD"}"#
+                .to_string(),
+            boundary_at: Timestamp(1_500),
+            boundary_kind: BoundaryKind::Observed,
+            observation_id: None,
+        }])
+        .expect("the pre-annotation row must store");
+
+    // Re-ingest the SAME catalog. The upstream said nothing new.
+    let obs2 = store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(2_000),
+            outcome: ObservationOutcome::Changed { snapshot_seq: 2 },
+            normalized_hash: Some("h2".into()),
+            raw_hash: Some("r2".into()),
+            etag: None,
+            duration_ms: Some(5),
+            detail: None,
+        })
+        .unwrap();
+    let plan2 = plan_ingest(
+        store,
+        &catalog,
+        Timestamp(2_000),
+        BoundaryKind::Observed,
+        Some(obs2),
+    )
+    .unwrap();
+
+    let rate_eras = plan2
+        .eras
+        .iter()
+        .filter(|e| {
+            e.fact_key == key && e.provider_id == "anthropic" && e.model_id == "claude-sonnet-4-5"
+        })
+        .count();
+    assert_eq!(
+        rate_eras, 0,
+        "re-ingesting an unchanged catalog against rows lacking a fusiform \
+         annotation must write NO rate eras. Each one would claim the provider \
+         changed its price at this instant, in a history that exists to say \
+         what the provider did. Wrote {rate_eras}."
+    );
+
+    // CONTROL: a real value change must still open an era, or the comparison
+    // above has been made blind rather than precise.
+    let moved = {
+        let mut doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        doc["anthropic"]["models"]["claude-sonnet-4-5"]["cost"]["input"] = serde_json::json!(99.0);
+        serde_json::to_vec(&doc).unwrap()
+    };
+    let moved_catalog = normalize_models_dev(&moved).unwrap().catalog;
+    let plan3 = plan_ingest(
+        store,
+        &moved_catalog,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        None,
+    )
+    .unwrap();
+    assert!(
+        plan3
+            .eras
+            .iter()
+            .any(|e| e.fact_key.as_str() == "rate.input"),
+        "control: a genuine rate change must still open an era"
+    );
+}

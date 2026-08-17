@@ -135,7 +135,7 @@ pub fn plan_ingest(
         for (fact_key, value_json) in facts {
             let unchanged = known
                 .and_then(|f| f.get(&fact_key))
-                .map(|held| *held == value_json)
+                .map(|held| states_the_same_upstream_claim(held, &value_json))
                 .unwrap_or(false);
             if unchanged {
                 continue;
@@ -446,6 +446,52 @@ fn modality_name(m: &fusiform_core::Modality) -> String {
         Pdf => "pdf".to_string(),
         Other(s) => s.clone(),
     }
+}
+
+/// Whether two stored values state the same thing ABOUT THE UPSTREAM.
+///
+/// # Why this is not string equality, measured the expensive way
+///
+/// It was, until 2026-08-16. Adding `unit_provenance` to the stored rate
+/// representation made every stored rate differ textually from every freshly
+/// normalized one, so the first poll after that binary shipped wrote 17,455
+/// eras — one per priced rate — each with `boundary_kind = observed` and an
+/// observation window implying the provider had moved its price.
+///
+/// Nothing had moved. `anthropic/claude-sonnet-4-5` `rate.input` reads
+/// `units: 3000000000` on both sides of that boundary. The store recorded
+/// fusiform's own serialization change as an upstream event, in a history
+/// whose entire purpose is to say what the upstream did.
+///
+/// # The rule
+///
+/// An era boundary is a claim about the SOURCE. Fields fusiform adds are
+/// annotations about fusiform's own handling, and they must never open one.
+/// `unit_provenance` is the case in hand: the upstream publishes no currency
+/// at all, so provenance describes a policy this code applied, and a change to
+/// that policy is a change to fusiform rather than to the provider.
+///
+/// Compared as parsed JSON rather than text so key order and whitespace cannot
+/// open a boundary either — the hazard this file's own opening comment warns
+/// about for the upstream payload, eleven lines above the code that had it.
+fn states_the_same_upstream_claim(held: &str, incoming: &str) -> bool {
+    if held == incoming {
+        return true;
+    }
+    let (Ok(mut a), Ok(mut b)) = (
+        serde_json::from_str::<serde_json::Value>(held),
+        serde_json::from_str::<serde_json::Value>(incoming),
+    ) else {
+        // Unparseable on either side: fall back to the literal comparison
+        // already made above, which said they differ.
+        return false;
+    };
+    for v in [&mut a, &mut b] {
+        if let Some(obj) = v.as_object_mut() {
+            obj.remove("unit_provenance");
+        }
+    }
+    a == b
 }
 
 /// Render a rate for storage, keeping the three value states distinct.
