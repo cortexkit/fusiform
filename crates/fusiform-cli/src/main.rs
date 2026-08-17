@@ -49,6 +49,7 @@ use std::{
 };
 
 use fusiform_store::prefix;
+use std::fmt::Write as _;
 use subc_client_rs::consumer::{CallOptions, ConsumerOptions, SubcConsumer};
 use subc_protocol::{BindIdentity, RouteTarget};
 
@@ -743,17 +744,24 @@ fn render_single_model(
             out.push_str(&format!("  {key:<34}  {value}\n"));
         }
     }
-    // withheld and uncertain still print directly; only the override block is
-    // returned, because the override is the one whose ABSENCE carries meaning.
-    // Converting the other two would be churn for a property they do not have.
-    print!("{out}");
-    print_withheld(response);
-    print_uncertain(response);
-    let overridden = render_overridden(response);
-    print!("{overridden}");
-    // Returned for the test that holds the fact value and the override block
-    // together: everything printed above, plus the block.
-    format!("{out}{overridden}")
+    // PRINTS NOTHING. The caller prints what this returns, and for a while
+    // this function did both — so every single-model read rendered its facts
+    // TWICE, under a header correctly saying "1 model".
+    //
+    // It survived because the duplicate is the second screenful: `--json`
+    // shows one model, the header says one model, and every hand check of this
+    // path went through `head`, which cuts before the repeat. Found by driving
+    // a correction end to end in a lab and reading the whole output.
+    //
+    // The mixed shape came from making the override block testable: the block
+    // was returned so a test could hold it beside the fact value, and the
+    // printing was left in place beneath it. A function that both prints and
+    // returns the same text has two callers by construction — itself and
+    // whoever uses the return.
+    out.push_str(&render_withheld(response));
+    out.push_str(&render_uncertain(response));
+    out.push_str(&render_overridden(response));
+    out
 }
 
 /// Report facts the read refused to answer.
@@ -762,21 +770,27 @@ fn render_single_model(
 /// fact is absent from that list. Without this an operator sees a model with no
 /// input rate and concludes the upstream publishes none.
 fn print_withheld(response: &serde_json::Value) {
+    print!("{}", render_withheld(response));
+}
+
+fn render_withheld(response: &serde_json::Value) -> String {
+    let mut out = String::new();
     let Some(withheld) = response.get("withheld").and_then(|v| v.as_array()) else {
-        return;
+        return String::new();
     };
     if withheld.is_empty() {
-        return;
+        return String::new();
     }
 
-    println!(
+    let _ = writeln!(
+        out,
         "\n{} withheld — the record fusiform holds for these is known bad:",
         count(withheld.len(), "fact")
     );
     for item in withheld {
         let model = item.get("model").and_then(|v| v.as_str()).unwrap_or("?");
         let fact = item.get("fact_key").and_then(|v| v.as_str()).unwrap_or("?");
-        println!("  {model}  {fact}");
+        let _ = writeln!(out, "  {model}  {fact}");
         if let Some(corrections) = item.get("corrections").and_then(|v| v.as_array()) {
             for c in corrections {
                 let from = c
@@ -788,7 +802,8 @@ fn print_withheld(response: &serde_json::Value) {
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0);
                 let reason = c.get("reason").and_then(|v| v.as_str()).unwrap_or("");
-                println!(
+                let _ = writeln!(
+                    out,
                     "      {} to {}: {reason}",
                     format_instant(from),
                     format_instant(until)
@@ -796,6 +811,7 @@ fn print_withheld(response: &serde_json::Value) {
             }
         }
     }
+    out
 }
 
 /// Facts whose value at the read instant may already have been superseded.
@@ -815,14 +831,20 @@ fn print_withheld(response: &serde_json::Value) {
 /// rendering it — the bracket reached the payload and stopped one layer short
 /// of the only surface an operator uses.
 fn print_uncertain(response: &serde_json::Value) {
+    print!("{}", render_uncertain(response));
+}
+
+fn render_uncertain(response: &serde_json::Value) -> String {
+    let mut out = String::new();
     let Some(uncertain) = response.get("uncertain").and_then(|v| v.as_array()) else {
-        return;
+        return String::new();
     };
     if uncertain.is_empty() {
-        return;
+        return String::new();
     }
 
-    println!(
+    let _ = writeln!(
+        out,
         "\n{} uncertain at this instant — the value is real, and \
          fusiform did not look during the window it may have changed in:",
         count(uncertain.len(), "fact")
@@ -842,13 +864,15 @@ fn print_uncertain(response: &serde_json::Value) {
             .get("superseded_by_ms")
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
-        println!("  {provider}/{model}  {fact}");
-        println!(
+        let _ = writeln!(out, "  {provider}/{model}  {fact}");
+        let _ = writeln!(
+            out,
             "      last confirmed {}, changed by {}",
             format_instant(after),
             format_instant(by)
         );
     }
+    out
 }
 
 /// The override in force on a fact whose history is being read.
@@ -2027,5 +2051,54 @@ mod connection_discovery_tests {
             p("/tmp/subc-connection.json"),
         );
         assert_eq!(got, vec![p("/tmp/subc-connection.json")]);
+    }
+}
+
+#[cfg(test)]
+mod render_once_tests {
+    use super::*;
+
+    /// A single-model read renders its facts exactly once.
+    ///
+    /// # The defect
+    ///
+    /// `render_single_model` both PRINTED its output and RETURNED it, and the
+    /// caller printed the return. So every single-model read showed the model
+    /// and every fact twice, under a header correctly reading "1 model".
+    ///
+    /// It survived because the duplicate is the second screenful. `--json`
+    /// carries one model, the header says one model, and every hand check of
+    /// this path went through `head`, which cuts before the repeat. Found by
+    /// driving a correction end to end against a live lab daemon and reading
+    /// the whole output rather than the top of it.
+    ///
+    /// The mixed shape came from making the override block testable: the block
+    /// was returned so a test could hold it beside the fact value, and the
+    /// printing was left in place beneath it. A function that both prints and
+    /// returns the same text has two callers by construction.
+    #[test]
+    fn a_single_model_renders_its_facts_exactly_once() {
+        let response = serde_json::json!({
+            "models": {
+                "crossmodel/deepseek/deepseek-v4-flash": {
+                    "rate.input": {"state": "priced", "units": 405000000},
+                    "limit.context": 1000000
+                }
+            }
+        });
+        let models = response["models"].as_object().unwrap();
+        let out = render_single_model(&response, models);
+
+        assert_eq!(
+            out.matches("crossmodel/deepseek/deepseek-v4-flash").count(),
+            1,
+            "the model identity must appear once; it appeared twice for as long \
+             as this function both printed and returned: {out}"
+        );
+        assert_eq!(
+            out.matches("rate.input").count(),
+            1,
+            "each fact must appear once: {out}"
+        );
     }
 }
