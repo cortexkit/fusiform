@@ -96,6 +96,30 @@ pub enum CorrectionRefusal {
         fact_key: FactKey,
         current_since: Timestamp,
     },
+    /// The value did not change across the window, so withholding it would
+    /// remove a correct answer.
+    ///
+    /// A correction's remedy is to WITHHOLD the recorded value: reads inside
+    /// the interval refuse rather than serve it. That is right when the value
+    /// was wrong, which is the defect this mechanism was built for — the
+    /// commons tier rows recorded a threshold of 0 and a consumer must not use
+    /// them.
+    ///
+    /// It is wrong when the VALUE is fine and only the BOUNDARY is a fiction.
+    /// On 2026-08-16 fusiform wrote 17,455 eras whose values are identical on
+    /// both sides of the boundary, because a serialization change was compared
+    /// as a value change. Correcting one of those would replace a spurious
+    /// change event with a refusal to answer — strictly worse, since the value
+    /// was serving correctly and afterwards nothing would.
+    ///
+    /// Detected by comparing what was in force entering the window against
+    /// what is in force now. Equal means the correction has no repaired value
+    /// to sit behind, and the operator is describing a boundary defect that
+    /// this mechanism does not repair.
+    ValueUnchangedAcrossWindow {
+        fact_key: FactKey,
+        value_json: String,
+    },
     /// An identical correction is already recorded.
     ///
     /// Refused rather than deduplicated, because a second identical correction
@@ -120,6 +144,18 @@ impl std::fmt::Display for CorrectionRefusal {
                 f,
                 "{provider_id}/{model_id} has no history for {}; check the \
                  provider and model ids",
+                fact_key.as_str()
+            ),
+            Self::ValueUnchangedAcrossWindow {
+                fact_key,
+                value_json,
+            } => write!(
+                f,
+                "{} served {value_json} entering that window and serves the same \
+                 now, so a correction would withhold a value that is right. If \
+                 the defect is a boundary that should not exist, this command \
+                 cannot repair it: the value stands and the finding records the \
+                 instant",
                 fact_key.as_str()
             ),
             Self::PresentStillAffected {
@@ -226,6 +262,28 @@ pub fn plan_correction(
                 current_since: current.boundary_at,
             });
             continue;
+        }
+
+        // A correction WITHHOLDS. So there must be something wrong to withhold.
+        //
+        // Entering the window, fusiform served some value; now it serves
+        // another. If they are the same, nothing was repaired and the operator
+        // is describing a defect in the BOUNDARY rather than in the value —
+        // which this mechanism does not fix, and would make worse by refusing
+        // reads of a value that is correct.
+        //
+        // The case is real: the 17,455 eras of 2026-08-16 all carry identical
+        // values on both sides. See `ValueUnchangedAcrossWindow`.
+        let entering =
+            store.recorded_value_at(source, provider_id, model_id, fact_key, affected_from)?;
+        if let Some(entering) = entering {
+            if entering.value_json == current.value_json {
+                refusals.push(CorrectionRefusal::ValueUnchangedAcrossWindow {
+                    fact_key: fact_key.clone(),
+                    value_json: current.value_json.clone(),
+                });
+                continue;
+            }
         }
 
         // An identical correction already recorded.

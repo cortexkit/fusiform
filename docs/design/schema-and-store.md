@@ -447,6 +447,33 @@ A `Corrected` boundary must serve two different consumers of the same fact:
   A correction partitions their ledger into charges they can stand behind and
   charges they can only explain.
 
+> **A correction cannot express a WRONG BOUNDARY over a right value, and the
+> paragraph above will tempt a reader into trying.**
+>
+> "The upstream did not move" describes two different defects. In the commons
+> tier case the recorded VALUE was wrong, and withholding it is exactly right:
+> a consumer must not use it. On 2026-08-16 fusiform wrote 17,455 eras whose
+> values are all correct and whose BOUNDARIES are fictions — a serialization
+> change recorded as a price change
+> (`docs/findings/2026-08-16-provenance-rewrote-the-rate-plane.md`).
+>
+> The mechanism below fits the first and not the second. Applied to a
+> boundary-only defect it would withhold facts that are true, replacing a
+> spurious change event with a refusal to answer — strictly worse, because the
+> value was serving correctly and now nothing does.
+>
+> **So a boundary-only defect has no remedy here, deliberately.** The values
+> stand, the phantom boundary stands, and the artifact instant is recorded in
+> the finding and carried to consumers by hand. Building an era kind for it
+> would be a mechanism designed from one event, which is the same objection
+> that keeps an automatic correction detector out of this section: a taxonomy
+> written from a single defect classifies the next one wrongly.
+>
+> What a consumer needs from a boundary-only defect is narrower than a
+> correction and is satisfiable without one: values compared across the
+> instant are unaffected, and only a count of CHANGE EVENTS is inflated. That
+> is a sentence in a finding, not a row in a store.
+
 That second use requires **extent, not just kind**. A bare annotation is a
 note; an auditable correction says which fields were wrong over which prior
 interval, so a consumer can mechanically select every fact it derived from the

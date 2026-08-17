@@ -640,3 +640,111 @@ fn a_second_correction_between_plan_and_apply_is_refused() {
         "got {err}"
     );
 }
+
+/// A correction with nothing to repair is refused.
+///
+/// # The misuse this closes
+///
+/// A correction WITHHOLDS: reads inside its interval refuse rather than serve
+/// the recorded value. That is right when the value was wrong — the commons
+/// tier rows recorded a threshold of 0 and a consumer must not use them.
+///
+/// It is wrong when the value is fine and only the BOUNDARY is a fiction. On
+/// 2026-08-16 fusiform wrote 17,455 eras carrying identical values on both
+/// sides, because a serialization change was compared as a value change.
+/// Correcting one would replace a spurious change event with a refusal to
+/// answer — strictly worse, since the value was serving correctly.
+///
+/// §3.1 of the design note invites exactly this mistake: it says a correction
+/// exists to state that "the upstream did not move", which describes both
+/// defects while the remedy fits only one. The note now warns, and prose is
+/// what this repo keeps proving unreliable, so the store refuses.
+#[test]
+fn a_correction_with_nothing_to_repair_is_refused() {
+    let f = fixture();
+    let key = FactKey::rate(TokenClass::Input);
+
+    // Two eras, same value, different instants: the shape the incident left
+    // behind.
+    for (at, kind) in [
+        (1_000i64, BoundaryKind::Seed),
+        (5_000i64, BoundaryKind::Observed),
+    ] {
+        f.store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "anthropic".into(),
+                model_id: "probe-model-boundary-only".into(),
+                fact_key: key.clone(),
+                value_json:
+                    r#"{"state":"priced","units":3000000000,"exponent":9,"currency":"USD"}"#
+                        .to_string(),
+                boundary_at: Timestamp(at),
+                boundary_kind: kind,
+                observation_id: None,
+            }])
+            .expect("the era must store");
+    }
+
+    let outcome = plan_correction(
+        &f.store,
+        SourceId::ModelsDev,
+        "anthropic",
+        "probe-model-boundary-only",
+        &[FieldId::Rate {
+            class: TokenClass::Input,
+        }],
+        Timestamp(2_000),
+        Timestamp(5_000),
+        "docs/findings/2026-08-16-provenance-rewrote-the-rate-plane.md",
+        Timestamp(9_000),
+    )
+    .expect("planning must not error");
+
+    let refusals = outcome.expect_err("a correction with nothing to repair must be refused");
+    let text = refusals
+        .iter()
+        .map(|r| r.to_string())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    assert!(
+        text.contains("withhold a value that is right"),
+        "the refusal must say why, and point at what the command cannot do: {text}"
+    );
+
+    // CONTROL: a genuine repair — the value DID change — must still plan.
+    f.store
+        .append_eras(&[NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "probe-model-boundary-only".into(),
+            fact_key: key.clone(),
+            value_json: r#"{"state":"priced","units":9000000000,"exponent":9,"currency":"USD"}"#
+                .to_string(),
+            boundary_at: Timestamp(6_000),
+            boundary_kind: BoundaryKind::Observed,
+            observation_id: None,
+        }])
+        .expect("the repaired era must store");
+
+    let outcome = plan_correction(
+        &f.store,
+        SourceId::ModelsDev,
+        "anthropic",
+        "probe-model-boundary-only",
+        &[FieldId::Rate {
+            class: TokenClass::Input,
+        }],
+        Timestamp(2_000),
+        Timestamp(6_000),
+        "docs/findings/2026-08-11-commons-tier-threshold.md",
+        Timestamp(9_000),
+    )
+    .expect("planning must not error");
+    assert!(
+        outcome.is_ok(),
+        "control: a correction sitting behind a genuinely repaired value must \
+         still plan, or this guard has blocked the mechanism's real use: {:?}",
+        outcome.err()
+    );
+}
