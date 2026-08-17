@@ -1065,9 +1065,20 @@ fn an_annotation_fusiform_added_does_not_open_an_era() {
     let plan = plan_ingest(store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
 
-    // A stored rate WITHOUT the annotation, written directly. This is the real
-    // population: 19,707 such rows existed when the field was introduced, and
-    // an append-only store never rewrites them.
+    // A stored rate WITH the annotation, written directly. This is the LIVE
+    // population and the direction that matters for deployment: 17,455 rows
+    // carry `unit_provenance` because a binary wrote it into storage for one
+    // day, and the fixed binary no longer emits it.
+    //
+    // So the next poll after the fix is placed compares stored-with against
+    // incoming-without. If the comparison were not symmetric about the
+    // annotation, placing the FIX would cause a second mass rewrite — worse
+    // than the first, because the repair would have caused it.
+    //
+    // This test previously stored a row WITHOUT the annotation, which was the
+    // right direction while storage still emitted it. After that write was
+    // removed, both sides lacked the field, the strings matched exactly, and
+    // the test passed without exercising the comparison at all.
     let key = fusiform_store::FactKey::rate(fusiform_core::TokenClass::Input);
     store
         .append_eras(&[fusiform_store::NewEra {
@@ -1075,7 +1086,7 @@ fn an_annotation_fusiform_added_does_not_open_an_era() {
             provider_id: "anthropic".into(),
             model_id: "claude-sonnet-4-5".into(),
             fact_key: key.clone(),
-            value_json: r#"{"state":"priced","units":3000000000,"exponent":9,"currency":"USD"}"#
+            value_json: r#"{"state":"priced","units":3000000000,"exponent":9,"currency":"USD","unit_provenance":{"kind":"assumed_by_policy","policy":"models-dev-usd-v1"}}"#
                 .to_string(),
             boundary_at: Timestamp(1_500),
             boundary_kind: BoundaryKind::Observed,
