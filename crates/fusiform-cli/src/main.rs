@@ -587,19 +587,28 @@ fn print_catalog(response: &serde_json::Value) {
 
     // A single model prints its facts; a whole catalog prints one line each,
     // because 6,253 models times eleven facts is not something to read.
+    //
+    // BOTH SHAPES BUILD A STRING AND PRINT ONCE. They used to differ — the
+    // single-model path returned text while this one printed directly — and
+    // that asymmetry is what let `render_single_model` both print and return
+    // without looking wrong, which rendered every single-model read twice.
+    //
+    // The mixed form cannot be written now: nothing below prints, so a block
+    // added to one path and not the other is missing rather than doubled, and
+    // missing is the failure that shows up the first time someone looks.
     if models.len() == 1 {
         print!("{}", render_single_model(response, models));
         return;
     }
 
-    println!();
+    let mut out = String::from("\n");
     for identity in models.keys() {
-        println!("  {identity}");
+        let _ = writeln!(out, "  {identity}");
     }
-
-    print_withheld(response);
-    print_uncertain(response);
-    print_overridden(response);
+    out.push_str(&render_withheld(response));
+    out.push_str(&render_uncertain(response));
+    out.push_str(&render_overridden(response));
+    print!("{out}");
 }
 
 /// Report facts whose served value differs from what the upstream published.
@@ -617,11 +626,10 @@ fn print_catalog(response: &serde_json::Value) {
 /// recent attention on an artifact makes its UNEXAMINED dimensions less visible,
 /// because the artifact as a whole feels checked. It is the second instance of
 /// exactly this defect in this file today; the first was `uncertain`.
-fn print_overridden(response: &serde_json::Value) {
-    print!("{}", render_overridden(response));
-}
-
-/// The rendered block, returned rather than printed so it can be asserted.
+///
+/// Returned rather than printed so it can be asserted beside the fact value
+/// it qualifies — and, since the double-render of `c43fae3`, because nothing
+/// in this file prints except the two entry points.
 ///
 /// The defect this file has already shipped once was in a COMPOSED sentence
 /// ("1 models arrived"), where every unit test of the part passed because the
@@ -769,10 +777,6 @@ fn render_single_model(
 /// Printed after the models rather than folded into them, because a withheld
 /// fact is absent from that list. Without this an operator sees a model with no
 /// input rate and concludes the upstream publishes none.
-fn print_withheld(response: &serde_json::Value) {
-    print!("{}", render_withheld(response));
-}
-
 fn render_withheld(response: &serde_json::Value) -> String {
     let mut out = String::new();
     let Some(withheld) = response.get("withheld").and_then(|v| v.as_array()) else {
@@ -830,10 +834,6 @@ fn render_withheld(response: &serde_json::Value) -> String {
 /// Written after the wire field had been live for three commits with nothing
 /// rendering it — the bracket reached the payload and stopped one layer short
 /// of the only surface an operator uses.
-fn print_uncertain(response: &serde_json::Value) {
-    print!("{}", render_uncertain(response));
-}
-
 fn render_uncertain(response: &serde_json::Value) -> String {
     let mut out = String::new();
     let Some(uncertain) = response.get("uncertain").and_then(|v| v.as_array()) else {
