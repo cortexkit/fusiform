@@ -480,3 +480,69 @@ fn a_tick_reports_arrivals_and_changes_separately() {
         report.eras_written
     );
 }
+
+/// The recorded `raw_hash` is a function of the bytes that arrived.
+///
+/// # The gap this closes, found by an age-selected sweep
+///
+/// `fetch.rs` had gone six days untouched, so mutations were written against
+/// it from memory. Replacing `blake3::hash(bytes)` with `blake3::hash(&[])`
+/// survived the entire module crate: every recorded `raw_hash` could have been
+/// one constant and nothing would have failed.
+///
+/// The reason nothing caught it is visible in the fixtures. Every other test
+/// that mentions the field SETS it — `Some("raw")`, `Some("seed-raw")`, `None`
+/// — because they need an observation row, not a hash. A field written as a
+/// literal in every test is a field no test can discover has become a literal
+/// in production.
+///
+/// What it costs: `raw_hash` is the operator half of the two hashes. Its whole
+/// job is answering "did the upstream change its bytes without changing its
+/// facts" — reformatting, key reordering, a field fusiform does not read. A
+/// constant answers "no" forever, and answers it in the direction nobody
+/// investigates.
+#[test]
+fn the_raw_hash_distinguishes_the_documents_it_summarises() {
+    let f = fixture();
+
+    // Two documents that differ in bytes. Whether they differ in FACTS is not
+    // the question here — that is `normalized_hash`, the consumer half.
+    let first = String::from_utf8(FIXTURE.to_vec()).expect("the fixture is utf8");
+    let second = mutate(&first, "\"attachment\": false", "\"attachment\":   false");
+
+    let r1 = run(&f, body(first.as_bytes(), Some("e1")), 1_000);
+    let h1 = f
+        .store
+        .raw_hash_of_observation(r1.observation_id)
+        .expect("the hash must be readable");
+
+    let r2 = run(&f, body(second.as_bytes(), Some("e2")), 2_000);
+    let h2 = f
+        .store
+        .raw_hash_of_observation(r2.observation_id)
+        .expect("the hash must be readable");
+
+    assert!(
+        h1.is_some() && h2.is_some(),
+        "both polls must record a hash"
+    );
+    assert_ne!(
+        h1, h2,
+        "two documents differing only in whitespace must record different raw \
+         hashes. This is the operator's drift signal: equal hashes here mean an \
+         upstream that reformatted its document is indistinguishable from one \
+         that did not publish at all."
+    );
+
+    // And stable for the same bytes, or "unchanged" would mean nothing either.
+    let r3 = run(&f, body(first.as_bytes(), Some("e3")), 3_000);
+    let h3 = f
+        .store
+        .raw_hash_of_observation(r3.observation_id)
+        .expect("the hash must be readable");
+    assert_eq!(
+        h1, h3,
+        "the same bytes must record the same hash, or a stable upstream would \
+         look like it was churning"
+    );
+}
