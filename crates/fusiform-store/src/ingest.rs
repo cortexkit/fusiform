@@ -478,7 +478,7 @@ fn states_the_same_upstream_claim(held: &str, incoming: &str) -> bool {
     if held == incoming {
         return true;
     }
-    let (Ok(mut a), Ok(mut b)) = (
+    let (Ok(a), Ok(b)) = (
         serde_json::from_str::<serde_json::Value>(held),
         serde_json::from_str::<serde_json::Value>(incoming),
     ) else {
@@ -486,13 +486,42 @@ fn states_the_same_upstream_claim(held: &str, incoming: &str) -> bool {
         // already made above, which said they differ.
         return false;
     };
-    for v in [&mut a, &mut b] {
-        if let Some(obj) = v.as_object_mut() {
-            obj.remove("unit_provenance");
+    upstream_claim_of(a) == upstream_claim_of(b)
+}
+
+/// A stored value with everything fusiform added to it removed.
+///
+/// ONE definition, used by both the diff and the digest, because those two
+/// must agree about what counts as a change. `catalog_digest` already says
+/// that in its own doc — the signal and the era set are derived from one
+/// function so they cannot disagree — and stripping annotations in the
+/// comparison alone would have broken it conditionally: a future annotation
+/// would move the digest, waking every consumer, while the diff correctly
+/// wrote no eras. The consumer would refetch and find nothing changed.
+///
+/// Empty today, in the sense that nothing fusiform adds survives into storage
+/// after `98a7e35`. It is kept because the invariant is about the RULE rather
+/// than the current field list: the next annotation someone stores has to be
+/// named here or it moves the digest, and this function is where that decision
+/// gets made rather than discovered.
+fn upstream_claim_of(mut value: serde_json::Value) -> serde_json::Value {
+    if let Some(obj) = value.as_object_mut() {
+        for annotation in PRODUCER_ANNOTATIONS {
+            obj.remove(*annotation);
         }
     }
-    a == b
+    value
 }
+
+/// Fields fusiform attaches to a stored value that are NOT the upstream's
+/// claim, and so must never move a digest or open an era.
+///
+/// `unit_provenance` is here from the incident of 2026-08-16: it was written
+/// into storage for one day, and because the diff compared serialized strings
+/// the first poll afterwards recorded a price change for all 17,455 priced
+/// rates. Storage no longer carries it — the serve path attaches it — so this
+/// list guards against the next one rather than the last one.
+const PRODUCER_ANNOTATIONS: &[&str] = &["unit_provenance"];
 
 /// Render a rate for storage, keeping the three value states distinct.
 ///

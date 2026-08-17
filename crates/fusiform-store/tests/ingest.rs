@@ -1155,3 +1155,59 @@ fn an_annotation_fusiform_added_does_not_open_an_era() {
         "control: a genuine rate change must still open an era"
     );
 }
+
+/// A producer annotation moves NEITHER the digest nor the diff.
+///
+/// # The gap this closes, which I opened while fixing the incident
+///
+/// `catalog_digest` says in its own doc that the change SIGNAL and the era SET
+/// are derived from one function so they cannot disagree. Stripping
+/// annotations in the comparison alone broke that conditionally: a future
+/// annotation added to stored values would move the digest — waking every
+/// consumer — while the diff correctly wrote no eras. The consumer refetches
+/// and finds nothing changed, which is the "woken for a change that produced
+/// none" failure the digest doc names as the thing it prevents.
+///
+/// `the_digest_moves_exactly_when_the_diff_does` did not catch it: that test
+/// reserializes the UPSTREAM document, so it covers the upstream reformatting
+/// case. This one covers fusiform reformatting its own stored value, which is
+/// the case that cost 17,455 eras.
+#[test]
+fn a_producer_annotation_moves_neither_the_digest_nor_the_diff() {
+    use fusiform_store::ingest::catalog_digest;
+
+    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let digest = catalog_digest(&catalog);
+
+    // Every stored value, as the digest and the diff both see it.
+    let mut priced = 0usize;
+    for model in catalog.models() {
+        for (key, value) in fusiform_store::ingest::facts_with_values(model) {
+            if !key.as_str().starts_with("rate.") {
+                continue;
+            }
+            let v: serde_json::Value = serde_json::from_str(&value).unwrap();
+            if v["state"] != "priced" {
+                continue;
+            }
+            priced += 1;
+            assert!(
+                v.get("unit_provenance").is_none(),
+                "storage must carry no producer annotation, or the digest \
+                 hashes one: {value}"
+            );
+        }
+    }
+    assert!(
+        priced >= 2,
+        "the fixture must contain priced rates: {priced}"
+    );
+
+    // The digest is stable across a re-run, which is the property consumers
+    // depend on when nothing upstream has changed.
+    assert_eq!(
+        digest,
+        catalog_digest(&normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog),
+        "the digest must be a function of the catalog alone"
+    );
+}
