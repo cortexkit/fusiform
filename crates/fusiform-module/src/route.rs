@@ -177,11 +177,25 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
         // which of the three it is by elimination.
     }
 
+    // Annotated exactly as the catalog path annotates, because the reason for
+    // the annotation does not weaken with age.
+    //
+    // The golden fixture caught this: removing the storage write dropped
+    // provenance from HISTORY while `catalog.get` kept it, because only the
+    // catalog renderer applied the serve-time fill. A historical rate reading
+    // `currency: USD` with nothing saying the currency was assumed is the
+    // laundering this field exists to prevent — an operator auditing a past
+    // charge is exactly who needs to know models.dev published no currency at
+    // all.
     let eras: Vec<HistoryEra> = rows
         .into_iter()
         .map(|row| HistoryEra {
-            value: serde_json::from_str(&row.value_json)
-                .unwrap_or(serde_json::Value::String(row.value_json.clone())),
+            value: {
+                let mut v = serde_json::from_str(&row.value_json)
+                    .unwrap_or(serde_json::Value::String(row.value_json.clone()));
+                name_the_provenance_of_a_pre_0_11_row(&mut v);
+                v
+            },
             boundary_at_ms: row.boundary_at.0,
             boundary_kind: row.boundary_kind,
             correction: row.correction.map(|c| CorrectionDetail {

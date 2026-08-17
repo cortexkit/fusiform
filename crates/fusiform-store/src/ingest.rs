@@ -522,13 +522,26 @@ fn states_the_same_upstream_claim(held: &str, incoming: &str) -> bool {
 /// historical row is silently ambiguous about whether USD was read or assumed.
 fn json_rate(value: &RateValue) -> String {
     match value {
+        // NO `unit_provenance` HERE, and its absence is the fix rather than an
+        // omission.
+        //
+        // Storage holds what the UPSTREAM said. Provenance is fusiform's own
+        // annotation — models.dev publishes no currency at all, so "USD by
+        // policy models-dev-usd-v1" is a statement about this code — and the
+        // serve path already attaches it to every priced rate that lacks it.
+        //
+        // It was written here too for one day. That second path bought nothing
+        // and cost 17,455 false eras: the diff compared serialized strings, so
+        // every stored rate differed from every newly normalized one and the
+        // first poll after placement recorded a price change for every priced
+        // model. A second path to the same outcome is not redundancy, it is a
+        // second thing that can be wrong, and this one failed in a way the
+        // serve path could not observe.
         RateValue::Priced { amount } => format!(
-            r#"{{"state":"priced","units":{},"exponent":{},"currency":"{}","unit_provenance":{}}}"#,
+            r#"{{"state":"priced","units":{},"exponent":{},"currency":"{}"}}"#,
             amount.units,
             amount.exponent,
-            amount.currency.as_str(),
-            serde_json::to_string(&amount.unit_provenance)
-                .expect("UnitProvenance is a plain enum and always serializes")
+            amount.currency.as_str()
         ),
         RateValue::StatedZero => r#"{"state":"stated_zero"}"#.to_string(),
         RateValue::Unpriced { reason } => format!(

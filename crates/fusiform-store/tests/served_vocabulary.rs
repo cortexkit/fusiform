@@ -410,36 +410,27 @@ fn a_tier_rate_without_a_base_rate_of_the_same_class_survives() {
     );
 }
 
-/// A served currency says HOW it was established, not just what it is.
+/// STORAGE holds what the upstream said, and nothing fusiform added.
 ///
-/// # What was dropped, and where
+/// # Why this asserts the opposite of what it did yesterday
 ///
-/// `models.dev` states no currency anywhere. `UnitProvenance` exists so that
-/// "why does the catalog say USD" resolves to a named, versioned policy rather
-/// than a habit — its own doc comment says serving USD without saying why
-/// would launder a convention into a fact.
+/// This test used to require every stored rate to carry `unit_provenance`. It
+/// was wrong, and the cost of it was 17,455 corrupted eras.
 ///
-/// The domain got that right and `fusiform-core` tested it. The storage
-/// renderer then wrote `"currency":"USD"` and dropped the provenance, so the
-/// distinction died one layer below the test that proved it. Verified against
-/// the live store 2026-08-15: every stored rate read
-/// `{"state":"priced","units":...,"exponent":9,"currency":"USD"}` with no
-/// provenance at all.
+/// The annotation is fusiform's: models.dev publishes no currency at all, so
+/// "USD under policy models-dev-usd-v1" is a statement about this code. The
+/// serve path attaches it to every priced rate that lacks it, so consumers get
+/// it regardless. Writing it into storage as well was a second path to the
+/// same outcome — and a second path is not redundancy, it is a second thing
+/// that can be wrong.
 ///
-/// The two halves were each correct and never met — the same shape as a
-/// conditional-GET stub that answers 304 regardless of what it is asked.
-///
-/// # Why it matters at a seam and not inside a process
-///
-/// A producer's inference becomes a consumer's fact unless the marker crosses
-/// with the value. A consumer pricing against an assumed USD cannot discover
-/// the assumption was made; they are correct until a non-USD provider arrives,
-/// and at that moment every historical row is ambiguous about whether the
-/// currency was read or supplied.
+/// It went wrong the day it shipped. The ingest diff compared serialized
+/// strings, every stored rate differed textually from every newly normalized
+/// one, and the first poll after placement wrote a `boundary_kind = observed`
+/// era for every priced rate: the store claiming each provider had moved its
+/// price, when only the encoding had changed.
 #[test]
-fn a_stored_rate_says_how_its_currency_was_established() {
-    // Driven through the real ingest planner rather than a helper, so the
-    // JSON under test is the JSON that reaches the database.
+fn a_stored_rate_carries_no_annotation_fusiform_invented() {
     let dir = tempfile::tempdir().unwrap();
     let store = fusiform_store::CatalogStore::open(&cortexkit_store_types::StorageDescriptor {
         module_id: "fusiform".to_string(),
@@ -467,45 +458,30 @@ fn a_stored_rate_says_how_its_currency_was_established() {
         if !era.fact_key.as_str().starts_with("rate.") {
             continue;
         }
-        let value_json = era.value_json.clone();
         let v: serde_json::Value =
-            serde_json::from_str(&value_json).expect("a stored rate must be valid JSON");
+            serde_json::from_str(&era.value_json).expect("a stored rate must be valid JSON");
         if v["state"] != "priced" {
             continue;
         }
         checked += 1;
-
         assert!(
             v.get("currency").is_some(),
-            "a priced rate must state its currency: {value_json}"
-        );
-        let prov = v.get("unit_provenance").unwrap_or_else(|| {
-            panic!(
-                "a priced rate must say how its currency was established, \
-                 or a policy assumption is indistinguishable from a published \
-                 fact: {value_json}"
-            )
-        });
-
-        // The upstream states no currency, so the only honest kind here is a
-        // named policy. `stated` would be a claim about the source that the
-        // source does not make.
-        assert_eq!(
-            prov["kind"], "assumed_by_policy",
-            "models.dev publishes no currency field, so a rate normalized from \
-             it cannot claim the currency was STATED: {value_json}"
+            "a priced rate must still state its currency, which the upstream \
+             does not publish but the AMOUNT genuinely carries: {}",
+            era.value_json
         );
         assert!(
-            prov.get("policy").is_some(),
-            "an assumed currency must name the policy that supplied it, or the \
-             audit trail ends at 'we assumed': {value_json}"
+            v.get("unit_provenance").is_none(),
+            "storage must not carry fusiform's own annotation. It is attached \
+             at serve time, and writing it here makes every stored rate differ \
+             from every newly normalized one the moment the annotation changes: {}",
+            era.value_json
         );
     }
-
     assert!(
         checked >= 2,
-        "the fixture must contain priced rates, or this test asserts nothing \
-         about a population it never found: checked {checked}"
+        "the fixture must contain priced rates, or this asserts nothing about \
+         a population it never found: checked {checked}"
     );
 }
 

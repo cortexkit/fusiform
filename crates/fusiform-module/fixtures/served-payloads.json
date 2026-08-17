@@ -232,6 +232,10 @@
             "currency": "USD",
             "exponent": 9,
             "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
             "units": 3000000000
           }
         }
