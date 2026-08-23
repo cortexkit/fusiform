@@ -424,11 +424,36 @@ pub enum ObservationOutcome {
 }
 
 impl ObservationOutcome {
-    /// Whether this observation confirms the currently held values, and may
-    /// therefore act as the near edge of a subsequent era's window.
+    /// Whether this observation saw the currently held values STILL PUBLISHED,
+    /// and may therefore act as the near edge of a subsequent era's window.
     ///
     /// The distinction is the whole point of recording failures separately: a
     /// poll that failed is not a poll that returned nothing.
+    ///
+    /// # It confirms PRESENCE at T, never CORRECTNESS at T
+    ///
+    /// The name reads like the second and means the first, so the boundary is
+    /// worth stating where the predicate lives. A confirming observation says
+    /// the upstream still published these bytes. It says nothing about whether
+    /// the bytes were still true, because nothing in a fetch can.
+    ///
+    /// This is not hypothetical. Nineteen reseller entries in the live catalog
+    /// publish a first-party price card that was retired weeks earlier: fetched,
+    /// re-fetched, and confirming on every poll. An upstream that stops
+    /// maintaining a row goes on serving it, and re-reading it is not a second
+    /// opinion — it is the same claim, again.
+    ///
+    /// The consequence is on the WINDOW, which is why it matters here rather
+    /// than in a comment about staleness. These edges make eras that say a
+    /// value held continuously across an interval. For an abandoned row that
+    /// interval is asserted with the same confidence as any other, so the
+    /// history does not merely lack the truth — it affirms the falsehood over
+    /// a bounded span, and an audit landing inside that span finds
+    /// corroboration where it should find nothing.
+    ///
+    /// What the store CAN say about that row is when the fact last changed,
+    /// which is measured rather than inferred. What it cannot say is whether
+    /// anyone still stands behind it.
     ///
     /// # A surviving mutant here is EQUIVALENT, not a gap
     ///
