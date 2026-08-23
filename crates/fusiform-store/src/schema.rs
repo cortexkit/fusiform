@@ -46,6 +46,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 3,
         statements: SCHEMA_V3,
     },
+    Migration {
+        version: 4,
+        statements: SCHEMA_V4,
+    },
 ];
 
 const SCHEMA_V1: &str = r#"
@@ -262,4 +266,38 @@ CREATE INDEX era_corrections
 // decision is worth keeping and it is what makes the index load-bearing.
 const SCHEMA_V3: &str = r#"
 CREATE INDEX era_by_observation ON era (observation_id);
+"#;
+
+// A poll whose eras record fusiform changing its own mind, not the upstream
+// changing its data.
+//
+// # Why this exists as a mechanism rather than a constant
+//
+// On 2026-08-16 a serialization change of mine made every stored rate differ
+// textually from every freshly normalized one, so the diff wrote 17,455 eras
+// with identical values on both sides. Any measure derived from "when did this
+// fact last change" reads those as changes, and a consumer calibrating on them
+// sees the WHOLE CATALOG as freshly maintained — the direction that hides
+// abandoned rows rather than exposing them.
+//
+// A hardcoded exclusion of that one observation would fix the instance. The
+// next serialization change would arrive uncovered, and would arrive looking
+// exactly like data. So the artifact is a fact ABOUT a poll, recorded once and
+// honoured by every derivation.
+//
+// # Why a separate table rather than a column
+//
+// The store never updates a row in place, and these observations are already
+// written. A new row asserting something about an existing one is an addition;
+// altering the observation would be the store doing to its own history what
+// this table exists to record.
+//
+// `reason` names the finding rather than describing it, so an operator meets
+// the evidence rather than a summary of it.
+const SCHEMA_V4: &str = r#"
+CREATE TABLE observation_artifact (
+    observation_id  INTEGER PRIMARY KEY REFERENCES observation(id),
+    reason          TEXT    NOT NULL,
+    recorded_at_ms  INTEGER NOT NULL
+);
 "#;

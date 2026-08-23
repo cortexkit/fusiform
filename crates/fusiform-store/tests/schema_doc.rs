@@ -183,3 +183,60 @@ fn the_design_note_names_functions_that_exist() {
          deciding where to put a new annotation follows that name."
     );
 }
+
+/// The artifact table survives migration onto a store that already holds data.
+///
+/// A migration that only ever runs against an empty fixture is a migration
+/// nobody has tested — every real application of it lands on a store with
+/// history, and this one lands on 101,904 eras in production.
+#[test]
+fn the_artifact_table_arrives_on_a_populated_store() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("store.db");
+
+    // Build a store at the PREVIOUS schema, with rows in it, then migrate.
+    {
+        let conn = rusqlite::Connection::open(&path).expect("open");
+        for m in &fusiform_store::schema::MIGRATIONS[..3] {
+            conn.execute_batch(m.statements).expect("earlier migration");
+        }
+        conn.execute(
+            "INSERT INTO observation (source, observed_at_ms, outcome) \
+             VALUES ('models.dev', 1000, 'changed')",
+            [],
+        )
+        .expect("a row that must survive");
+    }
+
+    let conn = rusqlite::Connection::open(&path).expect("reopen");
+    conn.execute_batch(fusiform_store::schema::MIGRATIONS[3].statements)
+        .expect("v4 must apply to a store that already has rows");
+
+    let kept: i64 = conn
+        .query_row("SELECT COUNT(*) FROM observation", [], |r| r.get(0))
+        .expect("the pre-existing row must still be there");
+    assert_eq!(kept, 1, "migrating must not disturb existing observations");
+
+    // The table is usable. NOTE the REFERENCES clause is documentation, not
+    // enforcement: SQLite defaults `foreign_keys` to OFF, measured rather than
+    // assumed, so nothing stops an artifact naming an observation that does not
+    // exist. Stated here because the clause reads like a guarantee.
+    conn.execute(
+        "INSERT INTO observation_artifact (observation_id, reason, recorded_at_ms) \
+         VALUES (1, 'docs/findings/2026-08-16-provenance-rewrote-the-rate-plane.md', 2000)",
+        [],
+    )
+    .expect("marking a real observation must work");
+
+    let reason: String = conn
+        .query_row(
+            "SELECT reason FROM observation_artifact WHERE observation_id = 1",
+            [],
+            |r| r.get(0),
+        )
+        .expect("the mark must be readable");
+    assert!(
+        reason.contains("findings/"),
+        "the reason names the evidence rather than summarising it: {reason}"
+    );
+}
