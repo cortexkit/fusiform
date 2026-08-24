@@ -869,6 +869,67 @@ impl CatalogStore {
     /// Exists for the failure path: a parse failure records which exact
     /// document could not be read, so a later fix can be checked against those
     /// bytes rather than against whatever the upstream is serving by then.
+    /// Record that a poll's eras describe fusiform changing its own
+    /// representation rather than the upstream changing its data.
+    ///
+    /// `reason` names a finding rather than describing one, so an operator
+    /// meets the evidence instead of a summary of it.
+    ///
+    /// Fenced like every other write: an artifact is a claim about this
+    /// store's history and must not be written by a process that has lost its
+    /// lease.
+    pub fn mark_observation_artifact(
+        &self,
+        observation_id: i64,
+        reason: &str,
+        recorded_at: Timestamp,
+    ) -> Result<(), CatalogError> {
+        self.inner.with_conn_fenced(|conn| {
+            conn.execute(
+                "INSERT OR REPLACE INTO observation_artifact \
+                 (observation_id, reason, recorded_at_ms) VALUES (?1, ?2, ?3)",
+                params![observation_id, reason, recorded_at.0],
+            )
+        })?;
+        Ok(())
+    }
+
+    /// The instant a fact's value last genuinely changed, ignoring eras written
+    /// by polls marked as artifacts.
+    ///
+    /// # Why the exclusion is here rather than in the caller
+    ///
+    /// The whole point of the field is that a consumer cannot be expected to
+    /// know which of this store's polls were fusiform's own doing. An exclusion
+    /// a caller has to remember is an exclusion that will be forgotten by
+    /// whoever inherits the caller, and the resulting number does not look
+    /// wrong — it makes every abandoned row appear freshly maintained.
+    ///
+    /// Returns `None` when the fact has no era at all. A fact whose only era is
+    /// the seed returns the seed instant, which is honest: the value has been
+    /// true since at least then and has never been seen to move.
+    pub fn last_changed_at(
+        &self,
+        source: SourceId,
+        provider_id: &str,
+        model_id: &str,
+        fact_key: &FactKey,
+    ) -> Result<Option<Timestamp>, CatalogError> {
+        let at = self.inner.with_conn(|conn| {
+            conn.query_row(
+                "SELECT MAX(e.boundary_at_ms) FROM era e \
+                 WHERE e.source = ?1 AND e.provider_id = ?2 AND e.model_id = ?3 \
+                   AND e.fact_key = ?4 \
+                   AND (e.observation_id IS NULL OR e.observation_id NOT IN \
+                        (SELECT observation_id FROM observation_artifact))",
+                params![source.as_str(), provider_id, model_id, fact_key.as_str()],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .optional()
+        })?;
+        Ok(at.flatten().map(Timestamp))
+    }
+
     pub fn raw_hash_of_observation(&self, id: i64) -> Result<Option<String>, CatalogError> {
         let hash = self.inner.with_conn(|conn| {
             conn.query_row(

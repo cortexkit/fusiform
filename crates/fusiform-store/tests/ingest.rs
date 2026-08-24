@@ -10,7 +10,7 @@
 use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::plan_ingest;
-use fusiform_store::{CatalogStore, FactKey, NewObservation};
+use fusiform_store::{CatalogStore, FactKey, NewEra, NewObservation};
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_testkit::mutate;
@@ -1209,5 +1209,129 @@ fn a_producer_annotation_moves_neither_the_digest_nor_the_diff() {
         digest,
         catalog_digest(&normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog),
         "the digest must be a function of the catalog alone"
+    );
+}
+
+/// An artifact poll does not count as a change.
+///
+/// # The defect this exists for
+///
+/// On 2026-08-16 a serialization change wrote 17,455 eras with identical values
+/// on both sides. `last_changed_at` derived without excluding them reports that
+/// instant for every priced fact in the catalog — so a consumer calibrating a
+/// staleness rule reads the WHOLE CATALOG as freshly maintained, which hides
+/// abandoned rows rather than exposing them.
+///
+/// The control matters as much as the assertion: a genuine change AFTER the
+/// artifact must still be reported, or the exclusion has swallowed real history
+/// rather than fusiform's own noise.
+#[test]
+fn an_artifact_poll_is_not_a_change() {
+    let f = fixture();
+    let key = FactKey::rate(fusiform_core::TokenClass::Input);
+    let real = |units: i64| {
+        format!(r#"{{"state":"priced","units":{units},"exponent":9,"currency":"USD"}}"#)
+    };
+
+    // A genuine change at 1000, then an artifact poll at 5000 rewriting the
+    // same value, exactly as the provenance incident did.
+    f.store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(1_000),
+            outcome: ObservationOutcome::Seeded,
+            raw_hash: None,
+            normalized_hash: None,
+            duration_ms: Some(1),
+            detail: None,
+            etag: None,
+        })
+        .expect("the seed observation bounds the later window");
+
+    let obs = f
+        .store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(5_000),
+            outcome: ObservationOutcome::Changed { snapshot_seq: 1 },
+            raw_hash: None,
+            normalized_hash: None,
+            duration_ms: Some(1),
+            detail: None,
+            etag: None,
+        })
+        .expect("the artifact observation must record");
+
+    for (at, obs_id, kind) in [
+        (1_000i64, None, BoundaryKind::Seed),
+        (5_000i64, Some(obs), BoundaryKind::Observed),
+    ] {
+        f.store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "anthropic".into(),
+                model_id: "claude-sonnet-4-5".into(),
+                fact_key: key.clone(),
+                value_json: real(3_000_000_000),
+                boundary_at: Timestamp(at),
+                boundary_kind: kind,
+                observation_id: obs_id,
+            }])
+            .expect("era must store");
+    }
+
+    // BEFORE marking: the artifact is indistinguishable from a real change.
+    let unmarked = f
+        .store
+        .last_changed_at(SourceId::ModelsDev, "anthropic", "claude-sonnet-4-5", &key)
+        .expect("query must not error")
+        .expect("the fact has eras");
+    assert_eq!(
+        unmarked.0, 5_000,
+        "control: without the mark, the artifact poll reads as the last change — \
+         this is the defect, and if it does not reproduce the test proves nothing"
+    );
+
+    f.store
+        .mark_observation_artifact(
+            obs,
+            "docs/findings/2026-08-16-provenance-rewrote-the-rate-plane.md",
+            Timestamp(9_000),
+        )
+        .expect("marking must work");
+
+    let marked = f
+        .store
+        .last_changed_at(SourceId::ModelsDev, "anthropic", "claude-sonnet-4-5", &key)
+        .expect("query must not error")
+        .expect("the fact still has eras");
+    assert_eq!(
+        marked.0, 1_000,
+        "the artifact must not count as a change; the last GENUINE change stands"
+    );
+
+    // CONTROL: a real change after the artifact is still reported, or the
+    // exclusion is swallowing history rather than noise.
+    f.store
+        .append_eras(&[NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: key.clone(),
+            value_json: real(9_000_000_000),
+            boundary_at: Timestamp(7_000),
+            boundary_kind: BoundaryKind::Observed,
+            observation_id: None,
+        }])
+        .expect("the later real era must store");
+
+    let after = f
+        .store
+        .last_changed_at(SourceId::ModelsDev, "anthropic", "claude-sonnet-4-5", &key)
+        .expect("query must not error")
+        .expect("the fact has eras");
+    assert_eq!(
+        after.0, 7_000,
+        "a genuine change after an artifact must still be the last change"
     );
 }
