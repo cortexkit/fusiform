@@ -869,6 +869,72 @@ impl CatalogStore {
     /// Exists for the failure path: a parse failure records which exact
     /// document could not be read, so a later fix can be checked against those
     /// bytes rather than against whatever the upstream is serving by then.
+    /// Observations whose eras every one state the claim already in force, and
+    /// which are therefore artifacts of fusiform's own doing.
+    ///
+    /// # Why this can be decided mechanically rather than by an operator
+    ///
+    /// The ingest diff writes an era only when the incoming claim DIFFERS from
+    /// the one held. So under the current diff, a poll whose every era restates
+    /// the held claim cannot occur — such eras exist only because an earlier
+    /// diff compared bytes, which is exactly the 2026-08-16 defect.
+    ///
+    /// That makes the rule sound by construction rather than by judgement: the
+    /// signature identifies precisely the polls a byte-comparing diff could
+    /// produce and a claim-comparing one cannot.
+    ///
+    /// Returns nothing on a store with no such poll, which includes every fresh
+    /// install — so this is a repair that finds its own subject rather than a
+    /// constant that assumes one.
+    ///
+    /// # MEASURED, and it is why the threshold is `same > 0` rather than a ratio
+    ///
+    /// Live store, 2026-08-24:
+    ///
+    /// ```text
+    /// obs 203   same=17454  total=17455    the provenance incident
+    /// obs 194   same=0      total=340      an ordinary changed poll
+    /// obs 134   same=0      total=2388     an ordinary changed poll
+    /// ```
+    ///
+    /// Ordinary polls score EXACTLY ZERO, which is the property that makes this
+    /// sound: a claim-comparing diff cannot write an era restating what is held,
+    /// so a single such era is already evidence of the byte-comparing diff. A
+    /// ratio would invite a threshold; the honest rule is presence.
+    ///
+    /// And the incident is not pure — 17,454 of its 17,455 eras are artifacts,
+    /// and ONE IS A GENUINE UPSTREAM CHANGE that landed in the same tick. A
+    /// thirty-minute poll catching a real change alongside the rewrite is the
+    /// expected case rather than bad luck.
+    ///
+    /// That is why this identifies observations for INSPECTION rather than for
+    /// automatic marking: marking observation 203 would exclude its one real era
+    /// along with the noise, which is the same class of loss the mark exists to
+    /// prevent. Per-era exclusion is the exact answer and is not built yet.
+    pub fn artifact_observations(&self) -> Result<Vec<i64>, CatalogError> {
+        let candidates: Vec<i64> = self.inner.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT observation_id FROM era \
+                 WHERE observation_id IS NOT NULL AND boundary_kind = 'observed'",
+            )?;
+            let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })?;
+
+        let mut found = Vec::new();
+        for id in candidates {
+            let (same, total) = self.same_claim_era_fraction(id)?;
+            // A single same-claim era is already proof: the current diff cannot
+            // write one, so its presence dates the poll to the byte-comparing
+            // diff. Requiring ALL of them misses the real incident, whose 17,455
+            // eras include one genuine change.
+            if total > 0 && same > 0 {
+                found.push(id);
+            }
+        }
+        Ok(found)
+    }
+
     /// How many of a poll's eras state the same upstream claim as the era they
     /// superseded, against how many it wrote.
     ///

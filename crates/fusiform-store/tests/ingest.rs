@@ -1413,3 +1413,58 @@ fn the_artifact_signature_survives_a_serialization_change() {
          comparison scores this 0 and is blind to the case it exists for"
     );
 }
+
+/// The signature finds the artifact poll and leaves real polls alone.
+#[test]
+fn a_poll_that_restates_what_is_held_is_found_and_a_real_one_is_not() {
+    let f = fixture();
+    let key = FactKey::rate(fusiform_core::TokenClass::Input);
+    let bare = r#"{"state":"priced","units":132000000,"exponent":9,"currency":"USD"}"#;
+    let annotated = r#"{"state":"priced","units":132000000,"exponent":9,"currency":"USD","unit_provenance":{"kind":"assumed_by_policy","policy":"models-dev-usd-v1"}}"#;
+    let moved = r#"{"state":"priced","units":999000000,"exponent":9,"currency":"USD"}"#;
+
+    let obs = |at: i64, outcome: ObservationOutcome| {
+        f.store
+            .record_observation(&NewObservation {
+                source: SourceId::ModelsDev,
+                observed_at: Timestamp(at),
+                outcome,
+                raw_hash: None,
+                normalized_hash: None,
+                duration_ms: Some(1),
+                detail: None,
+                etag: None,
+            })
+            .expect("observation")
+    };
+    obs(1_000, ObservationOutcome::Seeded);
+    let artifact = obs(5_000, ObservationOutcome::Changed { snapshot_seq: 1 });
+    let real = obs(9_000, ObservationOutcome::Changed { snapshot_seq: 2 });
+
+    for (at, json, kind, id) in [
+        (1_000i64, bare, BoundaryKind::Seed, None),
+        (5_000i64, annotated, BoundaryKind::Observed, Some(artifact)),
+        (9_000i64, moved, BoundaryKind::Observed, Some(real)),
+    ] {
+        f.store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "anthropic".into(),
+                model_id: "claude-sonnet-4-5".into(),
+                fact_key: key.clone(),
+                value_json: json.to_string(),
+                boundary_at: Timestamp(at),
+                boundary_kind: kind,
+                observation_id: id,
+            }])
+            .expect("era");
+    }
+
+    let found = f.store.artifact_observations().expect("scan");
+    assert_eq!(
+        found,
+        vec![artifact],
+        "the poll that restated the held claim is an artifact; the one that \
+         moved the price is not, and marking it would delete real history"
+    );
+}
