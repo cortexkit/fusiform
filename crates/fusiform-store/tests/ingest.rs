@@ -1335,3 +1335,81 @@ fn an_artifact_poll_is_not_a_change() {
         "a genuine change after an artifact must still be the last change"
     );
 }
+
+/// The artifact signature is a claim comparison, not a byte comparison.
+///
+/// # The measurement this encodes
+///
+/// A textual version of this detector scores the live store's 2026-08-16
+/// artifact poll at 0 same-value eras out of 17,455 — it cannot see the poll it
+/// exists for, because the artifact eras carry `unit_provenance` and the eras
+/// they superseded do not. Identical claim, different text.
+///
+/// The fixture reproduces exactly that: same units, annotation added.
+#[test]
+fn the_artifact_signature_survives_a_serialization_change() {
+    let f = fixture();
+    let key = FactKey::rate(fusiform_core::TokenClass::Input);
+    let bare = r#"{"state":"priced","units":132000000,"exponent":9,"currency":"USD"}"#;
+    let annotated = r#"{"state":"priced","units":132000000,"exponent":9,"currency":"USD","unit_provenance":{"kind":"assumed_by_policy","policy":"models-dev-usd-v1"}}"#;
+
+    f.store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(1_000),
+            outcome: ObservationOutcome::Seeded,
+            raw_hash: None,
+            normalized_hash: None,
+            duration_ms: Some(1),
+            detail: None,
+            etag: None,
+        })
+        .expect("seed observation");
+
+    let obs = f
+        .store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(5_000),
+            outcome: ObservationOutcome::Changed { snapshot_seq: 1 },
+            raw_hash: None,
+            normalized_hash: None,
+            duration_ms: Some(1),
+            detail: None,
+            etag: None,
+        })
+        .expect("artifact observation");
+
+    for (at, json, kind, obs_id) in [
+        (1_000i64, bare, BoundaryKind::Seed, None),
+        (5_000i64, annotated, BoundaryKind::Observed, Some(obs)),
+    ] {
+        f.store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "anthropic".into(),
+                model_id: "claude-sonnet-4-5".into(),
+                fact_key: key.clone(),
+                value_json: json.to_string(),
+                boundary_at: Timestamp(at),
+                boundary_kind: kind,
+                observation_id: obs_id,
+            }])
+            .expect("era must store");
+    }
+
+    // CONTROL: the bytes genuinely differ, or the fixture is not reproducing
+    // the incident and the assertion below proves nothing.
+    assert_ne!(bare, annotated, "the fixture must differ textually");
+
+    let (same, total) = f
+        .store
+        .same_claim_era_fraction(obs)
+        .expect("the detector must run");
+    assert_eq!(total, 1, "the poll wrote one era");
+    assert_eq!(
+        same, 1,
+        "a serialization change states the SAME upstream claim; a byte \
+         comparison scores this 0 and is blind to the case it exists for"
+    );
+}

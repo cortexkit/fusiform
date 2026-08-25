@@ -869,6 +869,57 @@ impl CatalogStore {
     /// Exists for the failure path: a parse failure records which exact
     /// document could not be read, so a later fix can be checked against those
     /// bytes rather than against whatever the upstream is serving by then.
+    /// How many of a poll's eras state the same upstream claim as the era they
+    /// superseded, against how many it wrote.
+    ///
+    /// # Why this compares claims rather than bytes
+    ///
+    /// The obvious version compares `value_json` textually and CANNOT SEE THE
+    /// THING IT EXISTS FOR. Measured on the live store: the 2026-08-16 artifact
+    /// poll scores 0 same-value eras out of 17,455, because its eras carry
+    /// `unit_provenance` and the eras they superseded do not — identical claim,
+    /// different text. A serialization-change artifact is by definition the case
+    /// where the text differs and the meaning does not.
+    ///
+    /// So it strips producer annotations with the same function the ingest diff
+    /// uses. One rule, one definition of what the upstream said.
+    ///
+    /// # What it is for
+    ///
+    /// Marking an observation as an artifact deletes real history from every
+    /// derivation that honours the mark, and a mistaken mark is unfalsifiable
+    /// afterwards. This lets the claim be checked before it is written: a ratio
+    /// near 1.0 is the signature, and anything else is a poll that changed real
+    /// values and must not be marked.
+    pub fn same_claim_era_fraction(&self, observation_id: i64) -> Result<(i64, i64), CatalogError> {
+        let pairs: Vec<(String, Option<String>)> = self.inner.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT e.value_json, ( \
+                     SELECT p.value_json FROM era p \
+                     WHERE p.source = e.source AND p.provider_id = e.provider_id \
+                       AND p.model_id = e.model_id AND p.fact_key = e.fact_key \
+                       AND p.boundary_at_ms < e.boundary_at_ms \
+                     ORDER BY p.boundary_at_ms DESC LIMIT 1 \
+                   ) FROM era e WHERE e.observation_id = ?1",
+            )?;
+            let rows = stmt.query_map(params![observation_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })?;
+
+        let total = pairs.len() as i64;
+        let same = pairs
+            .iter()
+            .filter(|(current, previous)| {
+                previous
+                    .as_deref()
+                    .is_some_and(|p| ingest::states_the_same_upstream_claim(p, current))
+            })
+            .count() as i64;
+        Ok((same, total))
+    }
+
     /// Record that a poll's eras describe fusiform changing its own
     /// representation rather than the upstream changing its data.
     ///

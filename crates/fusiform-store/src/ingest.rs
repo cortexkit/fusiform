@@ -474,7 +474,7 @@ fn modality_name(m: &fusiform_core::Modality) -> String {
 /// Compared as parsed JSON rather than text so key order and whitespace cannot
 /// open a boundary either — the hazard this file's own opening comment warns
 /// about for the upstream payload, eleven lines above the code that had it.
-fn states_the_same_upstream_claim(held: &str, incoming: &str) -> bool {
+pub fn states_the_same_upstream_claim(held: &str, incoming: &str) -> bool {
     if held == incoming {
         return true;
     }
