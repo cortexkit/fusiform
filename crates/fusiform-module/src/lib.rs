@@ -38,6 +38,13 @@ pub fn manifest() -> ModuleManifest {
         module_version: env!("CARGO_PKG_VERSION").to_string(),
         protocol_ver: PROTOCOL_VERSION,
         trust_tier: TrustTier::FirstParty,
+        // No capability claim until one has been through the owner round.
+        //
+        // The field is decode-optional and construct-required, so the honest
+        // pre-review value is None rather than a plausible string. A capability
+        // is a claim other modules route on, and a claim minted here to fill a
+        // field would be indistinguishable from one that was reviewed.
+        capabilities: None,
         provides: vec![ProviderRole::ToolProvider {
             tools: vec![
                 Tool {
