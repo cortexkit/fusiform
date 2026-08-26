@@ -45,6 +45,18 @@ pub fn manifest() -> ModuleManifest {
         // is a claim other modules route on, and a claim minted here to fill a
         // field would be indistinguishable from one that was reviewed.
         capabilities: None,
+        // No provenance claim until the build injects one it can defend.
+        //
+        // Construct-required and wire-optional, same shape as `capabilities`:
+        // absence is deliberate rather than forgotten, and a value invented to
+        // satisfy a compiler would be indistinguishable downstream from one the
+        // build established.
+        //
+        // Fusiform already HAS the fact this field wants — stage.sh refuses to
+        // publish unless the signed binary's self-reported revision matches
+        // HEAD — but that check lives in the staging script, not in the build,
+        // so nothing here can honestly assert it yet.
+        provenance: None,
         provides: vec![ProviderRole::ToolProvider {
             tools: vec![
                 Tool {
