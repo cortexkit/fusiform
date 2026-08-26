@@ -45,18 +45,34 @@ pub fn manifest() -> ModuleManifest {
         // is a claim other modules route on, and a claim minted here to fill a
         // field would be indistinguishable from one that was reviewed.
         capabilities: None,
-        // No provenance claim until the build injects one it can defend.
+        // Populated only from a value the packaging path injected, never from
+        // whatever a compiler happened to see.
         //
-        // Construct-required and wire-optional, same shape as `capabilities`:
-        // absence is deliberate rather than forgotten, and a value invented to
-        // satisfy a compiler would be indistinguishable downstream from one the
-        // build established.
+        // `BUILD_REV` reads `CK_BUILD_REV` through `option_env!`, which captures
+        // the environment of WHOEVER COMPILED THE CRATE — so reading it
+        // unconditionally would mint a provenance claim out of an accident of
+        // the build environment. That is the `version_line` defect generalized:
+        // both binaries once reported the wire crate's version because a macro
+        // evaluated at its definition site rather than its caller's.
         //
-        // Fusiform already HAS the fact this field wants — stage.sh refuses to
-        // publish unless the signed binary's self-reported revision matches
-        // HEAD — but that check lives in the staging script, not in the build,
-        // so nothing here can honestly assert it yet.
-        provenance: None,
+        // `release-build.sh` sets it and REFUSES A DIRTY TREE outright, so there
+        // is no best-effort case here to stamp: a fusiform binary either carries
+        // a revision its bytes can defend, or carries none. `unknown` is the
+        // sentinel an ordinary `cargo build` leaves behind, and it maps to
+        // absence rather than to a string that looks like an answer.
+        provenance: (fusiform_protocol::BUILD_REV != "unknown").then(|| {
+            subc_protocol::manifest::ManifestProvenance {
+                build_git_sha: Some(fusiform_protocol::BUILD_REV.to_string()),
+                build_lock_digest: None,
+                // Absent for the same definition-site reason: this crate can
+                // only see its OWN CARGO_PKG_VERSION, and reporting that as the
+                // wire crate's version is precisely the `version_line` defect.
+                // The protocol crate would have to export its own constant, and
+                // that is a wire change rather than a manifest one.
+                wire_crate_version: None,
+                store_schema_version: None,
+            }
+        }),
         provides: vec![ProviderRole::ToolProvider {
             tools: vec![
                 Tool {
