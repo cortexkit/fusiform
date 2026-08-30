@@ -45,6 +45,35 @@ pub fn manifest() -> ModuleManifest {
         // is a claim other modules route on, and a claim minted here to fill a
         // field would be indistinguishable from one that was reviewed.
         capabilities: None,
+        // One declared behaviour: the catalog poll loop.
+        //
+        // `Some(vec![...])` rather than `None` because the list was examined
+        // rather than skipped — the wire distinguishes un-adopted from
+        // examined-and-none, and fusiform has exactly one thing to declare.
+        //
+        // `Literal` rather than `Derived` because the interval genuinely IS a
+        // compile-time constant here: `POLL_INTERVAL` is not read from config
+        // and not adjusted at runtime, so a literal is the truth rather than a
+        // convenient stand-in. The store-driven part of the loop is which ETAG
+        // it sends, not when it wakes.
+        //
+        // `Observe` is the whole point of this module — a poll that changed the
+        // upstream would be a defect, not a feature.
+        self_signals: Some(vec![subc_protocol::manifest::SelfSignalDeclaration {
+            name: "catalog_poll".to_string(),
+            kind: subc_protocol::manifest::SelfSignalKind::Poller,
+            effect: subc_protocol::manifest::SelfSignalEffect::Observe,
+            anchored_to: subc_protocol::manifest::SignalAnchor::FixedInterval,
+            cadence: Some(subc_protocol::manifest::SignalCadence::Literal {
+                interval_ms: crate::loop_::POLL_INTERVAL_MS as u64,
+            }),
+            domain: Some("models.dev".to_string()),
+            note: Some(
+                "Conditional GET against the upstream catalog; a 304 writes no \
+                 eras and a changed body writes only the facts that moved."
+                    .to_string(),
+            ),
+        }]),
         // Populated only from a value the packaging path injected, never from
         // whatever a compiler happened to see.
         //
