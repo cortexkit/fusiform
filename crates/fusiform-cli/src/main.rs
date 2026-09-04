@@ -99,6 +99,12 @@ correct options:
   --json                    print the raw response instead of a summary
 ";
 
+/// The headline `ck --help` prints beside `models`.
+///
+/// Names what the domain answers rather than what it is, because the list is
+/// read by someone deciding which verb to reach for.
+const CK_DOMAIN_HEADLINE: &str = "AI model catalog: status, get, history, correct";
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     // Before argument parsing and before the environment is touched: a version
@@ -110,6 +116,19 @@ async fn main() {
             "{}",
             fusiform_protocol::version_line("ck-models", env!("CARGO_PKG_VERSION"))
         );
+        return;
+    }
+
+    // The domain probe, answered in the same place and for the same reason as
+    // --version: before argument parsing, before the environment is touched,
+    // and without a daemon connection. `ck` dispatches only to binaries that
+    // opt in, so a probe that needed a running subc would make `ck models`
+    // vanish whenever the daemon was down — exactly when an operator reaches
+    // for it.
+    //
+    // Exactly one non-empty line, well inside the 2 s budget.
+    if env::args().skip(1).any(|a| a == "--ck-domain") {
+        println!("{CK_DOMAIN_HEADLINE}");
         return;
     }
 
