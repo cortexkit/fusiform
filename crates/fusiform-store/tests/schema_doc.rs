@@ -240,3 +240,62 @@ fn the_artifact_table_arrives_on_a_populated_store() {
         "the reason names the evidence rather than summarising it: {reason}"
     );
 }
+
+/// A store written by a newer binary is refused rather than served from.
+///
+/// The migrator reports and does not refuse, deliberately, so that a binary
+/// rollback is not bricked. This asserts fusiform's own answer to that report.
+///
+/// The control matters more than the refusal: without it, a test that only
+/// checks the ahead case passes equally well against a store that refuses
+/// EVERYTHING, which would be a worse defect than the one being guarded.
+#[test]
+fn a_store_written_by_a_newer_binary_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("store.db");
+    let descriptor = StorageDescriptor {
+        module_id: "fusiform".to_string(),
+        storage_namespace: "default".to_string(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: path.to_string_lossy().to_string(),
+        },
+    };
+
+    // CONTROL, asserted first: a store this binary wrote opens.
+    {
+        let store = CatalogStore::open(&descriptor).expect("a store at parity must open");
+        drop(store);
+    }
+
+    // Now record a chain entry from the future, exactly as a newer binary's
+    // migrator would have left it.
+    let ahead = fusiform_store::schema::MIGRATIONS
+        .last()
+        .expect("the chain is not empty")
+        .version
+        + 1;
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute(
+        "INSERT INTO cortexkit_schema_version (namespace, version, applied_at_unix) \
+         VALUES (?1, ?2, 0)",
+        rusqlite::params![fusiform_store::schema::NAMESPACE, ahead],
+    )
+    .unwrap();
+    drop(conn);
+
+    let err = CatalogStore::open(&descriptor)
+        .err()
+        .expect("a store ahead of this binary must be refused");
+    let text = err.to_string();
+    assert!(
+        text.contains(&ahead.to_string()),
+        "the refusal must name the store's version so an operator knows which \
+         binary to run: {text}"
+    );
+    assert!(
+        text.contains("boundary_kind"),
+        "the refusal must say WHY this binary cannot serve the store, not just \
+         that it will not: {text}"
+    );
+}

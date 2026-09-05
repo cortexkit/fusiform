@@ -263,7 +263,38 @@ impl CatalogStore {
     /// alongside the real one.
     pub fn open(descriptor: &StorageDescriptor) -> Result<Self, CatalogError> {
         let inner = open_sqlite(descriptor)?;
-        inner.migrate(schema::NAMESPACE, schema::MIGRATIONS)?;
+        let outcome = inner.migrate(schema::NAMESPACE, schema::MIGRATIONS)?;
+
+        // A store written by a NEWER binary is refused, rather than served from.
+        //
+        // The migrator deliberately does not refuse — that would brick a binary
+        // rollback — so the decision is the module's, and it turns on whether
+        // this binary can honestly answer questions about rows it did not write.
+        // Fusiform cannot, and the reason is measurable rather than cautious:
+        //
+        // `boundary_kind` is read back as a raw string and passed to the wire,
+        // which is safe on its own. But suppression is a WHERE clause over that
+        // column — `boundary_kind = 'corrected'` is what withholds a fact whose
+        // recorded value is known bad. Any suppression semantic a later version
+        // adds is therefore INVISIBLE to this binary's filter, and the failure is
+        // to serve a fact that a newer binary withholds: a confident answer, in
+        // the direction nobody audits, from a catalog whose whole purpose is that
+        // absent and unknown and withheld are different states.
+        //
+        // Refusing costs a rolled-back binary its startup and says exactly why.
+        // Continuing costs a consumer a wrong price with no way to notice.
+        if outcome.store_ahead() {
+            return Err(CatalogError::Invariant(format!(
+                "the store's schema chain is ahead of this binary: store at {}, \
+                 this binary knows {}. A newer version wrote rows this build \
+                 cannot interpret — suppression is a filter over `boundary_kind`, \
+                 so a boundary kind added later would be served rather than \
+                 withheld. Run the newer binary, or restore a store written by \
+                 this one.",
+                outcome.recorded, outcome.chain_max,
+            )));
+        }
+
         Ok(Self { inner })
     }
 
