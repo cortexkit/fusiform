@@ -635,8 +635,19 @@ fn render_failures(response: &serde_json::Value) -> String {
     // failure it pointed at. A number describing a moving relationship has to
     // be computed from it.
     //
-    // Absent when the module predates the field, because a wrong number is
-    // worse than no number here — the operator acts on it either way.
+    // Absent for TWO reasons, and neither justifies inventing a number: the
+    // module predates the field, or its store read failed (`observations_since`
+    // is `.ok()`-ed at the producer, so an error arrives here as absence).
+    //
+    // Rendering nothing is right for both. A hint is an instruction an operator
+    // follows, and a wrong one sends them to a window that does not contain the
+    // failure — which is the defect the derived hint replaced, when a hardcoded
+    // `--polls 60` pointed 196 polls short.
+    //
+    // What this cannot do is distinguish them, and that is a real limit rather
+    // than an oversight: a store error and an old module produce the same
+    // silence. Naming it here because the second cause is invisible from this
+    // side — the value is honest, the ambiguity is the cost.
     let hint = f
         .get("polls_back")
         .and_then(|v| v.as_i64())
