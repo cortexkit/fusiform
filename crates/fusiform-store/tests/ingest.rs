@@ -1468,3 +1468,114 @@ fn a_poll_that_restates_what_is_held_is_found_and_a_real_one_is_not() {
          moved the price is not, and marking it would delete real history"
     );
 }
+
+/// A genuine change inside a marked poll survives the mark.
+///
+/// # Why this is the case that decides the design
+///
+/// Measured on the live store: the provenance incident's observation carries
+/// 17,455 eras, of which 17,454 restate the claim already in force and ONE is a
+/// real upstream change that landed in the same thirty-minute tick. Real
+/// changes arrive continuously, so a marked poll containing one is the expected
+/// case rather than bad luck.
+///
+/// Excluding the whole observation would delete that change from history — the
+/// same loss the mark exists to prevent, pointed the other way. So the
+/// exclusion is per ERA, using the same claim comparison the ingest diff uses,
+/// and an era that carries a DIFFERENT claim inside a marked poll is preserved.
+#[test]
+fn a_real_change_inside_a_marked_poll_is_kept() {
+    let f = fixture();
+    let key = FactKey::rate(fusiform_core::TokenClass::Input);
+    let real = |units: i64| {
+        format!(r#"{{"state":"priced","units":{units},"exponent":9,"currency":"USD"}}"#)
+    };
+
+    f.store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(1_000),
+            outcome: ObservationOutcome::Seeded,
+            raw_hash: None,
+            normalized_hash: None,
+            duration_ms: Some(1),
+            detail: None,
+            etag: None,
+        })
+        .expect("the seed observation bounds the later window");
+
+    let obs = f
+        .store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(5_000),
+            outcome: ObservationOutcome::Changed { snapshot_seq: 1 },
+            raw_hash: None,
+            normalized_hash: None,
+            duration_ms: Some(1),
+            detail: None,
+            etag: None,
+        })
+        .expect("the mixed observation must record");
+
+    // TWO models, both touched by the one poll — the incident's shape. One has
+    // its value rewritten identically (the artifact); the other genuinely
+    // reprices in the same tick.
+    for (model, seed_units, poll_units) in [
+        ("claude-sonnet-4-5", 3_000_000_000i64, 3_000_000_000i64),
+        ("claude-opus-5", 15_000_000_000, 12_000_000_000),
+    ] {
+        f.store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "anthropic".into(),
+                model_id: model.into(),
+                fact_key: key.clone(),
+                value_json: real(seed_units),
+                boundary_at: Timestamp(1_000),
+                boundary_kind: BoundaryKind::Seed,
+                observation_id: None,
+            }])
+            .expect("seed era must store");
+        f.store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "anthropic".into(),
+                model_id: model.into(),
+                fact_key: key.clone(),
+                value_json: real(poll_units),
+                boundary_at: Timestamp(5_000),
+                boundary_kind: BoundaryKind::Observed,
+                observation_id: Some(obs),
+            }])
+            .expect("poll era must store");
+    }
+
+    f.store
+        .mark_observation_artifact(obs, "a representation change", Timestamp(9_000))
+        .expect("the mark must record");
+
+    // The rewritten value is excluded: its last real change is the seed.
+    let rewritten = f
+        .store
+        .last_changed_at(SourceId::ModelsDev, "anthropic", "claude-sonnet-4-5", &key)
+        .expect("query must not error")
+        .expect("the fact has eras");
+    assert_eq!(
+        rewritten.0, 1_000,
+        "an era restating the held claim inside a marked poll must be excluded"
+    );
+
+    // THE POINT: the genuine reprice in the same poll survives.
+    let repriced = f
+        .store
+        .last_changed_at(SourceId::ModelsDev, "anthropic", "claude-opus-5", &key)
+        .expect("query must not error")
+        .expect("the fact has eras");
+    assert_eq!(
+        repriced.0, 5_000,
+        "a real upstream change that landed in the same tick as an artifact must \
+         SURVIVE the mark — excluding it deletes history, which is the loss the \
+         mark exists to prevent"
+    );
+}

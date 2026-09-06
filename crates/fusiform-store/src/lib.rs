@@ -1063,19 +1063,64 @@ impl CatalogStore {
         model_id: &str,
         fact_key: &FactKey,
     ) -> Result<Option<Timestamp>, CatalogError> {
-        let at = self.inner.with_conn(|conn| {
-            conn.query_row(
-                "SELECT MAX(e.boundary_at_ms) FROM era e \
+        // Per ERA, not per observation — measured, and the measurement changed
+        // this design.
+        //
+        // The provenance incident wrote 17,455 eras in one poll. 17,454 of them
+        // restate the claim already in force; ONE is a genuine upstream change
+        // that happened to land in the same thirty-minute tick. Excluding the
+        // whole observation would delete that change from history, which is the
+        // same loss the mark exists to prevent, pointed the other way.
+        //
+        // Real changes arrive continuously, so a marked poll containing one is
+        // the expected case rather than bad luck.
+        //
+        // The comparison is `states_the_same_upstream_claim`, the same function
+        // the ingest diff uses. Computed here rather than denormalized into a
+        // table at mark time, so there is ONE definition of "restates the held
+        // claim" and no stored set that can drift from it. Cheap because facts
+        // carry few eras — 68,419 of them have exactly one, 140 have two.
+        let rows: Vec<(i64, String, bool)> = self.inner.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT e.boundary_at_ms, e.value_json, \
+                        (e.observation_id IS NOT NULL AND e.observation_id IN \
+                         (SELECT observation_id FROM observation_artifact)) \
+                 FROM era e \
                  WHERE e.source = ?1 AND e.provider_id = ?2 AND e.model_id = ?3 \
                    AND e.fact_key = ?4 \
-                   AND (e.observation_id IS NULL OR e.observation_id NOT IN \
-                        (SELECT observation_id FROM observation_artifact))",
+                 ORDER BY e.boundary_at_ms DESC",
+            )?;
+            let mapped = stmt.query_map(
                 params![source.as_str(), provider_id, model_id, fact_key.as_str()],
-                |r| r.get::<_, Option<i64>>(0),
-            )
-            .optional()
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, bool>(2)?,
+                    ))
+                },
+            )?;
+            mapped.collect::<Result<Vec<_>, _>>()
         })?;
-        Ok(at.flatten().map(Timestamp))
+
+        for (i, (boundary, value, marked)) in rows.iter().enumerate() {
+            // An era inside a marked poll is an artifact only if it RESTATES
+            // what the previous era already said. One that carries a different
+            // claim is a real change the operator's coarse mark would otherwise
+            // have swallowed.
+            //
+            // The oldest era has no predecessor to restate, so it is never an
+            // artifact by this test — correct, since a first era establishes a
+            // value rather than repeating one.
+            let restates_previous = rows
+                .get(i + 1)
+                .is_some_and(|(_, prev, _)| ingest::states_the_same_upstream_claim(prev, value));
+            if *marked && restates_previous {
+                continue;
+            }
+            return Ok(Some(Timestamp(*boundary)));
+        }
+        Ok(None)
     }
 
     pub fn raw_hash_of_observation(&self, id: i64) -> Result<Option<String>, CatalogError> {
