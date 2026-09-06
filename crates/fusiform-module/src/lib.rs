@@ -195,6 +195,36 @@ pub fn manifest() -> ModuleManifest {
                     "additionalProperties": false
                 }),
             },
+            Tool {
+                name: route::TOOL_MARK_ARTIFACT.to_string(),
+                description: Some(
+                    "Record that one poll's eras describe fusiform changing its own \
+                         representation rather than the upstream changing its data, so \
+                         last_changed_at stops reporting that poll as a change. Previews \
+                         unless dry_run is false."
+                        .to_string(),
+                ),
+                // The second writer. Declared Mutating for the same reason as
+                // a correction: telling the supervisor a write is Pure would
+                // make it safe to replay, and replaying a mark is how one poll
+                // becomes several.
+                execution_mode: ExecutionMode::Mutating,
+                schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "observation_id": {"type": "integer"},
+                        "reason": {"type": "string"},
+                        "dry_run": {"type": "boolean"}
+                    },
+                    // One observation, named. No pattern form and no range: a
+                    // mark excludes eras from every derivation that honours it
+                    // and leaves nothing behind to argue with, so a rule that
+                    // selects several polls is a rule that eventually selects
+                    // the wrong one.
+                    "required": ["observation_id", "reason"],
+                    "additionalProperties": false
+                }),
+            },
         ],
         identity_scope: vec![IdentityScope::Project, IdentityScope::Session],
         concurrency: Concurrency::ModuleManaged,

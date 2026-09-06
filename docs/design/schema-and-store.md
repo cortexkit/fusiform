@@ -67,7 +67,7 @@ Verified against the working tree at `1ff33f9`, section by section:
 | §8 Two hashes | **built** — split by audience, both recorded per observation |
 | §9 Store | **built** — managed SQLite from the HELLO_ACK descriptor |
 | §9 Engram enrollment | **built** — `crates/fusiform-module/data/engram-catalog.json`, validated with engram's own parser, installed by `scripts/install-enrollment.sh`. See `docs/backup-enrollment.md`. Not load-bearing for the version counter: the §9 text once claimed a `restore-with-monotonic-fence` here, that mechanism does not exist, and the counter is restore-invariant by construction instead (§10). |
-| §10 Serve | **built.** Tools: `catalog.get` `catalog.history` `catalog.status` `catalog.correct`. The last one WRITES; see §3.1. |
+| §10 Serve | **built.** Tools: `catalog.get` `catalog.history` `catalog.status` `catalog.correct` `catalog.mark_artifact`. The last two WRITE; see §3.1. |
 | §10 Push | **transport now exists; fusiform emits nothing.** `subc-client-rs` 0.3.0 surfaces push frames to consumers (opt-in per route, epoch-fenced) with an always-present `pushes_dropped_no_receiver` counter, so a module pushing into a discarding client is a readable fact. What is NOT built is any fusiform push: `emits_push` is false in the manifest, and no code calls `ModuleHandle::push`. The discriminated acknowledgement of §10 is WITHDRAWN rather than pending — see below. |
 | §10 Payload boundary | **built.** The served types live in `fusiform-protocol` (this repo, not commons — settled 2026-08-12, see §10). Dependency tree pinned to serde-only by test; version discipline enforced in CI; golden fixtures of four real served payloads. What is NOT done is astrocyte consuming it, which is their switch on their schedule. |
 

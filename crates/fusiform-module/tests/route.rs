@@ -663,6 +663,16 @@ fn the_manifest_and_the_dispatch_agree_on_which_tools_exist() {
                 // dry_run defaults to true, so this proves the tool is reached
                 // without writing anything.
             }),
+            // Same reason as the correction above: this one requires a named
+            // observation, so a bare call is correctly refused rather than
+            // unserved. The id is deliberately one this fixture does not have,
+            // which reaches the handler and gets a no_coverage answer — proving
+            // the route is wired without depending on the fixture's ids.
+            "catalog.mark_artifact" => serde_json::json!({
+                "observation_id": 999_999,
+                "reason": "reachability check"
+                // dry_run defaults to true, so this cannot write either.
+            }),
             _ => serde_json::json!({}),
         };
         let body = serde_json::to_vec(&serde_json::json!({
@@ -678,6 +688,12 @@ fn the_manifest_and_the_dispatch_agree_on_which_tools_exist() {
             // merits, which is what this loop is checking for. Only a
             // bad_request or an unknown tool means it was not served.
             Err(e) if e.code == "refused" => {}
+            // A coverage answer also means the tool was REACHED: it read the
+            // store, found no such row, and said so. Distinguishing this from
+            // `bad_request` is exactly what the refusal contract added, and
+            // this loop is the first consumer of that distinction inside the
+            // repository.
+            Err(e) if e.code == fusiform_protocol::CODE_NO_COVERAGE => {}
             Err(e) => panic!(
                 "declared tool {tool} is not served: {} {}",
                 e.code, e.message
@@ -1840,5 +1856,118 @@ fn the_served_last_change_ignores_an_artifact_poll() {
         Some(3_000),
         "the served answer must skip the artifact era and report the genuine \
          reprice before it"
+    );
+}
+
+/// A preview reports the evidence and writes nothing; a commit writes.
+///
+/// # Why the preview matters more here than on a read
+///
+/// A mark excludes eras from every derivation that honours it and leaves
+/// nothing behind to argue with — unlike a correction, which keeps the era it
+/// partitions. So the operator's check is whether the id names the poll they
+/// mean, and the preview exists to answer exactly that: the observed instant,
+/// how many eras the poll wrote, and how many of those restate the claim
+/// already in force.
+///
+/// The counts are served as two numbers rather than a ratio because the
+/// DIFFERENCE is the finding. On the 2026-08-16 poll it is 17,454 of 17,455,
+/// and the one era that is not a restatement is a genuine upstream change that
+/// survives the mark.
+#[test]
+fn marking_previews_before_it_writes() {
+    let f = fixture();
+
+    let obs = f
+        .store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(4_000),
+            outcome: ObservationOutcome::Unchanged,
+            normalized_hash: Some("h".into()),
+            raw_hash: None,
+            etag: None,
+            duration_ms: None,
+            detail: None,
+        })
+        .unwrap();
+
+    let call = |dry: bool| {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "name": "catalog.mark_artifact",
+            "arguments": {
+                "observation_id": obs,
+                "reason": "docs/findings/2026-08-16-provenance-rewrote-the-rate-plane.md",
+                "dry_run": dry
+            }
+        }))
+        .unwrap();
+        match fusiform_module::route::serve_tool_call(&f.store, &body) {
+            Ok(fusiform_module::route::ToolResponse::MarkArtifact(m)) => m,
+            other => panic!("expected a mark response, got {other:?}"),
+        }
+    };
+
+    let preview = call(true);
+    assert!(!preview.committed, "a preview must not write");
+    assert_eq!(
+        preview.observed_at_ms, 4_000,
+        "the preview must name WHEN the poll was, since an id alone is not \
+         something an operator can verify by reading it"
+    );
+
+    // CONTROL: the store really is unmarked after the preview. Without this the
+    // `committed: false` assertion only proves what the response SAYS, not what
+    // the store did — which is the gap between a report and a fact.
+    assert_eq!(
+        f.store.observation_artifact_reason(obs).unwrap(),
+        None,
+        "a preview must leave no mark in the store"
+    );
+
+    let committed = call(false);
+    assert!(committed.committed, "an explicit dry_run: false must write");
+    assert!(
+        f.store
+            .observation_artifact_reason(obs)
+            .unwrap()
+            .is_some_and(|r| r.contains("provenance")),
+        "the commit must record the reason it was given, so a later reader \
+         meets the evidence rather than a bare id"
+    );
+}
+
+/// An id this store does not have is a coverage answer, not a caller defect.
+#[test]
+fn marking_an_unknown_observation_is_not_a_bad_request() {
+    let f = fixture();
+    let body = serde_json::to_vec(&serde_json::json!({
+        "name": "catalog.mark_artifact",
+        "arguments": {"observation_id": 999_999, "reason": "x"}
+    }))
+    .unwrap();
+
+    let err = fusiform_module::route::serve_tool_call(&f.store, &body)
+        .expect_err("an unknown observation must refuse");
+    assert_eq!(
+        err.code,
+        fusiform_protocol::CODE_NO_COVERAGE,
+        "the request was well-formed and this store has no such poll, which is \
+         an answer rather than the operator's defect: reporting it as a client \
+         error sends someone to debug a correct request"
+    );
+
+    // CONTROL: a genuinely malformed request still reads as one, or the
+    // assertion above would pass against a route that never says bad_request.
+    let malformed = serde_json::to_vec(&serde_json::json!({
+        "name": "catalog.mark_artifact",
+        "arguments": {"reason": "no id at all"}
+    }))
+    .unwrap();
+    assert_eq!(
+        fusiform_module::route::serve_tool_call(&f.store, &malformed)
+            .expect_err("a missing id must refuse")
+            .code,
+        fusiform_protocol::CODE_BAD_REQUEST,
     );
 }

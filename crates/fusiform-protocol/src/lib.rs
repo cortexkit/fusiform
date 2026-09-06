@@ -54,7 +54,71 @@ pub const TOOL_CORRECT: &str = "catalog.correct";
 
 /// Every tool name, so a dispatch and a manifest cannot disagree about which
 /// tools exist.
-pub const TOOLS: &[&str] = &[TOOL_GET, TOOL_HISTORY, TOOL_STATUS, TOOL_CORRECT];
+/// Record that a poll's eras describe fusiform changing its own representation
+/// rather than the upstream changing its data.
+///
+/// An operator write, like [`TOOL_CORRECT`], and bounded the same way: one
+/// named observation, previewed by default, no wildcard.
+pub const TOOL_MARK_ARTIFACT: &str = "catalog.mark_artifact";
+
+pub const TOOLS: &[&str] = &[
+    TOOL_GET,
+    TOOL_HISTORY,
+    TOOL_STATUS,
+    TOOL_CORRECT,
+    TOOL_MARK_ARTIFACT,
+];
+
+/// Mark one poll as a representation change of fusiform's own making.
+///
+/// # Why this exists
+///
+/// On 2026-08-16 a serialization change wrote 17,455 eras with identical claims
+/// on both sides. Nothing distinguishes them from real price movements in the
+/// era table, so `last_changed_at` reports that instant for every priced fact
+/// in the catalog — and a consumer calibrating on it reads the whole catalog as
+/// freshly maintained, which hides abandoned rows rather than exposing them.
+///
+/// The mark is how an operator says which poll that was. It is an operator
+/// action rather than something fusiform infers, because a mistaken mark
+/// deletes real history from every derivation that honours it and is
+/// unfalsifiable afterwards.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarkArtifactRequest {
+    /// The observation to mark. Named explicitly and never matched by pattern:
+    /// ids are per-store, and a rule that selects several polls is a rule that
+    /// eventually selects the wrong one.
+    pub observation_id: i64,
+    /// A pointer to the evidence, not a summary of it — a findings path, an
+    /// incident record. An operator reading this later should meet the account
+    /// rather than someone's recollection of it.
+    pub reason: String,
+    /// Preview unless explicitly false. Defaults to preview so an omitted flag
+    /// cannot write.
+    #[serde(default = "crate::default_true")]
+    pub dry_run: bool,
+}
+
+/// What marking would do, or did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkArtifactResponse {
+    pub observation_id: i64,
+    pub committed: bool,
+    /// Eras of this poll that RESTATE the claim already in force — the ones the
+    /// mark would exclude.
+    pub restating_eras: i64,
+    /// Every era this poll wrote.
+    ///
+    /// Served beside `restating_eras` rather than as a ratio, so an operator
+    /// sees the DIFFERENCE. On the 2026-08-16 poll it is 17,454 of 17,455: the
+    /// one era that is not a restatement is a genuine upstream change that
+    /// landed in the same tick, and it survives the mark. A single number would
+    /// have hidden exactly the case that decided the design.
+    pub total_eras: i64,
+    /// The instant the poll was observed, so an operator can check the id names
+    /// the poll they meant before committing.
+    pub observed_at_ms: i64,
+}
 
 /// A `catalog.get` request.
 ///
@@ -739,6 +803,7 @@ pub enum ToolResponse {
     History(HistoryResponse),
     Status(StatusResponse),
     Correct(CorrectResponse),
+    MarkArtifact(MarkArtifactResponse),
 }
 
 /// A `catalog.history` request: every era for one fact.

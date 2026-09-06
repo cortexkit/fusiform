@@ -1123,6 +1123,43 @@ impl CatalogStore {
         Ok(None)
     }
 
+    /// The reason recorded when a poll was marked an artifact, or `None` if it
+    /// was never marked.
+    ///
+    /// Exists so a caller can check what the STORE holds rather than what a
+    /// response claimed. Those are two different artifacts derived from one
+    /// intent, and a test asserting only the response proves what the code says
+    /// about itself.
+    pub fn observation_artifact_reason(&self, id: i64) -> Result<Option<String>, CatalogError> {
+        let reason = self.inner.with_conn(|conn| {
+            conn.query_row(
+                "SELECT reason FROM observation_artifact WHERE observation_id = ?1",
+                params![id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+        })?;
+        Ok(reason)
+    }
+
+    /// When one observation was taken, or `None` if this store has no such id.
+    ///
+    /// Exists so an operator marking a poll can check the id names the poll they
+    /// mean BEFORE committing. Observation ids are per-store and carry no
+    /// meaning across installs, so a number alone is not something anyone can
+    /// verify by reading it.
+    pub fn observation_observed_at(&self, id: i64) -> Result<Option<Timestamp>, CatalogError> {
+        let at = self.inner.with_conn(|conn| {
+            conn.query_row(
+                "SELECT observed_at_ms FROM observation WHERE id = ?1",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()
+        })?;
+        Ok(at.map(Timestamp))
+    }
+
     pub fn raw_hash_of_observation(&self, id: i64) -> Result<Option<String>, CatalogError> {
         let hash = self.inner.with_conn(|conn| {
             conn.query_row(

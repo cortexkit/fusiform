@@ -32,9 +32,10 @@ use serde::Deserialize;
 // a route should not have to know which crate the type is declared in.
 pub use fusiform_protocol::{
     CatalogGetRequest, CatalogGetResponse, CorrectRequest, CorrectResponse, CorrectedFact,
-    CorrectionDetail, HistoryEra, HistoryRequest, HistoryResponse, OverriddenFactWire, PollChanges,
-    StatusPoll, StatusRequest, StatusResponse, ToolResponse, UncertainFactWire, WithheldFactWire,
-    TOOLS, TOOL_CORRECT, TOOL_GET, TOOL_HISTORY, TOOL_STATUS,
+    CorrectionDetail, HistoryEra, HistoryRequest, HistoryResponse, MarkArtifactRequest,
+    MarkArtifactResponse, OverriddenFactWire, PollChanges, StatusPoll, StatusRequest,
+    StatusResponse, ToolResponse, UncertainFactWire, WithheldFactWire, TOOLS, TOOL_CORRECT,
+    TOOL_GET, TOOL_HISTORY, TOOL_MARK_ARTIFACT, TOOL_STATUS,
 };
 
 /// Why a request could not be served.
@@ -134,6 +135,7 @@ pub fn serve_tool_call(store: &CatalogStore, body: &[u8]) -> Result<ToolResponse
         TOOL_HISTORY => serve_history(store, &args).map(ToolResponse::History),
         TOOL_STATUS => serve_status(store, &args).map(ToolResponse::Status),
         TOOL_CORRECT => serve_correct(store, &args).map(ToolResponse::Correct),
+        TOOL_MARK_ARTIFACT => serve_mark_artifact(store, &args).map(ToolResponse::MarkArtifact),
         // Named explicitly rather than served anyway. A module that answers to
         // any tool name keeps answering after a consumer's typo, and the
         // consumer believes it called something else.
@@ -1127,6 +1129,83 @@ fn apply_corrections(
     }
 
     applied
+}
+
+/// Mark one poll as fusiform changing its own representation.
+///
+/// # Why this route exists at all
+///
+/// The store has carried `mark_observation_artifact` since the mechanism
+/// landed, and until now nothing in the shipped binary called it — three
+/// callers, all tests. So an operator could not mark anything, the exclusion
+/// could never fire in production, and `last_changed_at` would report the
+/// 2026-08-16 instant for every priced fact forever. That is precisely the
+/// defect the field exists to prevent, shipped without the means to prevent it.
+///
+/// # Why it previews by default
+///
+/// A mark deletes real history from every derivation that honours it, and it is
+/// unfalsifiable afterwards: nothing in the store records what the excluded
+/// eras would have said. So it is bounded exactly like `catalog.correct` — one
+/// observation named explicitly, never a pattern, and a write only on an
+/// explicit `dry_run: false`.
+///
+/// The preview answers the question an operator actually has, which is whether
+/// this id names the poll they mean: the observed instant, how many eras it
+/// wrote, and how many of those restate the claim already in force.
+pub fn serve_mark_artifact(
+    store: &CatalogStore,
+    body: &[u8],
+) -> Result<MarkArtifactResponse, RouteError> {
+    let request: MarkArtifactRequest = serde_json::from_slice(body)
+        .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?;
+
+    if request.reason.trim().is_empty() {
+        // Same rule as a correction: a mark with no reason is unauditable, and
+        // this one is worse — a correction leaves the corrected era in place to
+        // argue with, while a mark leaves nothing behind at all.
+        return Err(RouteError::bad_request(
+            "a mark must carry a reason naming the evidence record".to_string(),
+        ));
+    }
+
+    // The observation must exist. An id that names nothing is a coverage answer
+    // rather than a malformed request: the operator asked a well-formed
+    // question about a poll this store does not have.
+    let observed_at = store
+        .observation_observed_at(request.observation_id)
+        .map_err(|e| store_error(&e))?
+        .ok_or_else(|| {
+            RouteError::no_coverage(format!(
+                "no observation {} in this store",
+                request.observation_id
+            ))
+        })?;
+
+    let (restating, total) = store
+        .same_claim_era_fraction(request.observation_id)
+        .map_err(|e| store_error(&e))?;
+
+    let committed = if request.dry_run {
+        false
+    } else {
+        store
+            .mark_observation_artifact(
+                request.observation_id,
+                request.reason.trim(),
+                Timestamp(now_ms()),
+            )
+            .map_err(|e| store_error(&e))?;
+        true
+    };
+
+    Ok(MarkArtifactResponse {
+        observation_id: request.observation_id,
+        committed,
+        restating_eras: restating,
+        total_eras: total,
+        observed_at_ms: observed_at.0,
+    })
 }
 
 #[cfg(test)]
