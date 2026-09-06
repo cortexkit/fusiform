@@ -377,7 +377,14 @@ fn refuse_before_the_record(
     };
     if asked.0 < begins.0 {
         return Err(RouteError::no_coverage(format!(
-            "no record at {}: fusiform's history begins at {}, so it cannot say              what the catalog held before then. An empty answer would claim the              catalog was empty; it was unobserved.",
+            // Continuations, not a wrapped literal. Without the trailing \
+            // the source indentation becomes part of the string, and this
+            // message shipped with two runs of fourteen spaces in it — visible
+            // only by reading the SERVED output, never by reading the source,
+            // where it looks like ordinary wrapping.
+            "no record at {}: fusiform's history begins at {}, so it cannot say \
+             what the catalog held before then. An empty answer would claim the \
+             catalog was empty; it was unobserved.",
             asked.0, begins.0
         )));
     }
