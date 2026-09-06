@@ -2,7 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    # `train/**` is a precondition for CI-gated train branches, not a
+    # convenience: under required status checks, main is only pushable by a sha
+    # that already carries a green check. A trigger limited to master means a
+    # train push produces no run, so no sha ever earns one and main becomes
+    # unpushable — the protection waits forever for a check that cannot arrive.
+    #
+    # Widened BEFORE enabling protection, which is the order that matters.
+    branches: [master, 'train/**']
   pull_request:
   workflow_call:
 
