@@ -120,6 +120,17 @@ pub fn plan_ingest(
             .unwrap_or(false);
         if !was_present {
             new_models += 1;
+            // Near-identical to the withdrawal era below — one value differs — and
+            // deliberately not extracted.
+            //
+            // The drift a helper would prevent is already compile-caught: a new
+            // field on `NewEra` breaks BOTH struct literals (E0063), which is
+            // how the domain-to-wire fences elsewhere in this workspace work.
+            // What a helper would NOT prevent is a semantic change at one site,
+            // and that is the divergence these two are allowed to have: an
+            // arrival and a withdrawal could legitimately want different
+            // boundary kinds one day, and routing both through one call makes
+            // that harder to express rather than safer.
             eras.push(NewEra {
                 source,
                 provider_id: identity.0.clone(),
