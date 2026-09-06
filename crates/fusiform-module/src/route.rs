@@ -191,8 +191,7 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
         .into_iter()
         .map(|row| HistoryEra {
             value: {
-                let mut v = serde_json::from_str(&row.value_json)
-                    .unwrap_or(serde_json::Value::String(row.value_json.clone()));
+                let mut v = fact_for_the_wire(&row.value_json);
                 name_the_provenance_of_a_pre_0_11_row(&mut v);
                 v
             },
@@ -378,6 +377,30 @@ fn refuse_before_the_record(
 /// enforced by `only_one_currency_policy_has_ever_existed` — a second policy
 /// makes the default ambiguous and must force a decision rather than silently
 /// mislabel rows written under the other one.
+/// Parse a stored fact for the wire, and never substitute a MEANINGFUL value
+/// when the parse fails.
+///
+/// Three call sites did this and two of them agreed. The third substituted
+/// `Value::Null`, which in this catalog is not a neutral placeholder: the served
+/// contract says a null limit means UNKNOWN CAPACITY and must never be defaulted
+/// to a number. So a row this producer failed to parse would arrive at a
+/// consumer as a statement fusiform makes deliberately about the upstream —
+/// absent and unknown collapsed at the exact seam this catalog exists to keep
+/// apart, in the producer.
+///
+/// The raw string is the honest substitute. It is visibly not a fact object, so
+/// a consumer decoding it fails on the shape rather than believing a plausible
+/// absence, and the bytes that failed to parse travel with the failure instead
+/// of being replaced by a verdict.
+///
+/// Reaching here at all means a stored row is not the JSON this producer wrote,
+/// which is corruption or a representation change rather than upstream data —
+/// but the point is what it does when it happens, not how often.
+fn fact_for_the_wire(value_json: &str) -> serde_json::Value {
+    serde_json::from_str(value_json)
+        .unwrap_or_else(|_| serde_json::Value::String(value_json.to_string()))
+}
+
 fn name_the_provenance_of_a_pre_0_11_row(value: &mut serde_json::Value) {
     let Some(obj) = value.as_object_mut() else {
         return;
@@ -432,12 +455,7 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
             model
                 .facts
                 .iter()
-                .map(|(k, v)| {
-                    (
-                        k.as_str().to_string(),
-                        serde_json::from_str(v).unwrap_or(serde_json::Value::Null),
-                    )
-                })
+                .map(|(k, v)| (k.as_str().to_string(), fact_for_the_wire(v)))
                 .collect(),
         );
     }
@@ -571,8 +589,7 @@ pub fn serve_correct(store: &CatalogStore, body: &[u8]) -> Result<CorrectRespons
         .iter()
         .map(|row| CorrectedFact {
             fact_key: row.fact_key.as_str().to_string(),
-            value: serde_json::from_str(&row.value_json)
-                .unwrap_or(serde_json::Value::String(row.value_json.clone())),
+            value: fact_for_the_wire(&row.value_json),
             current_since_ms: row.current_since.0,
         })
         .collect();
@@ -1075,4 +1092,41 @@ fn apply_corrections(
     }
 
     applied
+}
+
+#[cfg(test)]
+mod wire_value_tests {
+    use super::*;
+
+    /// A row this producer cannot parse must not arrive as a MEANING.
+    ///
+    /// `null` is load-bearing on this wire: the served contract says a null
+    /// limit is unknown capacity and must never be defaulted to a number. So
+    /// substituting `Value::Null` for a parse failure hands a consumer a
+    /// deliberate-looking statement about the upstream when the truth is that
+    /// fusiform failed to read its own stored row — absent and unknown
+    /// collapsed in the producer, at the seam this catalog exists to keep apart.
+    #[test]
+    fn an_unparseable_row_never_becomes_null() {
+        let got = fact_for_the_wire("{not json");
+        assert!(
+            !got.is_null(),
+            "a parse failure must not be served as null, which this wire reads \
+             as 'the upstream published no value': {got:?}"
+        );
+        assert_eq!(
+            got,
+            serde_json::Value::String("{not json".to_string()),
+            "the bytes that failed to parse must travel with the failure: {got:?}"
+        );
+
+        // CONTROL: a well-formed row still parses to its object, so the
+        // assertion above cannot pass by everything becoming a string.
+        let ok = fact_for_the_wire(r#"{"state":"priced","units":3000000000}"#);
+        assert!(
+            ok.is_object(),
+            "a parseable row must still become an object, else the failure \
+             assertion above is vacuous: {ok:?}"
+        );
+    }
 }
