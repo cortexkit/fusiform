@@ -239,7 +239,13 @@ fn a_single_model_request_returns_one_model() {
         &f.store,
         br#"{"provider_id": "anthropic", "model_id": "no-such-model"}"#,
     ) {
-        Err(e) => assert_eq!(e.code, "bad_request"),
+        Err(e) => {
+            assert_eq!(e.code, fusiform_protocol::CODE_NO_COVERAGE);
+            assert!(
+                !fusiform_protocol::RefusalKind::of(e.code).is_retryable(),
+                "a coverage refusal must not invite a retry"
+            );
+        }
         Ok(r) => panic!("an unrecorded model must be refused, got {r:?}"),
     }
 }
@@ -1393,7 +1399,22 @@ fn an_unknown_provider_is_refused_rather_than_answered_with_zero() {
 
     match serve_catalog_get(&f.store, br#"{"provider_id": "notaprovider"}"#) {
         Err(e) => {
-            assert_eq!(e.code, "bad_request");
+            // `no_coverage`, not `bad_request`: the request was well formed
+            // and fusiform has no catalog to answer it. A consumer must act on
+            // those differently — one says fix your request, the other is an
+            // ANSWER — and while they shared a code no consumer could tell.
+            assert_eq!(e.code, fusiform_protocol::CODE_NO_COVERAGE);
+            assert_ne!(
+                e.code,
+                fusiform_protocol::CODE_BAD_REQUEST,
+                "a coverage refusal must not read as a caller defect: that \
+                 sends someone to debug a request that was correct"
+            );
+            assert!(
+                !fusiform_protocol::RefusalKind::of(e.code).is_retryable(),
+                "a coverage refusal must not invite a retry: the catalog will \
+                 not have the model next time either"
+            );
             assert!(
                 e.message.contains("notaprovider"),
                 "the refusal must name what was not found, got {:?}",
@@ -1426,7 +1447,22 @@ fn an_unknown_model_names_the_provider_as_known() {
         br#"{"provider_id": "anthropic", "model_id": "no-such-model"}"#,
     ) {
         Err(e) => {
-            assert_eq!(e.code, "bad_request");
+            // `no_coverage`, not `bad_request`: the request was well formed
+            // and fusiform has no catalog to answer it. A consumer must act on
+            // those differently — one says fix your request, the other is an
+            // ANSWER — and while they shared a code no consumer could tell.
+            assert_eq!(e.code, fusiform_protocol::CODE_NO_COVERAGE);
+            assert_ne!(
+                e.code,
+                fusiform_protocol::CODE_BAD_REQUEST,
+                "a coverage refusal must not read as a caller defect: that \
+                 sends someone to debug a request that was correct"
+            );
+            assert!(
+                !fusiform_protocol::RefusalKind::of(e.code).is_retryable(),
+                "a coverage refusal must not invite a retry: the catalog will \
+                 not have the model next time either"
+            );
             assert!(
                 e.message.contains("no-such-model"),
                 "must name the model, got {:?}",

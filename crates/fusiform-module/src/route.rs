@@ -51,7 +51,26 @@ pub struct RouteError {
 impl RouteError {
     fn bad_request(message: impl Into<String>) -> Self {
         Self {
-            code: "bad_request",
+            code: fusiform_protocol::CODE_BAD_REQUEST,
+            message: message.into(),
+        }
+    }
+
+    /// A well-formed request fusiform has no catalog to answer.
+    ///
+    /// Distinct from [`Self::bad_request`] because a consumer must act on them
+    /// differently, and the old shared code could not tell them apart. An
+    /// unknown model, an unknown provider, an instant before the record begins
+    /// — none is a caller defect. They are ANSWERS, arrived at deliberately, and
+    /// reporting them as client errors sends someone to debug a correct
+    /// request.
+    ///
+    /// These are also the refusals that exist so an empty catalog is never
+    /// returned in place of "nobody was watching", so collapsing them into a
+    /// caller defect undoes the distinction they were built to make.
+    fn no_coverage(message: impl Into<String>) -> Self {
+        Self {
+            code: fusiform_protocol::CODE_NO_COVERAGE,
             message: message.into(),
         }
     }
@@ -155,7 +174,7 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
             .provider_is_known(source, &request.provider_id)
             .map_err(|e| store_error(&e))?
         {
-            return Err(RouteError::bad_request(format!(
+            return Err(RouteError::no_coverage(format!(
                 "unknown provider {:?}: fusiform has never recorded a model \
                  under that id",
                 request.provider_id
@@ -165,7 +184,7 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
             .model_is_known(source, &request.provider_id, &request.model_id)
             .map_err(|e| store_error(&e))?
         {
-            return Err(RouteError::bad_request(format!(
+            return Err(RouteError::no_coverage(format!(
                 "unknown model {:?} under provider {:?}: the provider exists, \
                  so check the model id — upstream ids often carry a version \
                  suffix",
@@ -335,7 +354,7 @@ fn refuse_before_the_record(
         return Ok(());
     };
     if asked.0 < begins.0 {
-        return Err(RouteError::bad_request(format!(
+        return Err(RouteError::no_coverage(format!(
             "no record at {}: fusiform's history begins at {}, so it cannot say              what the catalog held before then. An empty answer would claim the              catalog was empty; it was unobserved.",
             asked.0, begins.0
         )));
@@ -715,7 +734,7 @@ pub fn serve_catalog_get(
                     .provider_is_known(source, &provider)
                     .map_err(|e| store_error(&e))?
             {
-                return Err(RouteError::bad_request(format!(
+                return Err(RouteError::no_coverage(format!(
                     "unknown provider {provider:?}: fusiform has never recorded \
                      a model under that id. Check the spelling — provider ids \
                      are the upstream's, so \"anthropic\" rather than \"Anthropic\""
@@ -780,7 +799,7 @@ fn single_model_snapshot(
             .provider_is_known(source, provider_id)
             .map_err(|e| store_error(&e))?
         {
-            return Err(RouteError::bad_request(format!(
+            return Err(RouteError::no_coverage(format!(
                 "unknown provider {provider_id:?}: fusiform has never recorded \
                  a model under that id"
             )));
@@ -789,7 +808,7 @@ fn single_model_snapshot(
             .model_is_known(source, provider_id, model_id)
             .map_err(|e| store_error(&e))?
         {
-            return Err(RouteError::bad_request(format!(
+            return Err(RouteError::no_coverage(format!(
                 "unknown model {model_id:?} under provider {provider_id:?}: the \
                  provider exists, so check the model id — upstream ids often \
                  carry a version suffix"
