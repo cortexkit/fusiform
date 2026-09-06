@@ -143,7 +143,8 @@ async fn main() {
 /// Drop any module identity inherited from the environment.
 ///
 /// `subc-client-rs` falls back to `SUBC_MODULE_ID` and `SUBC_LAUNCH_NONCE` from
-/// the process environment when a call carries no explicit consumer identity,
+/// the process environment when a call carries no explicit consumer identity
+/// (re-derived from `subc-client-rs/src/consumer.rs` 2026-09-06),
 /// and there is no way to say "explicitly none" — an absent identity in
 /// `CallOptions` *means* "read the environment".
 ///
@@ -362,7 +363,16 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
 /// without `XDG_RUNTIME_DIR` the writer's answer is the temp fallback and the
 /// client took that as its only candidate.
 ///
-/// The order matches `ck`'s own, read from `subc-core/src/bin/ck.rs`:
+/// The order matches `ck`'s own, read from `subc-core/src/bin/ck.rs`.
+/// Last re-derived from that source 2026-09-06, against subc-core 0.17.17.
+///
+/// The date is the point. Attribution says whose fact this is; only a date says
+/// when it was last true, and a borrowed constant that names its source without
+/// one reads as current forever. This ladder is copied rather than called — the
+/// writer-side helper resolves differently in a shell — so a divergence here is
+/// silent: this CLI would look somewhere `ck` does not, find a daemon or fail to,
+/// and either answer would be about the wrong machine.
+///
 ///
 /// 1. `--subc`, exclusive
 /// 2. `SUBC_CONNECTION_FILE`, exclusive
