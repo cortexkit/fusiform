@@ -344,131 +344,47 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
     Ok(())
 }
 
-/// Where a CLIENT looks for the daemon's connection file, in order.
+/// The connection-file ladder now lives in `subc-transport`, and this CLI calls
+/// it.
 ///
-/// # Why this is not `bootstrap::connection_file_path()`
+/// Four rungs were reproduced here, dated against `ck`'s own reader, because a
+/// copy of a sibling's behaviour cannot break loudly: a divergence would send
+/// this CLI to a path the daemon never wrote, and the reply would be true and
+/// about the wrong machine.
 ///
-/// That function is the DAEMON'S WRITER: it answers "where do I put the file",
-/// and it answers correctly — `XDG_RUNTIME_DIR` if set, otherwise a temp path.
-/// Using it here asked a writer's question to answer a reader's one.
+/// The copy existed for a real reason — `bootstrap::connection_file_path()` is
+/// the DAEMON'S WRITER, answering "where do I put the file", and in a shell
+/// without `XDG_RUNTIME_DIR` it answers the temp fallback. Calling it made
+/// `ck models status` fail naming a temp path while `ck health` served fine in
+/// the same terminal (reported 2026-08-13). A writer's question cannot answer a
+/// reader's one.
 ///
-/// The two differ because **the daemon writes one path and a client must search
-/// several.** A daemon started under a launch agent has an environment the
-/// operator's shell does not, so the client cannot derive the path the daemon
-/// chose — it has to look where daemons put them.
+/// `subc_client_rs::discovery_candidates` is the reader, moved verbatim out of
+/// `ck` so that no CLI reproduces it. Its exclusivity rules and its
+/// empty-is-unset filter are the two properties this file used to state
+/// separately, and a second statement of a rule is a thing that can drift from
+/// it.
 ///
-/// Reported from Ufuk's terminal 2026-08-13: `ck models status` failed naming a
-/// temp path while `ck health` in the same shell served fine. Not a daemon
-/// problem — fusiform's CLI had jumped straight to the LAST rung, because
-/// without `XDG_RUNTIME_DIR` the writer's answer is the temp fallback and the
-/// client took that as its only candidate.
-///
-/// The order matches `ck`'s own, read from `subc-core/src/bin/ck.rs`.
-/// Last re-derived from that source 2026-09-06, against subc-core 0.17.17.
-///
-/// The date is the point. Attribution says whose fact this is; only a date says
-/// when it was last true, and a borrowed constant that names its source without
-/// one reads as current forever. This ladder is copied rather than called — the
-/// writer-side helper resolves differently in a shell — so a divergence here is
-/// silent: this CLI would look somewhere `ck` does not, find a daemon or fail to,
-/// and either answer would be about the wrong machine.
-///
-///
-/// 1. `--subc`, exclusive
-/// 2. `SUBC_CONNECTION_FILE`, exclusive
-/// 3. `$XDG_RUNTIME_DIR/subc-connection.json`
-/// 4. `~/.local/share/cortexkit/run/subc-connection.json`
-/// 5. `$TMPDIR/subc-<token>.connection.json`
-///
-/// The first two are EXCLUSIVE rather than first-in-a-list, which is the part
-/// worth preserving deliberately: a path the operator named and got wrong must
-/// fail loudly. Falling through to discovery would answer from whichever daemon
-/// is found — in practice production — and the reply would be true and about
-/// the wrong machine.
-fn connection_file_candidates(override_path: Option<&Path>) -> Vec<PathBuf> {
-    candidates_with(
-        override_path,
-        non_empty("SUBC_CONNECTION_FILE"),
-        non_empty("XDG_RUNTIME_DIR"),
-        non_empty("HOME"),
-        subc_core::bootstrap::connection_file_path(),
-    )
-}
-
-fn non_empty(key: &str) -> Option<PathBuf> {
-    env::var_os(key).map(PathBuf::from)
-}
-
-/// The ladder, with the environment passed in rather than read.
-///
-/// Taking the values as parameters is what makes the exclusivity rule testable.
-/// Reading them here would force a test to mutate the process environment,
-/// which races under threaded test execution — the same reason `ck` structures
-/// its equivalent this way.
-fn candidates_with(
-    override_path: Option<&Path>,
-    env_named: Option<PathBuf>,
-    runtime_dir: Option<PathBuf>,
-    home: Option<PathBuf>,
-    temp_fallback: PathBuf,
-) -> Vec<PathBuf> {
-    // An empty variable is UNSET, and the filter lives here rather than at the
-    // reader so an injected environment reaches it.
-    //
-    // `ck` does the same through `non_empty_os_var`, so this is rung-for-rung
-    // agreement rather than a local nicety. Some rigs export `XDG_RUNTIME_DIR=""`
-    // to mean unset, and without this `PathBuf::from("").join(...)` yields the
-    // BARE FILENAME — a relative path resolved against whatever directory the
-    // operator happened to be standing in. That is not a miss; it is a lookup
-    // somewhere `ck` never looks, which is this ladder's whole failure mode.
-    //
-    // Placement is the point. While the filter sat in the reader, every test
-    // injected BELOW it and dropping it passed the entire suite (ENGRAM's
-    // fixture-vacuity, fleet channel 2026-09-06: a test that filters its own
-    // inputs cannot see the filter it is testing).
-    let drop_empty = |p: Option<PathBuf>| p.filter(|v| !v.as_os_str().is_empty());
-    let env_named = drop_empty(env_named);
-    let runtime_dir = drop_empty(runtime_dir);
-    let home = drop_empty(home);
-
-    if let Some(path) = override_path {
-        return vec![path.to_path_buf()];
-    }
-    if let Some(named) = env_named {
-        return vec![named];
-    }
-
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    let push = |p: PathBuf, out: &mut Vec<PathBuf>| {
-        if !out.contains(&p) {
-            out.push(p);
-        }
-    };
-
-    if let Some(runtime) = runtime_dir {
-        push(runtime.join(CONNECTION_FILE_NAME), &mut candidates);
-    }
-    if let Some(home) = home {
-        let mut path = home;
-        for part in [".local", "share", "cortexkit", "run", CONNECTION_FILE_NAME] {
-            path.push(part);
-        }
-        push(path, &mut candidates);
-    }
-    push(temp_fallback, &mut candidates);
-    candidates
-}
-
-/// The connection file's name, matching `ck` and the daemon.
-const CONNECTION_FILE_NAME: &str = "subc-connection.json";
-
 /// Open a route to fusiform, make one call, and close.
 async fn call(
     override_path: Option<&Path>,
     tool: &str,
     arguments: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let candidates = connection_file_candidates(override_path);
+    // The ladder is the transport crate's, not a copy of it.
+    //
+    // Four rungs lived here, dated against `ck`'s own reader because a copy
+    // cannot break loudly: a divergence would send this CLI to a path the
+    // daemon never wrote, and the reply would be true and about the wrong
+    // machine. `subc_client_rs::discovery_candidates` is that reader, moved
+    // verbatim into a library so no CLI has to reproduce it. The exclusivity of
+    // `--subc` and `SUBC_CONNECTION_FILE` and the empty-is-unset filter now live
+    // inside it, which is where a caller cannot reimplement them as "try it
+    // first, fall through".
+    let candidates = subc_client_rs::discovery_candidates(
+        override_path,
+        std::env::var_os("SUBC_CONNECTION_FILE").as_deref(),
+    );
 
     let mut tried: Vec<String> = Vec::new();
     let mut consumer = None;
@@ -1999,152 +1915,39 @@ mod tests {
 mod connection_discovery_tests {
     use super::*;
 
-    fn p(s: &str) -> PathBuf {
-        PathBuf::from(s)
-    }
-
-    /// The run dir is tried before the temp fallback.
+    /// This CLI CALLS the shared ladder rather than resolving one.
     ///
-    /// The defect this pins, reported from a live terminal 2026-08-13: with no
-    /// `XDG_RUNTIME_DIR`, `ck models status` failed naming a temp path while
-    /// `ck health` in the same shell served fine. The CLI had used the DAEMON'S
-    /// WRITER function — "where do I put the file" — to answer a client's
-    /// question, "where do I look for it". Those differ because the daemon
-    /// writes one path and a client must search several: a daemon under a
-    /// launch agent has an environment the operator's shell does not.
+    /// The rungs, their exclusivity and the empty-is-unset filter are tested
+    /// where they live, in `subc-transport`. Restating them here would be a
+    /// second statement of the same rule, free to drift from the one that
+    /// governs — which is the defect this migration removed rather than a
+    /// second layer of safety.
+    ///
+    /// What is asserted here is the property that belongs to fusiform: an
+    /// explicit path stays exclusive across the call boundary, so a `--subc`
+    /// an operator got wrong fails loudly instead of answering from whichever
+    /// daemon discovery happens to find. That is fusiform's requirement of the
+    /// helper, and it is the one thing a change on the other side could break
+    /// without this file changing at all.
     #[test]
-    fn the_run_dir_is_tried_before_the_temp_fallback() {
-        let got = candidates_with(
-            None,
-            None,
-            None,
-            Some(p("/home/u")),
-            p("/tmp/subc-u.connection.json"),
-        );
+    fn an_explicit_path_stays_exclusive_through_the_call() {
+        let explicit = PathBuf::from("/lab/subc.json");
+        let got = subc_client_rs::discovery_candidates(Some(&explicit), None);
         assert_eq!(
             got,
-            vec![
-                p("/home/u/.local/share/cortexkit/run/subc-connection.json"),
-                p("/tmp/subc-u.connection.json"),
-            ],
-            "the temp fallback is the LAST rung, not the only one"
+            vec![explicit.clone()],
+            "a named path must be the ONLY candidate: {got:?}"
         );
-    }
 
-    /// With a runtime dir set, it goes first — matching the daemon's own choice.
-    #[test]
-    fn the_runtime_dir_leads_when_it_is_set() {
-        let got = candidates_with(
-            None,
-            None,
-            Some(p("/run/user/501")),
-            Some(p("/home/u")),
-            p("/tmp/subc-u.connection.json"),
-        );
-        assert_eq!(got.first(), Some(&p("/run/user/501/subc-connection.json")));
-        assert_eq!(got.len(), 3, "all three rungs, in order: {got:?}");
-    }
-
-    /// `--subc` is EXCLUSIVE, not first-in-a-list.
-    ///
-    /// An empty variable is unset, and the rung it would have built is a
-    /// RELATIVE path.
-    ///
-    /// Some rigs export `XDG_RUNTIME_DIR=""` to mean unset. Without the filter
-    /// `PathBuf::from("")` joins to the bare filename, so the CLI searches the
-    /// directory the operator is standing in — not a miss, a lookup somewhere
-    /// `ck` never looks, which is exactly this ladder's failure mode.
-    ///
-    /// This test is only possible because the filter sits in the ladder rather
-    /// than in the reader. While it lived at the reader every test injected
-    /// below it, and dropping it passed the whole suite.
-    #[test]
-    fn an_empty_variable_is_unset_rather_than_a_relative_path() {
-        let got = candidates_with(
-            None,
-            None,
-            Some(PathBuf::new()),
-            Some(p("/home/u")),
-            p("/tmp/subc-u.connection.json"),
-        );
+        // CONTROL: without an explicit path the helper really does discover
+        // several, so the assertion above cannot pass by the ladder being
+        // empty for every input.
+        let discovered = subc_client_rs::discovery_candidates(None, None);
         assert!(
-            got.iter().all(|c| c.is_absolute()),
-            "an empty rung must not produce a relative candidate: {got:?}"
+            discovered.len() > 1,
+            "discovery must offer several rungs, else the exclusivity assertion \
+             above is vacuous: {discovered:?}"
         );
-        assert_eq!(
-            got.first(),
-            Some(&p(
-                "/home/u/.local/share/cortexkit/run/subc-connection.json"
-            )),
-            "with the runtime dir unset the HOME rung leads: {got:?}"
-        );
-
-        // CONTROL: the same ladder with a real runtime dir still prefers it, so
-        // the assertion above cannot pass by the rung being ignored outright.
-        let control = candidates_with(
-            None,
-            None,
-            Some(p("/run/user/501")),
-            Some(p("/home/u")),
-            p("/tmp/subc-u.connection.json"),
-        );
-        assert_eq!(
-            control.first(),
-            Some(&p("/run/user/501/subc-connection.json")),
-            "a non-empty runtime dir must still lead: {control:?}"
-        );
-    }
-
-    /// A path the operator named and got wrong must fail loudly. Falling
-    /// through to discovery would answer from whichever daemon is found — in
-    /// practice production — and the reply would be true and about the wrong
-    /// machine, with every later conclusion inheriting that while the operator
-    /// believes they are reading the one they named.
-    #[test]
-    fn an_explicit_override_is_exclusive() {
-        let got = candidates_with(
-            Some(&p("/lab/subc.json")),
-            Some(p("/env/subc.json")),
-            Some(p("/run/user/501")),
-            Some(p("/home/u")),
-            p("/tmp/subc-u.connection.json"),
-        );
-        assert_eq!(
-            got,
-            vec![p("/lab/subc.json")],
-            "a named path must not fall back to a healthy daemon elsewhere"
-        );
-    }
-
-    /// So is the environment variable, for the same reason.
-    #[test]
-    fn the_environment_variable_is_exclusive_too() {
-        let got = candidates_with(
-            None,
-            Some(p("/env/subc.json")),
-            Some(p("/run/user/501")),
-            Some(p("/home/u")),
-            p("/tmp/subc-u.connection.json"),
-        );
-        assert_eq!(got, vec![p("/env/subc.json")]);
-    }
-
-    /// A duplicate path is tried once.
-    ///
-    /// Reachable in practice: `XDG_RUNTIME_DIR` pointing at the temp dir makes
-    /// the first and last rungs identical, and reporting the same failure twice
-    /// in an error an operator reads during an incident is noise that looks
-    /// like two distinct problems.
-    #[test]
-    fn a_duplicate_rung_appears_once() {
-        let got = candidates_with(
-            None,
-            None,
-            Some(p("/tmp")),
-            None,
-            p("/tmp/subc-connection.json"),
-        );
-        assert_eq!(got, vec![p("/tmp/subc-connection.json")]);
     }
 }
 
