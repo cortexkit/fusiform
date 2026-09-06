@@ -201,6 +201,43 @@ fn a_tier_without_a_type_is_refused() {
     }
 }
 
+/// A tier spec that is MALFORMED rather than absent is refused too, and the
+/// message must not name a cause it cannot know.
+///
+/// `RawTier`'s conversion drops the parse error (`.ok()`), so a malformed spec
+/// and an absent one both arrive as `None`. Both fields of `RawTierSpec` are
+/// optional, so the reachable failure is a wrong TYPE — `"size": "200000"` as a
+/// string is the ordinary way an upstream drifts, and it is the case the old
+/// message described as "carries a size with no type" while the type was
+/// present and the size was what broke.
+///
+/// Fail-closed is the right direction and was already correct. What is asserted
+/// here is that the refusal does not send a reader after the wrong field.
+#[test]
+fn a_malformed_tier_spec_is_refused_without_naming_a_cause_it_cannot_know() {
+    let text = String::from_utf8(FIXTURE.to_vec()).unwrap();
+    // A string where a number belongs: the spec stops parsing, and the `type`
+    // key beside it is untouched and still correct.
+    let mutated = mutate(&text, "\"size\": 200000", "\"size\": \"200000\"");
+
+    match normalize_models_dev(mutated.as_bytes()) {
+        Err(e @ NormalizeError::TierMissingType { .. }) => {
+            let text = e.to_string();
+            assert!(
+                !text.contains("carries a size"),
+                "the message must not assert the tier carries a size: the spec \
+                 did not parse, so nothing about its contents is known: {text}"
+            );
+            assert!(
+                text.contains("no readable type"),
+                "the message must say what is known \u{2014} that no type could be \
+                 read \u{2014} rather than why: {text}"
+            );
+        }
+        other => panic!("a malformed tier spec must stop the parse, got {other:?}"),
+    }
+}
+
 /// The two tier encodings must agree ON RATES, and disagreement stops the parse.
 ///
 /// The mutation is structural rather than textual. A `str::replace` against

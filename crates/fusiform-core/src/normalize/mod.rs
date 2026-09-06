@@ -261,7 +261,23 @@ impl std::fmt::Display for NormalizeError {
                 "{model}: pricing tier declares type {tier_type:?}, and only \"context\" has a known meaning"
             ),
             NormalizeError::TierMissingType { model } => {
-                write!(f, "{model}: pricing tier carries a size with no type")
+                // Says what is known, and no more.
+                //
+                // This fires from `tier.tier == None`, which has TWO causes that
+                // are indistinguishable here: the `tier` key was absent, or it
+                // was present and did not parse — `RawTier`'s conversion drops
+                // the parse error, and both fields of `RawTierSpec` are
+                // optional, so a failure means the value was not an object or a
+                // key had the wrong type (`"size": "200000"` as a string is the
+                // ordinary way an upstream drifts).
+                //
+                // The old wording — "carries a size with no type" — asserted
+                // both halves. On the malformed case neither is known, and an
+                // operator greps the payload for a tier with a size and no type,
+                // finds one with both, and hunts a phantom. A message that
+                // travels to a reader and names a specific cause it cannot
+                // support is the sentinel problem in prose.
+                write!(f, "{model}: pricing tier has no readable type")
             }
             NormalizeError::OrphanedLegacyTier {
                 model,
