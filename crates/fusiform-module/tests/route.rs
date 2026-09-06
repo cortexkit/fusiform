@@ -2028,4 +2028,21 @@ fn the_manifest_declares_what_is_true_and_omits_what_is_not() {
         "absent on the wire too, so a reader sees no claim rather than a claim \
          this module would have to footnote"
     );
+
+    // identity_scope EMPTY, which is a claim and not an omission: the set of
+    // bind keys this provider PARTITIONS its answers by. Fusiform partitions by
+    // none — two projects asking what models exist must get the same answer,
+    // because the catalog describes the world rather than a workspace.
+    //
+    // Asserted on the wire as well as the struct, because an empty vec and an
+    // absent field are different statements to a reader and only one of them is
+    // what this module means.
+    let scopes = wire["provides"][0]["identity_scope"]
+        .as_array()
+        .expect("the tool provider must declare an identity_scope array");
+    assert!(
+        scopes.is_empty(),
+        "identity_scope must stay empty: any key here claims the answer depends \
+         on the caller, which is false for a catalog of the world (got {scopes:?})"
+    );
 }

@@ -17,7 +17,7 @@ pub mod seed;
 pub mod signals;
 
 use subc_protocol::manifest::{
-    Concurrency, ExecutionMode, IdentityScope, ModuleManifest, ProviderRole, Tool, TrustTier,
+    Concurrency, ExecutionMode, ModuleManifest, ProviderRole, Tool, TrustTier,
 };
 use subc_protocol::PROTOCOL_VERSION;
 
@@ -248,7 +248,23 @@ pub fn manifest() -> ModuleManifest {
                 }),
             },
         ],
-        identity_scope: vec![IdentityScope::Project, IdentityScope::Session],
+        // EMPTY, and that is a claim rather than an omission.
+        //
+        // Ruled by SUBC from BindIdentity's own doc: identity_scope is the set
+        // of bind keys a provider PARTITIONS its answers or state by, not the
+        // set it accepts — every bind carries all of them regardless. So an
+        // empty vec says "the answer does not depend on the caller", which is
+        // exactly true here and is the property this catalog exists to have.
+        //
+        // Two projects asking what models exist must get the same answer. The
+        // catalog describes the world, not a workspace. Declaring [Project,
+        // Session] said the opposite, in the same direction as the storage
+        // binding deleted in dcdf804 — and for the same reason: a value chosen
+        // to fill a field, before anyone had written down what the field meant.
+        //
+        // The doc that settles it is db9ff1af, written after this seat asked
+        // rather than guessed.
+        identity_scope: Vec::new(),
         concurrency: Concurrency::ModuleManaged,
         // False, and it was true here for eleven commits while nothing in
         // this repository ever called push. A manifest is a claim the
