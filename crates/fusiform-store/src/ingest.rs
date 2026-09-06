@@ -566,7 +566,20 @@ fn json_rate(value: &RateValue) -> String {
         // model. A second path to the same outcome is not redundancy, it is a
         // second thing that can be wrong, and this one failed in a way the
         // serve path could not observe.
-        RateValue::Priced { amount } => format!(
+        // `floor` is deliberately NOT stored, by the same rule that keeps
+        // `unit_provenance` out of this string.
+        //
+        // No source publishes minimum-charge data, so the floor is `Unknown` on
+        // every row — which is fusiform stating what nobody has established,
+        // not a claim the upstream made. Storage holds the upstream's claim.
+        //
+        // Writing a constant field into every stored rate is also precisely the
+        // reserialization described above: it would differ from every existing
+        // row and record a price change for every priced model on the first
+        // poll after placement. The dimension stays serve-side until a SOURCE
+        // publishes a floor, at which point it is an upstream claim and belongs
+        // here.
+        RateValue::Priced { amount, floor: _ } => format!(
             r#"{{"state":"priced","units":{},"exponent":{},"currency":"{}"}}"#,
             amount.units,
             amount.exponent,

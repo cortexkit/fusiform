@@ -478,6 +478,7 @@ dependencies = [
 name = "fusiform-core"
 version = "0.1.0"
 dependencies = [
+ "fusiform-protocol",
  "fusiform-testkit",
  "serde",
  "serde_json",
@@ -507,7 +508,7 @@ dependencies = [
 
 [[package]]
 name = "fusiform-protocol"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "serde",
  "serde_json",

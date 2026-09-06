@@ -55,7 +55,7 @@ fn rates_scale_to_exact_minor_units() {
     let outcome = catalog();
     let sonnet = model(&outcome, "anthropic/claude-sonnet-4-5");
 
-    let RateValue::Priced { amount } = rate(sonnet, TokenClass::Input, &RateCondition::Always)
+    let RateValue::Priced { amount, .. } = rate(sonnet, TokenClass::Input, &RateCondition::Always)
     else {
         panic!("input rate must be priced");
     };
@@ -72,7 +72,8 @@ fn rates_scale_to_exact_minor_units() {
     ));
 
     // A sub-dollar rate, where a float path would visibly drift.
-    let RateValue::Priced { amount } = rate(sonnet, TokenClass::CacheRead, &RateCondition::Always)
+    let RateValue::Priced { amount, .. } =
+        rate(sonnet, TokenClass::CacheRead, &RateCondition::Always)
     else {
         panic!("cache_read rate must be priced");
     };
@@ -138,7 +139,7 @@ fn context_tiers_produce_conditional_rates() {
     let gemini = model(&outcome, "impossibl/google/gemini-3.1-pro-preview");
 
     // Base rate, unconditional.
-    let RateValue::Priced { amount } = rate(gemini, TokenClass::Input, &RateCondition::Always)
+    let RateValue::Priced { amount, .. } = rate(gemini, TokenClass::Input, &RateCondition::Always)
     else {
         panic!("base input rate must be priced");
     };
@@ -147,7 +148,7 @@ fn context_tiers_produce_conditional_rates() {
     // Above the declared threshold, a different rate — carried on the rate's
     // own key, so a pricing consumer never joins capability rows to price rows.
     let over = RateCondition::MinContextTokens { tokens: 200_000 };
-    let RateValue::Priced { amount } = rate(gemini, TokenClass::Input, &over) else {
+    let RateValue::Priced { amount, .. } = rate(gemini, TokenClass::Input, &over) else {
         panic!("over-threshold input rate must be priced");
     };
     assert_eq!(amount.units, 4_000_000_000);
@@ -156,7 +157,7 @@ fn context_tiers_produce_conditional_rates() {
     // declared size rather than assuming the one the legacy key is named for.
     let luna = model(&outcome, "openai/gpt-5.6-luna");
     let over_luna = RateCondition::MinContextTokens { tokens: 272_000 };
-    let RateValue::Priced { amount } = rate(luna, TokenClass::Output, &over_luna) else {
+    let RateValue::Priced { amount, .. } = rate(luna, TokenClass::Output, &over_luna) else {
         panic!("luna over-threshold output rate must be priced");
     };
     assert_eq!(amount.units, 1_800_000_000);

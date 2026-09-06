@@ -1259,7 +1259,12 @@ fn a_rate_stored_before_the_field_existed_still_names_its_policy() {
 /// forces is what to do about the rows — not whether to keep defaulting.
 #[test]
 fn only_one_currency_policy_has_ever_existed() {
-    let src = include_str!("../../fusiform-core/src/money.rs");
+    // Follows the type: `PolicyId` moved to `fusiform-protocol` when the money
+    // vocabulary was lifted onto the crate consumers can depend on. The fence
+    // scans SOURCE, so its path is part of its subject — and it failed loudly
+    // on the move rather than passing against a file that no longer mints
+    // policies, which is the behaviour a source-scanning guard has to have.
+    let src = include_str!("../../fusiform-protocol/src/money.rs");
     let constructors: Vec<&str> = src
         .lines()
         .filter(|l| l.trim_start().starts_with("pub fn "))

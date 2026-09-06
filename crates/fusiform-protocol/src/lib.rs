@@ -31,6 +31,13 @@
 
 use std::collections::BTreeMap;
 
+pub mod money;
+
+pub use money::{
+    Amount, CurrencyCode, Floor, InvalidCurrencyCode, PolicyId, RateValue, UnitProvenance,
+    UnpricedReason, NANO_EXPONENT,
+};
+
 use serde::{Deserialize, Serialize};
 
 /// The tools fusiform serves.

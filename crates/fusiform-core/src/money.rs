@@ -4,84 +4,27 @@
 //! that look pedantic are the ones that cost something. See
 //! `docs/design/schema-and-store.md` §4.
 
-use serde::{Deserialize, Serialize};
+// The wire vocabulary moved to `fusiform-protocol` and is re-exported here.
+//
+// A consumer must be able to decode what a rate IS without depending on this
+// crate, which carries normalisation and a JSON parser configured for
+// arbitrary precision. While these types lived here, every consumer wrote its
+// own decoder — and a second copy of a money vocabulary is worse than none: a
+// new `UnpricedReason` variant does not FAIL a hand-written decoder, it falls
+// into a default arm and prices something that should have been refused.
+//
+// What did NOT move is below: the decimal parse boundary, where an upstream's
+// floats stop existing. That needs the parser, and the parser must never reach
+// the crate a consumer compiles against.
+pub use fusiform_protocol::money::{
+    Amount, CurrencyCode, Floor, InvalidCurrencyCode, PolicyId, UnitProvenance, NANO_EXPONENT,
+};
 
-/// An ISO 4217 alphabetic code. A code, never a symbol, and never defaulted:
-/// how a currency was established travels beside it in [`UnitProvenance`].
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct CurrencyCode(String);
-
-impl CurrencyCode {
-    /// Three ASCII letters, upper-cased. Anything else is refused rather than
-    /// normalised: a currency this type cannot recognise must not become one
-    /// it can, because the failure would be a silently mispriced ledger.
-    pub fn new(code: &str) -> Result<Self, MoneyError> {
-        let trimmed = code.trim();
-        if trimmed.len() != 3 || !trimmed.chars().all(|c| c.is_ascii_alphabetic()) {
-            return Err(MoneyError::CurrencyCode(code.to_string()));
-        }
-        Ok(Self(trimmed.to_ascii_uppercase()))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
+impl From<InvalidCurrencyCode> for MoneyError {
+    fn from(e: InvalidCurrencyCode) -> Self {
+        MoneyError::CurrencyCode(e.0)
     }
 }
-
-/// How the unit attached to an amount was established.
-///
-/// A producer that converts a currency stamps an invented rate with producer
-/// authority, so fusiform never converts. But refusing to convert is not
-/// enough on its own: models.dev states no currency at all, so serving USD
-/// without saying *why* would launder a convention into a fact.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
-pub enum UnitProvenance {
-    /// The source stated the currency.
-    Stated,
-    /// Fusiform applied a named policy declared in its own source and
-    /// versioned with it, so "why does the catalog say USD" resolves to an
-    /// auditable rule rather than a habit.
-    AssumedByPolicy { policy: PolicyId },
-    /// No statement and no policy covers it. The rate is unpriced; this is
-    /// what stops a non-USD provider being silently priced in dollars.
-    Unknown,
-}
-
-/// The identifier of a unit policy. Declared in fusiform's source, versioned
-/// with it, and carried on every amount that depended on it — so a policy
-/// change can find every row it touched.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct PolicyId(pub String);
-
-impl PolicyId {
-    /// Rates from the models.dev source carry no currency field at all. USD is
-    /// the upstream's unstated convention; this policy is fusiform saying so
-    /// out loud rather than assuming it silently.
-    pub fn models_dev_usd_v1() -> Self {
-        Self("models-dev-usd-v1".to_string())
-    }
-}
-
-/// An exact amount: an integer count of minor units, the exponent that scales
-/// them, and the currency they are denominated in.
-///
-/// Floats do not appear in this type and do not survive normalisation. They
-/// exist only at the JSON parse boundary, where the upstream forces them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Amount {
-    /// The value is `units × 10^(-exponent)` of `currency`.
-    pub units: i64,
-    /// Stated, never assumed. A consumer that has to infer the scale of an
-    /// integer will eventually infer it wrong.
-    pub exponent: u8,
-    pub currency: CurrencyCode,
-    pub unit_provenance: UnitProvenance,
-}
-
-/// Nanodollars, the scale the fleet's existing money paths already use: an
-/// exponent of 9 means `units` counts billionths of a currency unit.
-pub const NANO_EXPONENT: u8 = 9;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MoneyError {

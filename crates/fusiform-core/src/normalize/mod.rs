@@ -573,7 +573,14 @@ const TOKEN_COST_KEYS: &[(&str, TokenClass)] = &[
 fn rate_value(label: &str, field: &str, literal: &str) -> Result<RateValue, NormalizeError> {
     match decimal_str_to_minor_units(literal, NANO_EXPONENT) {
         Ok(0) => Ok(RateValue::StatedZero),
+        // `Floor::Unknown`, and it is the TRUE state rather than a placeholder.
+        //
+        // models.dev publishes no minimum-charge data of any kind, so nobody
+        // has established whether a call to this model has a floor. Saying so
+        // is what stops a consumer concluding there is none — which is exactly
+        // what they must conclude today, when the dimension does not exist.
         Ok(units) => Ok(RateValue::Priced {
+            floor: fusiform_protocol::money::Floor::Unknown,
             amount: Amount {
                 units,
                 exponent: NANO_EXPONENT,

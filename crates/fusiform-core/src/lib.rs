@@ -346,44 +346,13 @@ pub enum RateCondition {
 }
 
 /// Why a rate has no price.
-///
-/// Adopted from the metering module's existing enum rather than paralleled, so
-/// nothing has to be mapped at the boundary. Their remaining variants
-/// (degraded pricing time, arithmetic out of range) are structurally not a
-/// producer's: fusiform has no pricing instant and no ledger arithmetic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UnpricedReason {
-    /// The source describes this model but published no rate for this basis.
-    MissingRate,
-    /// The source does not describe this model at all.
-    NoCatalogCoverage,
-    /// A rate exists but what it is charged for cannot be established — the
-    /// audio keys are the live case, sitting in the same flat namespace as
-    /// token rates with no unit distinguishing them.
-    UnknownChargeBasis,
-}
-
-/// A rate's value: priced, a stated zero, or unpriced with a reason.
-///
-/// Three states because they have opposite consequences for a cap. Measured on
-/// 2026-08-11: 420 models carried no cost object at all, and 1,423 cost
-/// entries were exactly `0` — some genuinely free, some certainly "not
-/// published", and the upstream cannot distinguish them. Neither can fusiform,
-/// so it reports what was said instead of resolving it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "state")]
-pub enum RateValue {
-    Priced {
-        amount: Amount,
-    },
-    /// The source stated exactly zero. Not "free" — a stated zero. Whether a
-    /// zero is a real price is the consumer's policy, not fusiform's.
-    StatedZero,
-    Unpriced {
-        reason: UnpricedReason,
-    },
-}
+// `UnpricedReason` and `RateValue` moved to `fusiform-protocol`, re-exported
+// here so this crate's own code reads unchanged.
+//
+// They are the two types a consumer most needs and could least reach: a rate's
+// three states have opposite consequences for a cap, and the reason a rate is
+// unpriced decides whether a caller may proceed.
+pub use fusiform_protocol::money::{RateValue, UnpricedReason};
 
 /// What happened when fusiform looked at a source.
 ///

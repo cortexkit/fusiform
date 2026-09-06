@@ -95,7 +95,7 @@ fn every_zero_rate_on_live_data_was_stated_as_zero() {
     for model in outcome.catalog.models() {
         for rate in &model.rates {
             match &rate.value {
-                RateValue::Priced { amount } => {
+                RateValue::Priced { amount, .. } => {
                     priced += 1;
                     // A priced rate is never zero: that is what the money
                     // boundary's zero guard exists to prevent.

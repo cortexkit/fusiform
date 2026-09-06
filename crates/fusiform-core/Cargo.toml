@@ -6,6 +6,7 @@ publish = false
 description = "Pure domain for the ck-fusiform AI-model capability catalog: identity, observations, eras, and rates."
 
 [dependencies]
+fusiform-protocol = { path = "../fusiform-protocol" }
 serde = { workspace = true }
 # `arbitrary_precision` keeps JSON numbers as their literal source text instead
 # of parsing them to f64. This is load-bearing rather than a tuning choice: the
