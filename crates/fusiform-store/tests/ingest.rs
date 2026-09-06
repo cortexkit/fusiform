@@ -1579,3 +1579,120 @@ fn a_real_change_inside_a_marked_poll_is_kept() {
          mark exists to prevent"
     );
 }
+
+/// A retraction restores what the mark excluded, and leaves both events behind.
+///
+/// # Why this is append-only rather than a column
+///
+/// The first version of this added `retracted_at_ms` to the mark row. It works
+/// and it erodes the store's one invariant: a later re-mark overwrites the
+/// original `reason`, so "marked for A, retracted, marked for B" loses A. An
+/// operator asking why `last_changed_at` moved would read B and find no trace
+/// that A was ever claimed.
+///
+/// So marks and retractions are EVENTS and the current state is the newest one
+/// per observation — exactly how eras work, for exactly the same reason.
+#[test]
+fn a_retracted_mark_stops_excluding_and_stays_on_the_record() {
+    let f = fixture();
+    let key = FactKey::rate(fusiform_core::TokenClass::Input);
+    let real = |units: i64| {
+        format!(r#"{{"state":"priced","units":{units},"exponent":9,"currency":"USD"}}"#)
+    };
+
+    f.store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(1_000),
+            outcome: ObservationOutcome::Seeded,
+            raw_hash: None,
+            normalized_hash: None,
+            duration_ms: Some(1),
+            detail: None,
+            etag: None,
+        })
+        .expect("seed observation");
+
+    let obs = f
+        .store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(5_000),
+            outcome: ObservationOutcome::Changed { snapshot_seq: 1 },
+            raw_hash: None,
+            normalized_hash: None,
+            duration_ms: Some(1),
+            detail: None,
+            etag: None,
+        })
+        .expect("artifact observation");
+
+    for (at, obs_id, kind) in [
+        (1_000i64, None, BoundaryKind::Seed),
+        (5_000i64, Some(obs), BoundaryKind::Observed),
+    ] {
+        f.store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "anthropic".into(),
+                model_id: "claude-sonnet-4-5".into(),
+                fact_key: key.clone(),
+                value_json: real(3_000_000_000),
+                boundary_at: Timestamp(at),
+                boundary_kind: kind,
+                observation_id: obs_id,
+            }])
+            .expect("era must store");
+    }
+
+    let changed = || {
+        f.store
+            .last_changed_at(SourceId::ModelsDev, "anthropic", "claude-sonnet-4-5", &key)
+            .expect("query must not error")
+            .expect("the fact has eras")
+            .0
+    };
+
+    // CONTROL: unmarked, the artifact reads as the last change. Without this
+    // the assertions below pass against a store that never excludes anything.
+    assert_eq!(changed(), 5_000, "control: unmarked, the artifact counts");
+
+    f.store
+        .mark_observation_artifact(obs, "a representation change", Timestamp(9_000))
+        .expect("mark must record");
+    assert_eq!(changed(), 1_000, "a live mark excludes the restating era");
+
+    let took_it_back = f
+        .store
+        .retract_observation_artifact(obs, "marked the wrong poll", Timestamp(9_500))
+        .expect("retraction must not error");
+    assert!(took_it_back, "there was a live mark to retract");
+
+    assert_eq!(
+        changed(),
+        5_000,
+        "a retracted mark must stop excluding: the era is back in the derivation"
+    );
+
+    // Retracting again finds nothing live, and says so rather than reporting
+    // success — the same distinction the refusal contract draws between a
+    // caller defect and a coverage answer.
+    assert!(
+        !f.store
+            .retract_observation_artifact(obs, "again", Timestamp(9_600))
+            .expect("second retraction must not error"),
+        "a second retraction must report that there was nothing live to take back"
+    );
+
+    // BOTH events survive: the log is what an operator reads to see that a
+    // claim was made and withdrawn.
+    let events = f.store.artifact_events(obs).expect("events must read");
+    assert_eq!(
+        events,
+        vec![
+            ("marked".to_string(), "a representation change".to_string()),
+            ("retracted".to_string(), "marked the wrong poll".to_string()),
+        ],
+        "the mark and its retraction must both stay on the record"
+    );
+}

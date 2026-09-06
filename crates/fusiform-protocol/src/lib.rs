@@ -61,13 +61,50 @@ pub const TOOL_CORRECT: &str = "catalog.correct";
 /// named observation, previewed by default, no wildcard.
 pub const TOOL_MARK_ARTIFACT: &str = "catalog.mark_artifact";
 
+/// Take back a mark.
+///
+/// Separate from [`TOOL_MARK_ARTIFACT`] rather than a flag on it, because a
+/// retraction is a different claim with a different reason, and a boolean would
+/// let one be mistaken for the other in a call log.
+pub const TOOL_RETRACT_ARTIFACT: &str = "catalog.retract_artifact";
+
 pub const TOOLS: &[&str] = &[
     TOOL_GET,
     TOOL_HISTORY,
     TOOL_STATUS,
     TOOL_CORRECT,
     TOOL_MARK_ARTIFACT,
+    TOOL_RETRACT_ARTIFACT,
 ];
+
+/// Take back a mark on one poll.
+///
+/// The mark stays in the log and a retraction event follows it, so an operator
+/// asking why `last_changed_at` moved sees that a claim was made and withdrawn
+/// rather than finding nothing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetractArtifactRequest {
+    pub observation_id: i64,
+    /// Why the mark is being withdrawn. Required for the same reason the mark
+    /// requires one: a retraction with no reason is an unexplained change to
+    /// what every consumer of `last_changed_at` reads.
+    pub reason: String,
+    #[serde(default = "crate::default_true")]
+    pub dry_run: bool,
+}
+
+/// What retracting would do, or did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetractArtifactResponse {
+    pub observation_id: i64,
+    pub committed: bool,
+    /// Whether a live mark existed to take back.
+    ///
+    /// Reported rather than folded into `committed`, so a caller can tell "I
+    /// withdrew it" from "there was nothing there". Both are successful calls
+    /// and only one of them changed anything.
+    pub had_live_mark: bool,
+}
 
 /// Mark one poll as a representation change of fusiform's own making.
 ///
@@ -804,6 +841,7 @@ pub enum ToolResponse {
     Status(StatusResponse),
     Correct(CorrectResponse),
     MarkArtifact(MarkArtifactResponse),
+    RetractArtifact(RetractArtifactResponse),
 }
 
 /// A `catalog.history` request: every era for one fact.

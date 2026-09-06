@@ -50,6 +50,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 4,
         statements: SCHEMA_V4,
     },
+    Migration {
+        version: 5,
+        statements: SCHEMA_V5,
+    },
 ];
 
 const SCHEMA_V1: &str = r#"
@@ -300,4 +304,46 @@ CREATE TABLE observation_artifact (
     reason          TEXT    NOT NULL,
     recorded_at_ms  INTEGER NOT NULL
 );
+"#;
+
+// A mark becomes an EVENT LOG, so it can be taken back without erasing that it
+// was made.
+//
+// Marking a poll excludes its restating eras from every derivation that honours
+// it, and v4 had no way to take that back. That asymmetry is what made the
+// production mark a decision needing sign-off: a write with no retraction path
+// has to be certain in advance, which is exactly when certainty is least
+// available.
+//
+// The obvious fix — a `retracted_at` column on the existing row — was written
+// and thrown away. It needs an UPDATE, and a later re-mark overwrites the
+// original `reason`, so the sequence "marked for A, retracted, marked for B"
+// loses A. That is the store's one invariant eroded for convenience: an
+// operator asking why last_changed_at moved would read B and find no trace that
+// A was ever claimed.
+//
+// So: one row per EVENT, current state derived from the newest event per
+// observation. Exactly how eras work, for exactly the same reason. The old
+// table is dropped rather than migrated because nothing has ever been marked in
+// production — verified against the live store before writing this, rather than
+// assumed from the feature's age.
+const SCHEMA_V5: &str = r#"
+DROP TABLE observation_artifact;
+
+CREATE TABLE observation_artifact_event (
+    id              INTEGER PRIMARY KEY,
+    observation_id  INTEGER NOT NULL REFERENCES observation(id),
+    -- 'marked' or 'retracted'. A CHECK rather than a comment: an unrecognised
+    -- action would make the derived state silently wrong, and the vocabulary
+    -- fence in boundary_vocabulary.rs exists because that already happened once
+    -- with boundary_kind.
+    action          TEXT    NOT NULL CHECK (action IN ('marked', 'retracted')),
+    reason          TEXT    NOT NULL,
+    recorded_at_ms  INTEGER NOT NULL
+);
+
+-- The derivation reads the newest event per observation, so this index is the
+-- one the exclusion query depends on.
+CREATE INDEX artifact_event_by_observation
+    ON observation_artifact_event (observation_id, id DESC);
 "#;

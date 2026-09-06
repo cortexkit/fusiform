@@ -225,6 +225,29 @@ pub fn manifest() -> ModuleManifest {
                     "additionalProperties": false
                 }),
             },
+            Tool {
+                name: route::TOOL_RETRACT_ARTIFACT.to_string(),
+                description: Some(
+                    "Take back an artifact mark, so last_changed_at counts that \
+                         poll's eras again. The mark stays on the record and a \
+                         retraction follows it. Previews unless dry_run is false."
+                        .to_string(),
+                ),
+                // The third writer, and Mutating for the same reason: a replayed
+                // retraction would append a second withdrawal of a claim already
+                // withdrawn.
+                execution_mode: ExecutionMode::Mutating,
+                schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "observation_id": {"type": "integer"},
+                        "reason": {"type": "string"},
+                        "dry_run": {"type": "boolean"}
+                    },
+                    "required": ["observation_id", "reason"],
+                    "additionalProperties": false
+                }),
+            },
         ],
         identity_scope: vec![IdentityScope::Project, IdentityScope::Session],
         concurrency: Concurrency::ModuleManaged,

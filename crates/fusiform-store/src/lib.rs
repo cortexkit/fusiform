@@ -1034,8 +1034,9 @@ impl CatalogStore {
     ) -> Result<(), CatalogError> {
         self.inner.with_conn_fenced(|conn| {
             conn.execute(
-                "INSERT OR REPLACE INTO observation_artifact \
-                 (observation_id, reason, recorded_at_ms) VALUES (?1, ?2, ?3)",
+                "INSERT INTO observation_artifact_event \
+                 (observation_id, action, reason, recorded_at_ms) \
+                 VALUES (?1, 'marked', ?2, ?3)",
                 params![observation_id, reason, recorded_at.0],
             )
         })?;
@@ -1084,7 +1085,11 @@ impl CatalogStore {
             let mut stmt = conn.prepare(
                 "SELECT e.boundary_at_ms, e.value_json, \
                         (e.observation_id IS NOT NULL AND e.observation_id IN \
-                         (SELECT observation_id FROM observation_artifact)) \
+                         (SELECT observation_id FROM observation_artifact_event ev \
+                          WHERE ev.id = (SELECT MAX(id) \
+                                         FROM observation_artifact_event \
+                                         WHERE observation_id = ev.observation_id) \
+                            AND ev.action = 'marked')) \
                  FROM era e \
                  WHERE e.source = ?1 AND e.provider_id = ?2 AND e.model_id = ?3 \
                    AND e.fact_key = ?4 \
@@ -1123,6 +1128,60 @@ impl CatalogStore {
         Ok(None)
     }
 
+    /// Every mark and retraction recorded against one poll, oldest first.
+    ///
+    /// The log rather than the derived state, because "was this ever marked,
+    /// and did someone take it back" is a different question from "is it marked
+    /// now" — and the first is the one an operator asks when a derivation
+    /// changed under them.
+    pub fn artifact_events(
+        &self,
+        observation_id: i64,
+    ) -> Result<Vec<(String, String)>, CatalogError> {
+        let rows = self.inner.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT action, reason FROM observation_artifact_event \
+                 WHERE observation_id = ?1 ORDER BY id ASC",
+            )?;
+            let mapped = stmt.query_map(params![observation_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })?;
+            mapped.collect::<Result<Vec<_>, _>>()
+        })?;
+        Ok(rows)
+    }
+
+    /// Take back a mark, recording that it was taken back.
+    ///
+    /// An APPEND, not an update: the mark stays in the log and a retraction
+    /// event follows it. An operator asking why `last_changed_at` moved needs
+    /// to see that a claim was made and withdrawn — the claim merely being
+    /// absent tells them nothing about who decided what.
+    ///
+    /// Returns whether there was a live mark to retract, so a caller can tell
+    /// "I took it back" from "there was nothing there" rather than reporting
+    /// success either way. That distinction is the same one the refusal
+    /// contract draws between a caller defect and a coverage answer.
+    pub fn retract_observation_artifact(
+        &self,
+        observation_id: i64,
+        reason: &str,
+        retracted_at: Timestamp,
+    ) -> Result<bool, CatalogError> {
+        if self.observation_artifact_reason(observation_id)?.is_none() {
+            return Ok(false);
+        }
+        self.inner.with_conn_fenced(|conn| {
+            conn.execute(
+                "INSERT INTO observation_artifact_event \
+                 (observation_id, action, reason, recorded_at_ms) \
+                 VALUES (?1, 'retracted', ?2, ?3)",
+                params![observation_id, reason, retracted_at.0],
+            )
+        })?;
+        Ok(true)
+    }
+
     /// The reason recorded when a poll was marked an artifact, or `None` if it
     /// was never marked.
     ///
@@ -1133,7 +1192,10 @@ impl CatalogStore {
     pub fn observation_artifact_reason(&self, id: i64) -> Result<Option<String>, CatalogError> {
         let reason = self.inner.with_conn(|conn| {
             conn.query_row(
-                "SELECT reason FROM observation_artifact WHERE observation_id = ?1",
+                "SELECT reason FROM observation_artifact_event ev \
+                 WHERE ev.observation_id = ?1 AND ev.action = 'marked' \
+                   AND ev.id = (SELECT MAX(id) FROM observation_artifact_event \
+                                WHERE observation_id = ?1)",
                 params![id],
                 |r| r.get::<_, String>(0),
             )

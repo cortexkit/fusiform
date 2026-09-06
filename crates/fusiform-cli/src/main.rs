@@ -71,6 +71,7 @@ commands:
   history                   every recorded era for one fact
   mark-artifact             record that one poll rewrote fusiform's own
                             representation rather than upstream data
+  retract-artifact          take back an artifact mark
   correct                   record that fusiform's own record was wrong over a
                             past window (previews by default; --commit writes)
 
@@ -89,6 +90,11 @@ options:
 mark-artifact options:
   --observation <id>        the poll to mark; see `ck models status --polls N`
   --reason <ref>            the evidence record naming the representation change
+  --commit                  write it; previews by default
+
+retract-artifact options:
+  --observation <id>        the marked poll
+  --reason <ref>            why the mark is being withdrawn
   --commit                  write it; previews by default
 
 correct options:
@@ -342,6 +348,23 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
                 }),
             ))
         }
+        "retract-artifact" => {
+            let observation = args
+                .observation
+                .ok_or("retract-artifact needs --observation naming the marked poll")?;
+            let reason = args
+                .reason
+                .as_ref()
+                .ok_or("retract-artifact needs --reason: withdrawing a mark changes what every consumer of last_changed_at reads")?;
+            Ok((
+                fusiform_module::route::TOOL_RETRACT_ARTIFACT,
+                serde_json::json!({
+                    "observation_id": observation,
+                    "reason": reason,
+                    "dry_run": !args.commit,
+                }),
+            ))
+        }
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }
 }
@@ -367,6 +390,7 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
         "history" => print_history(&response),
         "correct" => print_correction(&response),
         "mark-artifact" => print_mark(&response),
+        "retract-artifact" => print_retraction(&response),
         _ => unreachable!("the command was validated above"),
     }
     Ok(())
@@ -1311,6 +1335,39 @@ fn render_mark(response: &serde_json::Value) -> String {
     out
 }
 
+/// What withdrawing a mark would do, or did.
+fn print_retraction(response: &serde_json::Value) {
+    println!("{}", render_retraction(response));
+}
+
+fn render_retraction(response: &serde_json::Value) -> String {
+    let flag = |k: &str| response.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+    let id = response
+        .get("observation_id")
+        .and_then(|v| v.as_i64())
+        .unwrap_or_default();
+
+    // "Nothing to take back" is reported as its own outcome rather than as a
+    // quiet success. A retraction against an unmarked poll changes nothing, and
+    // telling an operator it is done would leave them believing they had fixed
+    // something.
+    if !flag("had_live_mark") {
+        return format!("observation {id} carries no live mark. Nothing to retract.");
+    }
+
+    if flag("committed") {
+        format!(
+            "observation {id}: mark withdrawn. last_changed_at counts this poll's \
+             eras again, and both the mark and this retraction stay on the record."
+        )
+    } else {
+        format!(
+            "observation {id} carries a live mark.\n\npreview only. Re-run with \
+             --commit to withdraw it."
+        )
+    }
+}
+
 fn print_correction(response: &serde_json::Value) {
     let written = response
         .get("written")
@@ -2171,6 +2228,56 @@ mod mark_render_tests {
         assert!(
             rendered.contains("marked."),
             "a committed mark must say it wrote: {rendered}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod retraction_render_tests {
+    use super::*;
+
+    /// An unmarked poll is told so, not congratulated.
+    ///
+    /// A retraction against a poll carrying no mark is a successful call that
+    /// changes nothing. Rendering it as done would leave an operator believing
+    /// they had fixed something — the same shape as a preview that reads like a
+    /// commit.
+    #[test]
+    fn nothing_to_retract_says_so() {
+        let rendered = render_retraction(&serde_json::json!({
+            "observation_id": 7, "committed": false, "had_live_mark": false
+        }));
+        assert!(
+            rendered.contains("no live mark") && rendered.contains("Nothing to retract"),
+            "an unmarked poll must be named as such: {rendered}"
+        );
+        assert!(
+            !rendered.contains("preview"),
+            "there is nothing to preview when there is nothing to withdraw: {rendered}"
+        );
+    }
+
+    /// A live mark previews, and a committed retraction says what changed.
+    ///
+    /// CONTROL for the test above: without this, a renderer that always
+    /// reported "nothing to retract" would pass.
+    #[test]
+    fn a_live_mark_previews_then_commits() {
+        let preview = render_retraction(&serde_json::json!({
+            "observation_id": 203, "committed": false, "had_live_mark": true
+        }));
+        assert!(
+            preview.contains("preview only"),
+            "a live mark must preview before withdrawing: {preview}"
+        );
+
+        let done = render_retraction(&serde_json::json!({
+            "observation_id": 203, "committed": true, "had_live_mark": true
+        }));
+        assert!(
+            done.contains("withdrawn") && done.contains("stay on the record"),
+            "a committed retraction must say what changed AND that the mark \
+             survives, since the log is what an operator reads next: {done}"
         );
     }
 }

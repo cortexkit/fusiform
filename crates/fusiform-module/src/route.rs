@@ -33,9 +33,10 @@ use serde::Deserialize;
 pub use fusiform_protocol::{
     CatalogGetRequest, CatalogGetResponse, CorrectRequest, CorrectResponse, CorrectedFact,
     CorrectionDetail, HistoryEra, HistoryRequest, HistoryResponse, MarkArtifactRequest,
-    MarkArtifactResponse, OverriddenFactWire, PollChanges, StatusPoll, StatusRequest,
-    StatusResponse, ToolResponse, UncertainFactWire, WithheldFactWire, TOOLS, TOOL_CORRECT,
-    TOOL_GET, TOOL_HISTORY, TOOL_MARK_ARTIFACT, TOOL_STATUS,
+    MarkArtifactResponse, OverriddenFactWire, PollChanges, RetractArtifactRequest,
+    RetractArtifactResponse, StatusPoll, StatusRequest, StatusResponse, ToolResponse,
+    UncertainFactWire, WithheldFactWire, TOOLS, TOOL_CORRECT, TOOL_GET, TOOL_HISTORY,
+    TOOL_MARK_ARTIFACT, TOOL_RETRACT_ARTIFACT, TOOL_STATUS,
 };
 
 /// Why a request could not be served.
@@ -136,6 +137,9 @@ pub fn serve_tool_call(store: &CatalogStore, body: &[u8]) -> Result<ToolResponse
         TOOL_STATUS => serve_status(store, &args).map(ToolResponse::Status),
         TOOL_CORRECT => serve_correct(store, &args).map(ToolResponse::Correct),
         TOOL_MARK_ARTIFACT => serve_mark_artifact(store, &args).map(ToolResponse::MarkArtifact),
+        TOOL_RETRACT_ARTIFACT => {
+            serve_retract_artifact(store, &args).map(ToolResponse::RetractArtifact)
+        }
         // Named explicitly rather than served anyway. A module that answers to
         // any tool name keeps answering after a consumer's typo, and the
         // consumer believes it called something else.
@@ -1205,6 +1209,72 @@ pub fn serve_mark_artifact(
         restating_eras: restating,
         total_eras: total,
         observed_at_ms: observed_at.0,
+    })
+}
+
+/// Take back a mark on one poll.
+///
+/// # Why a separate tool rather than a flag
+///
+/// A retraction carries its own reason and is its own claim. A boolean on the
+/// mark call would let the two be confused in a call log, and the question an
+/// operator asks afterwards — "who withdrew this and why" — needs an answer
+/// that is not the same field holding a different value.
+///
+/// Previews by default, like every write here. The preview is worth more than
+/// on a mark, because it answers whether there is anything live to take back:
+/// a retraction against an unmarked poll is a successful call that changes
+/// nothing, and reporting that as done would leave an operator believing they
+/// had fixed something.
+pub fn serve_retract_artifact(
+    store: &CatalogStore,
+    body: &[u8],
+) -> Result<RetractArtifactResponse, RouteError> {
+    let request: RetractArtifactRequest = serde_json::from_slice(body)
+        .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?;
+
+    if request.reason.trim().is_empty() {
+        return Err(RouteError::bad_request(
+            "a retraction must carry a reason: it changes what every consumer of \
+             last_changed_at reads, and an unexplained change is unauditable"
+                .to_string(),
+        ));
+    }
+
+    if store
+        .observation_observed_at(request.observation_id)
+        .map_err(|e| store_error(&e))?
+        .is_none()
+    {
+        return Err(RouteError::no_coverage(format!(
+            "no observation {} in this store",
+            request.observation_id
+        )));
+    }
+
+    let live = store
+        .observation_artifact_reason(request.observation_id)
+        .map_err(|e| store_error(&e))?
+        .is_some();
+
+    let committed = if request.dry_run || !live {
+        // Not written when there is nothing live: a retraction event against an
+        // unmarked poll would record a withdrawal of a claim nobody made.
+        false
+    } else {
+        store
+            .retract_observation_artifact(
+                request.observation_id,
+                request.reason.trim(),
+                Timestamp(now_ms()),
+            )
+            .map_err(|e| store_error(&e))?
+    };
+
+    Ok(RetractArtifactResponse {
+        observation_id: request.observation_id,
+        committed,
+        had_live_mark: live,
     })
 }
 

@@ -673,6 +673,10 @@ fn the_manifest_and_the_dispatch_agree_on_which_tools_exist() {
                 "reason": "reachability check"
                 // dry_run defaults to true, so this cannot write either.
             }),
+            "catalog.retract_artifact" => serde_json::json!({
+                "observation_id": 999_999,
+                "reason": "reachability check"
+            }),
             _ => serde_json::json!({}),
         };
         let body = serde_json::to_vec(&serde_json::json!({
