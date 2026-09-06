@@ -17,8 +17,7 @@ pub mod seed;
 pub mod signals;
 
 use subc_protocol::manifest::{
-    Bindings, Concurrency, ExecutionMode, IdentityBinding, IdentityScope, ModuleManifest,
-    ProviderRole, StorageBinding, StorageKind, StorageScope, Tool, TrustTier,
+    Concurrency, ExecutionMode, IdentityScope, ModuleManifest, ProviderRole, Tool, TrustTier,
 };
 use subc_protocol::PROTOCOL_VERSION;
 
@@ -266,44 +265,34 @@ pub fn manifest() -> ModuleManifest {
 
     // `consumes` is the builder's default. Fusiform requests no consumer roles,
     // and an explicit empty vec would assert nothing the default does not.
-    let bindings = Bindings {
-        storage: StorageBinding {
-            kind: StorageKind::Sqlite,
-            // `Project` is the only variant this protocol version defines,
-            // and it does not decide anything here: the daemon resolves
-            // every module to one database (`isolation: module`) at
-            // <data_home>/cortexkit/<module_id>/store.db regardless of what
-            // this field says.
-            //
-            // Worth stating because the field READS like it partitions
-            // storage per project, which for fusiform would be wrong — the
-            // catalog describes the world, not a project, so two projects
-            // asking what models exist must get the same answer. They do,
-            // but because of the daemon's resolution rather than because of
-            // this value.
-            scope: StorageScope::Project,
-            owns_schema: true,
-        },
-        vault_grants: Vec::new(),
-        identity: IdentityBinding {
-            requires: Vec::new(),
-            optional: vec![IdentityScope::Project, IdentityScope::Session],
-        },
-    };
-
     ModuleManifest::builder(MODULE_ID.to_string(), env!("CARGO_PKG_VERSION").to_string())
         .protocol_ver(PROTOCOL_VERSION)
-        // Both moved from constructor arguments to builder methods in
-        // subc-protocol 0.19.0, and both are Option now. Passed EXPLICITLY
-        // rather than left to default: the whole point of the surrounding
-        // declarations is that an absent value means "nobody established this",
-        // so a value that IS established has to be stated or it becomes
-        // indistinguishable from one nobody reviewed.
+        // Declared because it is TRUE, not because a signature demanded it.
         //
-        // Fusiform is first-party and does declare bindings; omitting them here
-        // would silently downgrade both to unstated by taking a default.
+        // Under 0.18 the compiler kept this field present. Under 0.19 it is an
+        // optional setter, so nothing defends it but the test below — measured,
+        // not assumed: deleting this line built clean and passed the whole
+        // binary. An unread value that a reader is invited to tidy away is one
+        // tidy from gone with every gate green.
         .trust_tier(Some(TrustTier::FirstParty))
-        .bindings(Some(bindings))
+        // BINDINGS DELETED, and this is the case 0.19 was made for.
+        //
+        // The block declared `StorageScope::Project`, and the comment beside it
+        // admitted the problem: that is the enum's only variant, it decides
+        // nothing (the daemon resolves every module to one database at
+        // <data_home>/cortexkit/<module_id>/store.db under `isolation: module`
+        // regardless), and it READS as though this catalog were partitioned per
+        // project. For fusiform that reading is false — the catalog describes
+        // the world, so two projects asking what models exist must get the same
+        // answer.
+        //
+        // So the only value the type could express was one this module would
+        // have to footnote to stop it being wrong. Absent is the honest form,
+        // and a footnote is not a substitute for not making the claim.
+        //
+        // Nothing is lost operationally: the StorageDescriptor arrives from the
+        // daemon in HELLO_ACK, constructed by its own policy, never derived
+        // from anything a module claims here.
         // No capability claim until one has been through the owner round.
         //
         // The field is decode-optional and construct-required, so the honest

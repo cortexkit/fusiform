@@ -1975,3 +1975,57 @@ fn marking_an_unknown_observation_is_not_a_bad_request() {
         fusiform_protocol::CODE_BAD_REQUEST,
     );
 }
+
+/// The manifest declares what is TRUE of this module, in both directions.
+///
+/// # Why this test exists, measured rather than assumed
+///
+/// Under subc-protocol 0.18 `trust_tier` and `bindings` were positional
+/// arguments, so the COMPILER kept them present. 0.19 made them optional
+/// setters — correctly, because the daemon reads neither on any production path
+/// and a required-but-unread field forces producers to invent values.
+///
+/// The consequence does not appear as a compile error: deleting
+/// `.trust_tier(...)` built clean and passed the entire binary. The declaration
+/// survived only as long as nobody tidied the builder chain, and the tidy is
+/// INVITED, since the protocol itself says the field goes unread.
+///
+/// So both claims are pinned here, and the pinning is what makes them
+/// declarations rather than leftovers:
+///
+/// - `trust_tier` PRESENT, because fusiform is first-party and that is true.
+/// - `bindings` ABSENT, because the only storage scope the enum can express
+///   reads as a per-project partition, and this catalog describes the world.
+///   Two projects asking what models exist must get the same answer.
+///
+/// A manifest describes the module, not what the supervisor currently bothers
+/// to read. The reader changes; the module does not.
+#[test]
+fn the_manifest_declares_what_is_true_and_omits_what_is_not() {
+    let manifest = fusiform_module::manifest();
+    let wire = serde_json::to_value(&manifest).expect("the manifest must serialize");
+
+    assert_eq!(
+        manifest.trust_tier,
+        Some(subc_protocol::manifest::TrustTier::FirstParty),
+        "fusiform is first-party; deleting the setter must redden here rather \
+         than pass silently"
+    );
+    assert_eq!(
+        wire.get("trust_tier").and_then(|v| v.as_str()),
+        Some("first_party"),
+        "and it must reach the wire, since the struct field alone does not \
+         prove what a daemon receives"
+    );
+
+    assert!(
+        manifest.bindings.is_none(),
+        "bindings must stay absent: the only expressible storage scope reads as \
+         a per-project partition, which is false for a catalog of the world"
+    );
+    assert!(
+        wire.get("bindings").is_none() || wire["bindings"].is_null(),
+        "absent on the wire too, so a reader sees no claim rather than a claim \
+         this module would have to footnote"
+    );
+}
