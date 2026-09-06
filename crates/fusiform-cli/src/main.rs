@@ -69,6 +69,8 @@ commands:
                             catalog version, row counts
   get                       read the catalog
   history                   every recorded era for one fact
+  mark-artifact             record that one poll rewrote fusiform's own
+                            representation rather than upstream data
   correct                   record that fusiform's own record was wrong over a
                             past window (previews by default; --commit writes)
 
@@ -83,6 +85,11 @@ options:
   --capabilities            only capability and limit facts
   --include-retired         include models the upstream stopped publishing
   --polls <n>               how many recent polls status should show
+
+mark-artifact options:
+  --observation <id>        the poll to mark; see `ck models status --polls N`
+  --reason <ref>            the evidence record naming the representation change
+  --commit                  write it; previews by default
 
 correct options:
   --field <key>             a fact this correction names; repeatable
@@ -184,6 +191,7 @@ struct Args {
     from_ms: Option<i64>,
     until_ms: Option<i64>,
     reason: Option<String>,
+    observation: Option<i64>,
     commit: bool,
     /// An explicit `--subc` path, or `None` to discover.
     ///
@@ -315,6 +323,25 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
                 }),
             ))
         }
+        "mark-artifact" => {
+            let observation = args
+                .observation
+                .ok_or("mark-artifact needs --observation naming the poll")?;
+            let reason = args
+                .reason
+                .as_ref()
+                .ok_or("mark-artifact needs --reason naming the evidence record")?;
+            Ok((
+                fusiform_module::route::TOOL_MARK_ARTIFACT,
+                serde_json::json!({
+                    "observation_id": observation,
+                    "reason": reason,
+                    // Same inversion as `correct`: the wire asks whether this is
+                    // a preview, and the flag asks whether to write.
+                    "dry_run": !args.commit,
+                }),
+            ))
+        }
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }
 }
@@ -339,6 +366,7 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
         "get" => print_catalog(&response),
         "history" => print_history(&response),
         "correct" => print_correction(&response),
+        "mark-artifact" => print_mark(&response),
         _ => unreachable!("the command was validated above"),
     }
     Ok(())
@@ -1109,6 +1137,7 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         from_ms: None,
         until_ms: None,
         reason: None,
+        observation: None,
         commit: false,
         connection_file: None,
         json: false,
@@ -1157,6 +1186,13 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
                 );
             }
             "--reason" => args.reason = Some(value()?),
+            "--observation" => {
+                args.observation = Some(
+                    value()?
+                        .parse()
+                        .map_err(|e| format!("--observation must be an integer: {e}"))?,
+                )
+            }
             "--commit" => args.commit = true,
             "--subc" => args.connection_file = Some(PathBuf::from(value()?)),
             // Prefixes come from the store's own constants, not string
@@ -1213,6 +1249,68 @@ fn field_id_for_fact_key(key: &str) -> Result<serde_json::Value, String> {
 }
 
 /// Print what a correction did, or would do.
+/// What marking a poll would do, or did.
+///
+/// # Why the two counts are printed as a difference
+///
+/// The operator's question is whether this id names the poll they mean, and the
+/// discriminating number is how many of its eras RESTATE the claim already in
+/// force. On the 2026-08-16 poll that is 17,454 of 17,455 — and the one era
+/// that is not a restatement is a genuine upstream change that survives the
+/// mark. Printing a percentage would hide exactly the case that decided the
+/// design, so both numbers are shown and the remainder is named.
+fn print_mark(response: &serde_json::Value) {
+    println!("{}", render_mark(response));
+}
+
+fn render_mark(response: &serde_json::Value) -> String {
+    let n = |k: &str| response.get(k).and_then(|v| v.as_i64());
+    let committed = response
+        .get("committed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let mut out = String::new();
+    let id = n("observation_id").unwrap_or_default();
+    if let Some(at) = n("observed_at_ms") {
+        out.push_str(&format!(
+            "observation {id}  observed {}\n",
+            format_instant(at)
+        ));
+    } else {
+        out.push_str(&format!("observation {id}\n"));
+    }
+
+    match (n("restating_eras"), n("total_eras")) {
+        (Some(same), Some(total)) => {
+            out.push_str(&format!(
+                "  {} of {} restate the value already in force\n",
+                same,
+                count(total.max(0) as usize, "era")
+            ));
+            let genuine = total - same;
+            if genuine > 0 {
+                // Named rather than left to subtraction: these are the eras the
+                // mark KEEPS, and an operator who does not know they exist reads
+                // the mark as deleting the whole poll.
+                out.push_str(&format!(
+                    "  {} carr{} a different value and would survive the mark\n",
+                    count(genuine.max(0) as usize, "era"),
+                    if genuine == 1 { "ies" } else { "y" }
+                ));
+            }
+        }
+        _ => out.push_str("  era counts unavailable\n"),
+    }
+
+    out.push_str(if committed {
+        "\nmarked. last_changed_at now skips the restating eras of this poll."
+    } else {
+        "\npreview only. Re-run with --commit to record it."
+    });
+    out
+}
+
 fn print_correction(response: &serde_json::Value) {
     let written = response
         .get("written")
@@ -2007,6 +2105,72 @@ mod render_once_tests {
             out.matches("rate.input").count(),
             1,
             "each fact must appear once: {out}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod mark_render_tests {
+    use super::*;
+
+    /// The rendered preview names the eras that would SURVIVE the mark.
+    ///
+    /// # Why this line exists rather than a percentage
+    ///
+    /// The 2026-08-16 poll is 17,454 restatements and ONE genuine upstream
+    /// change. An operator who does not know that era exists reads the mark as
+    /// deleting the whole poll, and the number that tells them is the
+    /// remainder — which a ratio rounds away entirely.
+    #[test]
+    fn the_preview_names_the_eras_that_survive() {
+        let rendered = render_mark(&serde_json::json!({
+            "observation_id": 203,
+            "committed": false,
+            "restating_eras": 17_454,
+            "total_eras": 17_455,
+            "observed_at_ms": 1_786_529_249_396i64
+        }));
+
+        assert!(
+            rendered.contains("17454 of 17455 eras"),
+            "both counts must appear so the difference is visible: {rendered}"
+        );
+        assert!(
+            rendered.contains("1 era carries a different value"),
+            "the surviving era must be named, singular: {rendered}"
+        );
+        assert!(
+            rendered.contains("preview only"),
+            "an uncommitted mark must say so: {rendered}"
+        );
+        assert!(
+            !rendered.contains("marked."),
+            "a preview must not claim it marked anything: {rendered}"
+        );
+    }
+
+    /// A poll with nothing to keep says nothing about survivors.
+    ///
+    /// CONTROL for the test above: without this, a renderer that always prints
+    /// the survivor line would pass, and an operator marking a pure artifact
+    /// would be told an era survives when none does.
+    #[test]
+    fn a_pure_artifact_poll_claims_no_survivors() {
+        let rendered = render_mark(&serde_json::json!({
+            "observation_id": 7,
+            "committed": true,
+            "restating_eras": 40,
+            "total_eras": 40,
+            "observed_at_ms": 1_786_529_249_396i64
+        }));
+
+        assert!(
+            !rendered.contains("survive"),
+            "no era survives a poll that is entirely restatement: {rendered}"
+        );
+        assert!(
+            rendered.contains("marked."),
+            "a committed mark must say it wrote: {rendered}"
         );
     }
 }
