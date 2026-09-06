@@ -12,6 +12,24 @@ on:
     branches: [master, 'train/**']
   pull_request:
   workflow_call:
+  # A push gate asks "is this change good". Only a scheduled run asks "is what
+  # already landed still good against the world as it is now" — and for this
+  # repo the second answer changes on its own, because CI resolves eight sibling
+  # path dependencies (subconscious ×4, commons ×3, engram ×1) against their
+  # REMOTES rather than a pinned rev.
+  #
+  # So master can go red with no commit of mine responsible, and the push gate
+  # cannot see it: it only runs when I push. Without this, the break surfaces at
+  # my next push attached to an unrelated change, and reads as that change
+  # breaking something.
+  #
+  # CKCRED measured the clean evidence (fleet channel, 2026-09-06): the same sha
+  # green on push at 07:59 and red on schedule at 11:14, nothing in their repo
+  # moved. That is also why this must not be dropped once train branches land —
+  # a green train sha is green against the siblings AS THEY WERE WHEN CI RAN,
+  # and five lock waves reached this repo in a single day.
+  schedule:
+    - cron: '0 6 * * *'
 
 concurrency:
   group: ci-${{ github.ref }}
