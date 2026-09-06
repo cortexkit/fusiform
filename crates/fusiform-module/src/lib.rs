@@ -291,22 +291,28 @@ pub fn manifest() -> ModuleManifest {
         },
     };
 
-    ModuleManifest::builder(
-        MODULE_ID.to_string(),
-        env!("CARGO_PKG_VERSION").to_string(),
-        TrustTier::FirstParty,
-        bindings,
-    )
-    .protocol_ver(PROTOCOL_VERSION)
-    // No capability claim until one has been through the owner round.
-    //
-    // The field is decode-optional and construct-required, so the honest
-    // pre-review value is None rather than a plausible string. A capability is a
-    // claim other modules route on, and a claim minted here to fill a field
-    // would be indistinguishable from one that was reviewed.
-    .capabilities(None)
-    .self_signals(self_signals)
-    .provenance(provenance)
-    .provides(provides)
-    .build()
+    ModuleManifest::builder(MODULE_ID.to_string(), env!("CARGO_PKG_VERSION").to_string())
+        .protocol_ver(PROTOCOL_VERSION)
+        // Both moved from constructor arguments to builder methods in
+        // subc-protocol 0.19.0, and both are Option now. Passed EXPLICITLY
+        // rather than left to default: the whole point of the surrounding
+        // declarations is that an absent value means "nobody established this",
+        // so a value that IS established has to be stated or it becomes
+        // indistinguishable from one nobody reviewed.
+        //
+        // Fusiform is first-party and does declare bindings; omitting them here
+        // would silently downgrade both to unstated by taking a default.
+        .trust_tier(Some(TrustTier::FirstParty))
+        .bindings(Some(bindings))
+        // No capability claim until one has been through the owner round.
+        //
+        // The field is decode-optional and construct-required, so the honest
+        // pre-review value is None rather than a plausible string. A capability is a
+        // claim other modules route on, and a claim minted here to fill a field
+        // would be indistinguishable from one that was reviewed.
+        .capabilities(None)
+        .self_signals(self_signals)
+        .provenance(provenance)
+        .provides(provides)
+        .build()
 }
