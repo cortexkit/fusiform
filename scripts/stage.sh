@@ -80,8 +80,29 @@ done
 echo
 echo "rev       $HEAD_REV (self-reported by both binaries)"
 echo
+# A sidecar per binary, not just a printed digest.
+#
+# This script used to print the hashes and stop, which reads as sufficient and
+# is not: a digest in a terminal is gone when the window is, so the placing seat
+# has nothing to verify the bytes against at the moment they copy them. SUBC
+# refuses bare-binary staging for exactly that reason and refused this script's
+# output once.
+#
+# Written in `shasum -c` form and hashed FROM THE BYTES AT REST here, so the
+# check the placer runs is against the file they are about to move rather than
+# against a number this script remembered.
+for bin in ck-fusiform ck-models; do
+    (cd "$STAGE" && shasum -a 256 "$bin" > "$bin.sha256")
+    # Verified here rather than assumed: a sidecar that does not check is worse
+    # than none, because it is CITED as evidence.
+    (cd "$STAGE" && shasum -c "$bin.sha256" > /dev/null) || {
+        echo "the $bin sidecar does not check against the staged bytes" >&2
+        exit 1
+    }
+done
+
 echo "sha256:"
-shasum -a 256 "$STAGE"/* | sed "s|$STAGE/||"
+shasum -a 256 "$STAGE"/ck-fusiform "$STAGE"/ck-models | sed "s|$STAGE/||"
 echo
 echo "LC_UUID:"
 for bin in ck-fusiform ck-models; do
