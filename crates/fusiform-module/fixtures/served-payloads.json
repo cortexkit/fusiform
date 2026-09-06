@@ -241,6 +241,7 @@
         }
       ],
       "fact_key": "rate.input",
+      "last_changed_at_ms": 9000,
       "model_id": "claude-sonnet-4-5",
       "provider_id": "anthropic",
       "source": "models.dev"

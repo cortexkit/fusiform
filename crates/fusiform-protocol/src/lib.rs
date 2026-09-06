@@ -802,6 +802,32 @@ pub struct HistoryResponse {
     pub fact_key: String,
     /// Oldest first: a history is read forwards.
     pub eras: Vec<HistoryEra>,
+    /// When this fact's value last GENUINELY changed, in epoch milliseconds.
+    ///
+    /// # Why a consumer cannot compute this from `eras`
+    ///
+    /// The newest era's boundary is not the answer. Some eras record fusiform
+    /// changing its own representation rather than the upstream changing its
+    /// data — on 2026-08-16 one poll wrote 17,455 such eras with identical
+    /// values on both sides. Derived naively, every priced fact in the catalog
+    /// reports that instant, so a consumer calibrating on it reads the WHOLE
+    /// CATALOG as freshly maintained. That hides abandoned rows rather than
+    /// exposing them, which is the opposite of what the field is for.
+    ///
+    /// Which polls those were is not visible in this list and is not something
+    /// a consumer could be expected to know, so the exclusion is applied here,
+    /// per era, before the answer is served.
+    ///
+    /// # What it does NOT mean
+    ///
+    /// Not "when fusiform last looked" — see the observation windows on each
+    /// era for that. Not a staleness verdict either: 116 providers in this
+    /// catalog have never changed a rate, so an old instant is the normal state
+    /// for most of it and means only what it says.
+    ///
+    /// `None` when the fact has no era at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_changed_at_ms: Option<i64>,
     /// The override in force on this fact right now, when there is one.
     ///
     /// # Why history carries this and does NOT apply it

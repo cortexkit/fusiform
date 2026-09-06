@@ -258,12 +258,28 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
         )
     });
 
+    // Served here rather than left to the consumer because the exclusion it
+    // applies is not derivable from the era list above: which polls were
+    // fusiform's own representation changes is not in those rows, and a
+    // consumer taking the newest boundary reads the whole catalog as freshly
+    // maintained.
+    //
+    // A store read failure renders no field rather than a wrong instant. An
+    // absent value says "not established"; a wrong one is an assertion about
+    // when a price last moved, which is the kind of claim a caller acts on.
+    let last_changed_at_ms = store
+        .last_changed_at(source, &request.provider_id, &request.model_id, &fact)
+        .ok()
+        .flatten()
+        .map(|t| t.0);
+
     Ok(HistoryResponse {
         source: source.as_str().to_string(),
         provider_id: request.provider_id,
         model_id: request.model_id,
         fact_key: request.fact_key,
         eras,
+        last_changed_at_ms,
         overridden,
     })
 }

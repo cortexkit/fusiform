@@ -1710,3 +1710,135 @@ fn an_empty_history_names_which_cause_applies() {
         "control: a recorded fact must return eras: {value}"
     );
 }
+
+/// The served `last_changed_at_ms` excludes artifact eras.
+///
+/// # Why the golden fixture cannot cover this
+///
+/// In that fixture the answer equals the newest boundary, so it passes just as
+/// well against a route that ignores artifacts entirely. This drives the case
+/// where the two differ: the newest era is fusiform rewriting its own
+/// representation, and the true answer is the era before it.
+///
+/// That is the whole reason the field is served rather than derived by the
+/// consumer — which polls were representation changes is not in the era list,
+/// and a consumer taking the newest boundary reads an untouched fact as
+/// freshly maintained.
+#[test]
+fn the_served_last_change_ignores_an_artifact_poll() {
+    let f = fixture();
+
+    // A genuine reprice, then a poll that rewrites the same value.
+    let mut repriced: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    repriced
+        .get_mut("anthropic")
+        .and_then(|p| p.get_mut("models"))
+        .and_then(|m| m.get_mut("claude-sonnet-4-5"))
+        .and_then(|m| m.get_mut("cost"))
+        .and_then(|c| c.as_object_mut())
+        .unwrap()
+        .insert("input".to_string(), serde_json::json!(7.0));
+
+    let mut artifact_obs = None;
+    for (at, doc) in [(3_000i64, &repriced), (5_000, &repriced)] {
+        let obs = f
+            .store
+            .record_observation(&NewObservation {
+                source: SourceId::ModelsDev,
+                observed_at: Timestamp(at - 1_000),
+                outcome: ObservationOutcome::Unchanged,
+                normalized_hash: Some(format!("h{at}")),
+                raw_hash: None,
+                etag: None,
+                duration_ms: None,
+                detail: None,
+            })
+            .unwrap();
+        let catalog = normalize_models_dev(&serde_json::to_vec(doc).unwrap())
+            .unwrap()
+            .catalog;
+        let plan = plan_ingest(
+            &f.store,
+            &catalog,
+            Timestamp(at),
+            BoundaryKind::Observed,
+            Some(obs),
+        )
+        .unwrap();
+        // The second pass produces no eras, since the value did not move. Write
+        // one by hand, exactly as a representation change would: same claim,
+        // new era, new observation.
+        if at == 5_000 {
+            artifact_obs = Some(obs);
+            // The value is READ BACK from the store rather than written by
+            // hand, so it is byte-for-byte the claim already in force. A
+            // hand-typed literal that differs by a digit is a real change, and
+            // the test would then be asserting nothing about artifacts.
+            let held = f
+                .store
+                .fact_history(
+                    SourceId::ModelsDev,
+                    "anthropic",
+                    "claude-sonnet-4-5",
+                    &fusiform_store::FactKey::rate(fusiform_core::TokenClass::Input),
+                )
+                .unwrap()
+                .last()
+                .expect("the reprice era exists")
+                .value_json
+                .clone();
+            f.store
+                .append_eras(&[fusiform_store::NewEra {
+                    source: SourceId::ModelsDev,
+                    provider_id: "anthropic".into(),
+                    model_id: "claude-sonnet-4-5".into(),
+                    fact_key: fusiform_store::FactKey::rate(fusiform_core::TokenClass::Input),
+                    value_json: held,
+                    boundary_at: Timestamp(5_000),
+                    boundary_kind: BoundaryKind::Observed,
+                    observation_id: Some(obs),
+                }])
+                .unwrap();
+        } else {
+            f.store.append_eras(&plan.eras).unwrap();
+        }
+    }
+
+    let ask = || match fusiform_module::route::serve_tool_call(
+        &f.store,
+        br#"{"name": "catalog.history", "arguments": {
+            "provider_id": "anthropic",
+            "model_id": "claude-sonnet-4-5",
+            "fact_key": "rate.input"
+        }}"#,
+    )
+    .expect("history must be served")
+    {
+        fusiform_module::route::ToolResponse::History(h) => h,
+        other => panic!("expected a history response, got {other:?}"),
+    };
+
+    // CONTROL: unmarked, the artifact is indistinguishable from a real change.
+    // Without this the assertion below passes against a route that always
+    // reports the era before the newest.
+    assert_eq!(
+        ask().last_changed_at_ms,
+        Some(5_000),
+        "control: an unmarked artifact reads as the last change"
+    );
+
+    f.store
+        .mark_observation_artifact(
+            artifact_obs.expect("the artifact poll was recorded"),
+            "a representation change",
+            Timestamp(9_000),
+        )
+        .unwrap();
+
+    assert_eq!(
+        ask().last_changed_at_ms,
+        Some(3_000),
+        "the served answer must skip the artifact era and report the genuine \
+         reprice before it"
+    );
+}

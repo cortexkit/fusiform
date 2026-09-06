@@ -208,6 +208,7 @@ fn every_response_type_round_trips() {
     );
 
     let history = HistoryResponse {
+        last_changed_at_ms: Some(1_786_529_249_396),
         source: "models.dev".into(),
         provider_id: "anthropic".into(),
         model_id: "claude-sonnet-4-5".into(),
