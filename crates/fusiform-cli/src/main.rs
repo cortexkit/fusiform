@@ -396,9 +396,7 @@ fn connection_file_candidates(override_path: Option<&Path>) -> Vec<PathBuf> {
 }
 
 fn non_empty(key: &str) -> Option<PathBuf> {
-    env::var_os(key)
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
+    env::var_os(key).map(PathBuf::from)
 }
 
 /// The ladder, with the environment passed in rather than read.
@@ -414,6 +412,25 @@ fn candidates_with(
     home: Option<PathBuf>,
     temp_fallback: PathBuf,
 ) -> Vec<PathBuf> {
+    // An empty variable is UNSET, and the filter lives here rather than at the
+    // reader so an injected environment reaches it.
+    //
+    // `ck` does the same through `non_empty_os_var`, so this is rung-for-rung
+    // agreement rather than a local nicety. Some rigs export `XDG_RUNTIME_DIR=""`
+    // to mean unset, and without this `PathBuf::from("").join(...)` yields the
+    // BARE FILENAME — a relative path resolved against whatever directory the
+    // operator happened to be standing in. That is not a miss; it is a lookup
+    // somewhere `ck` never looks, which is this ladder's whole failure mode.
+    //
+    // Placement is the point. While the filter sat in the reader, every test
+    // injected BELOW it and dropping it passed the entire suite (ENGRAM's
+    // fixture-vacuity, fleet channel 2026-09-06: a test that filters its own
+    // inputs cannot see the filter it is testing).
+    let drop_empty = |p: Option<PathBuf>| p.filter(|v| !v.as_os_str().is_empty());
+    let env_named = drop_empty(env_named);
+    let runtime_dir = drop_empty(runtime_dir);
+    let home = drop_empty(home);
+
     if let Some(path) = override_path {
         return vec![path.to_path_buf()];
     }
@@ -2030,6 +2047,54 @@ mod connection_discovery_tests {
 
     /// `--subc` is EXCLUSIVE, not first-in-a-list.
     ///
+    /// An empty variable is unset, and the rung it would have built is a
+    /// RELATIVE path.
+    ///
+    /// Some rigs export `XDG_RUNTIME_DIR=""` to mean unset. Without the filter
+    /// `PathBuf::from("")` joins to the bare filename, so the CLI searches the
+    /// directory the operator is standing in — not a miss, a lookup somewhere
+    /// `ck` never looks, which is exactly this ladder's failure mode.
+    ///
+    /// This test is only possible because the filter sits in the ladder rather
+    /// than in the reader. While it lived at the reader every test injected
+    /// below it, and dropping it passed the whole suite.
+    #[test]
+    fn an_empty_variable_is_unset_rather_than_a_relative_path() {
+        let got = candidates_with(
+            None,
+            None,
+            Some(PathBuf::new()),
+            Some(p("/home/u")),
+            p("/tmp/subc-u.connection.json"),
+        );
+        assert!(
+            got.iter().all(|c| c.is_absolute()),
+            "an empty rung must not produce a relative candidate: {got:?}"
+        );
+        assert_eq!(
+            got.first(),
+            Some(&p(
+                "/home/u/.local/share/cortexkit/run/subc-connection.json"
+            )),
+            "with the runtime dir unset the HOME rung leads: {got:?}"
+        );
+
+        // CONTROL: the same ladder with a real runtime dir still prefers it, so
+        // the assertion above cannot pass by the rung being ignored outright.
+        let control = candidates_with(
+            None,
+            None,
+            Some(p("/run/user/501")),
+            Some(p("/home/u")),
+            p("/tmp/subc-u.connection.json"),
+        );
+        assert_eq!(
+            control.first(),
+            Some(&p("/run/user/501/subc-connection.json")),
+            "a non-empty runtime dir must still lead: {control:?}"
+        );
+    }
+
     /// A path the operator named and got wrong must fail loudly. Falling
     /// through to discovery would answer from whichever daemon is found — in
     /// practice production — and the reply would be true and about the wrong
