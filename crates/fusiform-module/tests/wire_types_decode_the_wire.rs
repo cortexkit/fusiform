@@ -95,3 +95,63 @@ fn collect_priced<'a>(node: &'a serde_json::Value, out: &mut Vec<&'a serde_json:
         _ => {}
     }
 }
+
+/// Every variant the producer can WRITE decodes, not only the ones the fixture
+/// happens to contain.
+///
+/// The fixture holds nine priced rates and no others, so the fence above — the
+/// only loud thing on this seam — could not see `stated_zero` or `unpriced` at
+/// all. Both decode today; that was measured rather than assumed, and it is
+/// exactly the reasoning that produced the flatten defect, so it does not get
+/// to stand on its own.
+///
+/// ASTRO made this load-bearing rather than tidy: since their deferred-catalog
+/// change, a decode refusal on a priced rate is no longer a crash there. The
+/// event stays `not_yet_priced` and their catalog reads healthy — quieter than
+/// the old failure and worse for exactly that reason. A shape this fixture does
+/// not contain would fail silently at the consumer and nowhere else.
+///
+/// The match is EXHAUSTIVE on purpose: a new `RateValue` variant fails to
+/// compile here until someone states the bytes the producer writes for it. A
+/// runtime list would simply not mention it.
+#[test]
+fn every_variant_the_producer_writes_decodes() {
+    // Verbatim from `json_rate` in fusiform-store/src/ingest.rs, which is the
+    // authority for what reaches the store and therefore the wire.
+    let cases: &[(&str, &str)] = &[
+        ("stated_zero", r#"{"state":"stated_zero"}"#),
+        (
+            "unpriced/missing_rate",
+            r#"{"state":"unpriced","reason":"missing_rate"}"#,
+        ),
+        (
+            "unpriced/no_catalog_coverage",
+            r#"{"state":"unpriced","reason":"no_catalog_coverage"}"#,
+        ),
+        (
+            "unpriced/unknown_charge_basis",
+            r#"{"state":"unpriced","reason":"unknown_charge_basis"}"#,
+        ),
+    ];
+
+    for (label, served) in cases {
+        let decoded: RateValue = serde_json::from_str(served)
+            .unwrap_or_else(|e| panic!("{label} must decode: {e}\n  served: {served}"));
+
+        // Exhaustive: adding a variant breaks this until its bytes are stated.
+        match decoded {
+            RateValue::StatedZero => assert_eq!(*label, "stated_zero"),
+            RateValue::Unpriced { .. } => assert!(label.starts_with("unpriced/")),
+            RateValue::Priced { .. } => {
+                panic!("{label} decoded as Priced, which would silently price a rate that is not")
+            }
+        }
+    }
+
+    // CONTROL: a shape the producer does NOT write must not decode, or the
+    // assertions above would pass against a type that accepts anything.
+    assert!(
+        serde_json::from_str::<RateValue>(r#"{"state":"invented"}"#).is_err(),
+        "an unknown state must refuse, else this fence proves nothing"
+    );
+}
