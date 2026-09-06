@@ -116,7 +116,20 @@ correct options:
 ///
 /// Names what the domain answers rather than what it is, because the list is
 /// read by someone deciding which verb to reach for.
-const CK_DOMAIN_HEADLINE: &str = "AI model catalog: status, get, history, correct";
+/// The one line `ck --help` shows for this domain.
+///
+/// Describes rather than ENUMERATES, and that is the fix rather than the style.
+/// It used to read "status, get, history, correct" and was accurate until two
+/// more verbs shipped, at which point an operator reading `ck --help` saw four
+/// of six and had no way to know the list was partial. A partial enumeration
+/// reads exactly like a complete one.
+///
+/// Nothing could catch that: the string is not derived from the verb table and
+/// no test compares them, so it goes stale silently every time a verb is added.
+/// A sentence that stays true as the surface grows removes the failure mode
+/// instead of pinning it — `ck models` with no arguments prints the full list,
+/// which is the place a complete enumeration belongs.
+const CK_DOMAIN_HEADLINE: &str = "AI model catalog: prices, limits, and their history";
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
