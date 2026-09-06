@@ -1,0 +1,27 @@
+# The guarded gate has to be SHORTER to type than the unguarded one.
+#
+# `cargo test` is a lock WRITER: when a sibling path dependency moves, it
+# silently re-resolves and rewrites Cargo.lock, and a later `git add -A` folds
+# that into a commit about something else. Measured on this repo's history:
+# eleven commits carry a sibling version move under a message about WAL
+# guarantees, provenance axes and domain-type fences. Nothing was ever wrong in
+# those locks — what is wrong is that a reader bisecting a subc-transport
+# change lands on eleven messages that do not mention it.
+#
+# `--locked` makes cargo a reader, so a moved sibling REFUSES instead of being
+# absorbed silently, and absorbing becomes a deliberate `cargo update` in its
+# own commit.
+#
+# The alias rather than a script, and the short name rather than a clear one,
+# because a guarded path that costs more keystrokes gets skipped exactly when
+# it matters most — which is when you are in a hurry, which is when the sweep
+# happens. `cargo t` is shorter than `cargo test`, so the guarded spelling wins
+# on the days discipline does not.
+#
+# Cargo announces the rewrite when it happens ("Locking 1 package... Updating
+# subc-core 0.17.18 -> 0.17.19"), two lines above the build noise. That is not
+# a silent instrument — it is one that speaks in the region every one of us
+# filters out to reach `test result:`. The alias removes the need to read it.
+[alias]
+t = "test --locked"
+c = "clippy --locked --workspace --all-targets"
