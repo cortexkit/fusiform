@@ -1061,6 +1061,12 @@ fn every_field_id() -> Vec<fusiform_core::FieldId> {
         FieldId::Capability {
             capability: CapabilityId::OutputModalities,
         },
+        FieldId::Model {
+            attribute: fusiform_core::ModelAttributeId::Family,
+        },
+        FieldId::Model {
+            attribute: fusiform_core::ModelAttributeId::OpenWeights,
+        },
     ]
 }
 

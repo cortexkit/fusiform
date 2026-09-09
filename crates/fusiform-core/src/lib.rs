@@ -254,6 +254,26 @@ pub enum FieldId {
     /// wrong `attachment` flag are unrelated defects with unrelated blast
     /// radii.
     Capability { capability: CapabilityId },
+    /// A fact about the model ARTEFACT that fusiform misread.
+    ///
+    /// Per attribute, for the same reason as limits and capabilities: a wrong
+    /// `family` and a wrong `open_weights` have unrelated blast radii. A wrong
+    /// family relates this row to the wrong other rows; a wrong open-weights
+    /// flag admits the row to a population it does not belong to.
+    ///
+    /// Correctable at all because these are load-bearing rather than
+    /// decorative: a consumer uses them to relate one provider's row to
+    /// another's, so a misread here produces a confident wrong answer about a
+    /// DIFFERENT provider's model, which is the worst direction available.
+    Model { attribute: ModelAttributeId },
+}
+
+/// Which artefact attribute a [`FieldId::Model`] names.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelAttributeId {
+    Family,
+    OpenWeights,
 }
 
 /// Which capacity limit a correction names.

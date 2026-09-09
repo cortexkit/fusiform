@@ -318,6 +318,11 @@ pub fn fact_keys_of(model: &NormalizedModel) -> Vec<FactKey> {
 /// checked structurally, since the thresholds are not fusiform's to enumerate.
 pub const SERVED_FACT_NAMESPACE: &[&str] = &[
     "existence",
+    // Artefact facts: what the model IS, independent of who serves it. Two
+    // providers serving the same weights agree on these and disagree on rates,
+    // which is what makes them the join a consumer needs to relate rows.
+    "model.family",
+    "model.open_weights",
     "limit.context",
     "limit.output",
     "capability.reasoning",
@@ -345,6 +350,24 @@ pub fn facts_with_values(model: &NormalizedModel) -> Vec<(FactKey, String)> {
 
 fn facts_of(model: &NormalizedModel) -> Vec<(FactKey, String)> {
     let mut facts = vec![
+        // What the model IS, as the upstream states it, independent of who
+        // serves it. Stored rather than derived because these are upstream's
+        // own claims — the same test every other fact here passes.
+        //
+        // They exist as facts so a RELATION between providers can be computed
+        // at serve time: `family` is published identically by every provider
+        // serving the same weights, and `open_weights` marks the population
+        // where one provider's list price says something about another's row.
+        // The relation itself is fusiform's derivation and stays out of
+        // storage; these two are not.
+        (
+            FactKey::model("family"),
+            json_opt_str(model.family.as_deref()),
+        ),
+        (
+            FactKey::model("open_weights"),
+            json_opt_bool(model.open_weights),
+        ),
         // Limits. `null` is a real value here: a limit that stops being
         // published is a change, and encoding it as absence would make the era
         // disappear rather than record that the upstream stopped saying.
@@ -419,6 +442,19 @@ fn withdrawal_value(key: &FactKey) -> String {
 fn json_opt_u64(v: Option<u64>) -> String {
     match v {
         Some(n) => n.to_string(),
+        None => "null".to_string(),
+    }
+}
+
+/// A string fact, or `null` when the upstream published none.
+///
+/// Serialized through serde rather than quoted by hand: a family name is
+/// upstream text and could contain a quote or a backslash, and a hand-built
+/// literal would produce a value that fails to parse on the way out. The
+/// numeric helpers beside this one are safe to format directly; text is not.
+fn json_opt_str(v: Option<&str>) -> String {
+    match v {
+        Some(s) => serde_json::Value::String(s.to_string()).to_string(),
         None => "null".to_string(),
     }
 }

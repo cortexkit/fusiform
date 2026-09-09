@@ -508,7 +508,7 @@ dependencies = [
 
 [[package]]
 name = "fusiform-protocol"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1510,7 +1510,7 @@ dependencies = [
 
 [[package]]
 name = "subc-core"
-version = "0.17.20"
+version = "0.17.22"
 dependencies = [
  "base64",
  "cortexkit-paths",

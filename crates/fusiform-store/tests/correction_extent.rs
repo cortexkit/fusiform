@@ -8,7 +8,8 @@
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::{
-    BoundaryKind, CapabilityId, Correction, FieldId, LimitId, SourceId, Timestamp, TokenClass,
+    BoundaryKind, CapabilityId, Correction, FieldId, LimitId, ModelAttributeId, SourceId,
+    Timestamp, TokenClass,
 };
 use fusiform_store::{CatalogStore, FactKey, NewEra};
 
@@ -185,6 +186,12 @@ fn every_served_fact_has_a_field_id() {
         },
         FieldId::Capability {
             capability: CapabilityId::OutputModalities,
+        },
+        FieldId::Model {
+            attribute: ModelAttributeId::Family,
+        },
+        FieldId::Model {
+            attribute: ModelAttributeId::OpenWeights,
         },
     ]
     .into_iter()

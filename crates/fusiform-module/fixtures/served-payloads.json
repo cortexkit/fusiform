@@ -18,7 +18,9 @@
           "capability.tool_call": null,
           "existence": "present",
           "limit.context": 128000,
-          "limit.output": 8192
+          "limit.output": 8192,
+          "model.family": null,
+          "model.open_weights": null
         }
       },
       "resolved_at_ms": -1,
@@ -52,6 +54,8 @@
           "existence": "present",
           "limit.context": 1000000,
           "limit.output": 64000,
+          "model.family": "claude-sonnet",
+          "model.open_weights": false,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -133,6 +137,8 @@
           "existence": "present",
           "limit.context": 200000,
           "limit.output": 64000,
+          "model.family": "claude-sonnet",
+          "model.open_weights": false,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -256,7 +262,7 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 164,
+      "era_count": 194,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,

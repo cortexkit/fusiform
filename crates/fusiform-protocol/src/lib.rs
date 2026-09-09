@@ -729,6 +729,23 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "null when unpublished, which is not the same as an empty list",
     },
     ServedFact {
+        key: "model.family",
+        class: FactClass::Advisory,
+        note: "the weights family the upstream names, identical across every \
+               provider serving the same weights. A JOIN KEY rather than a \
+               description: it is what relates one provider's row to another's, \
+               so a wrong value relates a row to the wrong siblings. null when \
+               unpublished",
+    },
+    ServedFact {
+        key: "model.open_weights",
+        class: FactClass::Advisory,
+        note: "whether the weights are published. Marks the population where \
+               one provider's price says something about another's row, since \
+               a closed model served by two providers is two distinct \
+               offerings. null when unpublished, which is not false",
+    },
+    ServedFact {
         key: "rate.input",
         class: FactClass::Money,
         note: "per million input tokens",

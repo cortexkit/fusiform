@@ -37,6 +37,13 @@ const SERVED_FACT_KEYS: &[&str] = &[
     "rate.cache_read",
     "rate.cache_write",
     "rate.reasoning",
+    // What the model IS, as upstream states it, independent of who serves it.
+    // Admitted deliberately: `family` is published identically by every
+    // provider serving the same weights, and `open_weights` marks the
+    // population where one provider's list price says something about
+    // another's row. A consumer relates rows across providers with them.
+    "model.family",
+    "model.open_weights",
 ];
 
 /// Fields the normalizer parses that must NEVER become facts.
@@ -258,6 +265,7 @@ fn every_namespace_prefix_selects_real_facts() {
             fusiform_store::prefix::RATE,
             fusiform_store::prefix::CAPABILITY,
             fusiform_store::prefix::LIMIT,
+            fusiform_store::prefix::MODEL,
         ]
         .iter()
         .any(|p| key.starts_with(p));

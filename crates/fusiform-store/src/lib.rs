@@ -163,6 +163,10 @@ impl FactKey {
                 CapabilityId::InputModalities => "input_modalities",
                 CapabilityId::OutputModalities => "output_modalities",
             }),
+            FieldId::Model { attribute } => FactKey::model(match attribute {
+                fusiform_core::ModelAttributeId::Family => "family",
+                fusiform_core::ModelAttributeId::OpenWeights => "open_weights",
+            }),
             // A tiered rate's fact key carries a threshold that the FieldId
             // does not know, so these two cannot be mapped to a single key.
             // `None` rather than a guess: the alternative is returning the
@@ -188,6 +192,14 @@ pub mod prefix {
     pub const CAPABILITY: &str = "capability.";
     /// Declared limits.
     pub const LIMIT: &str = "limit.";
+    /// What the upstream says the model IS, independent of who serves it.
+    ///
+    /// Distinct from `capability.` on purpose: a capability is something the
+    /// model can do, and these are facts about the artefact — which weights
+    /// family it belongs to, whether those weights are published. Two providers
+    /// serving the same weights agree on these and disagree on rates, which is
+    /// exactly what makes them useful for relating rows across providers.
+    pub const MODEL: &str = "model.";
 }
 
 impl FactKey {
@@ -229,6 +241,12 @@ impl FactKey {
     /// The key for a declared limit.
     pub fn limit(name: &str) -> Self {
         Self(format!("{}{name}", prefix::LIMIT))
+    }
+
+    /// A fact about the model artefact rather than about this provider's
+    /// offering of it.
+    pub fn model(name: &str) -> Self {
+        Self(format!("{}{name}", prefix::MODEL))
     }
 
     /// The key for whether the model exists in the source at all. A retirement
