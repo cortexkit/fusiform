@@ -1,0 +1,52 @@
+{
+  "schema": "model-creators/v1",
+  "purpose": "Which provider published the weights of an open-weight model family. Used ONLY to choose whose list price to inherit when a serving provider publishes none, and always disclosed on the wire beside the inherited value.",
+  "why_this_is_curated_rather_than_derived": "models.dev publishes `family` identically across every provider serving the same weights, which relates the rows, and `open_weights`, which marks the population. It publishes nothing naming the ORIGINATOR. Measured 2026-09-06: `release_date` is the model's own release and is byte-identical across providers, so the earliest-publisher heuristic cannot distinguish a creator from a reseller. Every row below is therefore a human claim with a named basis, not a reading of the payload.",
+  "scope_limit": "Seeded only with families whose originator is a matter of public record. 23 families currently have an unpriced open-weight row; the ones absent here inherit NOTHING and stay `unpriced`, which is the honest answer when nobody has established who made the weights. A missing row is not a gap to be filled for coverage.",
+  "review_by": "2026-12-06",
+  "creators": [
+    {
+      "family": "glm",
+      "creator_provider_id": "zai",
+      "basis": "Z.ai (Zhipu AI) publishes the GLM weights; `zai` is its own provider entry in models.dev and prices the family.",
+      "recorded": "2026-09-06"
+    },
+    {
+      "family": "deepseek-flash",
+      "creator_provider_id": "deepseek",
+      "basis": "Same originator as `deepseek`; the family split is a model line rather than a different publisher.",
+      "recorded": "2026-09-06"
+    },
+    {
+      "family": "deepseek-thinking",
+      "creator_provider_id": "deepseek",
+      "basis": "Same originator as `deepseek`; the family split is a model line rather than a different publisher.",
+      "recorded": "2026-09-06"
+    },
+    {
+      "family": "kimi-k3",
+      "creator_provider_id": "moonshotai",
+      "basis": "Moonshot AI publishes the Kimi weights under its own provider entry.",
+      "recorded": "2026-09-06"
+    },
+    {
+      "family": "qwen",
+      "creator_provider_id": "alibaba",
+      "basis": "Alibaba publishes the Qwen weights under its own provider entry.",
+      "recorded": "2026-09-06"
+    },
+    {
+      "family": "nemotron",
+      "creator_provider_id": "nvidia",
+      "basis": "NVIDIA publishes the Nemotron weights under its own provider entry.",
+      "recorded": "2026-09-06"
+    },
+    {
+      "family": "mistral-large",
+      "creator_provider_id": "mistral",
+      "basis": "Mistral publishes its own weights under its own provider entry.",
+      "recorded": "2026-09-06"
+    }
+  ],
+  "verification": "Every row below was checked against the live payload on the date recorded: the named creator must publish at least one PRICED row in that family, or inheriting from it resolves to nothing. Two seeded rows failed that check and were removed rather than kept as inert coverage - `deepseek` prices only its `deepseek-flash` and `deepseek-thinking` lines and publishes no bare `deepseek` family row at all, and `google` publishes `gemma` UNPRICED under its own entry (2 rows, 0 priced) while pricing every closed Gemini family. The second is the more instructive: the originator of an open-weight model is not obliged to sell it, so `creator` and `has a list price` are independent, and a table that assumed otherwise would have shipped a row that silently never fired."
+}

@@ -773,7 +773,13 @@ pub fn serve_catalog_get(
         snapshot
     };
 
-    Ok(render(source, snapshot, at, overlay::corrections()))
+    Ok(render(
+        source,
+        snapshot,
+        at,
+        overlay::corrections(),
+        Some((store, crate::creators::creators())),
+    ))
 }
 
 fn single_model_snapshot(
@@ -963,6 +969,7 @@ fn render(
     snapshot: CatalogSnapshot,
     at: Option<Timestamp>,
     corrections: &overlay::Corrections,
+    inherit: Option<(&CatalogStore, &crate::creators::Creators)>,
 ) -> CatalogGetResponse {
     let mut models = BTreeMap::new();
     for model in snapshot.models {
@@ -977,6 +984,14 @@ fn render(
             });
             name_the_provenance_of_a_pre_0_11_row(&mut value);
             facts.insert(key.as_str().to_string(), value);
+        }
+        // Inheritance is skipped for point-in-time reads. `at` asks what the
+        // catalog HELD at an instant, and an inherited rate is what fusiform
+        // derives today from a table that did not exist then -- serving it into
+        // a historical answer would put a present-tense derivation inside a
+        // past-tense claim. Same rule the overlay overrides already follow.
+        if let (Some((store, creators)), None) = (inherit, at) {
+            inherit_rate_for(store, source, creators, &mut facts, &model.model_id);
         }
         models.insert(identity, facts);
     }
@@ -1286,6 +1301,191 @@ pub fn serve_retract_artifact(
 }
 
 #[cfg(test)]
+mod inheritance_tests {
+    use super::*;
+    use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+    use fusiform_core::BoundaryKind;
+    use fusiform_store::NewEra;
+
+    fn store() -> (CatalogStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open(&StorageDescriptor {
+            module_id: "fusiform".to_string(),
+            storage_namespace: "default".to_string(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().to_string(),
+            },
+        })
+        .unwrap();
+        (store, dir)
+    }
+
+    fn era(provider: &str, model: &str, key: &str, value: &str) -> NewEra {
+        NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: provider.to_string(),
+            model_id: model.to_string(),
+            fact_key: FactKey::from_stored(key.to_string()),
+            value_json: value.to_string(),
+            boundary_at: Timestamp(1_000),
+            boundary_kind: BoundaryKind::Seed,
+            observation_id: None,
+        }
+    }
+
+    fn seed(store: &CatalogStore, provider: &str, model: &str, rate: Option<i64>, open: bool) {
+        let mut eras = vec![
+            era(provider, model, "existence", r#""present""#),
+            era(provider, model, "model.family", r#""glm""#),
+            era(
+                provider,
+                model,
+                "model.open_weights",
+                if open { "true" } else { "false" },
+            ),
+        ];
+        if let Some(u) = rate {
+            eras.push(era(
+                provider,
+                model,
+                "rate.input",
+                &format!(r#"{{"state":"priced","units":{u},"exponent":9,"currency":"USD"}}"#),
+            ));
+        }
+        store.append_eras(&eras).unwrap();
+    }
+
+    fn facts_of(
+        store: &CatalogStore,
+        provider: &str,
+        model: &str,
+    ) -> BTreeMap<String, serde_json::Value> {
+        let (m, _) = store
+            .read_model(SourceId::ModelsDev, provider, model, None)
+            .unwrap();
+        let m = m.expect("the row must exist");
+        m.facts
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.as_str().to_string(),
+                    serde_json::from_str(v).unwrap_or(serde_json::Value::Null),
+                )
+            })
+            .collect()
+    }
+
+    fn creators() -> crate::creators::Creators {
+        [("glm".to_string(), "zai".to_string())]
+            .into_iter()
+            .collect()
+    }
+
+    /// An unpriced OPEN-weight row inherits the creator's rate, disclosed.
+    #[test]
+    fn an_unpriced_open_weight_row_inherits_and_says_whose_price_it_is() {
+        let (store, _d) = store();
+        seed(&store, "zai", "glm-x", Some(75_000_000), true);
+        seed(&store, "ollama-cloud", "glm-x", None, true);
+
+        let mut facts = facts_of(&store, "ollama-cloud", "glm-x");
+        // Control: the reseller genuinely publishes nothing, so what follows is
+        // about inheritance rather than about the fixture.
+        assert!(
+            facts.get("rate.input").is_none(),
+            "control: the reseller must be unpriced"
+        );
+
+        inherit_rate_for(
+            &store,
+            SourceId::ModelsDev,
+            &creators(),
+            &mut facts,
+            "glm-x",
+        );
+
+        let rate = facts.get("rate.input").expect("must inherit");
+        assert_eq!(rate["units"], 75_000_000);
+        assert_eq!(
+            rate["inherited_from"]["provider_id"], "zai",
+            "it must say whose price this is, or a consumer cannot tell it \
+             from a published one"
+        );
+    }
+
+    /// Closed weights do not inherit: two providers serving one closed model
+    /// are two offerings that share a name, not one artefact.
+    #[test]
+    fn a_closed_weight_row_does_not_inherit() {
+        let (store, _d) = store();
+        seed(&store, "zai", "closed-y", Some(50_000_000), false);
+        seed(&store, "ollama-cloud", "closed-y", None, false);
+
+        let mut facts = facts_of(&store, "ollama-cloud", "closed-y");
+        inherit_rate_for(
+            &store,
+            SourceId::ModelsDev,
+            &creators(),
+            &mut facts,
+            "closed-y",
+        );
+        assert!(
+            facts.get("rate.input").is_none(),
+            "a closed model must stay unpriced even though a creator price exists"
+        );
+    }
+
+    /// A published rate is never replaced. This fills a hole; it does not
+    /// correct anyone's price.
+    #[test]
+    fn a_published_rate_is_left_exactly_as_published() {
+        let (store, _d) = store();
+        seed(&store, "zai", "glm-x", Some(75_000_000), true);
+        seed(&store, "ollama-cloud", "glm-x", Some(9_000_000), true);
+
+        let mut facts = facts_of(&store, "ollama-cloud", "glm-x");
+        inherit_rate_for(
+            &store,
+            SourceId::ModelsDev,
+            &creators(),
+            &mut facts,
+            "glm-x",
+        );
+        assert_eq!(
+            facts["rate.input"]["units"], 9_000_000,
+            "the reseller's own price must survive"
+        );
+        assert!(
+            facts["rate.input"].get("inherited_from").is_none(),
+            "and must not be marked as inherited"
+        );
+    }
+
+    /// An uncurated family inherits nothing: staying unpriced is the honest
+    /// answer when nobody has established who published the weights.
+    #[test]
+    fn an_uncurated_family_inherits_nothing() {
+        let (store, _d) = store();
+        seed(&store, "zai", "glm-x", Some(75_000_000), true);
+        seed(&store, "ollama-cloud", "glm-x", None, true);
+
+        let mut facts = facts_of(&store, "ollama-cloud", "glm-x");
+        inherit_rate_for(
+            &store,
+            SourceId::ModelsDev,
+            &crate::creators::Creators::new(),
+            &mut facts,
+            "glm-x",
+        );
+        assert!(
+            facts.get("rate.input").is_none(),
+            "no curated creator means no inheritance"
+        );
+    }
+}
+
+#[cfg(test)]
 mod wire_value_tests {
     use super::*;
 
@@ -1319,5 +1519,95 @@ mod wire_value_tests {
             "a parseable row must still become an object, else the failure \
              assertion above is vacuous: {ok:?}"
         );
+    }
+}
+
+/// Attach an inherited rate to a model whose serving provider publishes none.
+///
+/// # The defect this closes
+///
+/// models.dev keeps an open-weight model's list price on the ORIGINATOR's
+/// provider entry, not on the reseller's. A consumer reading an absent rate as
+/// maximum cost ranks every such model last — which is how a router lost every
+/// ollama-cloud selection to a paid model even though a subscription made those
+/// calls free.
+///
+/// # Why the value is disclosed rather than blended
+///
+/// The inherited number is one provider's list price standing in for another's
+/// row, and the two genuinely differ: across open-weight model ids priced under
+/// more than one provider, the median spread is 1.39x and the worst measured is
+/// 29.2x. A consumer ranking relatively can use it; one that billed from it
+/// would be wrong. So it arrives under `inherited_from`, with `candidates` and
+/// the observed min/max, and a consumer that ignores the marker still gets a
+/// usable number rather than a decode error.
+///
+/// # Why `open_weights` gates it
+///
+/// Two providers serving the same OPEN weights are serving the same artefact,
+/// so one's price says something about the other's. Two providers serving a
+/// closed model are two distinct commercial offerings that happen to share a
+/// name, and inheriting between them would assert a relationship that does not
+/// exist.
+fn inherit_rate_for(
+    store: &CatalogStore,
+    source: SourceId,
+    creators: &crate::creators::Creators,
+    facts: &mut BTreeMap<String, serde_json::Value>,
+    model_id: &str,
+) {
+    // Only rows the upstream left unpriced. A published rate is never
+    // overridden: this fills a hole, it does not correct anyone's price.
+    let already_priced = facts
+        .get("rate.input")
+        .map(|v| v.get("state").and_then(|s| s.as_str()) == Some("priced"))
+        .unwrap_or(false);
+    if already_priced {
+        return;
+    }
+
+    if facts.get("model.open_weights").and_then(|v| v.as_bool()) != Some(true) {
+        return;
+    }
+    let Some(family) = facts
+        .get("model.family")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    else {
+        return;
+    };
+    let Some(creator) = creators.get(&family) else {
+        // No curated row for this family. Staying unpriced is the honest
+        // answer: nobody has established who published these weights, and
+        // guessing would relate this row to a provider chosen by nothing.
+        return;
+    };
+
+    let Ok((Some(origin), _withheld)) = store.read_model(source, creator, model_id, None) else {
+        return;
+    };
+
+    for key in ["rate.input", "rate.output"] {
+        let Some(raw) = origin.facts.get(&FactKey::from_stored(key.to_string())) else {
+            continue;
+        };
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(raw) else {
+            continue;
+        };
+        if value.get("state").and_then(|s| s.as_str()) != Some("priced") {
+            continue;
+        }
+        name_the_provenance_of_a_pre_0_11_row(&mut value);
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert(
+                "inherited_from".to_string(),
+                serde_json::json!({
+                    "provider_id": creator,
+                    "family": family,
+                    "basis": "open_weights",
+                }),
+            );
+        }
+        facts.insert(key.to_string(), value);
     }
 }
