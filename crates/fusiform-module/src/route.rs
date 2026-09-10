@@ -1393,7 +1393,7 @@ mod inheritance_tests {
         // Control: the reseller genuinely publishes nothing, so what follows is
         // about inheritance rather than about the fixture.
         assert!(
-            facts.get("rate.input").is_none(),
+            !facts.contains_key("rate.input"),
             "control: the reseller must be unpriced"
         );
 
@@ -1431,7 +1431,7 @@ mod inheritance_tests {
             "closed-y",
         );
         assert!(
-            facts.get("rate.input").is_none(),
+            !facts.contains_key("rate.input"),
             "a closed model must stay unpriced even though a creator price exists"
         );
     }
@@ -1479,7 +1479,7 @@ mod inheritance_tests {
             "glm-x",
         );
         assert!(
-            facts.get("rate.input").is_none(),
+            !facts.contains_key("rate.input"),
             "no curated creator means no inheritance"
         );
     }
