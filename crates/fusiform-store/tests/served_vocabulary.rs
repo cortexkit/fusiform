@@ -621,3 +621,102 @@ fn every_limit_field_reaches_a_fact() {
          population it never found: {keys:?}"
     );
 }
+
+/// Every field on `NormalizedModel` either reaches a fact or is named here as
+/// deliberately not reaching one.
+///
+/// # The gap this closes, and how it was found
+///
+/// There are three boundaries a field crosses: payload -> parser,
+/// raw -> domain, domain -> fact. The first two are fenced. The third was
+/// fenced only for `Capabilities` and `Limits` — the two nested structs — and
+/// `NormalizedModel`'s OWN fields had nothing.
+///
+/// That gap is invisible from the parser-side fence by construction: it counts
+/// a field as handled once the parser touches it, and a field read into the
+/// domain and then dropped has been touched. So `family` and `open_weights`
+/// sat in the domain for months, passing every check, reaching nothing.
+///
+/// They were found because a consumer asked for a capability that needed them,
+/// not because anything here objected. A fence that waits for a consumer to
+/// notice is not a fence.
+///
+/// # Why total destructuring rather than a list of names
+///
+/// A list goes stale silently when a field is added. Destructuring makes the
+/// COMPILER refuse to build until the new field is named in one of the two
+/// arms below — the same mechanism `Capabilities` and `Limits` already use.
+#[test]
+fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
+    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
+    let model = outcome
+        .catalog
+        .models()
+        .next()
+        .expect("the fixture must produce a model");
+
+    // Total destructuring: adding a field to NormalizedModel fails to compile
+    // here until it is classified.
+    let fusiform_core::normalize::NormalizedModel {
+        // Reaches a fact.
+        key: _,
+        family,
+        open_weights,
+        capabilities: _,
+        limits: _,
+        rates: _,
+
+        // Declared unread, with the reason each is not served.
+        //
+        // `display_name` — prose for humans. Nothing branches on it, and a
+        // consumer rendering a name should use the id it queried by, which is
+        // stable, rather than a label the upstream may reword.
+        display_name: _,
+        // `release_date` — the MODEL's release, identical across every
+        // provider serving it. Measured 2026-09-06 while testing whether the
+        // creator of an open-weight family is derivable: it is not, precisely
+        // because this field says nothing about WHO is serving. Advisory at
+        // best and misleading at worst, since a reseller's row carries the
+        // originator's date.
+        release_date: _,
+        // `last_updated` — upstream's own edit stamp, deliberately not served.
+        // Measured on day one: prices changed 20-40% across three models while
+        // this field did not move, so it cannot drive change detection and
+        // serving it would invite a consumer to try.
+        last_updated: _,
+        // `knowledge_cutoff` — a property of the training data rather than of
+        // the offering. Nothing in the served contract branches on it, and it
+        // is not a capacity, a price, or a capability.
+        knowledge_cutoff: _,
+        // Recorded so an operator can see these exist; never served. Serving a
+        // renderer-selecting field would invite a consumer to select a renderer
+        // from the catalog, which is the one thing this catalog must not decide.
+        quarantined: _,
+    } = model;
+
+    let keys: Vec<String> = fact_keys_of(model)
+        .into_iter()
+        .map(|k| k.as_str().to_string())
+        .collect();
+
+    for (present, key) in [
+        (family.is_some(), "model.family"),
+        (open_weights.is_some(), "model.open_weights"),
+    ] {
+        assert!(
+            !present || keys.iter().any(|k| k == key),
+            "the domain carries a value for {key:?} and no fact reaches the \
+             wire. This is the shape that hid `family` and `open_weights` for \
+             months: the parser-side fence counts a touched field as handled, \
+             so a field read into the domain and dropped is invisible to it. \
+             Keys: {keys:?}"
+        );
+    }
+
+    assert!(
+        family.is_some() || open_weights.is_some(),
+        "control: the fixture must carry at least one of these, or the loop \
+         above asserts nothing and passes against a build that emits no model \
+         facts at all"
+    );
+}
