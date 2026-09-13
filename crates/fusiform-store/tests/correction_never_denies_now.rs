@@ -144,6 +144,20 @@ fn a_correction_cannot_refuse_a_read_at_now() {
     }
 }
 
+/// WHAT DEPENDS ON THIS, beyond the read it is named for.
+///
+/// Rate inheritance in fusiform-module fills any rate key absent from a model's
+/// fact map, reading absence as "the upstream published nothing". A fact
+/// withheld by a correction is ALSO absent from that map — it moves to the
+/// `withheld` list — so if a correction could reach a read at now, inheritance
+/// would serve a borrowed price into the slot fusiform is refusing to answer,
+/// and the response would contradict itself.
+///
+/// It cannot, because of the bound asserted below. Relaxing that bound does not
+/// break inheritance loudly; it makes it quietly wrong. Recorded here rather
+/// than only at the consuming site, because the change that would break it
+/// happens in THIS file.
+///
 /// The structural reason, asserted directly: no accepted correction can reach
 /// past its own recording instant.
 ///

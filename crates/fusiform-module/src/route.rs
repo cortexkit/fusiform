@@ -1883,6 +1883,27 @@ fn inherit_rate_for(
         .collect();
 
     for (key, raw) in inheritable {
+        // A key absent from `facts` means the upstream published nothing —
+        // and that reading depends on an invariant held in another crate.
+        //
+        // A fact WITHHELD by a correction is also absent here: the store drops
+        // it from the map and reports it in `withheld` instead. If that could
+        // happen on this path, inheritance would fill the slot fusiform is
+        // actively refusing to answer, and the response would carry both a
+        // price and a notice saying that price was withheld — contradictory,
+        // with the consumer having no reason to read the notice.
+        //
+        // It cannot, for a structural reason rather than a lucky one:
+        // `affected_until` can never exceed the instant a correction is
+        // recorded, so corrected intervals are bounded in the past and never
+        // intersect a read at now — and inheritance runs ONLY on current-view
+        // reads (see the `at.is_none()` gate in `render`). Withholding appears
+        // exactly where inheritance does not run.
+        //
+        // Fenced in fusiform-store/tests/correction_never_denies_now.rs. If
+        // that bound is ever relaxed, this loop needs the withheld key set
+        // passed in; nothing here would fail loudly on its own.
+        //
         // PER KEY, never once for the whole set.
         //
         // The gate above reads `rate.input` alone, and this loop used to write
