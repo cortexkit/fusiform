@@ -1487,7 +1487,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "subc-client-rs"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "async-trait",
  "serde",
@@ -1510,7 +1510,7 @@ dependencies = [
 
 [[package]]
 name = "subc-core"
-version = "0.17.26"
+version = "0.17.39"
 dependencies = [
  "base64",
  "cortexkit-paths",
@@ -1543,7 +1543,7 @@ dependencies = [
 
 [[package]]
 name = "subc-protocol"
-version = "0.19.0"
+version = "0.19.1"
 dependencies = [
  "serde",
  "serde_json",

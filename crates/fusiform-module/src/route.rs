@@ -735,7 +735,12 @@ pub fn serve_catalog_get(
                 Presence::PresentOnly
             },
             facts: match &request.fact_prefixes {
-                Some(prefixes) => fusiform_store::serve::FactFilter::Prefixes(prefixes.clone()),
+                // Widened, then narrowed again after inheritance runs. See
+                // `widened_for_inheritance`: the gate's own inputs were being
+                // filtered away by the caller's own filter.
+                Some(prefixes) => {
+                    fusiform_store::serve::FactFilter::Prefixes(widened_for_inheritance(prefixes))
+                }
                 None => fusiform_store::serve::FactFilter::All,
             },
         };
@@ -779,6 +784,7 @@ pub fn serve_catalog_get(
         at,
         overlay::corrections(),
         Some((store, crate::creators::creators())),
+        request.fact_prefixes.as_ref(),
     ))
 }
 
@@ -867,11 +873,18 @@ fn single_model_snapshot(
             // response and mean opposite things.
             let had_readable_facts = !model.facts.is_empty();
             let facts = match &request.fact_prefixes {
-                Some(prefixes) => model
-                    .facts
-                    .into_iter()
-                    .filter(|(k, _)| prefixes.iter().any(|p| k.as_str().starts_with(p)))
-                    .collect(),
+                Some(prefixes) => {
+                    // Same widening as the bulk path, for the same reason and
+                    // in the same shape. These two filters have diverged three
+                    // times in this crate; they share the helper so the rule
+                    // has one statement.
+                    let wide = widened_for_inheritance(prefixes);
+                    model
+                        .facts
+                        .into_iter()
+                        .filter(|(k, _)| wide.iter().any(|p| k.as_str().starts_with(p)))
+                        .collect()
+                }
                 None => model.facts,
             };
             // The model is returned even when the FILTER leaves it with no
@@ -970,6 +983,7 @@ fn render(
     at: Option<Timestamp>,
     corrections: &overlay::Corrections,
     inherit: Option<(&CatalogStore, &crate::creators::Creators)>,
+    requested_prefixes: Option<&Vec<String>>,
 ) -> CatalogGetResponse {
     let mut models = BTreeMap::new();
     for model in snapshot.models {
@@ -993,6 +1007,8 @@ fn render(
         if let (Some((store, creators)), None) = (inherit, at) {
             inherit_rate_for(store, source, creators, &mut facts, &model.model_id);
         }
+        // Drop what was fetched only to gate the rule above.
+        narrow_to_requested(&mut facts, requested_prefixes);
         models.insert(identity, facts);
     }
 
@@ -1462,6 +1478,76 @@ mod inheritance_tests {
         );
     }
 
+    /// A rate filter must not switch inheritance off.
+    ///
+    /// # This is the test that was missing, and production proved it
+    ///
+    /// The gates read `model.open_weights` and `model.family` from the fact map
+    /// the caller receives. `--rates` is exactly what a PRICING consumer
+    /// passes, and it filtered the gate's own inputs away, so the rule silently
+    /// did not fire. Verified against the running binary two days after
+    /// placement: the same model inherited with no filter and came back bare
+    /// with `--rates`.
+    ///
+    /// Every unit test above passed throughout, because they call
+    /// `inherit_rate_for` with a map nobody filtered. The defect lived in the
+    /// seam between the function and the route that feeds it — so this test
+    /// drives `serve_catalog_get`, which is the only surface a consumer has.
+    ///
+    /// The failure direction is the bad one: a gate with missing inputs reads
+    /// as "not eligible", which is indistinguishable from a model that
+    /// correctly does not inherit. The feature looked ABSENT rather than
+    /// broken, and absent is what it looked like before it existed.
+    #[test]
+    fn a_rate_filter_does_not_switch_inheritance_off() {
+        let (store, _d) = store();
+        // `glm` -> `zai` is in the SHIPPED table, so this drives the real
+        // mapping rather than a fixture that agrees with itself.
+        seed(&store, "zai", "glm-x", Some(75_000_000), true);
+        seed(&store, "ollama-cloud", "glm-x", None, true);
+
+        let filtered = serve_catalog_get(
+            &store,
+            br#"{"provider_id":"ollama-cloud","model_id":"glm-x","fact_prefixes":["rate."]}"#,
+        )
+        .expect("the request must be served");
+
+        let facts = filtered
+            .models
+            .get("ollama-cloud/glm-x")
+            .expect("the model must be present");
+
+        let rate = facts.get("rate.input").unwrap_or_else(|| {
+            panic!(
+                "a rate filter must not switch inheritance off: the gates read \
+                 model.* facts, and filtering them away made the rule silently \
+                 not fire in production. Got: {facts:?}"
+            )
+        });
+        assert_eq!(rate["units"], 75_000_000);
+        assert_eq!(rate["inherited_from"]["provider_id"], "zai");
+
+        // And the widening must not leak: the caller asked for rates, so the
+        // facts fetched to gate the rule are dropped again before serving.
+        assert!(
+            !facts.contains_key("model.family"),
+            "a --rates response must carry only rate facts, or fusiform is \
+             answering a different question from the one asked: {facts:?}"
+        );
+
+        // Control: the same request WITHOUT a filter must also inherit, or this
+        // test would pass against a build that inherits only under a filter.
+        let unfiltered = serve_catalog_get(
+            &store,
+            br#"{"provider_id":"ollama-cloud","model_id":"glm-x"}"#,
+        )
+        .expect("the request must be served");
+        assert!(
+            unfiltered.models["ollama-cloud/glm-x"].contains_key("rate.input"),
+            "control: inheritance must work unfiltered too"
+        );
+    }
+
     /// An uncurated family inherits nothing: staying unpriced is the honest
     /// answer when nobody has established who published the weights.
     #[test]
@@ -1520,6 +1606,59 @@ mod wire_value_tests {
              assertion above is vacuous: {ok:?}"
         );
     }
+}
+
+/// Does this prefix filter admit rate facts?
+///
+/// Both directions, because a caller may name a prefix BROADER than `rate.`
+/// (`""` for everything) or NARROWER (`rate.input`), and either admits rates.
+fn admits_rates(prefixes: &[String]) -> bool {
+    prefixes.iter().any(|p| {
+        p.starts_with(fusiform_store::prefix::RATE)
+            || fusiform_store::prefix::RATE.starts_with(p.as_str())
+    })
+}
+
+/// Widen a caller's prefix filter to carry the facts inheritance is gated on.
+///
+/// # The defect this closes, found in production
+///
+/// Inheritance is gated on `model.open_weights` and `model.family`. Those gates
+/// read the fact map the caller receives — so `--rates`, which is precisely
+/// what a PRICING consumer passes, filtered the gate's own inputs away and the
+/// rule silently did not fire. Verified against the running binary: the same
+/// model inherited correctly with no filter and returned bare with `--rates`.
+///
+/// The failure is silent in the worst direction. A gate whose inputs are
+/// missing reads as "not eligible", which is indistinguishable from a model
+/// that genuinely should not inherit, so the feature looked absent rather than
+/// broken — and absent is exactly what it looked like before it was built.
+///
+/// Widening the QUERY rather than re-reading per model keeps this at zero extra
+/// round-trips: the facts are fetched with the rest and dropped again in
+/// [`narrow_to_requested`] if the caller did not ask for them.
+fn widened_for_inheritance(prefixes: &[String]) -> Vec<String> {
+    let mut out = prefixes.to_vec();
+    if admits_rates(prefixes) && !out.iter().any(|p| p == fusiform_store::prefix::MODEL) {
+        out.push(fusiform_store::prefix::MODEL.to_string());
+    }
+    out
+}
+
+/// Drop the facts that were fetched only to gate inheritance.
+///
+/// The caller's filter is a statement about what they want to READ, and
+/// widening it was fusiform's implementation detail. Serving the extra keys
+/// would make a `--rates` response carry non-rate facts, which is a different
+/// answer to the question that was asked.
+fn narrow_to_requested(
+    facts: &mut BTreeMap<String, serde_json::Value>,
+    requested: Option<&Vec<String>>,
+) {
+    let Some(prefixes) = requested else {
+        return;
+    };
+    facts.retain(|k, _| prefixes.iter().any(|p| k.starts_with(p)));
 }
 
 /// Attach an inherited rate to a model whose serving provider publishes none.
