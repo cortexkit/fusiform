@@ -1372,6 +1372,13 @@ mod inheritance_tests {
         store.append_eras(&eras).unwrap();
     }
 
+    /// Add one rate dimension to an existing row.
+    fn add_rate(store: &CatalogStore, provider: &str, model: &str, key: &str, value: &str) {
+        store
+            .append_eras(&[era(provider, model, key, value)])
+            .unwrap();
+    }
+
     fn facts_of(
         store: &CatalogStore,
         provider: &str,
@@ -1475,6 +1482,129 @@ mod inheritance_tests {
         assert!(
             facts["rate.input"].get("inherited_from").is_none(),
             "and must not be marked as inherited"
+        );
+    }
+
+    /// Every dimension the creator publishes is inherited, not a chosen two.
+    ///
+    /// Measured before writing this: all 11 rows that inherit today have a
+    /// creator publishing more than input and output — a cache read price,
+    /// usually. Carrying two of four served a partial picture with nothing
+    /// marking it partial, and in this catalog an absent rate means "nobody
+    /// published this", which was false for exactly those dimensions.
+    #[test]
+    fn every_rate_dimension_the_creator_publishes_is_inherited() {
+        let (store, _d) = store();
+        seed(&store, "zai", "glm-x", Some(75_000_000), true);
+        add_rate(
+            &store,
+            "zai",
+            "glm-x",
+            "rate.output",
+            r#"{"state":"priced","units":250000000,"exponent":9,"currency":"USD"}"#,
+        );
+        add_rate(
+            &store,
+            "zai",
+            "glm-x",
+            "rate.cache_read",
+            r#"{"state":"priced","units":15000000,"exponent":9,"currency":"USD"}"#,
+        );
+        // A published ZERO is a published price, and must travel like one.
+        add_rate(
+            &store,
+            "zai",
+            "glm-x",
+            "rate.cache_write",
+            r#"{"state":"stated_zero"}"#,
+        );
+        seed(&store, "ollama-cloud", "glm-x", None, true);
+
+        let mut facts = facts_of(&store, "ollama-cloud", "glm-x");
+        inherit_rate_for(
+            &store,
+            SourceId::ModelsDev,
+            &creators(),
+            &mut facts,
+            "glm-x",
+        );
+
+        for key in [
+            "rate.input",
+            "rate.output",
+            "rate.cache_read",
+            "rate.cache_write",
+        ] {
+            let v = facts.get(key).unwrap_or_else(|| {
+                panic!(
+                    "{key} must be inherited: the creator publishes it, and serving it \
+                     absent would tell a consumer nobody published a price that \
+                     somebody did. Got: {facts:?}"
+                )
+            });
+            assert_eq!(
+                v["inherited_from"]["provider_id"], "zai",
+                "{key} must say whose price it is"
+            );
+        }
+        assert_eq!(
+            facts["rate.cache_write"]["state"], "stated_zero",
+            "a published zero must arrive as stated_zero rather than being dropped \
+             for not being `priced`"
+        );
+    }
+
+    /// A price the reseller published is never overwritten, PER KEY.
+    ///
+    /// The gate reads `rate.input`, and the loop used to write a fixed set on
+    /// the strength of it — so a reseller publishing an output price and no
+    /// input price would have had its own price replaced by the creator's. No
+    /// row in the live catalog has that shape (measured: 0), which is exactly
+    /// why it would have gone unnoticed.
+    #[test]
+    fn a_price_the_reseller_published_is_never_overwritten() {
+        let (store, _d) = store();
+        seed(&store, "zai", "glm-x", Some(75_000_000), true);
+        add_rate(
+            &store,
+            "zai",
+            "glm-x",
+            "rate.output",
+            r#"{"state":"priced","units":250000000,"exponent":9,"currency":"USD"}"#,
+        );
+
+        // The reseller publishes an OUTPUT price and no input price.
+        seed(&store, "ollama-cloud", "glm-x", None, true);
+        add_rate(
+            &store,
+            "ollama-cloud",
+            "glm-x",
+            "rate.output",
+            r#"{"state":"priced","units":4000000,"exponent":9,"currency":"USD"}"#,
+        );
+
+        let mut facts = facts_of(&store, "ollama-cloud", "glm-x");
+        inherit_rate_for(
+            &store,
+            SourceId::ModelsDev,
+            &creators(),
+            &mut facts,
+            "glm-x",
+        );
+
+        assert_eq!(
+            facts["rate.output"]["units"], 4_000_000,
+            "the reseller's own output price must survive"
+        );
+        assert!(
+            facts["rate.output"].get("inherited_from").is_none(),
+            "and must not be marked as inherited"
+        );
+        // Control: the dimension it did NOT publish still inherits, or this
+        // test would pass against a build that inherits nothing at all.
+        assert_eq!(
+            facts["rate.input"]["units"], 75_000_000,
+            "control: the missing dimension must still be filled"
         );
     }
 
@@ -1726,16 +1856,53 @@ fn inherit_rate_for(
         return;
     };
 
-    for key in ["rate.input", "rate.output"] {
-        let Some(raw) = origin.facts.get(&FactKey::from_stored(key.to_string())) else {
-            continue;
-        };
-        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(raw) else {
-            continue;
-        };
-        if value.get("state").and_then(|s| s.as_str()) != Some("priced") {
+    // EVERY rate dimension the creator publishes, not a chosen two.
+    //
+    // This began as `["rate.input", "rate.output"]` because those are what a
+    // router ranks on. Measured against the live store: all 11 rows that
+    // inherit have a creator publishing MORE than those two — a cache read
+    // price, usually — so every inheriting row was served a partial picture
+    // with nothing saying it was partial.
+    //
+    // A consumer pricing a cached request then sees an inherited input rate and
+    // an absent cache rate, and absent means "nobody published this" in this
+    // catalog's vocabulary. That reading is false: somebody did publish it, and
+    // fusiform declined to carry it for no reason a consumer could see.
+    //
+    // If the creator's price is a defensible stand-in for one dimension it is a
+    // stand-in for all of them, and the rule is easier to state with no
+    // exceptions: WHERE THE RESELLER PUBLISHED NOTHING, THE CREATOR'S PRICE
+    // STANDS IN, DISCLOSED. Tiered keys ride along under the same rule; none
+    // exist among the inheriting rows today, so this is the rule applying
+    // uniformly rather than a case anyone has exercised.
+    let inheritable: Vec<(String, String)> = origin
+        .facts
+        .iter()
+        .filter(|(k, _)| k.as_str().starts_with(fusiform_store::prefix::RATE))
+        .map(|(k, v)| (k.as_str().to_string(), v.clone()))
+        .collect();
+
+    for (key, raw) in inheritable {
+        // PER KEY, never once for the whole set.
+        //
+        // The gate above reads `rate.input` alone, and this loop used to write
+        // two keys on the strength of it — so a reseller that published an
+        // output price and no input price would have had its OWN price
+        // overwritten by the creator's. No row in the catalog has that shape
+        // today (measured: 0), which is exactly why it would have gone
+        // unnoticed. Overwriting a published price is the one thing this rule
+        // promises never to do.
+        if facts.contains_key(&key) {
             continue;
         }
+
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        // Whatever state the creator published, including `stated_zero`.
+        // "The originator states this is free" is a published price and carries
+        // the same standing as a number; skipping it would reintroduce the
+        // partial picture one level down.
         name_the_provenance_of_a_pre_0_11_row(&mut value);
         if let Some(obj) = value.as_object_mut() {
             obj.insert(
@@ -1747,6 +1914,6 @@ fn inherit_rate_for(
                 }),
             );
         }
-        facts.insert(key.to_string(), value);
+        facts.insert(key, value);
     }
 }
