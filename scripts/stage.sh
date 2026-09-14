@@ -144,8 +144,16 @@ done
 # Failure is NOT fatal: a stage that built, signed and verified is good even if
 # the tidying cannot run. Refusing here would turn housekeeping into a
 # deployment blocker.
+# `|| true` inside the substitution, and it is load-bearing rather than
+# defensive noise.
+#
+# `set -euo pipefail` is on. When grep matches nothing it returns 1, pipefail
+# propagates that, and the ASSIGNMENT then fails and kills the script. Both of
+# these read binaries that may legitimately produce no revision -- a module
+# that is not placed yet, or a stage directory holding something unreadable --
+# so "no match" is an ordinary outcome here, not an error.
 DEPLOYED_REV="$("$HOME/.local/share/cortexkit/bin/ck-fusiform" --version 2>/dev/null \
-    | grep -oE '[0-9a-f]{40}' | head -1)"
+    | grep -oE '[0-9a-f]{40}' | head -1 || true)"
 
 pruned=0
 for dir in "$HOME"/ck-stage/fusiform-*; do
@@ -169,7 +177,7 @@ for dir in "$HOME"/ck-stage/fusiform-*; do
     # Identify by what the binary REPORTS, never by the directory's timestamp.
     # A name is a label someone typed; the self-reported revision is the thing
     # that decides whether this directory is the rollback target.
-    rev="$("$dir/ck-fusiform" --version 2>/dev/null | grep -oE '[0-9a-f]{40}' | head -1)"
+    rev="$("$dir/ck-fusiform" --version 2>/dev/null | grep -oE '[0-9a-f]{40}' | head -1 || true)"
     if [ -n "$DEPLOYED_REV" ] && [ "$rev" = "$DEPLOYED_REV" ]; then
         continue
     fi
