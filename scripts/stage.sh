@@ -121,5 +121,58 @@ done
 # Printing it last means a truncated read loses the HASHES, which are the half
 # nobody can reconstruct from memory. A missing locator is recoverable; a
 # fabricated one that happens to resolve is not.
+
+# Prune superseded stages, keeping this one and the DEPLOYED revision.
+#
+# Thirty of these accumulated over a month, 429 MB, every one a signed and
+# runnable ck-fusiform of a revision nobody wants any more. That is the same
+# hazard I named to SUBC when I deleted a single superseded directory by hand
+# -- "a stale stage waiting to be placed is a trap I set for them" -- and then
+# left twenty-nine others sitting beside it.
+#
+# The script only ever created. So the cleanup was a thing I had to REMEMBER,
+# which means it was a thing that would eventually not happen, and the growth
+# is silent: nothing about a successful stage says the directory before it is
+# now a liability.
+#
+# WHY THE DEPLOYED REVISION IS KEPT RATHER THAN JUST THE NEWEST. It is the
+# rollback target. Deleting it would mean a rollback needs a rebuild, and a
+# rebuild during an incident is the worst time to discover the toolchain moved.
+# Read from the placed binary rather than assumed, so it stays right when
+# placement lags several stages behind, which is the normal case here.
+#
+# Failure is NOT fatal: a stage that built, signed and verified is good even if
+# the tidying cannot run. Refusing here would turn housekeeping into a
+# deployment blocker.
+DEPLOYED_REV="$("$HOME/.local/share/cortexkit/bin/ck-fusiform" --version 2>/dev/null \
+    | grep -oE '[0-9a-f]{40}' | head -1)"
+
+pruned=0
+for dir in "$HOME"/ck-stage/fusiform-*; do
+    [ -d "$dir" ] || continue
+    [ "$dir" = "$STAGE" ] && continue
+
+    # Identify by what the binary REPORTS, never by the directory's timestamp.
+    # A name is a label someone typed; the self-reported revision is the thing
+    # that decides whether this directory is the rollback target.
+    rev="$("$dir/ck-fusiform" --version 2>/dev/null | grep -oE '[0-9a-f]{40}' | head -1)"
+    if [ -n "$DEPLOYED_REV" ] && [ "$rev" = "$DEPLOYED_REV" ]; then
+        continue
+    fi
+    # An unreadable binary is pruned too: it cannot be the rollback target,
+    # because nothing can establish what it is.
+    rm -rf "$dir" && pruned=$((pruned + 1))
+done
+
+if [ "$pruned" -gt 0 ]; then
+    echo "pruned    $pruned superseded stage(s); kept this one and the deployed revision"
+fi
+
+# Printed LAST, and the prune block above deliberately sits before it.
+#
+# The reasoning is three paragraphs up: a truncated read must lose the hashes
+# rather than the locator, because a missing locator is recoverable and a
+# fabricated one that happens to resolve is not. Housekeeping output that
+# pushed the path off the bottom would undo exactly that.
 echo
 echo "staged at $STAGE"
