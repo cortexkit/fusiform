@@ -149,8 +149,22 @@ DEPLOYED_REV="$("$HOME/.local/share/cortexkit/bin/ck-fusiform" --version 2>/dev/
 
 pruned=0
 for dir in "$HOME"/ck-stage/fusiform-*; do
-    [ -d "$dir" ] || continue
-    [ "$dir" = "$STAGE" ] && continue
+    # `if` rather than `[ cond ] && continue`.
+    #
+    # Under `set -e` that idiom EXITS THE SCRIPT whenever the test is false,
+    # because the compound returns 1 -- so the first directory that was not the
+    # one just built would end the run silently, after the artifact was already
+    # built and signed. It did, on the first real run.
+    #
+    # Found only because the run was unpiped and the exit code read: the same
+    # command through `| tail -5` shows the hashes, looks complete, and reports
+    # tail's zero.
+    if [ ! -d "$dir" ]; then
+        continue
+    fi
+    if [ "$dir" = "$STAGE" ]; then
+        continue
+    fi
 
     # Identify by what the binary REPORTS, never by the directory's timestamp.
     # A name is a label someone typed; the self-reported revision is the thing
@@ -161,7 +175,9 @@ for dir in "$HOME"/ck-stage/fusiform-*; do
     fi
     # An unreadable binary is pruned too: it cannot be the rollback target,
     # because nothing can establish what it is.
-    rm -rf "$dir" && pruned=$((pruned + 1))
+    if rm -rf "$dir"; then
+        pruned=$((pruned + 1))
+    fi
 done
 
 if [ "$pruned" -gt 0 ]; then
