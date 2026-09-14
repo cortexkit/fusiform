@@ -277,6 +277,15 @@ fn cases() -> Vec<(&'static str, String)> {
             // Pinned because consumers pin from these bytes: with no case
             // requesting this row, the marker never appears in the golden
             // payload and a wire change to it lands without reddening anything.
+            // ASTRO'S DECODE TEST PINS THIS ROW BYTE-FOR-BYTE (astrocyte
+            // aba2219). Renaming the case, changing the synthetic provider
+            // ids, or dropping the pair breaks a test in another repository
+            // that nothing here would report.
+            //
+            // Recorded at this end because this is where the breaking edit
+            // happens. The case is SYNTHETIC — invented for a fence of mine —
+            // so it looks free to rearrange, which is exactly the property
+            // that makes a consumer's dependency on it invisible.
             "inherited rate",
             r#"{"name":"catalog.get","arguments":{"provider_id":"synthetic-reseller","model_id":"synthetic-glm"}}"#.to_string(),
         ),
