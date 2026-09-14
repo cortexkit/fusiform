@@ -262,15 +262,15 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 194,
+      "era_count": 216,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
         "last_class": "http_status",
         "polls_back": 1
       },
-      "model_count": 15,
-      "models_priced": 9,
+      "model_count": 17,
+      "models_priced": 10,
       "overridden": [
         {
           "authority": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-08-13) — 'Other Claude models, including Claude Sonnet 4.5, have a 200k-token context window'",
@@ -295,6 +295,112 @@
           "outcome": "seeded"
         }
       ],
+      "source": "models.dev"
+    }
+  },
+  "creator row, unmarked": {
+    "request": {
+      "arguments": {
+        "model_id": "synthetic-glm",
+        "provider_id": "zai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "zai/synthetic-glm": {
+          "capability.attachment": null,
+          "capability.input_modalities": null,
+          "capability.output_modalities": null,
+          "capability.reasoning": null,
+          "capability.tool_call": null,
+          "existence": "present",
+          "limit.context": 128000,
+          "limit.output": 8192,
+          "model.family": "glm",
+          "model.open_weights": true,
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 75000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 250000000
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "inherited rate": {
+    "request": {
+      "arguments": {
+        "model_id": "synthetic-glm",
+        "provider_id": "synthetic-reseller"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "synthetic-reseller/synthetic-glm": {
+          "capability.attachment": null,
+          "capability.input_modalities": null,
+          "capability.output_modalities": null,
+          "capability.reasoning": null,
+          "capability.tool_call": null,
+          "existence": "present",
+          "limit.context": 128000,
+          "limit.output": 8192,
+          "model.family": "glm",
+          "model.open_weights": true,
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "open_weights",
+              "family": "glm",
+              "provider_id": "zai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 75000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "open_weights",
+              "family": "glm",
+              "provider_id": "zai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 250000000
+          }
+        }
+      },
+      "resolved_at_ms": -1,
       "source": "models.dev"
     }
   }

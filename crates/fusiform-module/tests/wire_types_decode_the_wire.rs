@@ -58,7 +58,22 @@ fn every_served_rate_decodes_with_the_protocol_type() {
         });
 
         match value {
-            RateValue::Priced { amount, floor } => {
+            RateValue::Priced {
+                amount,
+                floor,
+                inherited_from,
+            } => {
+                // Asserted where it is decoded rather than in a test of its
+                // own: a marker that decodes to None on a row the producer
+                // marked is the failure this whole file exists to catch, and
+                // it is invisible unless something reads it here.
+                if raw.get("inherited_from").is_some() {
+                    assert!(
+                        inherited_from.is_some(),
+                        "the wire carries inherited_from and the type decoded \
+                         None: {raw}"
+                    );
+                }
                 assert!(
                     amount.units > 0,
                     "a priced rate must carry its units through the decode: {raw}"
@@ -228,59 +243,5 @@ fn no_served_rate_field_is_invisible_to_the_published_type() {
          see them: {dropped:?}. Add them to the type or stop serving them — a \
          field that only exists in the bytes is one every typed consumer is \
          blind to."
-    );
-}
-
-/// The fence above must be able to FAIL, proven on the field that motivated it.
-///
-/// The golden fixture contains no inherited rate — `inherited_from` is attached
-/// at serve time to rows the fixture's store does not have — so the check runs
-/// over rates that have nothing to lose and passes while seeing none of the
-/// case it exists for. A fence whose only evidence is a clean run on data that
-/// cannot dirty it is not a fence.
-///
-/// So the motivating shape is asserted directly, against the bytes the serve
-/// path actually produces:
-///
-///     {"state":"priced","units":…,"exponent":9,"currency":"USD",
-///      "inherited_from":{"provider_id":"zai","family":"glm",
-///                        "basis":"open_weights"}}
-///
-/// This test is EXPECTED TO FAIL the day the type gains the field, and that is
-/// the signal to delete it: its whole content is "the type does not carry this
-/// yet, and here is the consequence".
-#[test]
-fn inherited_from_is_currently_invisible_to_the_published_type() {
-    let served = serde_json::json!({
-        "state": "priced",
-        "units": 75_000_000i64,
-        "exponent": 9,
-        "currency": "USD",
-        "unit_provenance": {
-            "kind": "assumed_by_policy",
-            "policy": "models-dev-usd-v1"
-        },
-        "inherited_from": {
-            "provider_id": "zai",
-            "family": "glm",
-            "basis": "open_weights"
-        }
-    });
-
-    let decoded: RateValue =
-        serde_json::from_value(served.clone()).expect("an inherited rate decodes as priced");
-    let round_tripped = serde_json::to_value(&decoded).expect("the type re-serializes");
-
-    assert!(
-        round_tripped.get("inherited_from").is_none(),
-        "the type now carries inherited_from — DELETE THIS TEST, its subject is \
-         gone, and the general fence above covers the field from here"
-    );
-    // Control: the round-trip preserves what the type DOES name, so the
-    // assertion above is about a missing field rather than a broken decode.
-    assert_eq!(
-        round_tripped.get("units"),
-        served.get("units"),
-        "control: the fields the type names must survive the round-trip"
     );
 }

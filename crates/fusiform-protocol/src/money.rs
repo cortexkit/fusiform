@@ -206,6 +206,27 @@ pub enum RateValue {
         /// distinction the enum exists to hold, applied to its own rollout.
         #[serde(default = "Floor::unknown")]
         floor: Floor,
+        /// Present when this price is NOT this provider's own.
+        ///
+        /// models.dev keeps an open-weight model's list price on the
+        /// ORIGINATOR's provider entry, so a reseller serving the same weights
+        /// often publishes nothing. Where that happens fusiform serves the
+        /// creator's price and says so here.
+        ///
+        /// A CONSUMER MUST NOT READ THIS AS THE COST OF THE ROUTE. It is what
+        /// the named provider charges for the same weights, which is reference
+        /// data — the serving provider may be a subscription plane where the
+        /// marginal cost is zero, and fusiform cannot tell those apart.
+        ///
+        /// Typed here rather than left as raw JSON because it was raw JSON,
+        /// injected by the serve path, and therefore INVISIBLE to every
+        /// consumer decoding through this crate: serde drops unknown fields
+        /// silently, so the marker separating a published price from a borrowed
+        /// one vanished at exactly the seam it exists to guard. A consumer
+        /// reported their store collapsing that distinction; this type is why
+        /// it was easy to collapse.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inherited_from: Option<InheritedFrom>,
     },
     /// The source stated exactly zero. Not "free" — a stated zero. Whether a
     /// zero is a real price is the consumer's policy, not fusiform's.
@@ -213,6 +234,20 @@ pub enum RateValue {
     Unpriced {
         reason: UnpricedReason,
     },
+}
+
+/// Whose price this is, when it is not the serving provider's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InheritedFrom {
+    /// The provider whose published price this is.
+    pub provider_id: String,
+    /// The weights family both rows share, as the upstream names it.
+    pub family: String,
+    /// Why the two rows are relatable at all. `open_weights` today: two
+    /// providers serving the same OPEN weights serve the same artefact, which
+    /// is what makes one's price say anything about the other's row. A closed
+    /// model served by two providers is two offerings sharing a name.
+    pub basis: String,
 }
 
 impl Floor {

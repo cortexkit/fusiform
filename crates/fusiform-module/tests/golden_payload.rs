@@ -56,6 +56,58 @@ const UNKNOWN_REASONING: &str = r#"{
     }
   }
 }"#;
+/// A SYNTHETIC creator/reseller pair, so the fixture carries an INHERITED rate.
+///
+/// Without this the golden payload contains no `inherited_from` at all: the
+/// marker is attached at serve time, and it needs a creator row publishing a
+/// price for the same model id under a curated family. The real excerpt happens
+/// to hold no such pair.
+///
+/// That absence matters because consumers PIN FROM THESE BYTES. ALF said so
+/// explicitly, and a fixture that omits a served shape lets a wire change to it
+/// land without reddening anything here — which is the entire job of a golden
+/// payload.
+///
+/// `glm` -> `zai` is the real shipped mapping in model-creators.json, so this
+/// exercises the actual table rather than a fixture that agrees with itself.
+/// The creator is keyed `zai` because the lookup resolves on the PROVIDER KEY,
+/// not the `id` field inside it — my first version keyed it
+/// `synthetic-creator-zai` with `"id": "zai"` and produced no inheritance at
+/// all, which is a fixture that would have passed while testing nothing. `zai`
+/// is absent from the real excerpt (11 providers, checked), so there is no
+/// collision to mask.
+/// The reseller publishes NO rate at all, which is the population inheritance
+/// serves after the stated_zero correction: a provider that publishes any rate
+/// has a price card and is left alone.
+const INHERITANCE_PAIR: &str = r#"{
+  "zai": {
+    "id": "zai",
+    "name": "Synthetic zai entry (models are synthetic, the id is real)",
+    "models": {
+      "synthetic-glm": {
+        "id": "synthetic-glm",
+        "name": "A model whose weights the creator publishes and prices",
+        "family": "glm",
+        "open_weights": true,
+        "limit": { "context": 128000, "output": 8192 },
+        "cost": { "input": 0.075, "output": 0.25 }
+      }
+    }
+  },
+  "synthetic-reseller": {
+    "id": "synthetic-reseller",
+    "name": "Synthetic reseller publishing no price (not a real provider)",
+    "models": {
+      "synthetic-glm": {
+        "id": "synthetic-glm",
+        "name": "The same weights served by someone who publishes no rate",
+        "family": "glm",
+        "open_weights": true,
+        "limit": { "context": 128000, "output": 8192 }
+      }
+    }
+  }
+}"#;
 const GOLDEN: &str = include_str!("../fixtures/served-payloads.json");
 
 /// The real upstream cut with the synthetic unknown-reasoning provider added.
@@ -64,13 +116,15 @@ const GOLDEN: &str = include_str!("../fixtures/served-payloads.json");
 /// here instead of producing a document that parses into something unintended.
 fn merged_upstream() -> String {
     let mut doc: serde_json::Value = serde_json::from_str(UPSTREAM).unwrap();
-    let synthetic: serde_json::Value = serde_json::from_str(UNKNOWN_REASONING).unwrap();
     let obj = doc.as_object_mut().expect("the upstream is an object");
-    for (k, v) in synthetic.as_object().expect("synthetic is an object") {
-        assert!(
-            obj.insert(k.clone(), v.clone()).is_none(),
-            "the synthetic provider must not collide with a real one"
-        );
+    for src in [UNKNOWN_REASONING, INHERITANCE_PAIR] {
+        let synthetic: serde_json::Value = serde_json::from_str(src).unwrap();
+        for (k, v) in synthetic.as_object().expect("synthetic is an object") {
+            assert!(
+                obj.insert(k.clone(), v.clone()).is_none(),
+                "a synthetic provider must not collide with a real one: {k}"
+            );
+        }
     }
     serde_json::to_string(&doc).unwrap()
 }
@@ -214,6 +268,24 @@ fn cases() -> Vec<(&'static str, String)> {
             // to the wire -- correct at one layer, unverified at the next.
             "catalog.get — a model whose reasoning capability is unknown",
             r#"{"name":"catalog.get","arguments":{"provider_id":"synthetic","model_id":"unknown-reasoning"}}"#.to_string(),
+        ),
+        (
+            // An INHERITED rate, a shape absent everywhere else in this fixture.
+            // The reseller publishes no rate of its own, so every rate on this
+            // row is borrowed from the creator and carries `inherited_from`.
+            //
+            // Pinned because consumers pin from these bytes: with no case
+            // requesting this row, the marker never appears in the golden
+            // payload and a wire change to it lands without reddening anything.
+            "inherited rate",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"synthetic-reseller","model_id":"synthetic-glm"}}"#.to_string(),
+        ),
+        (
+            // The creator's own row, as the CONTROL: it publishes its own price
+            // and must carry no marker. Without this arm the fixture cannot
+            // tell "inheritance works" from "everything is marked inherited".
+            "creator row, unmarked",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"zai","model_id":"synthetic-glm"}}"#.to_string(),
         ),
         (
             "catalog.status",

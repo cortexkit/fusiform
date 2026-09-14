@@ -626,7 +626,27 @@ fn json_rate(value: &RateValue) -> String {
         // poll after placement. The dimension stays serve-side until a SOURCE
         // publishes a floor, at which point it is an upstream claim and belongs
         // here.
-        RateValue::Priced { amount, floor: _ } => format!(
+        // `inherited_from` is dropped here for the same reason as `floor`, and
+        // the reason is stronger rather than merely analogous.
+        //
+        // A floor is a dimension nobody has established. An inherited marker is
+        // a claim about a DIFFERENT PROVIDER'S ROW — zai's price attached to a
+        // reseller's model — and storage records what THIS source said about
+        // THIS row. Writing it would put one provider's price into another
+        // provider's history, where a point-in-time read would later serve it
+        // back as something the upstream published.
+        //
+        // The destructuring is what forced this decision rather than letting
+        // the field arrive by default: `RateValue` gaining a variant field
+        // fails to compile here until someone says whether it is an upstream
+        // claim. That fence exists because a serve-time annotation reached
+        // storage once and the ingest diff read every priced row as changed,
+        // writing 17,455 false price eras in a single poll.
+        RateValue::Priced {
+            amount,
+            floor: _,
+            inherited_from: _,
+        } => format!(
             r#"{{"state":"priced","units":{},"exponent":{},"currency":"{}"}}"#,
             amount.units,
             amount.exponent,

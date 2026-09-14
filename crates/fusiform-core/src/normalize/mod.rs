@@ -581,6 +581,14 @@ fn rate_value(label: &str, field: &str, literal: &str) -> Result<RateValue, Norm
         // what they must conclude today, when the dimension does not exist.
         Ok(units) => Ok(RateValue::Priced {
             floor: fusiform_protocol::money::Floor::Unknown,
+            // `None` at NORMALIZATION, always: this is the upstream's own
+            // published price for its own row. Inheritance is a serve-time
+            // derivation that attaches one provider's price to another's row,
+            // and it has no business in the normalizer — a stored fact must
+            // record what the source said, which is the rule the August
+            // provenance incident established at the cost of 17,455 false
+            // price eras.
+            inherited_from: None,
             amount: Amount {
                 units,
                 exponent: NANO_EXPONENT,
