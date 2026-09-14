@@ -1554,26 +1554,90 @@ mod inheritance_tests {
         );
     }
 
-    /// A price the reseller published is never overwritten, PER KEY.
+    /// A provider that published ANY rate keeps its own card, untouched.
     ///
-    /// The gate reads `rate.input`, and the loop used to write a fixed set on
-    /// the strength of it — so a reseller publishing an output price and no
-    /// input price would have had its own price replaced by the creator's. No
-    /// row in the live catalog has that shape (measured: 0), which is exactly
-    /// why it would have gone unnoticed.
+    /// # The production defect this pins
+    ///
+    /// The gate asked "is rate.input priced?" as a proxy for "does this
+    /// provider publish a price card?". `stated_zero` is a PUBLISHED price --
+    /// the provider saying a dimension is free -- so a subscription provider
+    /// stating every dimension zero read as unpriced, and inheritance filled
+    /// the dimensions around it from someone else's card:
+    ///
+    ///     alibaba-token-plan/deepseek-v4-flash
+    ///       input/output/cache_read/cache_write  stated_zero
+    ///       reasoning                            priced 600000000  <- INHERITED
+    ///
+    /// A router ranks that model as costing money for reasoning; a ledger
+    /// records a charge that does not exist. Worse than the gap inheritance was
+    /// built to fill, because an absent rate is visibly absent and a fabricated
+    /// one is indistinguishable from a real price.
+    ///
+    /// A partial card is still a card: what is missing from it is the
+    /// provider's statement about what they do not charge for, and it stays
+    /// VISIBLY missing rather than being filled from elsewhere.
     #[test]
-    fn a_price_the_reseller_published_is_never_overwritten() {
+    fn a_provider_that_published_any_rate_keeps_its_own_card() {
         let (store, _d) = store();
         seed(&store, "zai", "glm-x", Some(75_000_000), true);
         add_rate(
             &store,
             "zai",
             "glm-x",
-            "rate.output",
-            r#"{"state":"priced","units":250000000,"exponent":9,"currency":"USD"}"#,
+            "rate.reasoning",
+            r#"{"state":"priced","units":600000000,"exponent":9,"currency":"USD"}"#,
         );
 
-        // The reseller publishes an OUTPUT price and no input price.
+        // The subscription shape: every dimension published, all free.
+        seed(&store, "ollama-cloud", "glm-x", None, true);
+        for key in ["rate.input", "rate.output"] {
+            add_rate(
+                &store,
+                "ollama-cloud",
+                "glm-x",
+                key,
+                r#"{"state":"stated_zero"}"#,
+            );
+        }
+
+        let mut facts = facts_of(&store, "ollama-cloud", "glm-x");
+        // Control: the fixture really does state zero rather than omitting.
+        assert_eq!(
+            facts["rate.input"]["state"], "stated_zero",
+            "control: a stated zero must be present, or this tests nothing"
+        );
+
+        inherit_rate_for(
+            &store,
+            SourceId::ModelsDev,
+            &creators(),
+            &mut facts,
+            "glm-x",
+        );
+
+        assert_eq!(
+            facts["rate.input"]["state"], "stated_zero",
+            "a published zero must survive"
+        );
+        assert!(
+            !facts.contains_key("rate.reasoning"),
+            "and NO dimension may be imported beside it: the provider published \
+             a card, and a dimension absent from it is their statement rather \
+             than a hole to fill. Got: {facts:?}"
+        );
+    }
+
+    /// A partial card is still a card.
+    ///
+    /// Separated from the case above because the shapes differ and only one of
+    /// them existed in the catalog: a provider publishing output and nothing
+    /// else. Under the old gate its missing input was filled from the creator,
+    /// producing a blended card belonging to nobody.
+    #[test]
+    fn a_partial_card_is_not_topped_up_from_the_creator() {
+        let (store, _d) = store();
+        seed(&store, "zai", "glm-x", Some(75_000_000), true);
+
         seed(&store, "ollama-cloud", "glm-x", None, true);
         add_rate(
             &store,
@@ -1594,17 +1658,12 @@ mod inheritance_tests {
 
         assert_eq!(
             facts["rate.output"]["units"], 4_000_000,
-            "the reseller's own output price must survive"
+            "the provider's own price survives"
         );
         assert!(
-            facts["rate.output"].get("inherited_from").is_none(),
-            "and must not be marked as inherited"
-        );
-        // Control: the dimension it did NOT publish still inherits, or this
-        // test would pass against a build that inherits nothing at all.
-        assert_eq!(
-            facts["rate.input"]["units"], 75_000_000,
-            "control: the missing dimension must still be filled"
+            !facts.contains_key("rate.input"),
+            "and the dimension they did not publish stays VISIBLY absent rather \
+             than being filled from another provider's card"
         );
     }
 
@@ -1825,13 +1884,43 @@ fn inherit_rate_for(
     facts: &mut BTreeMap<String, serde_json::Value>,
     model_id: &str,
 ) {
-    // Only rows the upstream left unpriced. A published rate is never
-    // overridden: this fills a hole, it does not correct anyone's price.
-    let already_priced = facts
-        .get("rate.input")
-        .map(|v| v.get("state").and_then(|s| s.as_str()) == Some("priced"))
-        .unwrap_or(false);
-    if already_priced {
+    // Only rows that publish NO RATE AT ALL.
+    //
+    // This asked "is rate.input priced?" as a proxy for "does this provider
+    // publish a price card?", and the proxy is wrong in the direction that
+    // fabricates charges. `stated_zero` IS a published price -- it is the
+    // provider saying this dimension is free -- and treating it as absence let
+    // inheritance fill the dimensions around it from someone else's card.
+    //
+    // Found in production, one poll after placement:
+    //
+    //     alibaba-token-plan/deepseek-v4-flash
+    //       rate.input        stated_zero
+    //       rate.output       stated_zero
+    //       rate.cache_read   stated_zero
+    //       rate.cache_write  stated_zero
+    //       rate.reasoning    priced 600000000   <- INHERITED from deepseek
+    //
+    // A subscription provider states every dimension free, and fusiform
+    // attached a foreign $0.60/Mtok reasoning charge to it. A router ranks that
+    // model as costing money; a ledger records a charge that does not exist. It
+    // is worse than the gap it was built to fill, because an absent rate is
+    // visibly absent while a fabricated one is indistinguishable from a real
+    // price.
+    //
+    // A provider that has published ANY rate fact has a price card, and the
+    // dimensions missing from it are their statement about what they do not
+    // charge for -- not an invitation to import a number from elsewhere. So the
+    // gate is now the honest form of what the rule claims: inheritance is for
+    // rows where the upstream published nothing at all.
+    //
+    // This keeps the case it was built for: ollama-cloud/glm-5.3-flash has zero
+    // rate facts in the store (measured), which is why its rates went missing
+    // rather than arriving as zeros.
+    let publishes_a_rate = facts
+        .keys()
+        .any(|k| k.starts_with(fusiform_store::prefix::RATE));
+    if publishes_a_rate {
         return;
     }
 
