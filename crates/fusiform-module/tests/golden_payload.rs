@@ -277,15 +277,20 @@ fn cases() -> Vec<(&'static str, String)> {
             // Pinned because consumers pin from these bytes: with no case
             // requesting this row, the marker never appears in the golden
             // payload and a wire change to it lands without reddening anything.
-            // ASTRO'S DECODE TEST PINS THIS ROW BYTE-FOR-BYTE (astrocyte
-            // aba2219). Renaming the case, changing the synthetic provider
-            // ids, or dropping the pair breaks a test in another repository
-            // that nothing here would report.
+            // Astrocyte's inherited-rate test was SEEDED FROM this case
+            // (astrocyte aba2219): they copied the marked row's bytes into a
+            // literal, so the case is an origin rather than a dependency.
+            // Renaming or rearranging it does not break them — their test holds
+            // its own copy and asserts about the WIRE SHAPE, not about any row
+            // in this store.
             //
-            // Recorded at this end because this is where the breaking edit
-            // happens. The case is SYNTHETIC — invented for a fence of mine —
-            // so it looks free to rearrange, which is exactly the property
-            // that makes a consumer's dependency on it invisible.
+            // The note exists so a future reader knows where those bytes came
+            // from, which is a question that has no answer from their side. My
+            // first version of this comment said "pins byte-for-byte" and
+            // warned that an edit here breaks a test there; ASTRO corrected it.
+            // An overstated coupling is its own defect — it makes a reader
+            // afraid of an edit that is actually safe, and a warning nobody can
+            // verify is indistinguishable from one that is wrong.
             "inherited rate",
             r#"{"name":"catalog.get","arguments":{"provider_id":"synthetic-reseller","model_id":"synthetic-glm"}}"#.to_string(),
         ),
