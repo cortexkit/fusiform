@@ -1052,6 +1052,59 @@ fn print_history(response: &serde_json::Value) {
             );
         }
     }
+
+    print!("{}", render_last_changed(response));
+}
+
+/// When the value GENUINELY last changed, printed after the eras.
+///
+/// # Why this is not derivable from the list above it
+///
+/// The newest era's boundary is the obvious answer and it is wrong whenever a
+/// poll restated values already in force. One poll on 2026-08-16 wrote 17,455
+/// such eras, so reading the newest boundary makes every priced fact in the
+/// catalog report that instant and the whole catalog look freshly maintained.
+/// Which polls those were is not in the era rows; the store excludes them per
+/// era before answering.
+///
+/// # Why it renders at all
+///
+/// It was served for a day and printed NOWHERE. An operator running
+/// `ck models history` saw the eras and not the one instant that accounts for
+/// them — the field two consumers had asked for, invisible at the surface they
+/// would read it from. Third time in this repository: `uncertain` sat on the
+/// wire unrendered for three commits and `overridden` for three more. A
+/// producer adds a field, tests the wire, and the consumer-facing renderer is a
+/// separate edit no test reaches.
+///
+/// # Why it speaks on agreement too
+///
+/// Silence when the two agree would make the line's absence ambiguous between
+/// "the newest era IS the change" and "this build does not print it".
+fn render_last_changed(response: &serde_json::Value) -> String {
+    let Some(ms) = response.get("last_changed_at_ms").and_then(|v| v.as_i64()) else {
+        // Absent on an older daemon, and absent when the store read failed.
+        // Rendering nothing is honest for both: a wrong instant here is an
+        // assertion about when a price last moved.
+        return String::new();
+    };
+
+    let newest = response
+        .get("eras")
+        .and_then(|v| v.as_array())
+        .and_then(|e| e.last())
+        .and_then(|e| e.get("boundary_at_ms"))
+        .and_then(|v| v.as_i64());
+
+    match newest {
+        Some(newest) if newest != ms => format!(
+            "\nlast genuine change: {}\n  the newest era above is {}, which \
+             restated a value already in force\n",
+            format_instant(ms),
+            format_instant(newest)
+        ),
+        _ => format!("\nlast genuine change: {}\n", format_instant(ms)),
+    }
 }
 
 /// What a poll changed, as it appears at the end of a status line.
@@ -1713,6 +1766,27 @@ mod tests {
             .split_once("#[cfg(test)]")
             .expect("this file has a test module");
 
+        // The split assumes ALL production code precedes the FIRST test
+        // module, and a test module added mid-file silently breaks it.
+        //
+        // That happened while adding `render_last_changed`: a test module
+        // placed before the status renderers moved the split point up by ~360
+        // lines, so this fence stopped scanning the production code after it
+        // and kept passing. A guard that quietly narrows its own scope is worse
+        // than no guard, because the green is unchanged.
+        //
+        // A line floor catches it — the slice cannot lose a third of itself
+        // unnoticed. Set below the current size so ordinary edits do not trip
+        // it, and well above the truncated slice that prompted it.
+        let production_lines = production.lines().count();
+        assert!(
+            production_lines > 1_200,
+            "the production slice is only {production_lines} lines, so a \
+             #[cfg(test)] module was added ABOVE production code and this fence \
+             is no longer scanning all of it. Move the test module to the end \
+             of the file"
+        );
+
         let callers: Vec<&str> = production
             .lines()
             .filter(|l| l.contains("plural("))
@@ -2322,5 +2396,69 @@ mod retraction_render_tests {
             "a committed retraction must say what changed AND that the mark \
              survives, since the log is what an operator reads next: {done}"
         );
+    }
+}
+
+/// Tests for [`render_last_changed`].
+///
+/// AT THE END OF THE FILE, deliberately. `every_plural_goes_through_count`
+/// splits this file at the first `#[cfg(test)]` and scans everything before it
+/// as production. A test module placed mid-file moves that split point and
+/// silently shrinks what the fence checks — which is exactly what happened
+/// when these tests were first written above the status renderers. The fence
+/// now asserts a line floor, and this module stays down here.
+#[cfg(test)]
+mod last_changed_tests {
+    use super::*;
+
+    fn response(last_changed: Option<i64>, newest_era: i64) -> serde_json::Value {
+        let mut v = serde_json::json!({
+            "eras": [
+                {"boundary_at_ms": newest_era - 1000, "boundary_kind": "observed"},
+                {"boundary_at_ms": newest_era, "boundary_kind": "observed"}
+            ]
+        });
+        if let Some(ms) = last_changed {
+            v["last_changed_at_ms"] = serde_json::json!(ms);
+        }
+        v
+    }
+
+    /// The ordinary case: the newest era IS the genuine change.
+    #[test]
+    fn agreement_still_prints_the_instant() {
+        let out = render_last_changed(&response(Some(2_000_000), 2_000_000));
+        assert!(
+            out.contains("last genuine change"),
+            "silence on agreement would leave the line's absence ambiguous \
+             between 'they agree' and 'this build does not print it': {out}"
+        );
+        assert!(
+            !out.contains("restated"),
+            "and must not claim a restatement that did not happen: {out}"
+        );
+    }
+
+    /// The case the field exists for: an artifact poll restated the value, so
+    /// the newest era is NOT when the price moved.
+    #[test]
+    fn a_restating_newest_era_is_called_out() {
+        let out = render_last_changed(&response(Some(1_000_000), 2_000_000));
+        assert!(
+            out.contains("restated a value already in force"),
+            "when the two differ the operator must be told WHY, or the line \
+             reads as a contradiction of the eras printed above it: {out}"
+        );
+        assert!(out.contains(&format_instant(1_000_000)), "{out}");
+        assert!(out.contains(&format_instant(2_000_000)), "{out}");
+    }
+
+    /// An older daemon, or a store read that failed: render nothing.
+    ///
+    /// A wrong instant here is an assertion about when a price last moved,
+    /// which is the kind of claim a caller acts on.
+    #[test]
+    fn an_absent_field_renders_nothing() {
+        assert_eq!(render_last_changed(&response(None, 2_000_000)), "");
     }
 }
