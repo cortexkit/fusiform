@@ -1797,6 +1797,48 @@ mod inheritance_tests {
         );
     }
 
+    /// The BULK path must inherit under a rate filter too.
+    ///
+    /// The test below drives the single-model path (provider AND model named).
+    /// A pricing consumer reading a whole provider takes the bulk path, and a
+    /// mutation removing the widening from THAT call site survived — so the two
+    /// paths were never compared under a filter.
+    #[test]
+    fn the_bulk_path_inherits_under_a_rate_filter() {
+        let (store, _d) = store();
+        seed(&store, "zai", "glm-x", Some(75_000_000), true);
+        seed(&store, "ollama-cloud", "glm-x", None, true);
+
+        let bulk = serve_catalog_get(
+            &store,
+            br#"{"provider_id":"ollama-cloud","fact_prefixes":["rate."]}"#,
+        )
+        .expect("the request must be served");
+
+        let facts = bulk
+            .models
+            .get("ollama-cloud/glm-x")
+            .expect("the model must be present in a bulk read");
+        assert!(
+            facts.contains_key("rate.input"),
+            "a bulk read with a rate filter must inherit exactly as the \
+             single-model read does: a pricing consumer reading a whole \
+             provider is the ordinary case. Got: {facts:?}"
+        );
+
+        // Control: the single-model path on the same store, so a failure here
+        // names WHICH path is wrong rather than saying inheritance is broken.
+        let single = serve_catalog_get(
+            &store,
+            br#"{"provider_id":"ollama-cloud","model_id":"glm-x","fact_prefixes":["rate."]}"#,
+        )
+        .expect("the request must be served");
+        assert!(
+            single.models["ollama-cloud/glm-x"].contains_key("rate.input"),
+            "control: the single-model path must still inherit"
+        );
+    }
+
     /// A rate filter must not switch inheritance off.
     ///
     /// # This is the test that was missing, and production proved it
