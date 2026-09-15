@@ -685,3 +685,86 @@ fn a_fresh_process_populates_every_durable_field() {
         "and the observation instant likewise"
     );
 }
+
+/// A store read that FAILS must be distinguishable from a store with nothing
+/// in it — driven through the real adoption path, not by setting the flag.
+///
+/// # Why this test exists, and why the obvious version was not enough
+///
+/// `adopt_from_store` sets a flag when a read fails, and health uses that flag
+/// to report the catalog's age as UNKNOWN rather than rendering the
+/// fresh-install sentence. The unit test for that arm calls
+/// `Signals::adoption_failed()` directly — so it proves health reacts to the
+/// flag, and proves NOTHING about the reads that are supposed to set it.
+///
+/// Measured: deleting `self.adoption_failed()` from a real `Err` arm SURVIVED
+/// the whole suite. The wiring worked and nothing held it there.
+///
+/// That is the third instance in one night of a test naming the helper rather
+/// than the caller — and this one was inside the fix for the second. A
+/// mutation at the CALL SITE is what exposes it; a mutation inside the
+/// function is caught by the function's own test and proves nothing about
+/// reachability.
+///
+/// # How the failure is induced
+///
+/// By dropping the table the adoption reads query. Permissions and unlinking
+/// do not work here — measured previously: POSIX permission checks happen at
+/// `open(2)`, not `write(2)`, so an already-open SQLite connection is
+/// unaffected by both. Removing the table makes the SELECT itself fail, which
+/// is the real error path rather than a simulated one.
+#[test]
+fn a_failed_adoption_read_is_reported_as_unknown_not_as_a_fresh_install() {
+    let dir = tempfile::tempdir().unwrap();
+    seed_history(dir.path(), Timestamp(10 * HOUR));
+
+    // Control FIRST: the same store, unpoisoned, must adopt cleanly and report
+    // Ok. Without this the assertions below pass against a build that reports
+    // Degraded for everything.
+    {
+        let store = open(dir.path());
+        let signals = Signals::new();
+        signals.store_opened();
+        signals.adopt_from_store(&store, SourceId::ModelsDev);
+        assert!(
+            !signals.adoption_did_fail(),
+            "control: a healthy store must not report a failed adoption"
+        );
+        assert!(
+            signals.observation_age_ms(11 * HOUR).is_some(),
+            "control: the age must actually be adopted, or the poisoned case \
+             below proves nothing about the difference"
+        );
+    }
+
+    // Poison: remove the table every adoption read depends on.
+    {
+        let conn = rusqlite::Connection::open(dir.path().join("store.db")).unwrap();
+        conn.execute_batch("DROP TABLE observation;").unwrap();
+    }
+
+    let store = open(dir.path());
+    let signals = Signals::new();
+    signals.store_opened();
+    signals.adopt_from_store(&store, SourceId::ModelsDev);
+
+    assert!(
+        signals.adoption_did_fail(),
+        "a store read that errored must be recorded as a FAILED adoption: \
+         without it the empty clock is indistinguishable from a fresh install, \
+         and health says 'started recently' about a module that cannot tell \
+         whether its catalog is hours stale"
+    );
+
+    let report = fusiform_module::health::report(&signals, 11 * HOUR);
+    assert_eq!(
+        report.status,
+        subc_protocol::session::HealthStatus::Degraded,
+        "and health must say so rather than reporting Ok"
+    );
+    let detail = report.detail.unwrap_or_default();
+    assert!(
+        detail.contains("UNKNOWN"),
+        "the detail must name the age as unknown: {detail}"
+    );
+}

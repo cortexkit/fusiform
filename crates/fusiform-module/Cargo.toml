@@ -30,6 +30,11 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sy
 
 [dev-dependencies]
 fusiform-testkit = { workspace = true }
+# Only to POISON a store in a test: dropping the table an adoption read queries
+# is the cheapest way to drive a real store-read failure, and the alternative
+# was a test that calls the flag setter directly and therefore cannot see the
+# read that is supposed to call it.
+rusqlite = { workspace = true }
 tempfile = "3"
 # Verifies the compiled-in snapshot against the sha256 the refresh script
 # recorded. Must be sha256 specifically: checking a different hash would verify

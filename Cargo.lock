@@ -532,6 +532,7 @@ dependencies = [
  "fusiform-store",
  "fusiform-testkit",
  "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2",
