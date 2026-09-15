@@ -128,6 +128,19 @@ pub struct Signals {
     /// Whether the store has been opened. Read as a dispatch-capability signal:
     /// a module that never opened its store cannot answer a read.
     store_open: AtomicU64,
+    /// Set when a startup adoption read FAILED, as distinct from finding
+    /// nothing.
+    ///
+    /// Both leave the signal empty, and health renders an empty age as "no
+    /// observation yet; started recently" — true and reassuring for a fresh
+    /// install, FALSE and equally reassuring when the read failed. Without
+    /// this flag the two are indistinguishable at the only surface an operator
+    /// reads, and the sole existing signal is a stderr line in a shared sink
+    /// measured at 12.4M lines, of which 1,116 are fusiform's.
+    ///
+    /// That is the absent-versus-unknown collapse fusiform exists to prevent,
+    /// occurring in fusiform's own health.
+    adoption_failed: AtomicU64,
 }
 
 /// A value meaning "never happened", chosen so ordinary arithmetic on it is
@@ -153,6 +166,7 @@ impl Signals {
             last_failure_class: AtomicU64::new(CLASS_NONE),
             last_write_ms: AtomicI64::new(NEVER),
             store_open: AtomicU64::new(0),
+            adoption_failed: AtomicU64::new(0),
         }
     }
 
@@ -219,11 +233,14 @@ impl Signals {
             // exact false-fresh-install reading this adoption exists to
             // prevent. An operator who sees only "could not read" has no reason
             // to distrust the health line that follows it.
-            Err(e) => eprintln!(
-                "fusiform: could not read the last observation at startup, so health \
-                 will report observation_age_ms as null and look like a fresh \
-                 install until the next poll: {e}"
-            ),
+            Err(e) => {
+                self.adoption_failed();
+                eprintln!(
+                    "fusiform: could not read the last observation at startup, so \
+                     health will report observation_age_ms as null and look like a \
+                     fresh install until the next poll: {e}"
+                );
+            }
         }
 
         // The instant the catalog last changed, for the same reason. This one
@@ -235,11 +252,14 @@ impl Signals {
             Ok(Some(at)) => self.adopt_last_write(at.0),
             // No eras at all, so null is then the true answer.
             Ok(None) => {}
-            Err(e) => eprintln!(
-                "fusiform: could not read the newest era at startup, so health will \
-                 report last_write_age_ms as null — which reads as 'never written' \
-                 rather than 'not adopted': {e}"
-            ),
+            Err(e) => {
+                self.adoption_failed();
+                eprintln!(
+                    "fusiform: could not read the newest era at startup, so health \
+                     will report last_write_age_ms as null — which reads as 'never \
+                     written' rather than 'not adopted': {e}"
+                );
+            }
         }
 
         // And the failure HISTORY, which no atomic can supply.
@@ -285,11 +305,14 @@ impl Signals {
                     self.last_failure_ms.store(at.0, Ordering::Relaxed);
                 }
             }
-            Err(e) => eprintln!(
-                "fusiform: could not read the failure history at startup, so health \
-                 will report failures_ever as 0 — which reads as 'never failed' \
-                 rather than 'not adopted': {e}"
-            ),
+            Err(e) => {
+                self.adoption_failed();
+                eprintln!(
+                    "fusiform: could not read the failure history at startup, so \
+                     health will report failures_ever as 0 — which reads as 'never \
+                     failed' rather than 'not adopted': {e}"
+                );
+            }
         }
     }
 
@@ -442,6 +465,17 @@ impl Signals {
 
     pub fn consecutive_failures(&self) -> u64 {
         self.consecutive_failures.load(Ordering::Relaxed)
+    }
+
+    /// Record that a startup read failed, so an empty signal means UNKNOWN
+    /// rather than absent.
+    pub fn adoption_failed(&self) {
+        self.adoption_failed.store(1, Ordering::Relaxed);
+    }
+
+    /// Whether any startup adoption read failed.
+    pub fn adoption_did_fail(&self) -> bool {
+        self.adoption_failed.load(Ordering::Relaxed) == 1
     }
 
     pub fn store_is_open(&self) -> bool {

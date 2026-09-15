@@ -160,6 +160,35 @@ pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
                 describe_failure(signals)
             )),
         ),
+        // A startup read FAILED, so the empty clock means unknown rather than
+        // absent — and the two render identically without this arm.
+        //
+        // "No observation yet; started recently" is true and reassuring for a
+        // fresh install, and false and equally reassuring when the adoption
+        // read failed. Health then reports Ok on a module that cannot
+        // establish whether its catalog is hours stale, for up to one cadence,
+        // and the only other signal is a stderr line in a shared sink measured
+        // at 12.4M lines.
+        //
+        // Degraded rather than Ok-with-an-honest-detail: the question this
+        // surface exists to answer is whether the catalog is fresh, and the
+        // answer right now is that it cannot be established. An instrument
+        // that cannot see its subject must not report the subject as fine.
+        //
+        // It self-heals in one poll, which is why it is Degraded rather than
+        // Failing: the loop writes its own values shortly and nothing is
+        // actually broken in serving.
+        None if signals.adoption_did_fail() => (
+            HealthStatus::Degraded,
+            Some(
+                "the startup read of the store failed, so the catalog's age is \
+                 UNKNOWN rather than absent: this may be a fresh install or a \
+                 catalog hours stale, and this module cannot currently tell. \
+                 Resolves at the next poll; check the module's stderr for the \
+                 read error"
+                    .to_string(),
+            ),
+        ),
         None => (
             HealthStatus::Ok,
             Some("no observation yet; started recently".to_string()),
@@ -359,6 +388,40 @@ mod tests {
             r.status,
             HealthStatus::Ok,
             "a module that started a minute ago must not page anyone"
+        );
+    }
+
+    /// A failed startup read must not render as a fresh install.
+    ///
+    /// Both leave the staleness clock empty, and the empty clock rendered "no
+    /// observation yet; started recently" either way — true for one, false and
+    /// equally reassuring for the other. The module then reports Ok while
+    /// unable to establish whether its catalog is hours stale.
+    ///
+    /// The control is the test above: a genuine fresh install must STAY Ok, or
+    /// this fix pages someone on every clean boot.
+    #[test]
+    fn a_failed_startup_read_is_not_a_fresh_install() {
+        let s = open_store();
+        s.adoption_failed();
+        let r = report(&s, 1_000_000);
+
+        assert_eq!(
+            r.status,
+            HealthStatus::Degraded,
+            "an empty clock after a FAILED read means unknown, not absent: \
+             reporting Ok claims the catalog is fine when this module cannot \
+             tell whether it is hours stale"
+        );
+        let detail = r.detail.unwrap_or_default();
+        assert!(
+            detail.contains("UNKNOWN"),
+            "the detail must say the age is unknown rather than describing a \
+             fresh start: {detail}"
+        );
+        assert!(
+            !detail.contains("started recently"),
+            "and must not reuse the fresh-install sentence: {detail}"
         );
     }
 
