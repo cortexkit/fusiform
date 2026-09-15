@@ -200,6 +200,24 @@ FAILED="$(echo "$OUT" | awk '/^test .*FAILED/ && $2 != "result:" {print $2}' | p
 
 if [ -n "$FAILED" ]; then
   echo "caught by: $FAILED"
+  # Printed at CAUGHT, which is the moment of false confidence.
+  #
+  # A caught mutation says a test objects to the CHANGE. It does not say
+  # anything about whether a caller reaches the code at all: a mutation INSIDE
+  # a function is caught by that function's own test and proves nothing about
+  # reachability, while a mutation that REMOVES THE CALL is caught only if
+  # something drives the entry point.
+  #
+  # Three defects of that shape landed in this repository in one night, and the
+  # third was written inside the fix for the second -- by someone who had
+  # stated the rule to another seat an hour earlier. It does not transfer to
+  # memory, because at the moment you write a test you are thinking about the
+  # thing you just built, and the thing you just built is the function.
+  #
+  # So it is a line in the tool rather than a principle to hold, at the one
+  # moment somebody is about to conclude they are covered.
+  echo "  next: mutate the CALL SITE too. A function tested through its own"
+  echo "  front door is tested in a world where its caller is correct."
   exit 0
 fi
 
