@@ -3,7 +3,7 @@ name = "fusiform-protocol"
 # The served wire schema's version, moved by a CI check whenever the types
 # change. This is the number a consumer pins, so it must not track fusiform's
 # module version — the module deploys far more often than its contract moves.
-version = "0.19.0"
+version = "0.20.0"
 edition = "2021"
 publish = false
 description = "Fusiform's served wire schema: the request and response types for catalog.get, catalog.history and catalog.status. Types only — no store, no network, no runtime."

@@ -948,6 +948,26 @@ pub struct HistoryResponse {
     /// `None` when the fact has no era at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_changed_at_ms: Option<i64>,
+    /// Set when this fact has NO eras here because it is served by inheritance.
+    ///
+    /// # The disagreement this closes
+    ///
+    /// `catalog.get` serves a rate on a row whose provider published none,
+    /// borrowed from the creator and marked. `catalog.history` for that same
+    /// fact found no eras and said so — two surfaces disagreeing about whether
+    /// a fact exists, both correct, which reads as one of them being broken.
+    ///
+    /// Worse, the empty answer invited a wrong conclusion: with the model and
+    /// provider both known, the only remaining cause looked like a mistyped
+    /// fact key, so an operator was sent to hunt a typo in a key
+    /// `catalog.get` had just served them.
+    ///
+    /// The honest answer is that this row has no history for this fact and
+    /// never will: the value is derived at serve time, and its history lives
+    /// on the named provider's row. A consumer asking "when did this price
+    /// change" should ask there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inherited_from: Option<crate::money::InheritedFrom>,
     /// The override in force on this fact right now, when there is one.
     ///
     /// # Why history carries this and does NOT apply it

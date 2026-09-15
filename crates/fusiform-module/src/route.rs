@@ -279,6 +279,33 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
         .flatten()
         .map(|t| t.0);
 
+    // Why an empty history can be the RIGHT answer for a fact that is served.
+    //
+    // A rate inherited from the creator has no eras on this row -- the value is
+    // derived at serve time -- so `catalog.get` serves a price and
+    // `catalog.history` finds nothing. Two surfaces disagreeing about whether a
+    // fact exists, both correct, which reads as one of them being broken.
+    //
+    // Answered by running THE SAME derivation `catalog.get` runs, rather than
+    // by re-deriving the eligibility rule here. A second copy of that rule
+    // would be free to drift from the one that decides what is actually
+    // served, and then this surface would explain an absence that is not the
+    // one the consumer met.
+    //
+    // Only consulted when the history is empty: a fact with eras of its own is
+    // this provider's, and inheritance never overwrites a published rate.
+    let inherited_from = if eras.is_empty() {
+        inheritance_origin(
+            store,
+            source,
+            &request.provider_id,
+            &request.model_id,
+            &fact,
+        )
+    } else {
+        None
+    };
+
     Ok(HistoryResponse {
         source: source.as_str().to_string(),
         provider_id: request.provider_id,
@@ -286,6 +313,7 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
         fact_key: request.fact_key,
         eras,
         last_changed_at_ms,
+        inherited_from,
         overridden,
     })
 }
@@ -1667,6 +1695,108 @@ mod inheritance_tests {
         );
     }
 
+    /// History explains an inherited rate instead of denying it.
+    ///
+    /// # The disagreement this pins
+    ///
+    /// `catalog.get` serves a price on this row; `catalog.history` for the
+    /// same fact found no eras and rendered "check the fact key" — sending an
+    /// operator to hunt a typo in a key that had just been answered. Two
+    /// surfaces disagreeing about whether a fact exists, both correct.
+    ///
+    /// Found by driving the shipped CLI against production, not by a test.
+    #[test]
+    fn history_names_where_an_inherited_rate_comes_from() {
+        let (store, _d) = store();
+        seed(&store, "zai", "glm-x", Some(75_000_000), true);
+        seed(&store, "ollama-cloud", "glm-x", None, true);
+
+        let origin = inheritance_origin(
+            &store,
+            SourceId::ModelsDev,
+            "ollama-cloud",
+            "glm-x",
+            &FactKey::from_stored("rate.input".to_string()),
+        )
+        .expect("an inherited rate must name its origin");
+        assert_eq!(origin.provider_id, "zai");
+
+        // The creator's OWN row publishes the rate, so its history is real and
+        // must not be explained away as inherited.
+        assert!(
+            inheritance_origin(
+                &store,
+                SourceId::ModelsDev,
+                "zai",
+                "glm-x",
+                &FactKey::from_stored("rate.input".to_string()),
+            )
+            .is_none(),
+            "a provider's own published rate must not report an origin"
+        );
+
+        // A non-rate fact is never inherited, so it must not acquire an
+        // explanation either — without this the helper could answer for every
+        // empty history in the catalog.
+        assert!(
+            inheritance_origin(
+                &store,
+                SourceId::ModelsDev,
+                "ollama-cloud",
+                "glm-x",
+                &FactKey::from_stored("limit.context".to_string()),
+            )
+            .is_none(),
+            "only rates are inherited"
+        );
+    }
+
+    /// The ROUTE must carry the explanation, not just the helper.
+    ///
+    /// Testing `inheritance_origin` directly cannot see a route that never
+    /// calls it — a mutation replacing the route's whole branch with `None`
+    /// SURVIVED the helper test. That is the same gap that produced the
+    /// `--rates` defect: the function was right and the route feeding it was
+    /// wrong, and a function tested through its own front door cannot see its
+    /// caller.
+    #[test]
+    fn the_history_route_serves_the_origin() {
+        let (store, _d) = store();
+        seed(&store, "zai", "glm-x", Some(75_000_000), true);
+        seed(&store, "ollama-cloud", "glm-x", None, true);
+
+        let response = serve_history(
+            &store,
+            br#"{"provider_id":"ollama-cloud","model_id":"glm-x","fact_key":"rate.input"}"#,
+        )
+        .expect("the request must be served");
+
+        assert!(
+            response.eras.is_empty(),
+            "control: this row genuinely has no eras, which is why the \
+             explanation is needed"
+        );
+        let origin = response.inherited_from.expect(
+            "the route must explain an empty history that is served by \
+             inheritance, or an operator is told to check a fact key that \
+             catalog.get just answered",
+        );
+        assert_eq!(origin.provider_id, "zai");
+
+        // Control: a row with real history must NOT carry the explanation, or
+        // this passes against a route that attaches it unconditionally.
+        let creator = serve_history(
+            &store,
+            br#"{"provider_id":"zai","model_id":"glm-x","fact_key":"rate.input"}"#,
+        )
+        .expect("the request must be served");
+        assert!(!creator.eras.is_empty(), "control: the creator has history");
+        assert!(
+            creator.inherited_from.is_none(),
+            "a published rate's history must not be explained as inherited"
+        );
+    }
+
     /// A rate filter must not switch inheritance off.
     ///
     /// # This is the test that was missing, and production proved it
@@ -1848,6 +1978,46 @@ fn narrow_to_requested(
         return;
     };
     facts.retain(|k, _| prefixes.iter().any(|p| k.starts_with(p)));
+}
+
+/// Whose row this fact is served from, when it is served by inheritance.
+///
+/// Runs the real derivation over the model's real facts and reads the marker
+/// off the result, so this cannot disagree with what `catalog.get` serves. The
+/// alternative -- re-testing `open_weights`, the family, the creator table and
+/// the creator's published rates here -- is a second statement of the rule,
+/// and the two would answer differently the first time either changed.
+fn inheritance_origin(
+    store: &CatalogStore,
+    source: SourceId,
+    provider_id: &str,
+    model_id: &str,
+    fact: &FactKey,
+) -> Option<fusiform_protocol::money::InheritedFrom> {
+    if !fact.as_str().starts_with(fusiform_store::prefix::RATE) {
+        return None;
+    }
+    let (found, _withheld) = store.read_model(source, provider_id, model_id, None).ok()?;
+    let model = found?;
+
+    let mut facts: BTreeMap<String, serde_json::Value> = model
+        .facts
+        .into_iter()
+        .map(|(k, raw)| {
+            let v = fact_for_the_wire(&raw);
+            (k.as_str().to_string(), v)
+        })
+        .collect();
+
+    inherit_rate_for(
+        store,
+        source,
+        crate::creators::creators(),
+        &mut facts,
+        model_id,
+    );
+
+    serde_json::from_value(facts.get(fact.as_str())?.get("inherited_from")?.clone()).ok()
 }
 
 /// Attach an inherited rate to a model whose serving provider publishes none.

@@ -964,6 +964,36 @@ fn print_history(response: &serde_json::Value) {
         return;
     };
     if eras.is_empty() {
+        // An empty history that is not an absence.
+        //
+        // The value IS served on this row, derived at serve time from another
+        // provider's published price, so there are no eras here and never will
+        // be. Saying "check the fact key" would send an operator to hunt a typo
+        // in a key `catalog.get` had just answered.
+        //
+        // The origin is named because it is the actionable half: the question
+        // behind "show me this fact's history" is when the price changed, and
+        // that history exists — on the row this value came from.
+        if let Some(origin) = response.get("inherited_from") {
+            let provider = origin
+                .get("provider_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let model = response
+                .get("model_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let fact = response
+                .get("fact_key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            println!(
+                "\nno eras here: this provider publishes no rate, so the value is \
+                 served from {provider}'s card for the same weights"
+            );
+            println!("its history is at: ck models history --provider {provider} --model {model} --fact {fact}");
+            return;
+        }
         // By the time this renders, the route has already refused an unknown
         // provider and an unknown model. So the remaining causes really are
         // about the fact: either the key is mistyped, or the model genuinely
