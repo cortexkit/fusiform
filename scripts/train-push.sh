@@ -26,6 +26,15 @@
 # never a force. gated-push.sh stays for the work whose failures only reproduce
 # locally (watcher/fseventsd, macOS exec assessment).
 #
+# EDIT THIS FILE BY WRITE-TEMP-THEN-RENAME, NEVER IN PLACE. A running bash holds
+# an open fd and reads on by byte offset, so an in-place write (same inode) makes
+# a live train resume at the wrong offset and die on a syntax error in code it
+# never reached - "line 789: syntax error near unexpected token `('" in a file
+# that passes `bash -n` before and after. A rename into place (new inode) leaves
+# the live run on the old bytes. Measured both ways by BROCA; AFT restored bytes
+# under a live train once. Nothing lands from such a death: it happens before
+# the landing push, and the ref left behind is the recoverable repush state.
+#
 # A MERGE IS ITSELF A TRAIN PUSH. Under required status checks, a merge commit
 # made locally has no check of its own - main's protection sees an unchecked
 # sha and refuses the push, however green both sides were separately. So do the
@@ -159,6 +168,95 @@ train_ref="train/$train_name"
 # a named refusal here.
 if ! git check-ref-format "refs/heads/$train_ref"; then
   refuse "'$train_name' is not a usable branch name component"
+fi
+
+# REFUSE A CONCURRENT TRAIN. Two trains overlap the moment one is backgrounded and
+# another started - which is exactly what an operator wants to do, because a train
+# takes minutes and waiting is dull. They are not concurrent-safe: each resolves
+# HEAD and moves refs on one remote, so the second can land the first's commits,
+# or find main already where it meant to put it and report a failure over a
+# landing that succeeded. That false failure is the mild outcome; the dangerous
+# one is a train landing a sha its CI never tested.
+#
+# A remote train/* ref is NOT the signal: a ref outlives its process (a red CI
+# leaves the ref as the repush target, and the same train name is re-run round
+# after round), and a ref arrives late (a train between resolve-HEAD and push
+# holds no ref yet, so a second train in that window would be permitted - the
+# exact concurrency to refuse). A pid is the direct observable. The lock below
+# is a record, not a mutex: it means nothing unless its process is alive, so a
+# SIGKILLed train (no trap runs) leaves a file the next scan clears. No EXIT
+# trap on purpose - bash traps are global and a function further down sets one.
+#
+# Limit: the lock is local, refs are remote, so this sees trains on this box
+# only. One operator, one box here; a second machine driving the same remote is
+# invisible to it, which is why leftover refs are still listed below.
+# (Lifted from BROCA's train-push, d588cb6c.)
+train_lock_dir="$(git rev-parse --git-dir 2>/dev/null)/train-push-locks"
+mkdir -p "$train_lock_dir" 2>/dev/null || true
+train_lock_held="$train_lock_dir/held"
+
+# ACQUIRE BEFORE ANY NETWORK WORK, AND ACQUIRE ATOMICALLY. A scan-then-write
+# guard with a `git ls-remote` between the scan and the write admitted two
+# trains started together: the window is a network round trip, and "background
+# one train, start another" lands inside it by construction (BROCA's audit
+# found it in the guard written to fix an ordering bug; 98b68a85 -> d588cb6c).
+# `mkdir` is the POSIX atomic primitive: EEXIST if it exists, so of N racers
+# exactly one wins and there is no check-then-act to lose.
+#
+# The owner file is written after the directory exists, leaving a two-syscall
+# window where the lock is held by someone who has not said who they are. An
+# unreadable owner is treated as live and refused, never recovered: dispossessing
+# a process mid-acquisition gives two live trains, the thing this guard exists
+# to prevent; refusing costs one `rm -rf` the message names. Fail closed.
+train_lock_attempts=0
+while true; do
+  if mkdir "$train_lock_held" 2>/dev/null; then
+    printf '%s %s\n' "$$" "$train_name" > "$train_lock_held/owner"
+    break
+  fi
+
+  owner_pid="$(awk 'NR==1{print $1}' "$train_lock_held/owner" 2>/dev/null || true)"
+  owner_name="$(awk 'NR==1{print $2}' "$train_lock_held/owner" 2>/dev/null || true)"
+
+  if [ -z "$owner_pid" ]; then
+    printf 'train-push: the train lock is held with no readable owner.\n' >&2
+    printf '  a train was killed between taking the lock and recording its pid.\n' >&2
+    printf '  if you are sure no train is running:  rm -rf %s\n' "$train_lock_held" >&2
+    refuse "train lock held by an unidentified owner; refusing rather than dispossessing it"
+  fi
+
+  if kill -0 "$owner_pid" 2>/dev/null; then
+    printf 'train-push: train %s is RUNNING as pid %s\n' "${owner_name:-?}" "$owner_pid" >&2
+    printf '  wait for it, or kill it if you know it is wedged.\n' >&2
+    refuse "a train is already running on this machine; wait for it"
+  fi
+
+  # Stale owner. Claim the removal with a rename, not an rm: two processes
+  # finding the same stale owner would both delete and both acquire, and the
+  # second delete would take the first one's fresh lock. rename(2) of the
+  # directory to an unused name fails ENOENT for whoever arrives second, so
+  # exactly one recovers; the loser loops and meets the winner's live lock.
+  if mv "$train_lock_held" "$train_lock_held.stale.$$" 2>/dev/null; then
+    rm -rf "$train_lock_held.stale.$$" 2>/dev/null || true
+  fi
+
+  train_lock_attempts=$((train_lock_attempts + 1))
+  if [ "$train_lock_attempts" -ge 3 ]; then
+    refuse "could not acquire the train lock after clearing a stale owner; try again"
+  fi
+done
+
+# Leftover refs do not refuse - no process drives them, so they cannot race this
+# train. They are listed with the delete composed, because the operator reaching
+# this line is usually mid-CI-failure and composing `--delete train/<name>` by
+# hand next to several refs is where the wrong one gets deleted.
+stale_refs=$(git ls-remote --heads "$remote" 'train/*' 2>/dev/null | wc -l | tr -d ' ')
+if [ "${stale_refs:-0}" -gt 0 ]; then
+  printf 'train-push: %s train ref(s) on %s with no live train here:\n' \
+    "$stale_refs" "$remote" >&2
+  git ls-remote --heads "$remote" 'train/*' 2>/dev/null |
+    sed "s|.*refs/heads/|    git push $remote --delete |" >&2
+  printf '  (proceeding: a ref without a process cannot race this train)\n' >&2
 fi
 
 # Operator tooling runs on the upstream gh; the shim is only for agent commands.
@@ -549,6 +647,29 @@ rebase_onto_main() {
   local before="$1"
   local conflicted
   local now
+  local merges
+
+  # A plain rebase linearizes: it replays the non-merge commits and drops the
+  # merge commit itself, so anything recorded only in that merge (a conflict
+  # resolution, an integration fix) vanishes with exit 0 and the reduced tree
+  # is what gets re-tested and landed. --rebase-merges does not help: it
+  # re-performs the merges and loses the same adjustment unless rerere holds
+  # it. A merge is a permitted train shape (see the header), so refuse the
+  # automatic requeue and leave the remote train ref intact for the operator,
+  # who knows what the merge resolved. (BROCA's find, 2026-09-11.)
+  merges="$(git rev-list --merges "$remote_default..$before" 2>/dev/null || true)"
+  if [ -n "$merges" ]; then
+    {
+      printf 'train-push: %s/%s moved and the train carries merge commit(s) — not rebasing.\n' \
+        "$remote" "$default_branch"
+      printf '  A rebase would drop the merge and anything recorded only in it.\n'
+      printf '%s\n' "$merges" | sed 's/^/    merge /'
+      printf '  %s/%s still holds %s. Integrate %s/%s yourself (merge or re-pick),\n' \
+        "$remote" "$train_ref" "$before" "$remote" "$default_branch"
+      printf '  then re-run: scripts/train-push.sh %s\n' "$train_name"
+    } >&2
+    return 1
+  fi
 
   if git rebase "$remote_default"; then
     return 0
