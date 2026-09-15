@@ -400,7 +400,7 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
     match args.command.as_str() {
         "status" => print_status(&response),
         "get" => print_catalog(&response),
-        "history" => print_history(&response),
+        "history" => print!("{}", render_history(&response)),
         "correct" => print_correction(&response),
         "mark-artifact" => print_mark(&response),
         "retract-artifact" => print_retraction(&response),
@@ -940,9 +940,22 @@ fn render_history_override(response: &serde_json::Value) -> String {
     )
 }
 
-fn print_history(response: &serde_json::Value) {
-    println!(
-        "{}/{}  {}",
+/// The whole history block as a string, printed once by the caller.
+///
+/// It printed directly until now, which is the one shape this codebase already
+/// settled against: after a double-render defect the rule became that nothing
+/// below the entry point prints, so a block added to one path and not another
+/// is MISSING rather than doubled.
+///
+/// The concrete cost of the exception was that `render_last_changed` was
+/// testable and the CALL that prints it was not — deleting the call survived
+/// the whole suite. A function that prints cannot be driven by a test without
+/// capturing stdout, so its callers go untested by construction, and this file
+/// has now produced three served-but-unrendered fields.
+fn render_history(response: &serde_json::Value) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}/{}  {}\n",
         response
             .get("provider_id")
             .and_then(|v| v.as_str())
@@ -955,13 +968,14 @@ fn print_history(response: &serde_json::Value) {
             .get("fact_key")
             .and_then(|v| v.as_str())
             .unwrap_or("?"),
-    );
+    ));
 
     // Before the eras: this note changes how every row below reads.
-    print!("\n{}", render_history_override(response));
+    out.push('\n');
+    out.push_str(&render_history_override(response));
 
     let Some(eras) = response.get("eras").and_then(|v| v.as_array()) else {
-        return;
+        return out;
     };
     if eras.is_empty() {
         // An empty history that is not an absence.
@@ -987,12 +1001,15 @@ fn print_history(response: &serde_json::Value) {
                 .get("fact_key")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            println!(
-                "\nno eras here: this provider publishes no rate, so the value is \
-                 served from {provider}'s card for the same weights"
-            );
-            println!("its history is at: ck models history --provider {provider} --model {model} --fact {fact}");
-            return;
+            out.push_str(&format!(
+                "\nno eras here: this provider publishes no rate, so the value \
+                 is served from {provider}'s card for the same weights\n"
+            ));
+            out.push_str(&format!(
+                "its history is at: ck models history --provider {provider} \
+                 --model {model} --fact {fact}\n"
+            ));
+            return out;
         }
         // By the time this renders, the route has already refused an unknown
         // provider and an unknown model. So the remaining causes really are
@@ -1002,11 +1019,14 @@ fn print_history(response: &serde_json::Value) {
         // The earlier comment here named a typo in the key as the cause while
         // the route still answered all three cases identically, so an operator
         // who mistyped the MODEL was pointed at the key.
-        println!("\nno eras recorded for this fact: the model exists, so check the fact key");
-        return;
+        out.push_str(
+            "\nno eras recorded for this fact: the model exists, so check the \
+             fact key\n",
+        );
+        return out;
     }
 
-    println!();
+    out.push('\n');
     for era in eras {
         let at = era
             .get("boundary_at_ms")
@@ -1030,7 +1050,10 @@ fn print_history(response: &serde_json::Value) {
             None => String::new(),
         };
 
-        println!("  {}  {kind:<10} {value}{window}", format_instant(at));
+        out.push_str(&format!(
+            "  {}  {kind:<10} {value}{window}\n",
+            format_instant(at)
+        ));
 
         // A `corrected` boundary without its extent tells an operator that
         // something was wrong and not what. The reason is recorded in the
@@ -1045,15 +1068,16 @@ fn print_history(response: &serde_json::Value) {
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
             let reason = c.get("reason").and_then(|v| v.as_str()).unwrap_or("");
-            println!(
-                "                        corrects {} to {}: {reason}",
+            out.push_str(&format!(
+                "                        corrects {} to {}: {reason}\n",
                 format_instant(from),
                 format_instant(until)
-            );
+            ));
         }
     }
 
-    print!("{}", render_last_changed(response));
+    out.push_str(&render_last_changed(response));
+    out
 }
 
 /// When the value GENUINELY last changed, printed after the eras.
@@ -2460,5 +2484,106 @@ mod last_changed_tests {
     #[test]
     fn an_absent_field_renders_nothing() {
         assert_eq!(render_last_changed(&response(None, 2_000_000)), "");
+    }
+}
+
+/// Tests for [`render_history`], the whole block rather than its parts.
+///
+/// AT THE END OF THE FILE: `every_plural_goes_through_count` splits this file
+/// at the first `#[cfg(test)]`, and a module placed mid-file silently shrinks
+/// what that fence scans. It happened once already.
+#[cfg(test)]
+mod render_history_tests {
+    use super::*;
+
+    /// The whole reason `print_history` became `render_history`.
+    ///
+    /// Every field this renderer gained was testable in isolation while the
+    /// CALL that emits it was not, because a function that prints can only be
+    /// driven by capturing stdout. Three served fields reached the wire and
+    /// were rendered nowhere before this was fixed, and each was a separate
+    /// edit no test could reach.
+    ///
+    /// Now the block is a value, so the composed output is assertable and a
+    /// dropped section fails by name.
+    #[test]
+    fn the_block_carries_every_section_it_is_composed_of() {
+        let response = serde_json::json!({
+            "provider_id": "zai",
+            "model_id": "glm-x",
+            "fact_key": "rate.input",
+            "last_changed_at_ms": 1_000_000,
+            "eras": [{
+                "boundary_at_ms": 2_000_000,
+                "boundary_kind": "observed",
+                "value": {"state": "priced", "units": 75_000_000},
+                "window_from_ms": 1_900_000
+            }]
+        });
+
+        let out = render_history(&response);
+
+        assert!(out.contains("zai/glm-x"), "the identity line: {out}");
+        assert!(out.contains("rate.input"), "the fact key: {out}");
+        assert!(out.contains("observed"), "the era row: {out}");
+        assert!(out.contains("changed between"), "the era window: {out}");
+        assert!(
+            out.contains("last genuine change"),
+            "the derived instant, which was served for a day and printed \
+             nowhere: {out}"
+        );
+    }
+
+    /// An inherited rate explains itself instead of denying the fact exists.
+    ///
+    /// The control is the arm below: the same empty-era shape WITHOUT an
+    /// origin must still say something useful, or this test passes against a
+    /// build that prints the inheritance note unconditionally.
+    #[test]
+    fn an_empty_history_with_an_origin_names_where_to_look() {
+        let response = serde_json::json!({
+            "provider_id": "ollama-cloud",
+            "model_id": "glm-x",
+            "fact_key": "rate.input",
+            "eras": [],
+            "inherited_from": {"provider_id": "zai", "family": "glm"}
+        });
+
+        let out = render_history(&response);
+        assert!(
+            out.contains("served from zai's card"),
+            "the operator must learn why there are no eras: {out}"
+        );
+        assert!(
+            out.contains("--provider zai"),
+            "and be handed the command that finds the real history: {out}"
+        );
+        assert!(
+            !out.contains("check the fact key"),
+            "and must NOT be sent to hunt a typo in a key catalog.get just \
+             answered: {out}"
+        );
+    }
+
+    /// Control: an empty history with no origin keeps the older message.
+    #[test]
+    fn an_empty_history_without_an_origin_still_points_at_the_key() {
+        let response = serde_json::json!({
+            "provider_id": "anthropic",
+            "model_id": "claude-x",
+            "fact_key": "rate.reasoning",
+            "eras": []
+        });
+
+        let out = render_history(&response);
+        assert!(
+            out.contains("check the fact key"),
+            "control: without an inheritance origin the key really is the \
+             remaining cause: {out}"
+        );
+        assert!(
+            !out.contains("served from"),
+            "and nothing may claim an inheritance that did not happen: {out}"
+        );
     }
 }
