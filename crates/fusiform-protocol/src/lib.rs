@@ -658,6 +658,33 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// Fusiform will not emit a bare `0` and leave every consumer to decide what it
 /// means, since that is the shape that produces absorbing-default defects.
 ///
+/// # An absent rate is a fact about PUBLICATION, never about the world
+///
+/// A model with no `rate.*` fact means the upstream published no price for it.
+/// It does not mean the model is free, cheap, or unmetered, and a consumer must
+/// not key a pricing decision on the absence.
+///
+/// The failure is not hypothetical and it is not slow. A consumer keyed "this
+/// plane is zero marginal cost" on "the price is missing", which held while
+/// those rows were unpriced. On 2026-09-15 at 02:29Z the upstream began
+/// publishing that provider's own list prices — 22 of 24 rows in one poll — and
+/// the rule stopped firing. The same model went from the cheapest plane to the
+/// most expensive, a 100x move in effective price, and an identical selection
+/// run picked a different model the next morning.
+///
+/// NOTHING ABOUT THE WORLD CHANGED AT 02:29Z. The operator's plan was the same,
+/// the provider's terms were the same; only what the upstream chose to PRINT
+/// changed. Keying on absence had made the upstream's publishing behaviour
+/// load-bearing for routing, and publishing behaviour moves independently of
+/// everything a consumer cares about.
+///
+/// So: absence is a statement about the record, and it is the only thing
+/// fusiform can honestly say. Whether a published list price applies to a
+/// particular route — a subscription plane, a flat-rate plan, a negotiated
+/// contract — is knowledge the consumer holds and the catalog cannot. Fusiform
+/// deliberately does not encode it: a catalog that guessed which of its
+/// consumers held a flat-rate plan would be wrong for every other consumer.
+///
 /// # What fusiform never serves, and why it is the highest-stakes entry here
 ///
 /// Renderer-selection fields — `provider.npm`, per-model provider overrides,
