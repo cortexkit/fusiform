@@ -16,6 +16,35 @@
 //! A check that runs once protects the rows present the day it ran. This makes
 //! it protect the next one somebody adds.
 //!
+//! # Why the SEED is the subject, and what that costs
+//!
+//! This resolves "does the creator publish a priced row in this family" against
+//! the embedded seed, which is a snapshot. The live store is current and the
+//! seed ages, so the two can disagree — a creator that stops pricing a family
+//! leaves this fence passing on stale evidence. That is not hypothetical:
+//! `gemma -> google` was removed precisely because google publishes gemma
+//! unpriced, and a creator can change that in either direction.
+//!
+//! The seed is used anyway because CI has no store, and a test that skips when
+//! a live store is absent reports green while doing nothing — which this
+//! repository refuses. So the limit is declared rather than papered over: this
+//! fence answers for the seed's vintage, and the complement is an operator
+//! check against the store.
+//!
+//! Run after a seed refresh, when the fence's subject moves:
+//!
+//! ```text
+//! for each curated (family, creator):
+//!   SELECT COUNT(DISTINCT model_id) FROM era
+//!    WHERE provider_id = <creator> AND fact_key = 'rate.input'
+//!      AND EXISTS (model.family = <family> for that model)
+//! ```
+//!
+//! A row alive in the seed and zero in the store is a mapping that has died
+//! since the snapshot. Measured 2026-09-15 across all seven rows: seed and
+//! store agree on every one, the largest gap being deepseek-flash at 1 in the
+//! seed and 3 in the store — the catalog growing, not the mapping dying.
+//!
 //! # What this deliberately does NOT assert
 //!
 //! That a row fires TODAY. Measured against the live store on 2026-09-13, three
