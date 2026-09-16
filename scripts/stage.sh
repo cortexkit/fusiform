@@ -226,6 +226,31 @@ if [ -n "$path_cli" ]; then
     fi
 fi
 
+# The acceptance card's shape, printed where a card is about to be written.
+#
+# Two cards in two days were refused or corrected by the placing seat's gate,
+# for the same reason each time: a field was a true statement about the WRONG
+# ARTIFACT. First a marker quoting CLI output for a module placement; then a
+# control doing the same, in a card whose marker I had just fixed. Both times
+# the rule existed — I had written it to that seat the night before — and both
+# times it was applied to the field I was thinking about.
+#
+# A third card asserted output composed from memory of a contract table: it
+# claimed twelve keys where the wire serves fifteen, and named the wrong first
+# entry. Nothing in the card was checkable without running it, and I did not.
+#
+# So the template prints HERE, at the moment a card gets written, rather than
+# living in a message that protected its reader once. The labels are the whole
+# mechanism: "which binary" makes CLI-versus-module a field to fill rather than
+# a distinction the writer has to remember.
+echo
+echo "acceptance card — fill from MEASUREMENT, not memory:"
+echo "  MARKER    a string the PLACED binary carries (ck-fusiform), absent in the old one"
+echo "  CONTROL   from the PLACED binary, same surface as the marker, must read"
+echo "            IDENTICALLY on both — model_count, never catalog_version, which"
+echo "            advances on every restart by max(now_ms, current+1)"
+echo "  ARM       name WHICH BINARY renders it, and paste output you EXECUTED"
+
 # Printed LAST, and the prune block above deliberately sits before it.
 #
 # The reasoning is three paragraphs up: a truncated read must lose the hashes
