@@ -295,6 +295,23 @@
           "outcome": "seeded"
         }
       ],
+      "served_facts": [
+        "existence",
+        "limit.context",
+        "limit.output",
+        "capability.reasoning",
+        "capability.tool_call",
+        "capability.attachment",
+        "capability.input_modalities",
+        "capability.output_modalities",
+        "model.family",
+        "model.open_weights",
+        "rate.input",
+        "rate.output",
+        "rate.cache_read",
+        "rate.cache_write",
+        "rate.reasoning"
+      ],
       "source": "models.dev"
     }
   },

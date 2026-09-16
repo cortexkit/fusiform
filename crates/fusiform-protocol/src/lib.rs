@@ -1077,6 +1077,35 @@ pub struct StatusResponse {
     pub source: String,
     pub catalog_version: i64,
     pub model_count: usize,
+    /// Every fact key this producer can serve, whether or not any model
+    /// currently carries it.
+    ///
+    /// # Why a consumer cannot work this out from a catalog read
+    ///
+    /// Reading a model and collecting its keys answers a DIFFERENT question:
+    /// what did the upstream publish for that model. A model with no cache
+    /// pricing makes `rate.cache_read` look unserved, and an entire provider
+    /// can be missing a key that 5,397 other models carry.
+    ///
+    /// That is not hypothetical. A consumer built a routing cost model on
+    /// `rate.output` alone, believing it was the only rate served, while
+    /// `rate.input`, `rate.cache_read`, `rate.cache_write` and `rate.reasoning`
+    /// had all been served since the first ingest. Their basket ranked on ~5%
+    /// of the cost. The inference was sound on the evidence they had, because
+    /// absence on a model means the UPSTREAM published nothing — which is
+    /// precisely the distinction this catalog exists to keep, turned against a
+    /// consumer trying to discover the vocabulary.
+    ///
+    /// [`SERVED_FACTS`] carried this the whole time as a Rust constant, so it
+    /// was readable only by consumers compiling against this crate. One that
+    /// pins from fixture bytes — which is the shape we recommend, because a
+    /// real row's values move — could not see it.
+    ///
+    /// Tiered keys are NOT enumerated: the threshold is the upstream's and is
+    /// not fusiform's to invent. They appear as `<key>.above_context.<size>`,
+    /// matched by prefix against the keys listed here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub served_facts: Vec<String>,
     /// How many polls have EVER failed, and when the last one was.
     ///
     /// # Why a total, when the recent polls are right there

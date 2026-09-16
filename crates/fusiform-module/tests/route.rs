@@ -2052,3 +2052,77 @@ fn the_manifest_declares_what_is_true_and_omits_what_is_not() {
          on the caller, which is false for a catalog of the world (got {scopes:?})"
     );
 }
+
+/// `catalog.status` names every key this producer can serve, INCLUDING keys no
+/// model in the store carries.
+///
+/// # The defect this closes
+///
+/// A consumer discovering the vocabulary by reading a model and collecting its
+/// keys is answering a different question: what did the upstream publish for
+/// that model. A store whose models carry no cache pricing makes
+/// `rate.cache_read` look unserved.
+///
+/// That happened. A routing consumer priced on `rate.output` alone, believing
+/// it was the only rate served, while four other rate keys had been served
+/// since the first ingest — ranking on roughly 5% of the real cost. The
+/// inference was sound on the evidence they had, because absence on a model
+/// means the UPSTREAM published nothing, which is the distinction this catalog
+/// exists to keep. Turned against vocabulary discovery, it misleads.
+///
+/// So the list is read from the contract table rather than collected from the
+/// snapshot, and this test drives a store holding exactly ONE fact to prove it:
+/// if the answer came from the data, it would name one key.
+#[test]
+fn status_names_served_keys_no_model_in_this_store_carries() {
+    let f = fixture();
+
+    let status = match fusiform_module::route::serve_tool_call(
+        &f.store,
+        br#"{"name": "catalog.status", "arguments": {}}"#,
+    )
+    .expect("status must be served")
+    {
+        fusiform_module::route::ToolResponse::Status(s) => s,
+        other => panic!("expected a status response, got {other:?}"),
+    };
+
+    // The keys the consumer was missing, none of which this store holds.
+    for key in [
+        "rate.input",
+        "rate.output",
+        "rate.cache_read",
+        "rate.cache_write",
+        "rate.reasoning",
+    ] {
+        assert!(
+            status.served_facts.iter().any(|k| k == key),
+            "{key} must be named as servable even though no model here carries \
+             it — a vocabulary answer derived from today's data reports the \
+             upstream's silence as this producer's limit. Got: {:?}",
+            status.served_facts
+        );
+    }
+
+    // Control: the list is the CONTRACT, so it must not be the store's keys.
+    // Without this, the assertions above pass against a build that collects
+    // from a fixture that happens to be rich.
+    assert!(
+        status.served_facts.len() >= 10,
+        "the list must be the full served vocabulary rather than whatever this \
+         store holds: {:?}",
+        status.served_facts
+    );
+
+    // And tiered keys are NOT enumerated: the threshold is the upstream's, not
+    // fusiform's to invent. A consumer matches them by prefix.
+    assert!(
+        !status
+            .served_facts
+            .iter()
+            .any(|k| k.contains("above_context")),
+        "tiered keys must not be listed — their thresholds come from the \
+         upstream and cannot be enumerated: {:?}",
+        status.served_facts
+    );
+}

@@ -228,6 +228,7 @@ fn every_response_type_round_trips() {
     assert_eq!(back, history);
 
     let status = StatusResponse {
+        served_facts: vec!["rate.input".to_string()],
         failures: Some(fusiform_protocol::FailureHistoryWire {
             ever: 2,
             last_at_ms: 1_786_500_000_000,

@@ -564,6 +564,17 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
         catalog_version,
         overridden,
         failures,
+        // Read from the contract table rather than collected from the snapshot.
+        //
+        // Collecting the keys models happen to carry answers "what did the
+        // upstream publish", which is the question that misled a consumer into
+        // pricing on one rate. It would also make the answer depend on which
+        // models exist today: a catalog with no cached-pricing rows would report
+        // that fusiform cannot serve `rate.cache_read`, which is false.
+        served_facts: fusiform_protocol::SERVED_FACTS
+            .iter()
+            .map(|f| f.key.to_string())
+            .collect(),
         model_count: snapshot.model_count(),
         // Counted from the same snapshot as the model total, so the two cannot
         // disagree about which models exist.
