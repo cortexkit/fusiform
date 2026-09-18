@@ -807,10 +807,22 @@ pub fn serve_catalog_get(
                     .provider_is_known(source, &provider)
                     .map_err(|e| store_error(&e))?
             {
+                // The hint names the VOCABULARY rather than a casing rule.
+                //
+                // It read "check the spelling, so anthropic rather than
+                // Anthropic" — a rule true of one case and handed to every
+                // reader of this refusal. The commonest real cause is not a typo
+                // at all: a caller using a DIFFERENT NAMING for the same vendor.
+                // Insula calls them `codex` and `claude`, and publishes a
+                // separate `apiProvider` field carrying models.dev slugs
+                // precisely because the two vocabularies differ. Telling that
+                // caller to check their spelling sends them hunting a typo they
+                // did not make — which I did to myself against that very field.
                 return Err(RouteError::no_coverage(format!(
                     "unknown provider {provider:?}: fusiform has never recorded \
-                     a model under that id. Check the spelling — provider ids \
-                     are the upstream's, so \"anthropic\" rather than \"Anthropic\""
+                     a model under that id. Provider ids are models.dev's own — \
+                     a DIFFERENT NAMING for the same vendor will not resolve \
+                     here, and neither will a different case"
                 )));
             }
         }
