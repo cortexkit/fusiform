@@ -1,0 +1,53 @@
+#!/bin/sh
+# Refuse a push whose Cargo.lock does not resolve against the siblings on disk.
+#
+# WHY THIS EXISTS AS A HOOK RATHER THAN A HABIT
+#
+# Twice now a SHELL-ONLY commit has been pushed after a `bash -n` check and
+# failed CI on `--locked`. Nothing in either commit could break the build; the
+# lock had gone stale underneath the tree since the last full gate, because a
+# sibling published while I was editing something unrelated.
+#
+# The reasoning that produced it both times is the reasonable one: "my change
+# cannot need a cargo gate". THAT IS THE WRONG QUESTION. The gate is about the
+# TREE BEING PUSHED, not about the diff. A commit that cannot possibly break the
+# build still rides a tree that is already broken.
+#
+# I wrote that sentence into the first commit's message and repeated the defect
+# four commits later, which is the measured failure of rules that live in prose:
+# a rule in a message protects its reader once, and the thing under the defect
+# is never what you are attending to.
+#
+# WHY `cargo metadata` RATHER THAN check OR test
+#
+# It answers exactly the question a stale lock asks — does this lockfile resolve
+# — and answers it in 0.167s against a warm tree. A `cargo check` would take
+# tens of seconds and prove more than a pre-push hook should: the full suite is
+# CI's job, and a hook slow enough to resent is a hook someone disables.
+#
+# Invoked through AFT's managed dispatcher, which walks to `$repo_root/.githooks`
+# after the git-dir hooks. Tracked in the repo deliberately, so a fresh clone
+# has it and it is reviewable like any other file.
+set -eu
+
+if ! command -v cargo > /dev/null 2>&1; then
+    # No toolchain: a docs-only clone can still push. Refusing here would gate
+    # git on a dependency this check is merely convenient to have.
+    exit 0
+fi
+
+if ! cargo metadata --locked --offline --format-version 1 > /dev/null 2>&1; then
+    echo "pre-push refused: Cargo.lock does not resolve --locked" >&2
+    echo >&2
+    echo "  A sibling published while this tree was being edited. The commit" >&2
+    echo "  being pushed does not have to touch Rust for this to matter: CI" >&2
+    echo "  runs --locked, so the push fails there instead of here." >&2
+    echo >&2
+    echo "  Check the siblings are CLEAN (a dirty tree is someone mid-edit," >&2
+    echo "  not a published wave), then:" >&2
+    echo >&2
+    echo "      cargo update -w --offline" >&2
+    echo "      cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings" >&2
+    echo >&2
+    exit 1
+fi
