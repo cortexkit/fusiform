@@ -1544,7 +1544,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "subc-client-rs"
-version = "0.15.1"
+version = "0.15.2"
 dependencies = [
  "async-trait",
  "serde",
@@ -1567,7 +1567,7 @@ dependencies = [
 
 [[package]]
 name = "subc-core"
-version = "0.18.4"
+version = "0.18.5"
 dependencies = [
  "base64",
  "cortexkit-log",
