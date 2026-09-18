@@ -349,6 +349,55 @@ pub struct CatalogGetResponse {
     /// action and is the one that costs money.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub withheld: Vec<WithheldFactWire>,
+    /// Models this request EXCLUDED because they are retired, named rather than
+    /// silently dropped.
+    ///
+    /// # The defect this closes
+    ///
+    /// `include_retired` defaults to false, so a retired model was simply
+    /// missing from the reply — and missing is indistinguishable from "my fact
+    /// filter matched nothing" or "I asked for the wrong thing". A consumer
+    /// polling for presence therefore kept its own row marked present forever,
+    /// because a model that stops appearing looks exactly like one the filter
+    /// never reached.
+    ///
+    /// That happened, and it was silent for an unknown period: a routing seat
+    /// held a withdrawn model on its roster while another seat honouring the
+    /// tombstone refused every request against it. Seven of 295 rows flipped on
+    /// the first corrected poll.
+    ///
+    /// # Why naming them rather than changing the default
+    ///
+    /// A consumer asking what models exist reasonably means PRESENT ones, so
+    /// including retirements by default would surprise every caller to fix one.
+    /// This is the same answer [`Self::withheld`] gives for a corrected fact:
+    /// the value stays out of `models`, and the response says so, so absence
+    /// carries a reason instead of being inferred.
+    ///
+    /// # Scope: NAMED READS ONLY, and that is a measurement not a shortcut
+    ///
+    /// Populated when the request names a `provider_id` and `model_id`. A bulk
+    /// read leaves it empty even though retirements were filtered.
+    ///
+    /// The store holds 805 retired models against 7,852 present, and retirement
+    /// is permanent in an append-only history, so the list only grows. Attaching
+    /// it to every catalog read would ship hundreds of ancient retirements to
+    /// callers who asked about none of them — noise that makes the field worth
+    /// ignoring, which is how a signal dies.
+    ///
+    /// A bulk caller is not asking "is THIS model gone"; they are asking what
+    /// exists, and the thing they actually need is the DIFF against what they
+    /// held before. Only they have that. `include_retired: true` is the
+    /// mechanism when they want the retirements themselves.
+    ///
+    /// A named read is the case where silence genuinely misleads: the caller
+    /// said which model, and an empty `models` answers that question with the
+    /// same shape as "your fact filter matched nothing".
+    ///
+    /// Empty on a request that asked for retired models, because nothing was
+    /// excluded then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retired: Vec<RetiredModelWire>,
 
     /// Facts whose value is included but may already have been superseded at
     /// the read instant.
@@ -870,6 +919,21 @@ pub struct WithheldFactWire {
     pub fact_key: String,
     /// Every correction covering the read instant, oldest first.
     pub corrections: Vec<CorrectionDetail>,
+}
+
+/// A model left out of `models` because it is retired and the request did not
+/// ask for retirements.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetiredModelWire {
+    /// `provider_id/model_id`, the same identity spelling `models` uses.
+    pub model: String,
+    /// When the upstream was first observed to have stopped publishing it.
+    ///
+    /// The instant fusiform NOTICED, not the instant the upstream removed it:
+    /// polls are half-hourly, so the removal happened somewhere in the window
+    /// ending here. `catalog.history` on `existence` carries the bounding
+    /// window for a consumer that needs the interval rather than the edge.
+    pub retired_at_ms: i64,
 }
 
 /// What a served tool call produced.

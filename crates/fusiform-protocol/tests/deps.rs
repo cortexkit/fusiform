@@ -160,6 +160,10 @@ fn every_response_type_round_trips() {
     use std::collections::BTreeMap;
 
     let catalog = CatalogGetResponse {
+        retired: vec![fusiform_protocol::RetiredModelWire {
+            model: "kimi-for-coding/k3".to_string(),
+            retired_at_ms: 1_789_738_000_000,
+        }],
         source: "models.dev".into(),
         resolved_at_ms: 1_786_488_349_024,
         catalog_version: 1_786_488_349_024,

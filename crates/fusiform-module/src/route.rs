@@ -760,7 +760,7 @@ pub fn serve_catalog_get(
     // rather than merely absent.
     refuse_before_the_record(store, source, at)?;
 
-    let snapshot = if let (Some(provider_id), Some(model_id)) =
+    let (snapshot, retired) = if let (Some(provider_id), Some(model_id)) =
         (request.provider_id.as_deref(), request.model_id.as_deref())
     {
         single_model_snapshot(store, source, provider_id, model_id, at, &request)?
@@ -814,17 +814,25 @@ pub fn serve_catalog_get(
                 )));
             }
         }
-        snapshot
+        // Empty on the bulk path by design, not by omission: the reasoning is
+        // on `CatalogGetResponse::retired` — 805 retirements against 7,852
+        // present models, permanent in an append-only history.
+        (snapshot, Vec::new())
     };
 
-    Ok(render(
+    let mut response = render(
         source,
         snapshot,
         at,
         overlay::corrections(),
         Some((store, crate::creators::creators())),
         request.fact_prefixes.as_ref(),
-    ))
+    );
+    // Attached after rendering rather than passed through it: `render` is shared
+    // with the bulk path, which has no retirements to report, and threading an
+    // always-empty argument through it would invite a future caller to fill it.
+    response.retired = retired;
+    Ok(response)
 }
 
 fn single_model_snapshot(
@@ -834,7 +842,7 @@ fn single_model_snapshot(
     model_id: &str,
     at: Option<Timestamp>,
     request: &CatalogGetRequest,
-) -> Result<CatalogSnapshot, RouteError> {
+) -> Result<(CatalogSnapshot, Vec<fusiform_protocol::RetiredModelWire>), RouteError> {
     // Must agree with the bulk path's resolution, and the reason is a consumer
     // dependency rather than tidiness.
     //
@@ -901,10 +909,43 @@ fn single_model_snapshot(
     let catalog_version = store.catalog_version().map_err(|e| store_error(&e))?;
 
     let mut models = Vec::new();
+    let mut retired: Vec<fusiform_protocol::RetiredModelWire> = Vec::new();
     if let Some(model) = found {
         // Presence is checked before the fact filter, for the same reason the
         // catalog read checks it first: a rates-only request must not make a
         // present model look retired.
+        // Captured rather than merely skipped. A named read that returns an
+        // empty `models` is indistinguishable from "your fact filter matched
+        // nothing", and a consumer polling presence therefore held a withdrawn
+        // model on its roster indefinitely — the absence had no reason attached
+        // and none could be inferred.
+        if !request.include_retired && !model.is_present() {
+            retired.push(fusiform_protocol::RetiredModelWire {
+                model: format!("{}/{}", model.provider_id, model.model_id),
+                // The instant fusiform NOTICED, which is the boundary of the
+                // existence era. The upstream removed it somewhere in the
+                // half-hour window ending there; `catalog.history` carries the
+                // window for a consumer that needs the interval.
+                // Read from the existence fact's own genuine-change instant
+                // rather than stamped with "now". One indexed query, and only
+                // on the path where a model was actually excluded.
+                //
+                // `last_changed_at` rather than the newest era boundary,
+                // because a poll that restated existence without the upstream
+                // changing it would otherwise report today.
+                retired_at_ms: store
+                    .last_changed_at(
+                        source,
+                        &model.provider_id,
+                        &model.model_id,
+                        &fusiform_store::FactKey::existence(),
+                    )
+                    .ok()
+                    .flatten()
+                    .map(|t| t.0)
+                    .unwrap_or(resolved_at.0),
+            });
+        }
         let keep = request.include_retired || model.is_present();
         if keep {
             // Whether the model had anything READABLE before the plane filter
@@ -994,14 +1035,17 @@ fn single_model_snapshot(
         })
         .collect();
 
-    Ok(CatalogSnapshot {
-        source,
-        resolved_at,
-        catalog_version,
-        models,
-        withheld,
-        uncertain,
-    })
+    Ok((
+        CatalogSnapshot {
+            source,
+            resolved_at,
+            catalog_version,
+            models,
+            withheld,
+            uncertain,
+        },
+        retired,
+    ))
 }
 
 /// Render a snapshot as the wire response.
@@ -1103,6 +1147,12 @@ fn render(
         withheld,
         uncertain,
         overridden,
+        // Filled by the NAMED-read caller, which is the only path that knows a
+        // specific model was excluded. A bulk read leaves it empty on purpose:
+        // 805 retired models against 7,852 present, permanent in an append-only
+        // history, so attaching them to every read would ship hundreds of
+        // ancient retirements to callers who asked about none of them.
+        retired: Vec::new(),
     }
 }
 

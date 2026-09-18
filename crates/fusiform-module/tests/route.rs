@@ -2199,3 +2199,112 @@ fn an_unstamped_build_names_why_its_commit_is_absent() {
          constant is true"
     );
 }
+
+/// A NAMED read of a retired model says it is retired, rather than answering
+/// with silence.
+///
+/// # The defect this closes
+///
+/// `include_retired` defaults false, so a named read of a withdrawn model
+/// returned `"models": {}` with 200 OK — the same shape a caller gets when
+/// their fact filter matches nothing. A consumer polling presence therefore
+/// held a withdrawn model on its roster indefinitely, while another seat
+/// honouring the tombstone refused every request against it. Neither could see
+/// the disagreement, because the absence carried no reason and none could be
+/// inferred from the response.
+///
+/// Unknown models already refuse with `no_coverage`, so the gap was precisely
+/// between "retired and filtered out" and "nothing to say".
+#[test]
+fn a_named_read_of_a_retired_model_says_so() {
+    let f = fixture();
+
+    let mut doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    doc.get_mut("anthropic")
+        .and_then(|p| p.get_mut("models"))
+        .and_then(|m| m.as_object_mut())
+        .unwrap()
+        .remove("claude-sonnet-4-5");
+
+    let obs = f
+        .store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(2_000),
+            outcome: ObservationOutcome::Unchanged,
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: Some(5),
+            detail: None,
+        })
+        .unwrap();
+    let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+        .unwrap()
+        .catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        Some(obs),
+    )
+    .unwrap();
+    f.store.append_eras(&plan.eras).unwrap();
+
+    let named = get(
+        &f,
+        r#"{"provider_id": "anthropic", "model_id": "claude-sonnet-4-5"}"#,
+    );
+
+    assert!(
+        named.models.is_empty(),
+        "the model stays out of `models` — the default still means present"
+    );
+    assert_eq!(
+        named.retired.len(),
+        1,
+        "and the response must SAY it was excluded rather than leaving the \
+         caller to infer it from an empty map: {:?}",
+        named.retired
+    );
+    assert_eq!(named.retired[0].model, "anthropic/claude-sonnet-4-5");
+    assert!(
+        named.retired[0].retired_at_ms > 0,
+        "carrying when fusiform noticed, so a consumer can tell a retirement \
+         from last week apart from one this morning: {:?}",
+        named.retired[0]
+    );
+
+    // CONTROL: a present model must not be reported as retired, or the
+    // assertions above pass against a build that reports every named read.
+    let present = get(
+        &f,
+        r#"{"provider_id": "google", "model_id": "gemini-flash-latest"}"#,
+    );
+    assert!(
+        !present.models.is_empty(),
+        "control: this model is present and must be served"
+    );
+    assert!(
+        present.retired.is_empty(),
+        "control: a present model is not a retirement: {:?}",
+        present.retired
+    );
+
+    // CONTROL: asking FOR retirements excludes nothing, so there is nothing to
+    // report. An entry here would double-report the same model.
+    let audit = get(
+        &f,
+        r#"{"provider_id": "anthropic", "model_id": "claude-sonnet-4-5", "include_retired": true}"#,
+    );
+    assert!(
+        !audit.models.is_empty(),
+        "control: an audit read serves the retired model"
+    );
+    assert!(
+        audit.retired.is_empty(),
+        "control: nothing was excluded, so nothing is reported excluded: {:?}",
+        audit.retired
+    );
+}
