@@ -93,8 +93,22 @@ echo
 # against a number this script remembered.
 for bin in ck-fusiform ck-models; do
     (cd "$STAGE" && shasum -a 256 "$bin" > "$bin.sha256")
-    # Verified here rather than assumed: a sidecar that does not check is worse
-    # than none, because it is CITED as evidence.
+    # WHAT THIS CAN AND CANNOT CATCH, because the honest bound is narrower than
+    # it looks and the loose version of this comment was already here.
+    #
+    # The hash is computed from the bytes at rest and then checked against those
+    # same bytes, so it CANNOT detect a corrupt or truncated binary: a truncated
+    # write is hashed as truncated and matches itself. Reading it as proof the
+    # staged bytes are right would be a self-confirming claim.
+    #
+    # It catches the sidecar being unusable: an empty file, a redirect that
+    # failed, a name that does not resolve at the placer's `shasum -c`. Measured
+    # both: empty refuses, wrong filename refuses.
+    #
+    # That narrow thing is worth checking because the sidecar is CITED as
+    # evidence by the placing seat, and one that silently checks nothing is
+    # worse than none at all. The real verification of the bytes happens on
+    # their side, after the copy, which is the only place it means anything.
     (cd "$STAGE" && shasum -c "$bin.sha256" > /dev/null) || {
         echo "the $bin sidecar does not check against the staged bytes" >&2
         exit 1
