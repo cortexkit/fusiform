@@ -36,6 +36,37 @@ if ! command -v cargo > /dev/null 2>&1; then
     exit 0
 fi
 
+# The lock being PUSHED is the one CI resolves, and it is not necessarily the
+# one just validated below.
+#
+# SUBC named this shape after comparing hooks: theirs tests the commit, mine
+# tested the working tree, and they are different questions. The gap is one I
+# have already been bitten by from the other side — a gate run WITHOUT --locked
+# makes cargo a lock WRITER, and the documented remediation for that is to stage
+# explicit paths rather than `git add -A`. Do exactly that while the toolchain
+# has rewritten the lock, and the working tree resolves perfectly while the
+# commit carries the stale pin. Measured: the check below returns 0 throughout.
+#
+# Compared rather than resolved-in-an-archive because the sibling path deps are
+# relative to the repo's own location, so a copy elsewhere cannot resolve them.
+# Equality is the whole proof: if the committed bytes are the validated bytes,
+# the result below covers the push.
+if ! cmp -s "$(git rev-parse --show-toplevel)/Cargo.lock" /dev/stdin <<CMPEOF
+$(git show HEAD:Cargo.lock)
+CMPEOF
+then
+    echo "pre-push refused: the committed Cargo.lock is not the one in the tree" >&2
+    echo >&2
+    echo "  CI resolves the COMMIT, so validating this working tree proves" >&2
+    echo "  nothing about the push. The usual cause is a gate run without" >&2
+    echo "  --locked, which rewrites the lock, followed by staging explicit" >&2
+    echo "  paths that leave the rewrite behind." >&2
+    echo >&2
+    echo "      git diff HEAD -- Cargo.lock" >&2
+    echo >&2
+    exit 1
+fi
+
 if ! cargo metadata --locked --offline --format-version 1 > /dev/null 2>&1; then
     echo "pre-push refused: Cargo.lock does not resolve --locked" >&2
     echo >&2
