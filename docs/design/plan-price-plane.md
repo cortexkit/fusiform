@@ -189,6 +189,33 @@ confirm or correct the number, and commit a new establisher and date. Extending
 the date without looking is possible, as with any gate — and it leaves a diff
 with a name on it, which is the difference between a lapse and a decision.
 
+### Its failure message is load-bearing, because the first red will look broken
+
+A time-triggered gate fails on a morning when nobody changed anything. That is
+the least expected failure a suite can produce, and the natural reading is
+**"CI is broken"** rather than "a fact expired". A reader who arrives at that
+conclusion reaches for a skip, and the gate will have trained exactly the
+behaviour it exists to prevent.
+
+So the message is part of the design rather than a detail of it, and it must
+carry four things:
+
+- **That this is not a build failure.** Lead with it. Nothing changed; a date
+  passed. A reader who learns that in the first line stops debugging.
+- **Which row**, by `(provider_id, tier)`, and how long overdue. A gate that
+  says "a row is stale" sends someone hunting through a file.
+- **The `source_ref`**, so the check is a click rather than a search. The whole
+  fix is: open that page, read the number.
+- **What to commit**: the value if it moved, and a new `established_by`,
+  `established_at_ms`, `review_by_ms` in any case. Confirming a price unchanged
+  is a real result and must look like one, or "nothing changed" feels like
+  wasted work and the next reader skips it.
+
+The message should also say what it *cannot* tell you: that a price is still
+correct. The gate only knows nobody has looked recently. Claiming more would
+make it the kind of instrument this repo keeps finding — one that answers a
+question adjacent to the one asked.
+
 ## Settled, after being open
 
 **Its own tool, not `catalog.*`.** The shape argument (non-model rows in a model
