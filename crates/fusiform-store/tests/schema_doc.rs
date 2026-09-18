@@ -299,3 +299,128 @@ fn a_store_written_by_a_newer_binary_is_refused() {
          that it will not: {text}"
     );
 }
+
+/// The plan-price table arrives on a populated store, and its constraints hold.
+///
+/// Same reasoning as the artifact table above: a migration that only ever runs
+/// against an empty fixture is untested, because every real application lands
+/// on history. Production carries 141,058 eras.
+///
+/// The constraint arms matter as much as the arrival. This plane's whole
+/// defence is that incoherent rows are UNREPRESENTABLE rather than merely
+/// unwritten — a priced row carrying a refusal, or a refused row explaining
+/// nothing, are exactly what a careless writer produces and a careful one does
+/// not. If the CHECKs did not apply, the table would accept both and nothing
+/// would say so until a consumer read one.
+#[test]
+fn the_plan_price_table_arrives_on_a_populated_store() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("store.db");
+
+    {
+        let conn = rusqlite::Connection::open(&path).expect("open");
+        for m in &fusiform_store::schema::MIGRATIONS[..5] {
+            conn.execute_batch(m.statements).expect("earlier migration");
+        }
+        conn.execute(
+            "INSERT INTO observation (source, observed_at_ms, outcome) \
+             VALUES ('models.dev', 1000, 'changed')",
+            [],
+        )
+        .expect("a row that must survive");
+    }
+
+    let conn = rusqlite::Connection::open(&path).expect("reopen");
+    conn.execute_batch(fusiform_store::schema::MIGRATIONS[5].statements)
+        .expect("v6 must apply to a store that already has rows");
+
+    let kept: i64 = conn
+        .query_row("SELECT COUNT(*) FROM observation", [], |r| r.get(0))
+        .expect("count");
+    assert_eq!(kept, 1, "the migration must not disturb existing history");
+
+    // A priced row: all three money parts, no refusal.
+    conn.execute(
+        "INSERT INTO plan_price_era \
+         (provider_id, tier, minor_units, exponent, currency, period, \
+          boundary_kind, boundary_at_ms, established_by, established_at_ms, \
+          review_by_ms, source_ref) \
+         VALUES ('anthropic', 'max_20x', 20000, 2, 'USD', 'month', \
+                 'asserted', 1000, 'fusi', 2000, 3000, 'https://example')",
+        [],
+    )
+    .expect("a well-formed priced row must be accepted");
+
+    // A refusal row: no money parts, a reason.
+    conn.execute(
+        "INSERT INTO plan_price_era \
+         (provider_id, tier, period, boundary_kind, boundary_at_ms, \
+          established_by, established_at_ms, review_by_ms, source_ref, \
+          refusal_reason) \
+         VALUES ('openai', 'enterprise', 'month', 'asserted', 1000, \
+                 'fusi', 2000, 3000, 'https://example', \
+                 'tier observed, no published price')",
+        [],
+    )
+    .expect("a well-formed refusal row must be accepted");
+
+    // And the three incoherent shapes must be REFUSED, or the constraints are
+    // decorative. Each is a thing a careless writer produces.
+    let priced_with_a_refusal = conn.execute(
+        "INSERT INTO plan_price_era \
+         (provider_id, tier, minor_units, exponent, currency, period, \
+          boundary_kind, boundary_at_ms, established_by, established_at_ms, \
+          review_by_ms, source_ref, refusal_reason) \
+         VALUES ('x', 'y', 20000, 2, 'USD', 'month', 'asserted', 1000, \
+                 'fusi', 2000, 3000, 'https://example', 'why')",
+        [],
+    );
+    assert!(
+        priced_with_a_refusal.is_err(),
+        "a row cannot both carry a price and explain why it has none"
+    );
+
+    let refused_explaining_nothing = conn.execute(
+        "INSERT INTO plan_price_era \
+         (provider_id, tier, period, boundary_kind, boundary_at_ms, \
+          established_by, established_at_ms, review_by_ms, source_ref) \
+         VALUES ('x', 'y', 'month', 'asserted', 1000, 'fusi', 2000, 3000, \
+                 'https://example')",
+        [],
+    );
+    assert!(
+        refused_explaining_nothing.is_err(),
+        "an absent price must say WHICH absence it is: 'not observed' and \
+         'observed and unpriced' are different states and only one is work"
+    );
+
+    let half_an_amount = conn.execute(
+        "INSERT INTO plan_price_era \
+         (provider_id, tier, minor_units, period, boundary_kind, \
+          boundary_at_ms, established_by, established_at_ms, review_by_ms, \
+          source_ref) \
+         VALUES ('x', 'y', 20000, 'month', 'asserted', 1000, 'fusi', 2000, \
+                 3000, 'https://example')",
+        [],
+    );
+    assert!(
+        half_an_amount.is_err(),
+        "a value without its exponent and currency is a number, not an amount"
+    );
+
+    // An observed boundary is a CATEGORY error here, not a data error: every
+    // row in this plane is a date a vendor stated with no fetch behind it.
+    let observed = conn.execute(
+        "INSERT INTO plan_price_era \
+         (provider_id, tier, period, boundary_kind, boundary_at_ms, \
+          established_by, established_at_ms, review_by_ms, source_ref, \
+          refusal_reason) \
+         VALUES ('x', 'y', 'month', 'observed', 1000, 'fusi', 2000, 3000, \
+                 'https://example', 'why')",
+        [],
+    );
+    assert!(
+        observed.is_err(),
+        "this plane has no observed boundaries; nothing here is fetched"
+    );
+}

@@ -54,6 +54,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 5,
         statements: SCHEMA_V5,
     },
+    Migration {
+        version: 6,
+        statements: SCHEMA_V6,
+    },
 ];
 
 const SCHEMA_V1: &str = r#"
@@ -346,4 +350,104 @@ CREATE TABLE observation_artifact_event (
 -- one the exclusion query depends on.
 CREATE INDEX artifact_event_by_observation
     ON observation_artifact_event (observation_id, id DESC);
+"#;
+
+const SCHEMA_V6: &str = r#"
+-- Subscription list prices, keyed (provider_id, tier). A separate plane from
+-- the model catalog, sharing this store's clock and era machinery.
+--
+-- WHY NOT THE `era` TABLE: `era.model_id` is NOT NULL, so a tier row would need
+-- a sentinel, and a sentinel in a key column is where ambiguity starts. Worse,
+-- plan rows keyed into the model space would surface as pseudo-models on
+-- `catalog.get` for every existing consumer, to serve one that reads them
+-- rarely and off any hot path.
+CREATE TABLE plan_price_era (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- A models.dev slug, the same vocabulary as `era.provider_id`. NOT the
+    -- naming a quota source uses for the same vendor: those differ (`codex`
+    -- against `openai`, `claude` against `anthropic`), and insula publishes a
+    -- separate `apiProvider` field carrying these slugs precisely because of
+    -- that gap.
+    provider_id       TEXT    NOT NULL,
+
+    -- The provider's own tier string, UNNORMALISED.
+    --
+    -- Never canonicalised, because the same string names plans an order of
+    -- magnitude apart across vendors: `pro` is a low consumer tier at one and a
+    -- top tier at another. Any normalisation step is a place those could be
+    -- brought together, and that error is invisible downstream — it produces a
+    -- healthy-looking multiplier that is wrong by 10x.
+    tier              TEXT    NOT NULL,
+
+    -- NULL means "this tier was observed and no price is published for it",
+    -- which is a POSITIVE claim rather than a gap. `refusal_reason` says which
+    -- kind, and the CHECK below makes the incoherent combinations
+    -- unrepresentable.
+    minor_units       INTEGER,
+    exponent          INTEGER,
+    currency          TEXT,
+
+    -- Stated rather than assumed. A price without its period is not a price.
+    period            TEXT    NOT NULL,
+
+    -- Always `asserted` here, and the CHECK says so rather than leaving it to
+    -- be inferred. Every row in this plane arrives with a date the vendor
+    -- stated and no fetch behind it, so an `observed` row would be a category
+    -- error rather than a data error.
+    boundary_kind     TEXT    NOT NULL CHECK (boundary_kind = 'asserted'),
+
+    -- The VENDOR'S effective date.
+    --
+    -- There is deliberately NO column for when this row was committed, and that
+    -- absence is load-bearing: it makes a price recorded late indistinguishable
+    -- from one recorded on time, so a backfilled reprice leaves no residue and
+    -- every past window computes correctly the moment the row lands.
+    --
+    -- Adding a commit timestamp "for completeness" would destroy that property
+    -- without looking like it changed anything.
+    boundary_at_ms    INTEGER NOT NULL,
+
+    -- Who sourced it and when they looked. From the first row, never
+    -- retrofitted: the first ten rows are obviously true when written, which is
+    -- exactly why the provenance never gets added later.
+    established_by    TEXT    NOT NULL,
+    established_at_ms INTEGER NOT NULL,
+
+    -- Per ROW, never per file. A file-level date is bumped wholesale, so it
+    -- goes stale as a unit and stops answering "when did anyone last look at
+    -- THIS price" — the question that matters when one vendor reprices and the
+    -- others do not.
+    --
+    -- This is a CEILING ON HOW LONG A WRONG VALUE MAY CIRCULATE, not a sampling
+    -- rate. Nothing reveals a plan reprice: every other fact in this store has
+    -- a fetch that would eventually contradict a stale value, and this one has
+    -- the review and nothing else. The damage is retroactive, because every
+    -- window in the stale period was priced against the wrong number.
+    review_by_ms      INTEGER NOT NULL,
+
+    -- The page the number came from, so a review is a click rather than a
+    -- search.
+    source_ref        TEXT    NOT NULL,
+
+    refusal_reason    TEXT,
+
+    -- A priced row carrying a refusal, and a refused row explaining nothing,
+    -- are both things a careful writer would not produce and a careless one
+    -- would. Stated as a constraint so they are unrepresentable rather than
+    -- merely unwritten.
+    CHECK ((minor_units IS NULL) = (refusal_reason IS NOT NULL)),
+
+    -- A priced row needs all three money parts or none: a value without its
+    -- exponent and currency is a number, not an amount.
+    CHECK (
+        (minor_units IS NULL AND exponent IS NULL AND currency IS NULL)
+        OR (minor_units IS NOT NULL AND exponent IS NOT NULL AND currency IS NOT NULL)
+    )
+);
+
+-- One era per (provider, tier) boundary. The same key twice at one instant is a
+-- contradiction rather than a history.
+CREATE UNIQUE INDEX plan_price_era_key
+    ON plan_price_era(provider_id, tier, boundary_at_ms);
 "#;

@@ -1441,7 +1441,7 @@ path at `astrocyte/store.db` is a 0-byte decoy that misleads every audit,
 including mine an hour ago).
 
 Tables, as shipped: **`observation`, `era`, `catalog_version`,
-`observation_artifact_event`**, plus
+`observation_artifact_event`, `plan_price_era`**, plus
 `cortexkit_schema_version` owned by the store crate, and `cortexkit_fence`
 which the store crate creates on the **first fenced write** rather than at open
 (measured, not assumed — a freshly migrated store does not have it). An operator
