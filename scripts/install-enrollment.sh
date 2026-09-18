@@ -92,6 +92,32 @@ cp "$source_file" "$target_file"
 chmod 600 "$target_file"
 chmod 700 "$target_dir"
 
+# Verified AFTER the copy, comparing SOURCE against DESTINATION.
+#
+# The `cmp` above runs before installing, to decide whether there is anything to
+# do — it says nothing about the bytes this script just wrote. Until now the
+# line below announced "installed" on the strength of `cp` not having returned
+# an error, which is not the same claim.
+#
+# SUBC found this shape in their rollback arm and it is worth the two lines here
+# for the same reason: the failure is SILENT and the artifact is load-bearing.
+# This descriptor is class `portable`, so an unreadable or truncated one does
+# not merely lose fusiform's backup — it halts the entire fleet capture run.
+#
+# Source-against-destination specifically. Hashing the destination and checking
+# it against itself would pass on a truncated write, because the truncation is
+# what gets hashed.
+if ! cmp -s "$source_file" "$target_file"; then
+    echo "error: the installed descriptor does not match the repository's" >&2
+    echo "  source:    $source_file" >&2
+    echo "  installed: $target_file" >&2
+    echo >&2
+    echo "  The copy did not land intact. This entry is class 'portable', so an" >&2
+    echo "  unreadable descriptor fails the whole fleet capture run rather than" >&2
+    echo "  just this module's." >&2
+    exit 1
+fi
+
 echo "installed: $target_file (0600, dir 0700)"
 echo
 echo "Engram picks this up on its next fleet walk. Until then fusiform reports"
