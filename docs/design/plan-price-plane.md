@@ -144,9 +144,28 @@ money and must not become a float here for the same reason it must not there.
   frequency.
 - **Establisher and date from row one.** Retrofitting never happens, because the
   first ten rows are obviously true when you write them.
-- **Refusal cells name why.** "Tier not observed" and "tier observed but no
-  published price" are different states and **only the second is someone's job**.
-  Collapsing them produces a backlog indistinguishable from a completed one.
+- **Refusal cells name why**, and sourcing the first four rows found **three**
+  kinds where the design anticipated two:
+
+      tier not observed                      nobody has looked yet
+      tier observed, no published price      looked; the vendor publishes none
+      tier string does not resolve to a       the price IS published, and the
+        published price tier                  JOIN from the API's string is not
+
+  Only the last two are completed work, and the third was unanticipated. It is
+  the sharpest of them: OpenAI runs two Pro tiers and names them *by price* on
+  its own help page, while the API reports `plan_type: "pro"` for both. The
+  figure exists; nothing upstream says which tier that string means.
+
+  Recording either figure would be wrong by 2x for half of all accounts, in the
+  **flattering** direction, with no error and no anomaly — a wrong join is a
+  number identical in shape to a right one. Refusing fails loudly instead: no
+  row, no multiplier, someone asks why. A third party's display table maps it,
+  which is their inference rather than an upstream statement, and is the same
+  class of unpublished join this catalog already refuses for model renames.
+
+  Collapsing any of the three produces a backlog indistinguishable from a
+  completed one.
 - **Zero derivable cells.** Nothing here is computable from anything, so the
   discipline costs nothing to maintain — and shipping one derivable cell would
   destroy the meaning of absence for every other.
@@ -215,6 +234,55 @@ The message should also say what it *cannot* tell you: that a price is still
 correct. The gate only knows nobody has looked recently. Claiming more would
 make it the kind of instrument this repo keeps finding — one that answers a
 question adjacent to the one asked.
+
+## What sourcing the first three rows proved, on day zero
+
+Both of these appeared on the **first rows anyone tried to source**, and both
+would have been invisible in a table populated from memory. They are recorded as
+rows rather than as principles, because the rows are the evidence.
+
+**Billing basis is a hidden key dimension, and it is 15% wide.**
+anthropic.com/pricing publishes Pro at *$17 per month with annual subscription*
+and *$20 if billed monthly* — one tier, two published prices. From memory this
+looks like one number. The plane records the **monthly-billed** figure, chosen
+for its failure direction rather than for tidiness: a higher denominator
+produces a lower multiplier, so monthly-billed makes a subscription look *worse*
+than it is for an annual subscriber, and every other residual in the consuming
+calculation biases toward "keep paying". The one conservative term is the one
+worth keeping. An annual subscriber's actual rate is an operator fact and
+belongs on their credential record, not in a public list.
+
+**A source's silence is evidence about that SOURCE, not about the fact.** This
+one was recorded wrongly first, and the mistake is the more useful half.
+
+anthropic.com/pricing says Max is *"From $100 per month"* and *"Choose 5x or 20x
+more usage than Pro"* — it publishes the family floor and the multiplier choice,
+and never a tier price. Correct reading. I then shipped **two refusal cells**
+concluding the figures were unsourceable, and told the consumer their primary
+provider might not be computable.
+
+Both are on the vendor's own help centre, stated outright: *"Max 5x: $100 per
+month"*, *"Max 20x: $200 per month"*. One more surface from the same publisher.
+
+A refusal cell asserts **nobody publishes this**, which is far stronger than the
+evidence *this page does not*. So: exhaust a publisher's own surfaces — pricing
+page, help centre, billing docs — before recording one. A refusal is a positive
+claim and carries a positive claim's burden.
+
+What made it stick for an hour is that a well-argued negative is the easiest
+thing to accept. The consumer took my conclusion, propagated it, and the cost of
+checking was a single search.
+
+**And the same page carried two more basis axes.** *"The Max plan is currently
+available as a monthly subscription only"* — so the monthly-billed convention is
+a **fact** for those rows rather than a choice, and a note implying a decision
+would be wrong. *"These prices are for web subscriptions only. Mobile pricing may
+vary depending on your app platform"* — an app-store markup is a third axis
+beyond country and billing term, invisible to the plane, and it belongs in the
+policy note rather than being discovered by someone whose multiplier is quietly
+wrong.
+
+Neither axis is visible from memory. Both came from reading the page.
 
 ## Settled, after being open
 

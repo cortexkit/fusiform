@@ -1,0 +1,68 @@
+{
+  "schema": "plan-prices/v1",
+  "unit_policy": "US list price, MONTHLY-BILLED basis. Recorded rather than assumed, and the basis is chosen for its FAILURE DIRECTION rather than for consistency: a higher denominator produces a lower multiplier, so recording the monthly-billed price makes a subscription look WORSE than it is for an annual subscriber. Every other known residual in the consuming calculation biases toward 'keep paying', so the one term that errs pessimistic is the one pushing back. Do not 'correct' this to the annual figure: it would remove the only conservative term. anthropic/pro is $17 billed annually against $20 monthly, a 15% spread, and that difference is deliberately not modelled here \u2014 an operator on an annual term or a grandfathered rate overrides this plane on their own credential record, which is where a fact about one account belongs. WEB-SUBSCRIPTION prices, additionally: the Max help centre states 'these prices are for web subscriptions only. Mobile pricing may vary depending on your app platform.' An operator who subscribed through an app store may pay an app-store markup this plane cannot see, which is a third basis axis beyond country and billing term. Same remedy as the others \u2014 the credential override carries what one account actually pays.",
+  "how_to_add_a_row": "Open the source_ref, read the number, and record what the page says. If the page does not publish the number for that tier, the row is a refusal with why \u2014 never the figure you remember. The establisher is whoever looked, and the date is when they looked, both from the first row rather than retrofitted.",
+  "review_interval_note": "review_by is a ceiling on how long a wrong value may circulate, NOT a sampling rate. Nothing reveals a plan reprice: every other fact in this store has a fetch that would eventually contradict a stale value, and this one has the review and nothing else. The damage is retroactive, because every window in the stale period was priced against the wrong number. Quarterly, and the derivation travels with the number because the first person to find the review tedious will reason from frequency and be right about the frequency.",
+  "cells": [
+    {
+      "provider_id": "anthropic",
+      "tier": "pro",
+      "price": {
+        "minor_units": 2000,
+        "exponent": 2,
+        "currency": "USD",
+        "period": "month"
+      },
+      "boundary_at_ms": 1789689600000,
+      "established_by": "fusiform",
+      "established_at_ms": 1789776000000,
+      "review_by_ms": 1797552000000,
+      "source_ref": "https://www.anthropic.com/pricing",
+      "note": "The page publishes both bases: $17 per month with annual subscription, $20 if billed monthly. This row records the monthly-billed figure per unit_policy above. boundary_at_ms is the date this price was READ, not a vendor effective date \u2014 Anthropic publishes no effective dates, so the honest claim is the earliest instant fusiform can defend, which is the reading."
+    },
+    {
+      "provider_id": "anthropic",
+      "tier": "max_5x",
+      "price": {
+        "minor_units": 10000,
+        "exponent": 2,
+        "currency": "USD",
+        "period": "month"
+      },
+      "boundary_at_ms": 1789689600000,
+      "established_by": "fusiform",
+      "established_at_ms": 1789776000000,
+      "review_by_ms": 1797552000000,
+      "source_ref": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan",
+      "note": "anthropic.com/pricing publishes only the family floor ('From $100 per month') and never attributes it to a tier, so this row was briefly a refusal. The help centre article states 'Max 5x: $100 per month' outright. The refusal was evidence about the first page, not about the fact \u2014 exhaust a publisher's own surfaces before recording one. Max is monthly-only per the same page, so the plane's monthly-billed convention is a FACT here rather than a choice."
+    },
+    {
+      "provider_id": "anthropic",
+      "tier": "max_20x",
+      "price": {
+        "minor_units": 20000,
+        "exponent": 2,
+        "currency": "USD",
+        "period": "month"
+      },
+      "boundary_at_ms": 1789689600000,
+      "established_by": "fusiform",
+      "established_at_ms": 1789776000000,
+      "review_by_ms": 1797552000000,
+      "source_ref": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan",
+      "note": "'Max 20x: $200 per month', read from the page rather than from what everyone knows. This row was a refusal for an hour on the grounds that anthropic.com/pricing does not publish the 20x figure \u2014 true of that page, and the wrong conclusion about the fact. Max is monthly-only, so no billing-basis ambiguity applies."
+    },
+    {
+      "provider_id": "openai",
+      "tier": "pro",
+      "price": null,
+      "refusal_reason": "tier string does not resolve to a published price tier",
+      "boundary_at_ms": 1789689600000,
+      "established_by": "fusiform",
+      "established_at_ms": 1789776000000,
+      "review_by_ms": 1797552000000,
+      "source_ref": "https://help.openai.com/en/articles/9793128",
+      "note": "A THIRD kind of absence, and the one this plane had no vocabulary for. The price is published and the JOIN is not. OpenAI runs two Pro tiers and names them BY PRICE on that page ('Pro $100' unlocks 5x, 'Pro $200' unlocks 20x), while the API reports plan_type 'pro' for both. Nothing upstream states which tier that string means. Recording either figure would be wrong by 2x for half of all accounts, in the FLATTERING direction \u2014 the subscription looks twice as good as it is \u2014 with no error, no anomaly, and a number identical in shape to a correct one. Refusing instead fails loudly: no row, no multiplier, someone asks why. The only mapping evidence anyone has found is a third party's hardcoded display table (CodexBar v0.60.0 maps 'pro' to 20x and 'prolite' to 5x), which is their inference rather than an upstream statement \u2014 the same class of unpublished join this catalog refuses for model renames. Resolvable cheaply and not by reading: the consumer holds two codex accounts and can compare plan_type against what each billing surface says. One observation converts the inference into a measurement, and the row becomes real. Separately, I could not read the source myself \u2014 help.openai.com returns 403 to a plain fetch \u2014 so the price figures above are the consumer's reading, not mine. That is a second reason this is a refusal: the establisher field asserts who looked, and for the price half of this row nobody here did."
+    }
+  ]
+}

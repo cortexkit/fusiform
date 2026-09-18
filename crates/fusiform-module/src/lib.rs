@@ -13,6 +13,7 @@ pub mod fetch;
 pub mod health;
 pub mod loop_;
 pub mod overlay;
+pub mod plan_prices;
 pub mod route;
 pub mod seed;
 pub mod signals;
