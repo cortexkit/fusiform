@@ -88,8 +88,11 @@ if ! cargo metadata --locked --offline --format-version 1 > /dev/null 2>&1; then
     echo "  being pushed does not have to touch Rust for this to matter: CI" >&2
     echo "  runs --locked, so the push fails there instead of here." >&2
     echo >&2
-    echo "  Check the siblings are CLEAN (a dirty tree is someone mid-edit," >&2
-    echo "  not a published wave), then:" >&2
+    echo "  Check whether the sibling's DIRTY FILES include the manifest that" >&2
+    echo "  moved. Repo-level dirtiness is not the question. An unrelated" >&2
+    echo "  in-progress edit means they are publishing normally; a dirty" >&2
+    echo "  Cargo.toml for the crate that moved means someone is mid-edit and" >&2
+    echo "  the version was never shipped. Then:" >&2
     echo >&2
     echo "      cargo update -w --offline" >&2
     echo "      cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings" >&2
