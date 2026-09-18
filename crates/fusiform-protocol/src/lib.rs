@@ -1075,6 +1075,32 @@ pub struct PollChanges {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StatusResponse {
     pub source: String,
+    /// A change CURSOR, not a snapshot identity.
+    ///
+    /// # What it is for
+    ///
+    /// A value to COMPARE against one you held before. It advances when the
+    /// catalog moves, so a consumer polling this surface can tell there is
+    /// something new without reading 7,800 models.
+    ///
+    /// # What it cannot do, and why this warning is here twice
+    ///
+    /// It is `max(now_ms, current + 1)`, so it advances with WALL CLOCK time on
+    /// any poll that writes, including the boot poll after a restart. It cannot
+    /// identify which snapshot a response describes: a point-in-time read of
+    /// old values stamps TODAY's version on them. Use `resolved_at_ms`, which
+    /// echoes the instant that was resolved and round-trips with `at_ms`.
+    ///
+    /// [`CatalogGetResponse::catalog_version`] has carried that warning for
+    /// months and this field — the one a POLLING consumer actually reads — had
+    /// no doc at all. Three separate seats reached for it as a snapshot
+    /// identity and each had to be corrected by hand. At three, the name is
+    /// doing the misleading rather than the readers being careless, and a
+    /// warning that lives only on the sibling field is a warning on the surface
+    /// nobody was reading.
+    ///
+    /// It is also not a cursor you SEND: `catalog.status` takes no instant, only
+    /// a count of recent polls.
     pub catalog_version: i64,
     pub model_count: usize,
     /// Every fact key this producer can serve, whether or not any model
