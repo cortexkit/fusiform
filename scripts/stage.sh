@@ -246,9 +246,15 @@ fi
 echo
 echo "acceptance card — fill from MEASUREMENT, not memory:"
 echo "  MARKER    a string the PLACED binary carries (ck-fusiform), absent in the old one"
-echo "  CONTROL   from the PLACED binary, same surface as the marker, must read"
-echo "            IDENTICALLY on both — model_count, never catalog_version, which"
-echo "            advances on every restart by max(now_ms, current+1)"
+echo "  CONTROL   from the PLACED binary, same surface as the marker, and with a"
+echo "            COUNT THAT DOES NOT MOVE between revisions. In strings prefer"
+echo "            models-dev-usd-v1 (exactly 1, held by the test"
+echo "            only_one_currency_policy_has_ever_existed) over a string whose"
+echo "            mentions drift with the code: models.dev read 11 staged / 12"
+echo "            live across one placement, and an unequal control reads as a"
+echo "            discriminator to anyone skimming. On a served value use"
+echo "            model_count, never catalog_version — max(now_ms, current+1)"
+echo "            advances on every restart, so it can never hold still"
 echo "  ARM       name WHICH BINARY renders it, and paste output you EXECUTED"
 
 # Printed LAST, and the prune block above deliberately sits before it.
