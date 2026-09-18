@@ -28,6 +28,20 @@
 # Invoked through AFT's managed dispatcher, which walks to `$repo_root/.githooks`
 # after the git-dir hooks. Tracked in the repo deliberately, so a fresh clone
 # has it and it is reviewable like any other file.
+# RE-PROVING THIS HOOK IS WIRED, which needs a precondition nobody states.
+#
+#     printf '#!/bin/sh\necho REACHED >&2\nexit 1\n' > .githooks/pre-push
+#     git push origin HEAD:refs/heads/probe-hook-reach     <- a NEW ref
+#
+# The new ref is load-bearing. Push something already at origin and git does no
+# work, never invokes the hook, and prints nothing — which reads exactly like a
+# hook that ran and passed. SUBC hit that on their first attempt and nearly
+# banked the silence as proof.
+#
+# So there are three states, not two: ran-and-passed, never-called-because-
+# unwired, and never-called-because-there-was-nothing-to-do. Only the first two
+# are about the hook, and a wiring test that does not force work to exist cannot
+# tell them apart.
 set -eu
 
 if ! command -v cargo > /dev/null 2>&1; then
