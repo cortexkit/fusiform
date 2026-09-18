@@ -81,6 +81,17 @@ then
     exit 1
 fi
 
+# Does the lock match what the siblings PUBLISHED, not just what is on disk.
+#
+# The cargo check below asks whether the lockfile resolves against the siblings
+# as they are HERE. CI resolves them against their REMOTES. Those agree almost
+# always and disagree exactly when a sibling has a branch checked out, at which
+# point every local gate passes forever and CI goes red against a version nobody
+# shipped.
+if ! "$(dirname "$0")/../scripts/lock-vs-published.sh"; then
+    exit 1
+fi
+
 if ! cargo metadata --locked --offline --format-version 1 > /dev/null 2>&1; then
     echo "pre-push refused: Cargo.lock does not resolve --locked" >&2
     echo >&2
