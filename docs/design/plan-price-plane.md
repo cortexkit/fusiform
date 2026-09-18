@@ -106,7 +106,14 @@ CREATE TABLE plan_price_era (
     -- how long a wrong number may circulate, NOT a sampling rate.
     review_by_ms    INTEGER NOT NULL,
     source_ref      TEXT    NOT NULL,   -- the page the number came from
-    refusal_reason  TEXT               -- set iff minor_units IS NULL
+    refusal_reason  TEXT,
+
+    -- Stated as a constraint rather than left to a comment, for the same reason
+    -- as the boundary_kind CHECK above: it makes the two incoherent states
+    -- UNREPRESENTABLE rather than merely unwritten. A priced row carrying a
+    -- refusal, and a refused row explaining nothing, are both things a careful
+    -- writer would not produce and a careless one would.
+    CHECK ((minor_units IS NULL) = (refusal_reason IS NOT NULL))
 );
 ```
 
@@ -151,11 +158,51 @@ money and must not become a float here for the same reason it must not there.
   between them. In both cases the thing that looks like helpfulness is a
   fabricated continuity.
 
-## Open
+## The review date needs a reader, or it is a comment with a timestamp in it
 
-- Whether the plane is served over the existing `catalog.*` surface or its own
-  tool. Serving it under `catalog.get` would put non-model rows in a model
-  response; a separate tool costs a manifest entry and a route.
-- Whether the file is compiled in (like `window-overlay.json`) or read at
-  runtime. Compiled-in makes the binary the unit of release; runtime makes the
-  file editable without a rebuild and reintroduces per-host drift.
+`review_by_ms` is the only defence this plane has: a plan reprice leaves no
+trace anywhere, so nothing can ever contradict a stale row. A date nobody reads
+fails in the quiet direction — the rows keep serving, the multipliers keep
+computing, and staleness accumulates behind a field that *looks* like it is
+managing the problem.
+
+**So an overdue row fails the test suite.** Not a health metric: a metric
+requires someone to look, and the failure mode being guarded against is nobody
+looking.
+
+The mechanism that makes this work already exists and was built for this exact
+class. CI runs on push *and* on a 06:00 schedule, and the scheduled run's own
+comment states why it is there: *"a push gate asks is this change good; only a
+scheduled run asks is what already landed still good against the world as it is
+now."* A review date passing is precisely that — **the world changes while the
+repository does not.** A push-only gate would never fire on a row that went
+overdue during a quiet week, which is when review dates actually lapse.
+
+This is the repo's first *time-triggered* gate. Every other fence here fails
+because data or code changed; this one fails because a date passed with nothing
+touched. That is not a defect in the design, it is the point: the facts in this
+plane rot without anyone touching them, so the gate that guards them must fire
+without anyone touching them either.
+
+The fix when it fires is cheap and is the intended work: open the source page,
+confirm or correct the number, and commit a new establisher and date. Extending
+the date without looking is possible, as with any gate — and it leaves a diff
+with a name on it, which is the difference between a lapse and a decision.
+
+## Settled, after being open
+
+**Its own tool, not `catalog.*`.** The shape argument (non-model rows in a model
+response) is the weaker one. The stronger: *the consumer of a plan price is not
+the consumer of model prices.* Model rates are read per request by routers on a
+hot path; a plan price is read rarely by whatever computes a multiplier. No
+caller wants both in one response, so serving them together grows every existing
+consumer's response to serve one that does not exist yet — and hands all of them
+a field they must **learn to ignore**, which is a field someone eventually
+misreads in a way that looks like a reasonable interpretation rather than a bug.
+
+**Compiled in.** Runtime editing reintroduces exactly the per-host drift that
+ruled out the operator verb. The cost is real and stated plainly: a price
+correction requires a fusiform release. It is acceptable because **the release
+is the review** — for a value whose errors are invisible downstream, the thing
+that would make a correction cheap is the same thing that would make it
+dangerous.
