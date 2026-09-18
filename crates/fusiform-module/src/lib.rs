@@ -87,19 +87,62 @@ pub fn manifest() -> ModuleManifest {
     // a revision its bytes can defend, or carries none. `unknown` is the
     // sentinel an ordinary `cargo build` leaves behind, and it maps to
     // absence rather than to a string that looks like an answer.
-    let provenance = (fusiform_protocol::BUILD_REV != "unknown").then(|| {
-        subc_protocol::manifest::ManifestProvenance {
-            build_git_sha: Some(fusiform_protocol::BUILD_REV.to_string()),
-            build_lock_digest: None,
-            // Absent for the same definition-site reason: this crate can
-            // only see its OWN CARGO_PKG_VERSION, and reporting that as the
-            // wire crate's version is precisely the `version_line` defect.
-            // The protocol crate would have to export its own constant, and
-            // that is a wire change rather than a manifest one.
-            wire_crate_version: None,
-            store_schema_version: None,
+    // Built through the owner's constructor rather than by hand, for the reason
+    // its own docs give: a helper that constructs a wire type lives in the crate
+    // that owns the type. It also validates the form (40 lowercase hex), which a
+    // hand-built literal does not — and an abbreviation would otherwise reach
+    // the wire looking like an attested commit.
+    //
+    // DECLARED IN BOTH DIRECTIONS, which is the change subc-protocol 0.18 makes
+    // possible. Until now an unstamped build reported `provenance: None`, which
+    // conflates "this module states nothing about its build" with "this build
+    // carries no commit". The second is a fact and the first is a silence, and
+    // keeping those apart is what this catalog exists to do.
+    //
+    // `NeverDerived` rather than `DeclinedDirty`: `release-build.sh` REFUSES a
+    // dirty tree outright rather than building an unstamped binary, so a dirty
+    // tree produces no artifact at all here. The sentinel therefore means the
+    // packaging path never ran — an ordinary `cargo build` — and `DeclinedDirty`
+    // is structurally unreachable for a fusiform binary. If that script ever
+    // stamps a dirty tree instead of refusing it, this arm becomes a lie.
+    let source = if fusiform_protocol::BUILD_REV == "unknown" {
+        subc_protocol::manifest::BuildGitShaSource::NeverDerived
+    } else {
+        subc_protocol::manifest::BuildGitShaSource::Git {
+            revision: fusiform_protocol::BUILD_REV,
+            // Clean by construction: the only path that sets `CK_BUILD_REV`
+            // refuses to run on a dirty tree, so a stamped binary's bytes match
+            // the commit it names.
+            tree_state: subc_protocol::manifest::GitTreeState::Clean,
         }
-    });
+    };
+
+    // `wire_crate_version` arrives FILLED, and that is the helper earning its
+    // place rather than a field being minted.
+    //
+    // Fusiform left it absent for years on sound reasoning: this crate can only
+    // see its own CARGO_PKG_VERSION, and naming that as the WIRE crate's
+    // version is the `version_line` defect — a macro evaluated where it is
+    // defined rather than where it is called. The constructor fills it from
+    // `SUBC_PROTOCOL_CRATE_VERSION`, evaluated inside subc-protocol, which is
+    // that same rule obeyed rather than broken. The value was never unknowable;
+    // it was unknowable HERE.
+    //
+    // `store_schema_version` stays absent: nothing is passed for it, because
+    // this manifest is built before the store is opened.
+    let provenance = Some(
+        subc_protocol::manifest::build_provenance_from_source(source, None, None)
+            // A malformed stamp is a PACKAGING defect, and `option_env!` reads
+            // at compile time, so this is deterministic per binary: a build that
+            // starts once starts always. Refusing at startup surfaces it at the
+            // earliest possible moment.
+            //
+            // Swallowing it with `.ok()` would be worse than a panic here, and
+            // not by a little: an absent provenance now reports `NeverDerived`,
+            // so a dropped malformed stamp would claim the packaging path never
+            // ran when it ran and produced something wrong.
+            .expect("CK_BUILD_REV must be a full 40-character commit or unset"),
+    );
 
     let provides = vec![ProviderRole::ToolProvider {
         tools: vec![

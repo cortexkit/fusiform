@@ -475,14 +475,20 @@ async fn call(
         ));
     };
 
-    let identity = BindIdentity {
-        project_root: env::current_dir().map_err(|e| e.to_string())?,
-        harness: "fusiform-cli".to_string(),
-        // A per-invocation session: the CLI is not a durable participant, and
-        // reusing one id across invocations would make two concurrent operator
-        // commands look like one session to anything counting them.
-        session: format!("cli-{}", process::id()),
-    };
+    // Through the owner's constructor: `BindIdentity` became non-exhaustive in
+    // subc-protocol 0.18, so a struct literal here would break on every field
+    // the owner adds — and, worse, a field added with a plausible default would
+    // be filled by whoever absorbed the wave rather than by whoever knows what
+    // it means.
+    //
+    // A per-invocation session: the CLI is not a durable participant, and
+    // reusing one id across invocations would make two concurrent operator
+    // commands look like one session to anything counting them.
+    let identity = BindIdentity::new(
+        env::current_dir().map_err(|e| e.to_string())?,
+        "fusiform-cli",
+        format!("cli-{}", process::id()),
+    );
 
     let body = serde_json::to_vec(&serde_json::json!({
         "name": tool,

@@ -2126,3 +2126,76 @@ fn status_names_served_keys_no_model_in_this_store_carries() {
         status.served_facts
     );
 }
+
+/// An unstamped build SAYS it is unstamped, rather than saying nothing.
+///
+/// # What changed, and why it is not cosmetic
+///
+/// Until subc-protocol 0.18 a binary built by an ordinary `cargo build` carried
+/// `provenance: None`. That conflates two different states: "this module states
+/// nothing about its build" and "this build carries no commit". The first is a
+/// silence and the second is a fact, and an auditor asking which one they are
+/// looking at had no way to tell.
+///
+/// 0.18 added an absence REASON, so the absence became attestable and the
+/// honest form changed. This is the same distinction the catalog keeps between
+/// an absent rate and an unpriced one, applied to fusiform's own manifest.
+///
+/// # Why `NeverDerived` is the true reason here
+///
+/// `release-build.sh` refuses a dirty tree outright rather than building an
+/// unstamped binary, so `DeclinedDirty` is structurally unreachable: a dirty
+/// tree produces no fusiform artifact at all. The sentinel therefore means the
+/// packaging path never ran.
+///
+/// This test runs under `cargo test`, which does not set `CK_BUILD_REV` — so it
+/// drives exactly the unstamped case and cannot pass by accident on a stamped
+/// one.
+#[test]
+fn an_unstamped_build_names_why_its_commit_is_absent() {
+    let manifest = fusiform_module::manifest();
+
+    let provenance = manifest
+        .provenance
+        .as_ref()
+        .expect("an unstamped build must still DECLARE provenance: absent-with-a-reason and absent-entirely are different claims");
+
+    assert!(
+        provenance.build_git_sha.is_none(),
+        "cargo test does not set CK_BUILD_REV, so no commit can be attested here: {:?}",
+        provenance.build_git_sha
+    );
+
+    assert!(
+        matches!(
+            provenance.build_git_sha_absence_reason,
+            Some(subc_protocol::manifest::BuildGitShaAbsenceReason::NeverDerived)
+        ),
+        "the reason must be NeverDerived — release-build.sh refuses a dirty tree \
+         rather than building unstamped, so DeclinedDirty cannot describe a \
+         fusiform binary: {:?}",
+        provenance.build_git_sha_absence_reason
+    );
+
+    // Control, and it corrected me rather than confirming me.
+    //
+    // I asserted this field must stay ABSENT, carrying forward the reasoning
+    // from when fusiform hand-built the struct: a crate can only see its own
+    // CARGO_PKG_VERSION, so naming that as the WIRE crate's version is the
+    // `version_line` defect. True of a literal built here. False now, because
+    // the owner's constructor fills it from `SUBC_PROTOCOL_CRATE_VERSION`,
+    // evaluated INSIDE subc-protocol — which is the definition-site rule
+    // applied correctly rather than violated. Moving to the helper fixed the
+    // defect my comment was working around.
+    //
+    // Asserted against the constant rather than a literal: the two crates are
+    // BOTH at 0.21.0 today, so a literal would pass for the wrong reason and
+    // keep passing after one of them moves. That coincidence is also what made
+    // the first failure read as fusiform-protocol's version leaking.
+    assert_eq!(
+        provenance.wire_crate_version.as_deref(),
+        Some(subc_protocol::SUBC_PROTOCOL_CRATE_VERSION),
+        "the wire crate version must be the PROTOCOL crate's, filled where that \
+         constant is true"
+    );
+}
