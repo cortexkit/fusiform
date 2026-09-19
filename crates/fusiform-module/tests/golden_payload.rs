@@ -682,11 +682,25 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
 ///
 /// # What a miss costs
 ///
-/// Consumers pin from these bytes — ALF by my own recommendation. A field absent
-/// from the fixture is a field whose wire shape no test here constrains, so it
-/// can change and redden nothing until a consumer's decoder meets it in
-/// production. That is quieter than a build failure and lands further from the
-/// change.
+/// Consumers pin from these bytes -- ALF by my own recommendation.
+///
+/// MEASURED RATHER THAN ASSERTED, because the first version of this comment
+/// said an absent field "can change and redden nothing", and that is false. The
+/// three fields this fence was built after -- `retired`, `uncertain`,
+/// `tier_vocabulary` -- are all asserted in `route.rs` by direct field access,
+/// so a shape change would have reddened there.
+///
+/// What the fixture adds over those tests is a different guarantee, and it is
+/// the one worth stating: a route test asserts the field a consumer ASKED FOR,
+/// on a payload that test constructed. The fixture pins EVERY SERVED BYTE of a
+/// real response, so it catches a change nobody thought to assert -- a renamed
+/// neighbour, a dropped null, an added key. That is the class a targeted test
+/// structurally cannot see, since it examines only what its author already had
+/// in mind.
+///
+/// So the cost of a gap is narrower than I first wrote and still real: the
+/// field keeps whatever coverage someone gave it deliberately, and loses the
+/// coverage nobody had to think of.
 ///
 /// # The three WRITE tools are exempt, and that is a finding rather than a gap
 ///
