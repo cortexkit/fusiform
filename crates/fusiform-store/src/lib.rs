@@ -1787,10 +1787,43 @@ impl CatalogStore {
     /// the new date, the gate reads the file, and the store keeps the era that
     /// says what the price was. Which is correct — the store's subject is the
     /// price's history, and the review date is a fact about the file.
+    ///
+    /// # A key the file stops carrying is TOMBSTONED, not left alone
+    ///
+    /// This diff visits the FILE'S rows. Left there, a key present in the store
+    /// and absent from the file would never be visited, so its last row would
+    /// stay in force — and the review gate reads the FILE, so nothing would
+    /// check its date either.
+    ///
+    /// That is the worst failure this plane has. Its premise is that curated
+    /// data has no fetch, no diff and no possible contradiction, so a review
+    /// date is the ONLY liveness signal it can carry. A row that escapes the
+    /// gate is a price that can be wrong forever with nothing able to notice —
+    /// and deleting a cell is the obvious way to retire a tier.
+    ///
+    /// Same fix as the catalog's, which tombstones a model the upstream stops
+    /// publishing rather than letting the old facts stand. Solved there in
+    /// August and not applied here until QTA generalised it: IN AN APPEND-ONLY
+    /// STORE, DECLINING TO WRITE LEAVES THE OLD CLAIM SERVING RATHER THAN
+    /// LEAVING SILENCE.
+    ///
+    /// A tombstone is the one row here that cannot go stale, because its claim
+    /// is about fusiform's own curation rather than about a price.
     pub fn append_plan_prices(&self, rows: &[NewPlanPrice]) -> Result<usize, CatalogError> {
         if rows.is_empty() {
             return Ok(0);
         }
+
+        // The file's vintage, used for the tombstones below. The file states
+        // these prices as effective at this instant, so the ABSENCE of a key is
+        // a statement as of the same instant — and taking it from the rows
+        // rather than the clock keeps re-application a no-op.
+        let vintage = rows.iter().map(|r| r.boundary_at_ms).max().unwrap_or(0);
+        let review = rows.iter().map(|r| r.review_by_ms).max().unwrap_or(0);
+        let curated: std::collections::BTreeSet<(&str, &str)> = rows
+            .iter()
+            .map(|r| (r.provider_id.as_str(), r.tier.as_str()))
+            .collect();
 
         let written = self.inner.with_conn_fenced(|tx| {
             let mut written = 0usize;
@@ -1844,12 +1877,72 @@ impl CatalogStore {
                 )?;
                 written += 1;
             }
+
+            // Every key the store holds, so one absent from the file can be
+            // named. Read inside the fenced transaction, or a key written by a
+            // concurrent apply could be tombstoned on the strength of a stale
+            // read.
+            let mut stmt = tx.prepare("SELECT DISTINCT provider_id, tier FROM plan_price_era")?;
+            let held: Vec<(String, String)> = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(stmt);
+
+            for (provider_id, tier) in held {
+                if curated.contains(&(provider_id.as_str(), tier.as_str())) {
+                    continue;
+                }
+
+                // Already tombstoned? Then this is an ordinary boot and there
+                // is nothing to say. Without this the table would gain a
+                // tombstone on every restart — the phantom-era failure again,
+                // in the code that exists to prevent the stale-row one.
+                let current: Option<Option<String>> = tx
+                    .query_row(
+                        "SELECT refusal_reason FROM plan_price_era \
+                         WHERE provider_id = ?1 AND tier = ?2 \
+                         ORDER BY id DESC LIMIT 1",
+                        params![provider_id, tier],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                if matches!(&current, Some(Some(reason)) if reason == UNCURATED) {
+                    continue;
+                }
+
+                tx.execute(
+                    "INSERT \
+                     INTO plan_price_era \
+                     (provider_id, tier, boundary_kind, boundary_at_ms, \
+                      established_by, established_at_ms, review_by_ms, \
+                      source_ref, refusal_reason) \
+                     VALUES (?1, ?2, 'asserted', ?3, 'fusiform', ?3, ?4, ?5, ?6)",
+                    params![provider_id, tier, vintage, review, CURATED_FILE, UNCURATED,],
+                )?;
+                written += 1;
+            }
+
             Ok(written)
         })?;
 
         Ok(written)
     }
 }
+
+/// The reason a tombstone carries, matched on to keep re-application a no-op.
+///
+/// A constant rather than a literal at both sites: the writer and the
+/// already-tombstoned check must agree exactly, and two copies of a sentence
+/// are two things that can drift into writing a fresh tombstone on every boot.
+pub const UNCURATED: &str =
+    "no longer carried by fusiform's curated plan-price file; the last price \
+     above is what it cost when curation stopped, not what it costs now";
+
+/// What a tombstone cites, since there is no vendor page behind an absence.
+///
+/// The file itself is the source: the claim is "fusiform stopped carrying
+/// this", which the file's own contents establish.
+pub const CURATED_FILE: &str = "crates/fusiform-module/data/plan-prices.json";
 
 impl CatalogStore {
     /// The plan price in force for every `(provider, tier)` at `at_ms`.

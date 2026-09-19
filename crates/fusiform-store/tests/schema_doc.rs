@@ -553,3 +553,100 @@ fn re_applying_the_curated_file_is_a_no_op() {
         .expect("fourth apply");
     assert_eq!(withdrawn, 1, "a price becoming unpublished is a change");
 }
+
+/// A key dropped from the curated file is TOMBSTONED, not left serving.
+///
+/// # The defect this replaced, reproduced before it was fixed
+///
+/// `append_plan_prices` iterates the FILE'S rows, so a key present in the store
+/// and absent from the file was never visited: its last row stayed in force
+/// with its price intact, indistinguishable from a curated one. The review gate
+/// reads the FILE, so that key's date was no longer checked by anything either.
+///
+/// Which is the worst failure this plane has. Its premise is that curated data
+/// has no fetch, no diff and no possible contradiction, so a review date is the
+/// ONLY liveness signal it can carry. A row that escapes the gate is a price
+/// that can be wrong forever with nothing able to notice — and deleting a cell
+/// is the obvious way to retire a tier.
+///
+/// The defect was asserted here first and this test watched it hold, because a
+/// fix whose defect was never reproduced is a fix for a described problem.
+#[test]
+fn a_key_dropped_from_the_file_is_tombstoned() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let descriptor = cortexkit_store_types::StorageDescriptor {
+        module_id: "fusiform".to_string(),
+        storage_namespace: "default".to_string(),
+        isolation: cortexkit_store_types::Isolation::Module,
+        backend: cortexkit_store_types::StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().to_string(),
+        },
+    };
+    let store = fusiform_store::CatalogStore::open(&descriptor).expect("open");
+
+    let row = |tier: &str, units: i64| fusiform_store::NewPlanPrice {
+        provider_id: "acme".to_string(),
+        tier: tier.to_string(),
+        minor_units: Some(units),
+        exponent: Some(2),
+        currency: Some("USD".to_string()),
+        period: Some("month".to_string()),
+        boundary_at_ms: 1_000,
+        established_by: "fusi".to_string(),
+        established_at_ms: 2_000,
+        review_by_ms: 3_000,
+        source_ref: "https://example".to_string(),
+        refusal_reason: None,
+    };
+
+    store
+        .append_plan_prices(&[row("pro", 2000), row("retired_tier", 5000)])
+        .expect("first apply");
+
+    // The file now carries only one of them — someone retired a tier by
+    // deleting its cell, which is the obvious way to do it.
+    let second = store
+        .append_plan_prices(&[row("pro", 2000)])
+        .expect("second apply");
+    assert_eq!(second, 1, "the dropped key must be tombstoned, and only it");
+
+    let served = store.plan_prices_at(9_999_999, None).expect("read");
+
+    // STILL A ROW, because a refusal is a row here: a consumer querying the
+    // retired tier gets a reason rather than a no_coverage refusal that sends
+    // them hunting a curation gap.
+    let stale = served
+        .iter()
+        .find(|r| r.tier == "retired_tier")
+        .expect("the dropped key still answers, with a reason");
+    assert_eq!(
+        stale.minor_units, None,
+        "but carries NO price — the defect was that its old price stood"
+    );
+    assert!(
+        stale
+            .refusal_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no longer carried"),
+        "and says why: {:?}",
+        stale.refusal_reason
+    );
+
+    // CONTROL: the curated key is untouched. Without this the assertions above
+    // pass against an apply that tombstones everything.
+    let live = served
+        .iter()
+        .find(|r| r.tier == "pro")
+        .expect("still curated");
+    assert_eq!(live.minor_units, Some(2000));
+    assert!(live.refusal_reason.is_none());
+
+    // And a third apply writes NOTHING. Without this the table gains a
+    // tombstone on every boot — the phantom-era failure inside the fix for the
+    // stale-row one.
+    let third = store
+        .append_plan_prices(&[row("pro", 2000)])
+        .expect("third apply");
+    assert_eq!(third, 0, "re-application must stay a no-op");
+}
