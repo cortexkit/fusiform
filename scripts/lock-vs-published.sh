@@ -132,22 +132,52 @@ while read -r name path; do
         echo "  Cargo.lock pins        $pinned" >&2
         echo "  $name published        $published" >&2
         echo >&2
-        echo "  That version is not on the sibling's master, so CI — which" >&2
-        echo "  resolves path deps against REMOTES — will refuse it while every" >&2
-        echo "  local gate here keeps passing." >&2
-        echo >&2
-        echo "  FIRST: this check does not fetch, so a stale cached ref reports" >&2
-        echo "  a divergence that does not exist. Try:" >&2
-        echo >&2
-        echo "      git -C $sibling_repo fetch origin" >&2
-        echo >&2
-        echo "  If it still refuses, the sibling likely has a branch checked" >&2
-        echo "  out. Confirm:" >&2
-        echo >&2
-        echo "      git -C $sibling_repo log --all -S 'version = \"$pinned\"' -- $rel/Cargo.toml" >&2
-        echo >&2
-        echo "  If it is on an unlanded branch, restore the lock and wait for" >&2
-        echo "  the wave notice." >&2
+
+        # WHICH DIRECTION, because the two have different causes and opposite
+        # actions, and printing one text for both misdirects half the time.
+        #
+        # This printed the AHEAD guidance unconditionally until it fired on a
+        # BEHIND case and sent me hunting an unlanded branch for a version that
+        # was plainly on master. A wrong hint is worse than none: it moves the
+        # reader away and costs a search plus the time it takes to stop trusting
+        # the tool — which is the exact defect I had just fixed in this repo's
+        # route refusals, reproduced in my own gate hours later.
+        #
+        # `sort -V` decides it: a version-aware compare, so 0.18.9 is BELOW
+        # 0.18.16 rather than above it, which a lexical compare gets backwards
+        # on precisely the two-digit patch numbers this fleet reaches weekly.
+        newest=$(printf '%s\n%s\n' "$pinned" "$published" | sort -V | tail -1)
+
+        if [ "$newest" = "$published" ]; then
+            echo "  BEHIND: a wave landed. The sibling published a version this" >&2
+            echo "  lock does not have, so CI — which resolves path deps against" >&2
+            echo "  REMOTES — will refuse the build." >&2
+            echo >&2
+            echo "  Absorb it:" >&2
+            echo >&2
+            echo "      cargo update -w --offline && ./scripts/lock-vs-published.sh" >&2
+            echo >&2
+            echo "  Then gate and commit the lock on its own." >&2
+        else
+            echo "  AHEAD: this lock pins a version that is NOT on the sibling's" >&2
+            echo "  master. That is the dangerous direction — every local gate" >&2
+            echo "  keeps passing forever while CI goes red against something" >&2
+            echo "  nobody shipped, and nothing in this repo explains the red." >&2
+            echo >&2
+            echo "  CHEAPEST FIRST, regardless of likelihood: this check does not" >&2
+            echo "  fetch, so a stale cached ref reports a divergence that does" >&2
+            echo "  not exist." >&2
+            echo >&2
+            echo "      git -C $sibling_repo fetch origin" >&2
+            echo >&2
+            echo "  If it still refuses, the sibling likely has a branch checked" >&2
+            echo "  out. Confirm:" >&2
+            echo >&2
+            echo "      git -C $sibling_repo log --all -S 'version = \"$pinned\"' -- $rel/Cargo.toml" >&2
+            echo >&2
+            echo "  If it is on an unlanded branch, restore the lock and wait for" >&2
+            echo "  the wave notice." >&2
+        fi
         status=1
     fi
 done < "$tmp"
