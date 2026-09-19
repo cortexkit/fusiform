@@ -354,10 +354,19 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
 ///
 /// So a well-meaning consolidation — folding three cases into one model that
 /// happens to carry all three keys — keeps both fences green while the shapes
-/// stop being independently pinned. ASTRO hit the same thing from the other
-/// side: one test fake of theirs is the sole fence for five role-to-key
-/// mappings, and simplifying it to the two keys a future test needs would drop
-/// three fences with every suite still passing.
+/// stop being independently pinned.
+///
+/// I cited a peer's repository here as a second instance. They then MEASURED it
+/// and it was not one: dropping a key from the fixture I described fails two of
+/// their tests, because the event those tests price carries every role, so a
+/// missing key leaves a measurement unpriced. Their fixture was fenced by a
+/// property nobody had written down as a fence.
+///
+/// Removed rather than corrected in place, because the claim was doing work it
+/// could not support -- a second instance makes a risk look general, and this
+/// one is mine alone until someone finds another. Second time in this file I
+/// have overstated a coupling in another repository; the note at the
+/// inheritance case below is the first.
 ///
 /// The rule, stated because no fence here can enforce it: A CASE EARNS ITS
 /// PLACE BY THE SHAPE IT PRODUCES, not by the keys it happens to contain. If
