@@ -190,12 +190,7 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
             .model_is_known(source, &request.provider_id, &request.model_id)
             .map_err(|e| store_error(&e))?
         {
-            return Err(RouteError::no_coverage(format!(
-                "unknown model {:?} under provider {:?}: the provider exists, \
-                 so check the model id — upstream ids often carry a version \
-                 suffix",
-                request.model_id, request.provider_id
-            )));
+            return Err(unknown_model(&request.provider_id, &request.model_id));
         }
         // Known model, nothing recorded for this fact: a real answer, and now
         // the only remaining cause is the fact key. The empty response says
@@ -908,11 +903,7 @@ fn single_model_snapshot(
             .model_is_known(source, provider_id, model_id)
             .map_err(|e| store_error(&e))?
         {
-            return Err(RouteError::no_coverage(format!(
-                "unknown model {model_id:?} under provider {provider_id:?}: the \
-                 provider exists, so check the model id — upstream ids often \
-                 carry a version suffix"
-            )));
+            return Err(unknown_model(provider_id, model_id));
         }
         // Known, and absent at this instant: that is a real answer about a real
         // model, so it stays an empty result rather than becoming an error.
@@ -1166,6 +1157,25 @@ fn render(
         // ancient retirements to callers who asked about none of them.
         retired: Vec::new(),
     }
+}
+
+/// One statement of the unknown-model refusal, for the two routes that ask it.
+///
+/// `catalog.get` and `catalog.history` reach this from the same predicate —
+/// `model_is_known` returned false under a provider that exists — and carried
+/// byte-identical copies of the sentence. Operator-facing text duplicated
+/// across call sites drifts the moment one copy is improved, and the copy left
+/// behind is the one nobody is looking at.
+///
+/// The hint stays, unlike the provider-level refusal's, because it is GROUNDED
+/// rather than remembered: this branch runs only after the store has confirmed
+/// the provider is real, so "the provider exists" is something the code
+/// established rather than a likely cause recalled from one case.
+fn unknown_model(provider_id: &str, model_id: &str) -> RouteError {
+    RouteError::no_coverage(format!(
+        "unknown model {model_id:?} under provider {provider_id:?}: the provider \
+         exists, so check the model id — upstream ids often carry a version suffix"
+    ))
 }
 
 fn store_error(e: &CatalogError) -> RouteError {
