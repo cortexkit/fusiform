@@ -159,6 +159,19 @@ fn parse(doc: &serde_json::Value) -> (Corrections, Vec<String>) {
         // any of it ships. Neither fact is visible from this file, which is why
         // it is written here: a reader deciding whether this branch needs a
         // reject arm cannot answer from the code in front of them.
+        //
+        // VERIFIED 2026-09-19 rather than asserted, because a cross-file claim
+        // is exactly the kind believed without checking — checking means
+        // reading someone else's tests. Planted `"kind": "approximately"` on a
+        // real cell and ran the guard: it panicked with `unknown value kind
+        // "approximately"`. So the protection is real and this catch-all is
+        // genuinely unreachable from shipped data.
+        //
+        // What that does NOT establish: that the guard still panics after
+        // someone edits it. Mutating its panic arm to a no-op survives the
+        // suite, because a test is not tested by other tests. The protection is
+        // that this branch and that guard would have to be weakened together,
+        // and the only reader who would do that is one who has read this.
         if value["kind"].as_str() != Some("stated") {
             continue;
         }
