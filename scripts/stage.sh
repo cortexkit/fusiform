@@ -289,6 +289,34 @@ echo "  ARM       name WHICH BINARY renders it, and paste output you EXECUTED
             store_ahead, so service does not come back without a store restore
             too. A card that omits this reads as freely reversible"
 
+# DECLARE which stage is current, so a placer does not have to infer it.
+#
+# SUBC's gate printed "INFERRED from mtime (no ck-fusiform.current)". It picked
+# the right artifact, and the inference and the declaration disagree in exactly
+# one case: when a card has been SUPERSEDED. That is not hypothetical here —
+# stage.sh prunes, so a path I handed over an hour ago can be gone, and I have
+# already had to send a replacement locator once tonight.
+#
+# An mtime read cannot see that. Newest-on-disk answers "which directory was
+# written last", which is a true answer to a question nobody asked: the question
+# is "which one did the producer publish".
+#
+# Written to a STABLE path so a stale card is recoverable without asking me. It
+# carries the sha as well as the directory, so a placer can check that what it
+# found is what was declared rather than trusting the pointer.
+current="$HOME/ck-stage/fusiform.current"
+{
+    echo "stage=$STAGE"
+    echo "revision=$(git rev-parse HEAD)"
+    echo "declared_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > "$current.tmp"
+mv -f "$current.tmp" "$current"
+
+# Written through a temp file and renamed, because a reader can open this at any
+# moment: a truncated declaration naming half a path is worse than a stale one
+# naming a whole path that no longer exists. `mv` within one filesystem is
+# atomic; a direct redirect is not.
+
 # Printed LAST, and the prune block above deliberately sits before it.
 #
 # The reasoning is three paragraphs up: a truncated read must lose the hashes
@@ -297,3 +325,4 @@ echo "  ARM       name WHICH BINARY renders it, and paste output you EXECUTED
 # pushed the path off the bottom would undo exactly that.
 echo
 echo "staged at $STAGE"
+echo "declared in $current"
