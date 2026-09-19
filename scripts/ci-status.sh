@@ -73,32 +73,53 @@ runs=$(gh run list --workflow="$workflow" --event schedule --limit 40 \
     exit 1
 }
 
-# The date window still scopes "recently enough to matter". It is no longer
-# load-bearing for CORRECTNESS — the fetch above cannot be flushed — so a bad
-# choice here costs relevance rather than truth.
-unwatched=$(printf '%s' "$runs" | CI_STATUS_DAYS="$days" python3 -c '
+# THE VERDICT IS THE NEWEST RUN; THE HISTORY IS CONTEXT.
+#
+# This first exited 1 whenever ANY run in the window had failed, and that is a
+# gate which fails for two weeks after its cause is fixed — the precise thing I
+# wrote into its own commit message ("still reporting failures whose cause was
+# fixed weeks ago, which trains its reader to skim") and then shipped.
+#
+# The question a reader has is "is master red NOW". A run from nine days ago
+# whose cause landed today answers a different one. So the exit code follows the
+# newest scheduled run, and older failures print as context BELOW it — visible,
+# because a pattern of reds is worth seeing, and not alarming, because they are
+# answered.
+#
+# The date window now only scopes that context. It is load-bearing for neither
+# correctness nor the verdict, which is the right place for a number nobody
+# measured.
+verdict=$(printf '%s' "$runs" | CI_STATUS_DAYS="$days" python3 -c '
 import datetime, json, os, sys
 runs = json.load(sys.stdin)
+if not runs:
+    print("NONE")
+    sys.exit(0)
+
 days = int(os.environ["CI_STATUS_DAYS"])
 cut = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
 def when(r):
     return datetime.datetime.fromisoformat(r["createdAt"].replace("Z", "+00:00"))
-rows = [r for r in runs if when(r) >= cut]
-if not rows:
-    print("NONE")
-    sys.exit(0)
-bad = [r for r in rows if r["conclusion"] not in ("success", None, "")]
-print(f"{len(rows)} scheduled run(s) in window, {len(bad)} failed")
-for r in bad[:10]:
-    stamp = r["createdAt"][:16]
-    concl = r["conclusion"]
-    sha = r["headSha"][:7]
-    print("  %s  %-10s %s" % (stamp, concl, sha))
+def bad(r):
+    return r["conclusion"] not in ("success", None, "")
+
+# gh returns newest first. Taken by DATE rather than by position, because a
+# trust in list ordering is the kind of assumption that holds until it does not.
+newest = max(runs, key=when)
+window = [r for r in runs if when(r) >= cut]
+older = [r for r in window if bad(r) and r is not newest]
+
+state = "RED" if bad(newest) else "GREEN"
+print("%s|%s|%s|%s|%d" % (
+    state, newest["createdAt"][:16], newest["conclusion"], newest["headSha"][:7],
+    len(older)))
+for r in older[:8]:
+    print("  %s  %-10s %s" % (r["createdAt"][:16], r["conclusion"], r["headSha"][:7]))
 ')
 
-case "$unwatched" in
+case "$verdict" in
     NONE)
-        echo "ci-status: NO scheduled runs in the last $days day(s)."
+        echo "ci-status: NO scheduled runs at all."
         echo
         echo "  This query filters server-side, so a busy repository cannot"
         echo "  hide them — an empty result means the schedule is not firing."
@@ -106,19 +127,41 @@ case "$unwatched" in
         echo "  passes, which is the deadlock QTA hit in September."
         exit 1
         ;;
-    *" 0 failed")
-        echo "ci-status: $unwatched (last $days day(s))"
-        ;;
-    *)
-        echo "ci-status: $unwatched" >&2
-        echo >&2
-        echo "  These ran with nobody attending. A scheduled red usually" >&2
-        echo "  means master broke with nothing of yours moving — most" >&2
-        echo "  often a sibling published and the committed lock is behind," >&2
-        echo "  since CI resolves path deps against REMOTES." >&2
-        echo >&2
-        echo "  Check the lock first:  ./scripts/lock-vs-published.sh" >&2
-        echo "  Then the log:          gh run view <id> --log-failed" >&2
-        exit 1
-        ;;
 esac
+
+head=$(printf '%s' "$verdict" | head -1)
+rest=$(printf '%s' "$verdict" | tail -n +2)
+
+state=$(printf '%s' "$head" | cut -d'|' -f1)
+stamp=$(printf '%s' "$head" | cut -d'|' -f2)
+concl=$(printf '%s' "$head" | cut -d'|' -f3)
+sha=$(printf '%s' "$head" | cut -d'|' -f4)
+older=$(printf '%s' "$head" | cut -d'|' -f5)
+
+if [ "$state" = "GREEN" ]; then
+    echo "ci-status: newest scheduled run PASSED  ($stamp, $sha)"
+    if [ "$older" -gt 0 ]; then
+        echo
+        echo "  $older earlier failure(s) in the last $days day(s), shown as context"
+        echo "  — the newest run is green, so these are answered:"
+        printf '%s\n' "$rest"
+    fi
+    exit 0
+fi
+
+echo "ci-status: newest scheduled run FAILED  ($stamp, $concl, $sha)" >&2
+echo >&2
+echo "  It ran with nobody attending. A scheduled red usually means" >&2
+echo "  master broke with nothing of yours moving — most often a" >&2
+echo "  sibling published and the committed lock is behind, since CI" >&2
+echo "  resolves path deps against REMOTES." >&2
+echo >&2
+echo "  Cheapest first, regardless of likelihood:" >&2
+echo "    ./scripts/lock-vs-published.sh        local, free" >&2
+echo "    gh run view <id> --log-failed         one fetch" >&2
+if [ "$older" -gt 0 ]; then
+    echo >&2
+    echo "  $older earlier failure(s) in the last $days day(s):" >&2
+    printf '%s\n' "$rest" >&2
+fi
+exit 1
