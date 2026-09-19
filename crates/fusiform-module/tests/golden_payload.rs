@@ -430,6 +430,22 @@ fn cases() -> Vec<(&'static str, String)> {
             r#"{"name":"catalog.get","arguments":{"provider_id":"zhipuai","model_id":"glm-4.5-flash","at_ms":1200,"fact_prefixes":["rate."]}}"#.to_string(),
         ),
         (
+            // `rate.reasoning`, the one served fact key absent from every other
+            // case here — found by asking the fact-key question the response
+            // field fence does not cover.
+            //
+            // Worth its own case rather than incidental coverage: only 166 of
+            // 6,213 reasoning-capable models in the live catalog carry this key,
+            // so a consumer is unlikely to meet one by accident and very likely
+            // to meet one eventually. 115 of those restate the model's output
+            // rate, and 29 publish a genuinely different number — alibaba bills
+            // reasoning at 2.5x to 3.3x output, perplexity's sonar at 0.38x — so
+            // a decoder that defaults this key to the output rate is wrong in
+            // BOTH directions and the errors cancel in aggregate.
+            "catalog.get — a model that prices reasoning separately",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"nebius","model_id":"Qwen/Qwen3-Next-80B-A3B-Thinking","fact_prefixes":["rate."]}}"#.to_string(),
+        ),
+        (
             "catalog.history — a corrected fact",
             r#"{"name":"catalog.history","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","fact_key":"rate.input"}}"#.to_string(),
         ),
@@ -739,4 +755,67 @@ fn collect_keys(value: &serde_json::Value, out: &mut std::collections::BTreeSet<
         }
         _ => {}
     }
+}
+
+/// Every fact key in `SERVED_FACTS` appears in the fixture.
+///
+/// # A different vocabulary from the response fields next door
+///
+/// The fence above checks the KEYS OF THE ENVELOPE — `models`, `withheld`,
+/// `retired`. This checks the keys INSIDE it, which is a separate list with a
+/// separate authority: `SERVED_FACTS` in the protocol crate, the table that
+/// tells a consumer what fusiform can ever serve.
+///
+/// Asked separately because the first fence was green while this one was not:
+/// `rate.reasoning` appeared in no case, and the envelope was complete.
+///
+/// # Why a rare key needs a case rather than incidental coverage
+///
+/// `rate.reasoning` is carried by 166 of 6,213 reasoning-capable models in the
+/// live catalog, measured 2026-09-19. A consumer is unlikely to meet one by
+/// accident and certain to meet one eventually, which is the worst combination:
+/// the decoder path is cold until it is load-bearing.
+///
+/// It is also the key where getting the shape wrong costs most. 115 of those
+/// rows restate the model's output rate and 29 publish a different number —
+/// alibaba bills reasoning at 2.5x to 3.3x output, perplexity's sonar at 0.38x
+/// — so a consumer that defaults the key to the output rate is wrong in BOTH
+/// directions, and the errors partially cancel in aggregate while every row is
+/// wrong.
+#[test]
+fn every_served_fact_key_reaches_the_fixture() {
+    let src = include_str!("../../fusiform-protocol/src/lib.rs");
+    let golden: serde_json::Value = serde_json::from_str(GOLDEN).expect("the fixture parses");
+
+    let mut present: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    collect_keys(&golden, &mut present);
+
+    // Scanned from the table rather than listed here, so a key added to
+    // `SERVED_FACTS` is checked without anyone remembering this test.
+    let keys: Vec<&str> = src
+        .match_indices("key: \"")
+        .filter_map(|(i, _)| {
+            let rest = &src[i + 6..];
+            rest.find('"').map(|end| &rest[..end])
+        })
+        .collect();
+
+    assert!(
+        keys.len() >= 15,
+        "SERVED_FACTS carried 15 entries when this was written; found {}, which \
+         means the scan broke rather than the table shrinking",
+        keys.len()
+    );
+
+    let missing: Vec<&&str> = keys.iter().filter(|k| !present.contains(**k)).collect();
+    assert!(
+        missing.is_empty(),
+        "\n\nThese served fact keys appear in no golden payload:\n\n  {:?}\n\n\
+         A consumer pinning from this fixture never meets them, so their wire \
+         shape is constrained by nothing here.\n\n\
+         Add a case reading a model that PUBLISHES the key. If the excerpt has \
+         no such model, that is the finding — the fixture's upstream cut does \
+         not cover a fact fusiform serves.\n",
+        missing
+    );
 }
