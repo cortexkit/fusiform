@@ -215,6 +215,67 @@ pub fn load_reporting_rejects(doc: &str) -> (Vec<PlanPrice>, Vec<String>) {
     (rows, rejects)
 }
 
+/// A row whose review date has passed, with everything needed to act on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Overdue {
+    pub provider_id: String,
+    pub tier: String,
+    pub days_overdue: i64,
+    pub source_ref: String,
+}
+
+/// Which rows are past their review date at `now_ms`.
+///
+/// Takes the instant rather than reading the clock, so the gate can be driven
+/// in both directions. A check that can only ever be run against the real
+/// present can only be tested on data that is currently fine.
+pub fn overdue_at(rows: &[PlanPrice], now_ms: i64) -> Vec<Overdue> {
+    rows.iter()
+        .filter(|r| r.review_by_ms < now_ms)
+        .map(|r| Overdue {
+            provider_id: r.provider_id.clone(),
+            tier: r.tier.clone(),
+            days_overdue: (now_ms - r.review_by_ms) / 86_400_000,
+            source_ref: r.source_ref.clone(),
+        })
+        .collect()
+}
+
+/// What an operator should read when the gate fires.
+///
+/// The message is part of the design rather than a detail of it. A
+/// time-triggered gate fails on a morning when nobody changed anything, which
+/// is the least expected failure a suite can produce — the natural reading is
+/// "CI is broken" rather than "a fact expired". A reader who reaches that
+/// conclusion reaches for a skip, and the gate will have trained exactly the
+/// behaviour it exists to prevent.
+pub fn overdue_report(overdue: &[Overdue]) -> String {
+    let mut out = String::from(
+        "NOT A BUILD FAILURE. Nothing changed; a review date passed.\n\n\
+         These curated subscription prices are past their review date. Nothing \
+         reveals a plan reprice — no fetch, no diff, no contradiction — so this \
+         date is the only signal that a price may have moved, and the damage is \
+         retroactive: every window priced in the stale period used the old \
+         number.\n\n",
+    );
+    for o in overdue {
+        out.push_str(&format!(
+            "  {}/{} — {} day(s) overdue\n    read: {}\n",
+            o.provider_id, o.tier, o.days_overdue, o.source_ref
+        ));
+    }
+    out.push_str(
+        "\nOpen each source, read the number, and commit:\n\
+         \x20 - the price, IF it moved\n\
+         \x20 - a new established_by, established_at_ms and review_by_ms, ALWAYS\n\n\
+         Confirming a price unchanged is a real result and the commit should \
+         look like one. If it did not move, the only edit is the provenance.\n\n\
+         What this gate CANNOT tell you: whether a price is still correct. It \
+         knows only that nobody has looked recently.\n",
+    );
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,6 +379,88 @@ mod tests {
         assert!(rejects.is_empty(), "control: {rejects:?}");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].price.expect("priced").minor_units, 2000);
+    }
+
+    /// No curated price is past its review date.
+    ///
+    /// # This is the repo's only TIME-TRIGGERED gate
+    ///
+    /// Every other fence here fails because data or code changed. This one
+    /// fires because a date passed with nothing touched — which is the point
+    /// rather than a defect: the facts it guards rot untouched, so the gate
+    /// that guards them must fire untouched.
+    ///
+    /// It runs on push AND on the 06:00 schedule, and the schedule is what
+    /// makes it work. A push-only gate is silent for exactly the period a
+    /// review date exists to bound, because dates lapse during quiet weeks and
+    /// a quiet week has no pushes.
+    ///
+    /// Reads the real clock, deliberately. A fixed instant would make this a
+    /// test about arithmetic.
+    #[test]
+    fn no_curated_price_is_past_its_review_date() {
+        let (rows, rejects) = load_reporting_rejects(PLAN_PRICES);
+        assert!(rejects.is_empty(), "{rejects:?}");
+        assert!(!rows.is_empty(), "a file with no rows cannot be overdue");
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("the clock is after 1970")
+            .as_millis() as i64;
+
+        let overdue = overdue_at(&rows, now);
+        assert!(overdue.is_empty(), "\n\n{}", overdue_report(&overdue));
+    }
+
+    /// The gate fires, and its message says the four things a reader needs.
+    ///
+    /// Without this the test above passes every day until the first lapse, and
+    /// the first person to meet a real failure meets an untested message at the
+    /// moment they are least inclined to read carefully.
+    #[test]
+    fn an_overdue_row_fires_and_the_message_is_actionable() {
+        let doc = r#"{"cells":[{"provider_id":"acme","tier":"pro",
+            "price":{"minor_units":2000,"exponent":2,"currency":"USD","period":"month"},
+            "boundary_at_ms":1,"established_by":"x","established_at_ms":2,
+            "review_by_ms":1000,"source_ref":"https://example/pricing"}]}"#;
+        let (rows, rejects) = load_reporting_rejects(doc);
+        assert!(rejects.is_empty(), "{rejects:?}");
+
+        let overdue = overdue_at(&rows, 1000 + 86_400_000 * 3);
+        assert_eq!(overdue.len(), 1, "an expired row must be reported");
+        assert_eq!(overdue[0].days_overdue, 3);
+
+        let msg = overdue_report(&overdue);
+        assert!(
+            msg.contains("NOT A BUILD FAILURE"),
+            "must lead with this, or a reader spends the first minutes \
+             debugging a build that is fine: {msg}"
+        );
+        assert!(
+            msg.contains("acme/pro") && msg.contains("3 day(s)"),
+            "must name the row and how far overdue, or someone hunts a file: {msg}"
+        );
+        assert!(
+            msg.contains("https://example/pricing"),
+            "must carry the source, so checking is a click rather than a search: {msg}"
+        );
+        assert!(
+            msg.contains("unchanged is a real result"),
+            "must say what to commit when the price did NOT move, or 'nothing \
+             changed' reads as wasted work and the next reader skips it: {msg}"
+        );
+        assert!(
+            msg.contains("CANNOT tell you"),
+            "must state its own limit: it knows nobody looked recently, not \
+             that the price is correct: {msg}"
+        );
+
+        // CONTROL: a row still in date must NOT fire, or the gate reports
+        // everything and its output becomes noise.
+        assert!(
+            overdue_at(&rows, 999).is_empty(),
+            "a row inside its review window must not be reported"
+        );
     }
 
     /// A refusal cell is a ROW, not a dropped one.
