@@ -23,11 +23,35 @@ on:
   # my next push attached to an unrelated change, and reads as that change
   # breaking something.
   #
-  # CKCRED measured the clean evidence (fleet channel, 2026-09-06): the same sha
-  # green on push at 07:59 and red on schedule at 11:14, nothing in their repo
-  # moved. That is also why this must not be dropped once train branches land —
-  # a green train sha is green against the siblings AS THEY WERE WHEN CI RAN,
-  # and five lock waves reached this repo in a single day.
+  # MEASURED HERE, on this repository's own history (2026-09-19). Same sha,
+  # four runs, two verdicts, and the only variable is WHEN:
+  #
+  #     afd4bef  2026-09-16T17:38  push:success
+  #     afd4bef  2026-09-16T17:41  push:success
+  #     afd4bef  2026-09-17T10:42  schedule:failure
+  #     afd4bef  2026-09-18T10:17  schedule:failure
+  #
+  # Nothing in the commit changed. Siblings published, the committed lock went
+  # stale against their remotes, and a commit that was genuinely green became
+  # genuinely red while sitting still. Check it with:
+  #
+  #     gh run list --workflow=ci.yml --limit 200 \
+  #       --json event,conclusion,headSha --jq \
+  #       '.[] | select(.headSha|startswith("afd4bef"))'
+  #
+  # CKCRED measured the same shape first (fleet channel, 2026-09-06): green on
+  # push at 07:59, red on schedule at 11:14. Theirs arrived three hours apart
+  # and mine two DAYS apart, which is the part that matters — the window is not
+  # a race, it is however long the repo sits still.
+  #
+  # Kept alongside rather than replaced: a borrowed measurement is one a reader
+  # here cannot check, and a local one is one they can. Two instances in two
+  # repositories is also the only evidence that this is a property of the
+  # path-dep arrangement rather than an accident of either seat.
+  #
+  # That is also why this must not be dropped once train branches land — a green
+  # train sha is green against the siblings AS THEY WERE WHEN CI RAN, and five
+  # lock waves reached this repo in a single day.
   schedule:
     - cron: '0 6 * * *'
 
