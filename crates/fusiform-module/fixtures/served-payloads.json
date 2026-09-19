@@ -1,4 +1,38 @@
 {
+  "catalog.get — a model the upstream prices not at all": {
+    "request": {
+      "arguments": {
+        "model_id": "anthropic/claude-opus-4-6",
+        "provider_id": "anyapi"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "anyapi/anthropic/claude-opus-4-6": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "pdf",
+            "text"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1000000,
+          "limit.output": 128000,
+          "model.family": "claude-opus",
+          "model.open_weights": false
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — a model whose reasoning capability is unknown": {
     "request": {
       "arguments": {
@@ -21,6 +55,74 @@
           "limit.output": 8192,
           "model.family": null,
           "model.open_weights": null
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — a rate published as zero": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "rate."
+        ],
+        "model_id": "green-s",
+        "provider_id": "greenpt"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "greenpt/green-s": {
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4370000
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — a rate the upstream withdrew": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "rate."
+        ],
+        "model_id": "glm-4.5-flash",
+        "provider_id": "zhipuai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "zhipuai/glm-4.5-flash": {
+          "rate.cache_read": {
+            "state": "stated_zero"
+          },
+          "rate.cache_write": {
+            "reason": "missing_rate",
+            "state": "unpriced"
+          },
+          "rate.input": {
+            "state": "stated_zero"
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          }
         }
       },
       "resolved_at_ms": -1,
@@ -262,7 +364,7 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 216,
+      "era_count": 217,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
@@ -288,6 +390,17 @@
           "failure_class": "http_status",
           "observed_at_ms": 2000,
           "outcome": "failed"
+        },
+        {
+          "changes": {
+            "eras": 1,
+            "facts_changed": 1,
+            "models_arrived": 0,
+            "models_withdrawn": 0
+          },
+          "duration_ms": 210,
+          "observed_at_ms": 1500,
+          "outcome": "changed"
         },
         {
           "duration_ms": 12,
