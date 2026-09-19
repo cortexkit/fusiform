@@ -368,3 +368,81 @@ fn canonical(v: &serde_json::Value) -> String {
 fn canonical_str(served: &str) -> String {
     canonical(&serde_json::from_str(served).expect("a literal in this test parses"))
 }
+
+/// The fixture carries a real served example of every `RateValue` state.
+///
+/// # This is the half of the consolidation risk that CAN be fenced
+///
+/// The coverage fences in `golden_payload.rs` are key-level: they ask whether
+/// `rate.input` appears, not whether its VALUE reached each shape a consumer
+/// must decode. So folding cases together keeps them green while the shapes
+/// stop being separately pinned — ASTRO and I both concluded that was
+/// comment-only and put warnings at the point of temptation.
+///
+/// For rate states it is not comment-only. The vocabulary is a closed enum, so
+/// the question "did every state reach the fixture" has an exhaustive answer,
+/// and this asks it.
+///
+/// # Why this vocabulary and not another
+///
+/// It is the one that actually bit. The fixture carried `priced` and nothing
+/// else until 2026-09-19, so a consumer pinning from it would never have met
+/// `stated_zero` or `unpriced` — and those three are not interchangeable: a
+/// number, a provider saying a dimension is FREE, and nobody having published
+/// one. A decoder that collapses them bills nothing for a rate the upstream
+/// withdrew.
+///
+/// # Exhaustive on purpose
+///
+/// A new variant fails to compile here until someone states whether the fixture
+/// must carry an example. A runtime list would simply not mention it, which is
+/// how `stated_zero` went unpinned for a month.
+#[test]
+fn the_fixture_carries_every_rate_state() {
+    let doc: serde_json::Value = serde_json::from_str(SERVED).expect("the fixture parses");
+    let mut shapes: Vec<String> = Vec::new();
+    collect_rate_shapes(&doc, &mut shapes);
+    assert!(
+        !shapes.is_empty(),
+        "no served rates found at all, so every assertion below would pass \
+         against a fixture carrying nothing"
+    );
+
+    let mut seen_priced = false;
+    let mut seen_stated_zero = false;
+    let mut seen_unpriced = false;
+    for shape in &shapes {
+        match serde_json::from_str::<RateValue>(shape) {
+            Ok(RateValue::Priced { .. }) => seen_priced = true,
+            Ok(RateValue::StatedZero) => seen_stated_zero = true,
+            Ok(RateValue::Unpriced { .. }) => seen_unpriced = true,
+            // A served rate that does not decode is the flatten defect, and the
+            // fence above this one is what reports it. Ignored here so this test
+            // answers its own question rather than two.
+            Err(_) => {}
+        }
+    }
+
+    let missing: Vec<&str> = [
+        ("priced", seen_priced),
+        ("stated_zero", seen_stated_zero),
+        ("unpriced", seen_unpriced),
+    ]
+    .iter()
+    .filter(|(_, seen)| !seen)
+    .map(|(name, _)| *name)
+    .collect();
+
+    assert!(
+        missing.is_empty(),
+        "\n\nThe fixture carries no served example of: {missing:?}\n\n\
+         These states are NOT interchangeable -- a number, a provider saying a \
+         dimension is free, and nobody having published one -- and a consumer \
+         pinning from this fixture never meets the missing one.\n\n\
+         Add a case to golden_payload.rs that PRODUCES it. A model with a zero \
+         in its cost object gives stated_zero; a withdrawn rate gives \
+         unpriced/missing_rate.\n\n\
+         Found {} served rates in total.\n",
+        shapes.len()
+    );
+}
