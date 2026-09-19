@@ -61,6 +61,27 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — a named read of a retired model": {
+    "request": {
+      "arguments": {
+        "model_id": "google/veo-3",
+        "provider_id": "poe"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {},
+      "resolved_at_ms": -1,
+      "retired": [
+        {
+          "model": "poe/google/veo-3",
+          "retired_at_ms": 1500
+        }
+      ],
+      "source": "models.dev"
+    }
+  },
   "catalog.get — a rate published as zero": {
     "request": {
       "arguments": {
@@ -127,6 +148,49 @@
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
+    }
+  },
+  "catalog.get — an instant inside an unobserved window": {
+    "request": {
+      "arguments": {
+        "at_ms": 1200,
+        "fact_prefixes": [
+          "rate."
+        ],
+        "model_id": "glm-4.5-flash",
+        "provider_id": "zhipuai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "zhipuai/glm-4.5-flash": {
+          "rate.cache_read": {
+            "state": "stated_zero"
+          },
+          "rate.cache_write": {
+            "state": "stated_zero"
+          },
+          "rate.input": {
+            "state": "stated_zero"
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          }
+        }
+      },
+      "resolved_at_ms": 1200,
+      "source": "models.dev",
+      "uncertain": [
+        {
+          "fact_key": "rate.cache_write",
+          "model_id": "glm-4.5-flash",
+          "provider_id": "zhipuai",
+          "superseded_after_ms": 1000,
+          "superseded_by_ms": 1500
+        }
+      ]
     }
   },
   "catalog.get — inside a corrected interval": {
@@ -364,14 +428,14 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 217,
+      "era_count": 218,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
         "last_class": "http_status",
         "polls_back": 1
       },
-      "model_count": 17,
+      "model_count": 16,
       "models_priced": 10,
       "overridden": [
         {
@@ -393,10 +457,10 @@
         },
         {
           "changes": {
-            "eras": 1,
+            "eras": 2,
             "facts_changed": 1,
             "models_arrived": 0,
-            "models_withdrawn": 0
+            "models_withdrawn": 1
           },
           "duration_ms": 210,
           "observed_at_ms": 1500,
@@ -532,6 +596,104 @@
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
+    }
+  },
+  "plan.prices — every curated row": {
+    "request": {
+      "arguments": {},
+      "name": "plan.prices"
+    },
+    "response": {
+      "prices": [
+        {
+          "boundary_at_ms": 1789689600000,
+          "established_at_ms": 1789776000000,
+          "established_by": "fusiform",
+          "price": {
+            "currency": "USD",
+            "exponent": 2,
+            "minor_units": 20000,
+            "period": "month"
+          },
+          "provider_id": "anthropic",
+          "review_by_ms": 1797552000000,
+          "source_ref": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan",
+          "tier": "max_20x"
+        },
+        {
+          "boundary_at_ms": 1789689600000,
+          "established_at_ms": 1789776000000,
+          "established_by": "fusiform",
+          "price": {
+            "currency": "USD",
+            "exponent": 2,
+            "minor_units": 10000,
+            "period": "month"
+          },
+          "provider_id": "anthropic",
+          "review_by_ms": 1797552000000,
+          "source_ref": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan",
+          "tier": "max_5x"
+        },
+        {
+          "boundary_at_ms": 1789689600000,
+          "established_at_ms": 1789776000000,
+          "established_by": "fusiform",
+          "price": {
+            "currency": "USD",
+            "exponent": 2,
+            "minor_units": 2000,
+            "period": "month"
+          },
+          "provider_id": "anthropic",
+          "review_by_ms": 1797552000000,
+          "source_ref": "https://www.anthropic.com/pricing",
+          "tier": "pro"
+        },
+        {
+          "boundary_at_ms": 1789785600000,
+          "established_at_ms": 1789785600000,
+          "established_by": "fusiform",
+          "provider_id": "openai",
+          "refusal_reason": "\"pro\" is an API plan string, not a vendor tier name. OpenAI publishes Pro 5x ($100) and Pro 20x ($200) and its API reports plan_type \"pro\" for both, so this key cannot carry one price. The tier rows are openai/pro_5x and openai/pro_20x; which one an account holds is not published on any surface and is a fact about the account.",
+          "review_by_ms": 1797552000000,
+          "source_ref": "https://help.openai.com/en/articles/9793128",
+          "tier": "pro"
+        },
+        {
+          "boundary_at_ms": 1789785600000,
+          "established_at_ms": 1789785600000,
+          "established_by": "fusiform",
+          "price": {
+            "currency": "USD",
+            "exponent": 2,
+            "minor_units": 20000,
+            "period": "month"
+          },
+          "provider_id": "openai",
+          "review_by_ms": 1797552000000,
+          "source_ref": "https://help.openai.com/en/articles/9793128",
+          "tier": "pro_20x"
+        },
+        {
+          "boundary_at_ms": 1789785600000,
+          "established_at_ms": 1789785600000,
+          "established_by": "fusiform",
+          "price": {
+            "currency": "USD",
+            "exponent": 2,
+            "minor_units": 10000,
+            "period": "month"
+          },
+          "provider_id": "openai",
+          "review_by_ms": 1797552000000,
+          "source_ref": "https://help.openai.com/en/articles/9793128",
+          "tier": "pro_5x"
+        }
+      ],
+      "resolved_at_ms": -1,
+      "tier_vocabulary": "The tier is the VENDOR'S OWN TIER NAME, never an API plan string. Those are different vocabularies and do not correspond one-to-one, so a consumer holding an API string must map it to a tier itself, with knowledge of the account.",
+      "unit_policy": "US list price, monthly-billed, web subscription. An operator on an annual term, in another country, or subscribed through an app store pays something else, and this plane cannot see which."
     }
   }
 }

@@ -225,6 +225,26 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
             "the key being withdrawn must exist first, or this ingest is a no-op \
              and the fixture silently loses the tombstone"
         );
+
+        // A WHOLE MODEL withdrawn as well, so the fixture carries a RETIRED
+        // row. The `retired` array was added for a consumer whose roster went
+        // stale on an upstream rename, and it appeared nowhere in these bytes
+        // — the field exists precisely so a named read of a retired model is
+        // distinguishable from a read of an unknown one, and neither shape was
+        // pinned.
+        let models = doc["poe"]["models"]
+            .as_object_mut()
+            .expect("poe publishes models");
+        assert!(
+            models.remove("google/veo-3").is_some(),
+            "the model being withdrawn must exist first, or the retirement is a \
+             no-op and the case below reads an unknown model instead"
+        );
+        assert!(
+            !models.is_empty(),
+            "the provider must keep a model, or this withdraws the PROVIDER too \
+             and the read refuses for a different reason than the one pinned"
+        );
         serde_json::to_string(&doc).expect("the edited document serialises")
     };
     let obs = store
@@ -259,6 +279,25 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
         plan.eras.len()
     );
     store.append_eras(&plan.eras).unwrap();
+
+    // THE CURATED PLAN PRICES, applied exactly as boot applies them.
+    //
+    // Without this the whole `plan.prices` tool is absent from the fixture: I
+    // shipped it and never pinned its wire shape, so a change to `prices`,
+    // `unit_policy` or `tier_vocabulary` would redden nothing here. That is the
+    // same gap the rate states had — a surface consumers pin from, covering
+    // less than the wire carries.
+    //
+    // Applied through `store_rows(rows())` rather than hand-built, so the
+    // fixture pins what the SHIPPED FILE produces. A synthetic row would pin a
+    // shape nobody serves, and the curated file is the artifact under review.
+    let plan_rows = fusiform_module::plan_prices::store_rows(fusiform_module::plan_prices::rows());
+    assert!(
+        !plan_rows.is_empty(),
+        "the curated file must yield rows, or the plan.prices cases below pin an \
+         empty answer and prove nothing"
+    );
+    store.append_plan_prices(&plan_rows).unwrap();
 
     // A failed poll, so the status payload carries a failure class. An
     // all-successful history would leave the fields a consumer reads during an
@@ -351,6 +390,44 @@ fn cases() -> Vec<(&'static str, String)> {
             // all appear in bytes a consumer can pin.
             "catalog.get — a rate the upstream withdrew",
             r#"{"name":"catalog.get","arguments":{"provider_id":"zhipuai","model_id":"glm-4.5-flash","fact_prefixes":["rate."]}}"#.to_string(),
+        ),
+        (
+            // The whole `plan.prices` surface: priced tiers, a REFUSAL row, the
+            // unit policy and the tier vocabulary. Every one of these was
+            // unpinned until now.
+            //
+            // The refusal matters most — `openai/pro` carries no price because
+            // the API plan string does not resolve to a vendor tier, and a
+            // consumer that reads a missing price as free bills nothing for a
+            // subscription that costs money.
+            "plan.prices — every curated row",
+            r#"{"name":"plan.prices","arguments":{}}"#.to_string(),
+        ),
+        (
+            // A NAMED READ OF A RETIRED MODEL. The model is gone from the
+            // upstream, so `models` is empty and `retired` names it with the
+            // instant it went.
+            //
+            // Distinct from a read of an UNKNOWN model, which refuses with
+            // no_coverage. Collapsing the two is what sent a consumer hunting a
+            // deletion when the upstream had renamed a provider, and this is
+            // the shape that tells them apart.
+            "catalog.get — a named read of a retired model",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"poe","model_id":"google/veo-3"}}"#.to_string(),
+        ),
+        (
+            // A READ INSIDE AN UNOBSERVED WINDOW, which populates `uncertain`.
+            //
+            // The withdrawal landed at t=1500 and the observation before it was
+            // t=1000, so at t=1200 the store knows the value it served and does
+            // NOT know whether it still held — the change could have happened
+            // either side of the instant asked for.
+            //
+            // Unpinned until now, and it is the field a consumer needs to
+            // reconstruct a past decision honestly: flattening the bracket to a
+            // point value turns "nobody was watching" into a confident answer.
+            "catalog.get — an instant inside an unobserved window",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"zhipuai","model_id":"glm-4.5-flash","at_ms":1200,"fact_prefixes":["rate."]}}"#.to_string(),
         ),
         (
             "catalog.history — a corrected fact",
