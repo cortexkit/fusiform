@@ -93,6 +93,35 @@ if ! "$(dirname "$0")/../scripts/lock-vs-published.sh"; then
 fi
 
 if ! cargo metadata --locked --offline --format-version 1 > /dev/null 2>&1; then
+    # CARGO AND THE PUBLISHED-VERSION GATE READ DIFFERENT SUBJECTS, and when
+    # they disagree the lock is RIGHT and cargo is looking at something else.
+    #
+    # Cargo resolves a path dep to the sibling's WORKING TREE. So a sibling with
+    # unpublished work checked out makes `--locked` refuse a lock that exactly
+    # matches what that sibling has PUBLISHED — which is the lock CI wants,
+    # because CI resolves against remotes.
+    #
+    # Refusing there blocks a correct push for as long as someone else has a
+    # branch checked out, and the reason is invisible from this repo. Measured
+    # 2026-09-19: subc-core read 0.18.17 on the sibling's disk and 0.18.16 on
+    # its master; the lock said 0.18.16 and this hook refused it.
+    #
+    # So ask the other question before refusing. If the lock matches every
+    # sibling's published ref, the only thing wrong is local, and the push is
+    # the one CI will accept.
+    if [ -x ./scripts/lock-vs-published.sh ] \
+        && ./scripts/lock-vs-published.sh > /dev/null 2>&1; then
+        echo "pre-push: cargo --locked refuses, but the lock matches every" >&2
+        echo "  sibling's PUBLISHED ref — so a sibling has unpublished work on" >&2
+        echo "  disk and cargo is resolving against that. The lock is what CI" >&2
+        echo "  wants. Allowing the push." >&2
+        echo >&2
+        echo "  Gate locally with --offline until that sibling publishes, and" >&2
+        echo "  stage explicit paths rather than -A, because an --offline run" >&2
+        echo "  rewrites the lock." >&2
+        exit 0
+    fi
+
     echo "pre-push refused: Cargo.lock does not resolve --locked" >&2
     echo >&2
     echo "  A sibling published while this tree was being edited. The commit" >&2
