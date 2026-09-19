@@ -92,6 +92,36 @@ if ! "$(dirname "$0")/../scripts/lock-vs-published.sh"; then
     exit 1
 fi
 
+# FORMAT, BECAUSE CI CHECKS IT AND I DO NOT.
+#
+# `cargo fmt --all -- --check` is the FIRST thing ci.yml runs, and nothing local
+# ran it. So a commit could pass every gate I have and fail CI on whitespace —
+# which it did, on 237caa9, after a full test-and-clippy run reported green.
+#
+# Same shape as the clippy alias that omitted `-D warnings` and so answered "are
+# there errors" while CI asked "are there warnings or errors". Both are a local
+# gate answering a WEAKER question than the gate that decides the push, and both
+# are invisible until CI disagrees.
+#
+# Cheap enough to be unconditional: it reads files and compares, no build. That
+# is the test for anything living in a hook — it must cost nothing when it was
+# unnecessary, or it gets removed the first time someone is in a hurry.
+#
+# --check rather than rewriting: a hook that EDITS the tree during a push would
+# format files that are not in the commit being pushed, which is a worse
+# surprise than a refusal.
+if ! cargo fmt --all -- --check > /dev/null 2>&1; then
+    echo "pre-push refused: formatting" >&2
+    echo >&2
+    echo "  ci.yml runs \`cargo fmt --all -- --check\` before anything else, so" >&2
+    echo "  this fails there rather than here. Fix:" >&2
+    echo >&2
+    echo "      cargo fmt --all" >&2
+    echo >&2
+    echo "  Then re-stage the files it touched — explicit paths, not -A." >&2
+    exit 1
+fi
+
 if ! cargo metadata --locked --offline --format-version 1 > /dev/null 2>&1; then
     # CARGO AND THE PUBLISHED-VERSION GATE READ DIFFERENT SUBJECTS, and when
     # they disagree the lock is RIGHT and cargo is looking at something else.

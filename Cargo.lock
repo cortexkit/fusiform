@@ -1543,6 +1543,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
+name = "subc-cgroup"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "subc-client-rs"
 version = "0.15.2"
 dependencies = [
@@ -1567,7 +1574,7 @@ dependencies = [
 
 [[package]]
 name = "subc-core"
-version = "0.18.18"
+version = "0.18.19"
 dependencies = [
  "base64",
  "cortexkit-log",
@@ -1592,7 +1599,7 @@ dependencies = [
 
 [[package]]
 name = "subc-daemon"
-version = "0.18.16"
+version = "0.18.17"
 dependencies = [
  "cortexkit-log",
  "cortexkit-paths",
@@ -1602,6 +1609,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "subc-cgroup",
  "subc-control",
  "subc-jsonc",
  "subc-protocol",

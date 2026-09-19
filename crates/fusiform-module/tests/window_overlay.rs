@@ -1003,7 +1003,10 @@ fn the_date_parser_agrees_with_a_second_implementation() {
 /// parser would be answering a more general question than this file asks.
 fn chrono_ms(stamp: &str) -> i64 {
     let (date, rest) = stamp.split_once('T').expect("an RFC3339 stamp has a T");
-    let d: Vec<i64> = date.split('-').map(|p| p.parse().expect("numeric")).collect();
+    let d: Vec<i64> = date
+        .split('-')
+        .map(|p| p.parse().expect("numeric"))
+        .collect();
     let t: Vec<i64> = rest
         .trim_end_matches('Z')
         .split(':')
