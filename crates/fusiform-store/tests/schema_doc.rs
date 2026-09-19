@@ -464,3 +464,74 @@ fn the_plan_price_table_arrives_on_a_populated_store() {
         "this plane has no observed boundaries; nothing here is fetched"
     );
 }
+
+/// Re-applying the same curated file writes nothing the second time.
+///
+/// The file is compiled in and applied on every startup, so a blind insert
+/// would write the whole file again on each boot: the table would grow without
+/// bound and every row would read as repriced on each restart. That is the
+/// August phantom-era failure in different clothes — a write path recording
+/// fusiform's own repetition as though the world had changed.
+///
+/// The third arm is the one that makes this a test rather than a demonstration:
+/// a CHANGED price must still write, or an ingest that never writes anything
+/// passes the first two.
+#[test]
+fn re_applying_the_curated_file_is_a_no_op() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let descriptor = cortexkit_store_types::StorageDescriptor {
+        module_id: "fusiform".to_string(),
+        storage_namespace: "default".to_string(),
+        isolation: cortexkit_store_types::Isolation::Module,
+        backend: cortexkit_store_types::StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().to_string(),
+        },
+    };
+    let store = fusiform_store::CatalogStore::open(&descriptor).expect("open");
+
+    let row = |units: Option<i64>, by: &str| fusiform_store::NewPlanPrice {
+        provider_id: "anthropic".to_string(),
+        tier: "max_20x".to_string(),
+        minor_units: units,
+        exponent: units.map(|_| 2),
+        currency: units.map(|_| "USD".to_string()),
+        period: "month".to_string(),
+        boundary_at_ms: 1_000,
+        established_by: by.to_string(),
+        established_at_ms: 2_000,
+        review_by_ms: 3_000,
+        source_ref: "https://example".to_string(),
+        refusal_reason: units.is_none().then(|| "no published price".to_string()),
+    };
+
+    let first = store
+        .append_plan_prices(&[row(Some(20000), "fusi")])
+        .expect("first apply");
+    assert_eq!(first, 1, "a new row must be written");
+
+    // Same claim, DIFFERENT provenance: a re-read that confirmed the price.
+    // This must not write, or confirming a price would be indistinguishable
+    // from a reprice in the row's own history.
+    let again = store
+        .append_plan_prices(&[row(Some(20000), "someone-else")])
+        .expect("second apply");
+    assert_eq!(
+        again, 0,
+        "re-reading a page and confirming the same number is not a change; \
+         recording it would make a review look like a reprice"
+    );
+
+    // CONTROL: a real change still writes. Without this the two assertions
+    // above pass against an ingest that writes nothing at all.
+    let moved = store
+        .append_plan_prices(&[row(Some(25000), "fusi")])
+        .expect("third apply");
+    assert_eq!(moved, 1, "a changed price must be recorded");
+
+    // And a refusal replacing a price is a change too: the vendor withdrawing a
+    // published figure is exactly the event this plane exists to notice.
+    let withdrawn = store
+        .append_plan_prices(&[row(None, "fusi")])
+        .expect("fourth apply");
+    assert_eq!(withdrawn, 1, "a price becoming unpublished is a change");
+}

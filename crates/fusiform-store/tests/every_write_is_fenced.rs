@@ -192,13 +192,16 @@ fn no_write_escapes_the_fence() {
     // house style for every multi-line statement in the store. The checker
     // passed its own codebase perfectly while seeing nothing.
     //
-    // The floor is MEASURED, and the enumeration is here so the next reader can
-    // check it rather than trust it. Three write sites, all in lib.rs, all with
-    // their SQL keyword straddling a `\` continuation:
+    // The count is MEASURED and EXACT, and the enumeration is here so the next
+    // reader can check it rather than trust it. All in lib.rs, all with their
+    // SQL keyword straddling a `\` continuation:
     //
-    //   lib.rs:284   INSERT INTO observation
-    //   lib.rs:492   INSERT INTO era
-    //   lib.rs:910   UPDATE catalog_version
+    //   INSERT INTO observation
+    //   INSERT INTO era
+    //   INSERT INTO observation_artifact_event   (mark)
+    //   INSERT INTO observation_artifact_event   (retract)
+    //   UPDATE catalog_version
+    //   INSERT INTO plan_price_era
     //
     // ingest.rs, serve.rs and correct.rs issue none: they build plans and read,
     // and every write they cause goes through `append_eras` in lib.rs. That is
@@ -206,22 +209,29 @@ fn no_write_escapes_the_fence() {
     //
     // The first version of this assertion said `>= 8`, a number I guessed and
     // wrote in the register of a measurement. It fired immediately, which is the
-    // only reason it did not ship — the same fabricated-number failure that put
-    // an invented bracket bound into a consumer's fixture earlier today, in the
-    // test file whose subject is keeping this crate honest. A floor is a claim
-    // about the codebase and has to be counted like one.
+    // only reason it did not ship — a floor is a claim about the codebase and
+    // has to be counted like one.
     //
-    // A floor rather than an exact count, so adding a write does not fail a test
-    // about detection. What cannot happen quietly is the detector finding
-    // NOTHING.
-    assert!(
-        writes_seen >= 3,
-        "the write detector found only {writes_seen} write sites, and there are \
-         three (enumerated above). The loop above asserts nothing when it finds \
-         nothing, so this test would pass while checking no writes at all. \
-         Either WRITE_KEYWORDS has drifted from how this crate spells its \
-         statements, or the continuation-joining broke -- read the detector \
-         before touching this floor."
+    // WHY EXACT RATHER THAN A FLOOR, which is a reversal.
+    //
+    // It was `>= 3` with a comment enumerating three sites. Two artifact writes
+    // and this plan-price write landed afterwards and the list was never
+    // touched: the guard read SIX while telling its reader THREE, and the floor
+    // passed the whole time. An enumeration a guard carries is a claim about
+    // another file, and a floor cannot tell you when that claim expires.
+    //
+    // The cost of exactness is one line to edit when a write is added, at the
+    // moment the author is already editing writes. The cost of the floor was a
+    // list that quietly became wrong, which is worse than no list — a reader
+    // checking the guard against three sites concludes it is complete.
+    assert_eq!(
+        writes_seen, 6,
+        "the write detector found {writes_seen} write sites; six are enumerated \
+         above. If you ADDED a write, add it to that list and update this number \
+         — the list is how the next reader checks this guard, and a stale list \
+         is worse than none. If you added nothing, either WRITE_KEYWORDS has \
+         drifted from how this crate spells its statements, or the \
+         continuation-joining broke: read the detector before touching this."
     );
 }
 

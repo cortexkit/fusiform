@@ -1719,3 +1719,124 @@ fn outcome_columns(outcome: &ObservationOutcome) -> (&'static str, Option<&'stat
     };
     (outcome.wire_str(), failure_class)
 }
+
+/// One curated subscription price, as the store records it.
+///
+/// A separate type from the module's loaded row rather than a re-export: the
+/// store's concern is what gets written, and the loader's concern includes
+/// where the row came from in the file. Keeping them apart means a field added
+/// for the file's benefit does not silently become a stored claim — the exact
+/// mistake that put `unit_provenance` into stored rates and wrote 17,455
+/// phantom eras.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewPlanPrice {
+    pub provider_id: String,
+    pub tier: String,
+    /// `None` with a `refusal_reason` is a positive claim: the tier was
+    /// observed and the source publishes no price for it.
+    pub minor_units: Option<i64>,
+    pub exponent: Option<i32>,
+    pub currency: Option<String>,
+    pub period: String,
+    /// The vendor's effective date. Deliberately not paired with a "recorded
+    /// at" column — see the schema.
+    pub boundary_at_ms: i64,
+    pub established_by: String,
+    pub established_at_ms: i64,
+    pub review_by_ms: i64,
+    pub source_ref: String,
+    pub refusal_reason: Option<String>,
+}
+
+impl CatalogStore {
+    /// Append curated plan prices, skipping rows already in force unchanged.
+    ///
+    /// # Why this diffs rather than inserting
+    ///
+    /// The curated file is compiled in and re-applied on every startup, so a
+    /// blind insert would write the whole file again on each boot — the table
+    /// would grow without bound and every row's history would read as a
+    /// reprice on each restart. That is the phantom-era failure from August
+    /// wearing different clothes: a write path that records fusiform's own
+    /// repetition as though it were the world changing.
+    ///
+    /// The comparison is on the CLAIM — price, period, refusal — and not on
+    /// provenance. Re-reading a page and confirming the same number moves
+    /// `established_at_ms` and `review_by_ms` without the price having changed,
+    /// and recording that as a new era would make a confirmation
+    /// indistinguishable from a reprice. A review is not a change.
+    ///
+    /// That leaves a real gap, stated rather than hidden: a confirmed-unchanged
+    /// price does not refresh its review date in the STORE. The file carries
+    /// the new date, the gate reads the file, and the store keeps the era that
+    /// says what the price was. Which is correct — the store's subject is the
+    /// price's history, and the review date is a fact about the file.
+    pub fn append_plan_prices(&self, rows: &[NewPlanPrice]) -> Result<usize, CatalogError> {
+        if rows.is_empty() {
+            return Ok(0);
+        }
+
+        let written = self.inner.with_conn_fenced(|tx| {
+            let mut written = 0usize;
+            for row in rows {
+                // The row in force for this key: newest id at or before the
+                // boundary. Matches the read path, so a row this diff considers
+                // unchanged is the same one a reader would be served.
+                let held: Option<(
+                    Option<i64>,
+                    Option<i32>,
+                    Option<String>,
+                    String,
+                    Option<String>,
+                )> = tx
+                    .query_row(
+                        "SELECT minor_units, exponent, currency, period, refusal_reason \
+                         FROM plan_price_era \
+                         WHERE provider_id = ?1 AND tier = ?2 AND boundary_at_ms <= ?3 \
+                         ORDER BY id DESC LIMIT 1",
+                        params![row.provider_id, row.tier, row.boundary_at_ms],
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                    )
+                    .optional()?;
+
+                if let Some((units, exponent, currency, period, refusal)) = held {
+                    let unchanged = units == row.minor_units
+                        && exponent == row.exponent
+                        && currency == row.currency
+                        && period == row.period
+                        && refusal == row.refusal_reason;
+                    if unchanged {
+                        continue;
+                    }
+                }
+
+                tx.execute(
+                    "INSERT \
+                     INTO plan_price_era \
+                     (provider_id, tier, minor_units, exponent, currency, period, \
+                      boundary_kind, boundary_at_ms, established_by, \
+                      established_at_ms, review_by_ms, source_ref, refusal_reason) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'asserted', ?7, ?8, ?9, ?10, ?11, ?12)",
+                    params![
+                        row.provider_id,
+                        row.tier,
+                        row.minor_units,
+                        row.exponent,
+                        row.currency,
+                        row.period,
+                        row.boundary_at_ms,
+                        row.established_by,
+                        row.established_at_ms,
+                        row.review_by_ms,
+                        row.source_ref,
+                        row.refusal_reason,
+                    ],
+                )?;
+                written += 1;
+            }
+            Ok(written)
+        })?;
+
+        Ok(written)
+    }
+}
