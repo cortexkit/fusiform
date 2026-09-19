@@ -408,6 +408,46 @@ fn the_plan_price_table_arrives_on_a_populated_store() {
         "a value without its exponent and currency is a number, not an amount"
     );
 
+    // A CORRECTION: the same key at the same vendor instant, a different value.
+    //
+    // This is the case a unique index would have made unrepresentable. Correcting
+    // a mistyped price does not change the vendor's effective date — it changes
+    // fusiform's reading of it — so the corrected row carries the SAME boundary.
+    // Refusing it would force either an in-place UPDATE, which this store does
+    // not do, or a falsified boundary chosen to dodge the constraint.
+    conn.execute(
+        "INSERT INTO plan_price_era \
+         (provider_id, tier, minor_units, exponent, currency, period, \
+          boundary_kind, boundary_at_ms, established_by, established_at_ms, \
+          review_by_ms, source_ref) \
+         VALUES ('anthropic', 'max_20x', 20000, 2, 'USD', 'month', \
+                 'asserted', 1000, 'fusi', 4000, 5000, 'https://example')",
+        [],
+    )
+    .expect(
+        "a correction at the same boundary must be accepted, or a mistyped \
+             price can only be fixed by falsifying the vendor's date",
+    );
+
+    // And supersession is by insertion order, so the newest row is the one in
+    // force. Without this arm the insert above proves only that the constraint
+    // is gone, not that the correction can be READ back.
+    let (units, by): (i64, String) = conn
+        .query_row(
+            "SELECT minor_units, established_by FROM plan_price_era \
+             WHERE provider_id='anthropic' AND tier='max_20x' \
+               AND boundary_at_ms <= 1000 \
+             ORDER BY id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("the corrected row must be readable");
+    assert_eq!(units, 20000);
+    assert_eq!(
+        by, "fusi",
+        "the newest row at or before the instant is the one in force"
+    );
+
     // An observed boundary is a CATEGORY error here, not a data error: every
     // row in this plane is a date a vendor stated with no fetch behind it.
     let observed = conn.execute(

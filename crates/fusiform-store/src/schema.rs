@@ -446,8 +446,23 @@ CREATE TABLE plan_price_era (
     )
 );
 
--- One era per (provider, tier) boundary. The same key twice at one instant is a
--- contradiction rather than a history.
-CREATE UNIQUE INDEX plan_price_era_key
+-- NOT UNIQUE, and that is the correction path rather than an oversight.
+--
+-- A unique key on (provider, tier, boundary_at) reads as "the same key twice at
+-- one instant is a contradiction". It is not: correcting a mistyped price is
+-- the same key at the same VENDOR instant with a different value, because the
+-- vendor's effective date did not change — fusiform's reading of it did. A
+-- unique index would make that correction unrepresentable and force either an
+-- in-place UPDATE, which this store does not do, or a falsified boundary.
+--
+-- So supersession is by insertion order: the row in force at an instant is the
+-- NEWEST id among those with boundary_at_ms <= T. Same shape as the era table,
+-- where a correction is a new row rather than an edit.
+--
+-- The duplicate this index was meant to catch — the same cell written twice in
+-- the curated file — is caught in the LOADER instead, where it is a mistake in
+-- an authored artifact. The store records what it is told; the file is where a
+-- contradiction is refused.
+CREATE INDEX plan_price_era_key
     ON plan_price_era(provider_id, tier, boundary_at_ms);
 "#;

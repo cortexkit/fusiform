@@ -180,6 +180,25 @@ pub fn load_reporting_rejects(doc: &str) -> (Vec<PlanPrice>, Vec<String>) {
             })
         };
 
+        // The same cell twice is a contradiction in an AUTHORED artifact, and
+        // it is refused here rather than by a unique index in the store.
+        //
+        // The store must accept the same key at the same vendor instant twice,
+        // because that is how a mistyped price is corrected: the vendor's
+        // effective date did not change, fusiform's reading of it did. A file
+        // carrying the shape twice is a different thing — nobody edits a row by
+        // pasting a second copy below it — and whichever copy lost would be
+        // silently ignored.
+        if let Some(prior) = rows.iter().position(|r: &PlanPrice| {
+            r.provider_id == provider_id && r.tier == tier && r.boundary_at_ms == boundary_at_ms
+        }) {
+            rejects.push(at(&format!(
+                "duplicates cell {prior}: {provider_id}/{tier} already has a row at \
+                 this boundary, and one of the two would be silently ignored"
+            )));
+            continue;
+        }
+
         rows.push(PlanPrice {
             provider_id: provider_id.to_string(),
             tier: tier.to_string(),
@@ -269,6 +288,24 @@ mod tests {
             rejects.iter().any(|r| r.contains("missing provenance")),
             "a row without an establisher serves exactly like one with a real \
              establisher, which is the whole thing this plane refuses: {rejects:?}"
+        );
+
+        let twice = r#"{"cells":[
+            {"provider_id":"a","tier":"t",
+             "price":{"minor_units":1,"exponent":2,"currency":"USD","period":"month"},
+             "boundary_at_ms":1,"established_by":"x","established_at_ms":2,
+             "review_by_ms":3,"source_ref":"s"},
+            {"provider_id":"a","tier":"t",
+             "price":{"minor_units":9,"exponent":2,"currency":"USD","period":"month"},
+             "boundary_at_ms":1,"established_by":"x","established_at_ms":2,
+             "review_by_ms":3,"source_ref":"s"}
+        ]}"#;
+        let (rows, rejects) = load_reporting_rejects(twice);
+        assert_eq!(rows.len(), 1, "the first copy loads, the second is refused");
+        assert!(
+            rejects.iter().any(|r| r.contains("duplicates cell 0")),
+            "a repeated cell must name the row it collides with, because the \
+             reader has to find the OTHER one to decide which is right: {rejects:?}"
         );
 
         // CONTROL: a well-formed row must still load. Without this arm every
