@@ -1748,6 +1748,20 @@ pub struct NewPlanPrice {
     pub refusal_reason: Option<String>,
 }
 
+/// The claim a plan-price row currently makes: price, period, refusal.
+///
+/// Named rather than an inline tuple because it is the thing the ingest
+/// COMPARES, and its membership is the diff's definition of "changed". Reading
+/// the bare tuple at the comparison site says nothing about why those five
+/// fields and not the provenance ones beside them.
+type HeldPlanPrice = (
+    Option<i64>,
+    Option<i32>,
+    Option<String>,
+    String,
+    Option<String>,
+);
+
 impl CatalogStore {
     /// Append curated plan prices, skipping rows already in force unchanged.
     ///
@@ -1782,13 +1796,7 @@ impl CatalogStore {
                 // The row in force for this key: newest id at or before the
                 // boundary. Matches the read path, so a row this diff considers
                 // unchanged is the same one a reader would be served.
-                let held: Option<(
-                    Option<i64>,
-                    Option<i32>,
-                    Option<String>,
-                    String,
-                    Option<String>,
-                )> = tx
+                let held: Option<HeldPlanPrice> = tx
                     .query_row(
                         "SELECT minor_units, exponent, currency, period, refusal_reason \
                          FROM plan_price_era \

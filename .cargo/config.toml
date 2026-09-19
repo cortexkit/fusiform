@@ -24,4 +24,9 @@
 # filters out to reach `test result:`. The alias removes the need to read it.
 [alias]
 t = "test --locked"
-c = "clippy --locked --workspace --all-targets"
+# `-D warnings` because CI runs with it: without the flag this alias answers
+# "are there errors" while the gate that decides the push answers "are there
+# warnings OR errors", and the two agree until they do not. A clean local run
+# that CI rejects is the worst shape a gate can have — it spends a train run to
+# tell you something the alias could have.
+c = "clippy --locked --workspace --all-targets -- -D warnings"
