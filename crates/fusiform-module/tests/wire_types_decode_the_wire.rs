@@ -114,11 +114,28 @@ fn collect_priced<'a>(node: &'a serde_json::Value, out: &mut Vec<&'a serde_json:
 /// Every variant the producer can WRITE decodes, not only the ones the fixture
 /// happens to contain.
 ///
-/// The fixture holds nine priced rates and no others, so the fence above — the
-/// only loud thing on this seam — could not see `stated_zero` or `unpriced` at
-/// all. Both decode today; that was measured rather than assumed, and it is
-/// exactly the reasoning that produced the flatten defect, so it does not get
-/// to stand on its own.
+/// The fixture held nine priced rates and no others when this was written, so
+/// the fence above — the only loud thing on this seam — could not see
+/// `stated_zero` or `unpriced` at all. Both decode today; that was measured
+/// rather than assumed, and it is exactly the reasoning that produced the
+/// flatten defect, so it does not get to stand on its own.
+///
+/// # These literals are my belief about the producer, so two of them are checked
+///
+/// A hand-written literal pins what I BELIEVE `json_rate` emits. The fixture
+/// pins what it ACTUALLY emits, and the two can drift apart silently — this
+/// test would keep passing against bytes no producer writes.
+///
+/// The fixture now carries `stated_zero` and `unpriced/missing_rate` in real
+/// served bytes, so those two literals are asserted byte-identical to what the
+/// fixture contains. The other two have no producer path reachable from the
+/// fixture's store and stay unchecked, which is stated rather than hidden:
+///
+///     no_catalog_coverage    written where a model is described with no cost
+///                            object at all, which serves NO RATE FACTS rather
+///                            than an unpriced one
+///     unknown_charge_basis   written for a cost key the parser has no charge
+///                            unit for, such as audio, absent from the excerpt
 ///
 /// ASTRO made this load-bearing rather than tidy: since their deferred-catalog
 /// change, a decode refusal on a priced rate is no longer a crash there. The
@@ -149,9 +166,45 @@ fn every_variant_the_producer_writes_decodes() {
         ),
     ];
 
+    // What the producer ACTUALLY wrote, collected from the fixture's served
+    // bytes so a literal below can be checked rather than trusted.
+    let fixture: serde_json::Value = serde_json::from_str(SERVED).expect("the fixture parses");
+    let mut produced: Vec<String> = Vec::new();
+    collect_rate_shapes(&fixture, &mut produced);
+    assert!(
+        !produced.is_empty(),
+        "the fixture must contain served rates, or the cross-check below passes \
+         vacuously and this fence is back to trusting its own literals"
+    );
+
     for (label, served) in cases {
         let decoded: RateValue = serde_json::from_str(served)
             .unwrap_or_else(|e| panic!("{label} must decode: {e}\n  served: {served}"));
+
+        // CROSS-CHECK where the fixture can reach: the literal must be exactly
+        // what the producer wrote, not merely something that decodes.
+        let state = decoded_state(served);
+        // Keyed on state AND reason, not on state alone. My first version
+        // grouped by state, so `unpriced/no_catalog_coverage` was compared
+        // against the fixture's `unpriced/missing_rate` and fired — a
+        // comparison over a population broader than the claim, which is the
+        // same defect this fence exists to catch, one level up.
+        let literal = canonical_str(served);
+        let same_kind: Vec<&String> = produced
+            .iter()
+            .filter(|p| decoded_state(p) == state && decoded_reason(p) == decoded_reason(served))
+            .collect();
+        if !same_kind.is_empty() {
+            assert!(
+                same_kind.iter().any(|p| p.as_str() == literal),
+                "{label}: this literal is not what the producer writes.\n  \
+                 literal:  {served}\n  fixture:  {:?}\n\
+                 Either json_rate changed and this literal is stale, or the \
+                 literal was wrong from the start — and a stale literal keeps \
+                 this fence green while testing bytes nobody serves.",
+                same_kind
+            );
+        }
 
         // Exhaustive: adding a variant breaks this until its bytes are stated.
         match decoded {
@@ -244,4 +297,74 @@ fn no_served_rate_field_is_invisible_to_the_published_type() {
          field that only exists in the bytes is one every typed consumer is \
          blind to."
     );
+}
+
+/// The `reason` field of a served rate, or `""` if absent.
+fn decoded_reason(served: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(served)
+        .ok()
+        .and_then(|v| v["reason"].as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// The `state` field of a served rate, or `""` if absent.
+fn decoded_state(served: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(served)
+        .ok()
+        .and_then(|v| v["state"].as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// Every served rate object in the fixture, serialised back to compact JSON.
+///
+/// Walks rather than indexing known paths: a rate can appear under any model in
+/// any case, and a walker that misses one would narrow the comparison set
+/// silently — which reads as "the literal matched" rather than as "nothing was
+/// compared".
+fn collect_rate_shapes(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            // A rate object is the one carrying `state`. Serialised with the
+            // same compact form the literals use so the comparison is on
+            // content rather than on whitespace.
+            if map.contains_key("state") {
+                out.push(canonical(value));
+            }
+            for v in map.values() {
+                collect_rate_shapes(v, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for v in items {
+                collect_rate_shapes(v, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A rate object serialised with its keys SORTED.
+///
+/// Key-sorted rather than as-written, because my first version compared raw
+/// serialisations and fired on `{"reason":..,"state":..}` against
+/// `{"state":..,"reason":..}` — identical documents in different key order.
+/// JSON objects are unordered, so that difference is not drift, and comparing
+/// it makes the check fail on a property no contract holds.
+///
+/// What it still catches, which is the whole point: a field the producer writes
+/// and the literal omits, a field the literal invents, or any value that
+/// differs.
+fn canonical(v: &serde_json::Value) -> String {
+    let mut map = std::collections::BTreeMap::new();
+    if let serde_json::Value::Object(o) = v {
+        for (k, val) in o {
+            map.insert(k.clone(), val.clone());
+        }
+    }
+    serde_json::to_string(&map).expect("a served rate serialises")
+}
+
+/// `canonical` for a literal that has not been parsed yet.
+fn canonical_str(served: &str) -> String {
+    canonical(&serde_json::from_str(served).expect("a literal in this test parses"))
 }
