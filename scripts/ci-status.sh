@@ -34,9 +34,20 @@ command -v gh > /dev/null 2>&1 || {
 }
 
 workflow="${CI_STATUS_WORKFLOW:-ci.yml}"
-window="${CI_STATUS_WINDOW:-60}"
+# DAYS, not a run count, and the distinction is the first defect this script
+# shipped with.
+#
+# It asked for the last 60 RUNS. The question is about the last few DAYS, and
+# those diverge exactly when the repository is busy: twenty trains in one night
+# flushed both failing scheduled runs out of a 60-run window, and the script
+# reported "no scheduled runs — the schedule may not be firing", which is a
+# false alarm with a credible story. A count window is a proxy for time that
+# fails under load, and load is when you most want the check.
+days="${CI_STATUS_DAYS:-7}"
 
-runs=$(gh run list --workflow="$workflow" --limit "$window" \
+# Fetched generously and filtered by DATE below. The limit is a ceiling on the
+# fetch rather than the window itself.
+runs=$(gh run list --workflow="$workflow" --limit 200 \
     --json event,conclusion,headSha,createdAt 2>/dev/null) || {
     echo "ci-status: could not read run history for $workflow" >&2
     exit 1
@@ -44,9 +55,14 @@ runs=$(gh run list --workflow="$workflow" --limit "$window" \
 
 # Non-push runs only. A push run's result is read by whoever pushed; a
 # scheduled or dispatched one has no such reader by construction.
-unwatched=$(printf '%s' "$runs" | python3 -c '
-import json, sys
+unwatched=$(printf '%s' "$runs" | CI_STATUS_DAYS="$days" python3 -c '
+import datetime, json, os, sys
 runs = json.load(sys.stdin)
+days = int(os.environ["CI_STATUS_DAYS"])
+cut = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+def when(r):
+    return datetime.datetime.fromisoformat(r["createdAt"].replace("Z", "+00:00"))
+runs = [r for r in runs if when(r) >= cut]
 rows = [r for r in runs if r["event"] != "push"]
 if not rows:
     print("NONE")
@@ -63,13 +79,13 @@ for r in bad[:10]:
 
 case "$unwatched" in
     NONE)
-        echo "ci-status: no scheduled or dispatched runs in the last $window — "
+        echo "ci-status: no scheduled or dispatched runs in the last $days day(s) —"
         echo "  the schedule may not be firing at all, which is its own defect:"
         echo "  a gate that never runs reports the same silence as one that passes."
         exit 1
         ;;
     *" 0 failed")
-        echo "ci-status: $unwatched"
+        echo "ci-status: $unwatched (last $days day(s))"
         ;;
     *)
         echo "ci-status: $unwatched" >&2
