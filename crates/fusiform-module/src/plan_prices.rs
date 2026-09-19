@@ -73,6 +73,13 @@ const PLAN_PRICES: &str = include_str!("../data/plan-prices.json");
 /// sentence is a thing that can disagree with the rows it describes, and the
 /// disagreement would be invisible: the file's editor changes the basis, the
 /// constant keeps saying the old one, and every consumer reads the constant.
+///
+/// THE STATEMENT, NOT ITS REASONING. The file also carries `why_this_basis`,
+/// which argues for monthly-billed over annual and is for whoever edits the
+/// file. It is deliberately NOT on the wire: it ran to 1,243 characters, and a
+/// consumer decoding this field got an argument it cannot act on while an
+/// operator reading the CLI got a wall of prose under four rows. A policy a
+/// reader skips is a policy nobody knows.
 pub static UNIT_POLICY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     serde_json::from_str::<serde_json::Value>(PLAN_PRICES)
         .ok()
@@ -566,6 +573,50 @@ mod tests {
         assert!(priced.currency.is_some());
         assert_eq!(priced.period.as_deref(), Some("month"));
         assert!(priced.refusal_reason.is_none());
+    }
+
+    /// The served policy is the STATEMENT, and its argument stays in the file.
+    ///
+    /// The two were one field, and driving the CLI against a live daemon showed
+    /// what that cost: four rows of prices under a 1,243-character paragraph
+    /// arguing for monthly-billed over annual. A consumer decoding it got
+    /// reasoning it cannot act on; an operator got a wall they would skip. A
+    /// policy a reader skips is a policy nobody knows.
+    ///
+    /// The bound is deliberately loose — this is about ORDER OF MAGNITUDE, not
+    /// a style rule, and a tighter number would fail on a legitimate edit.
+    #[test]
+    fn the_served_policy_is_a_statement_rather_than_an_argument() {
+        let doc: serde_json::Value =
+            serde_json::from_str(PLAN_PRICES).expect("the shipped file parses");
+
+        let served = doc["unit_policy"].as_str().expect("a policy is served");
+        assert!(
+            served.len() < 400,
+            "the served policy is {} chars; the reasoning belongs in \
+             why_this_basis, which is not on the wire",
+            served.len()
+        );
+
+        // It must still STATE the basis. Without this the assertion above
+        // passes against an empty string, and a consumer assuming a basis is
+        // the failure the field exists to prevent.
+        for term in ["US list", "monthly-billed", "web subscription"] {
+            assert!(
+                served.contains(term),
+                "the served policy must name {term:?}: {served}"
+            );
+        }
+
+        // And the argument must survive SOMEWHERE, or splitting it out becomes
+        // a way to quietly delete it.
+        let why = doc["why_this_basis"]
+            .as_str()
+            .expect("the reasoning is kept in the file");
+        assert!(
+            why.contains("FAILURE DIRECTION"),
+            "the reason monthly-billed was chosen must survive the split"
+        );
     }
 
     /// A refusal cell is a ROW, not a dropped one.

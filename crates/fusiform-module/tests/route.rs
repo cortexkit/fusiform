@@ -2394,10 +2394,23 @@ fn plan_prices_serves_rows_with_their_provenance() {
          reviewer checks the same source rather than guessing at one"
     );
 
+    // Case-insensitive, and that is not laziness: this assertion failed when
+    // the policy was split from its reasoning and the wording relaxed from
+    // shouty prose. A test pinned to CASING fails on an edit that changes
+    // nothing it cares about, which teaches its reader to edit the test.
+    let policy = r.unit_policy.to_lowercase();
+    for term in ["us list", "monthly-billed", "web subscription"] {
+        assert!(
+            policy.contains(term),
+            "the basis travels with the prices, or a consumer assumes one — \
+             missing {term:?}: {}",
+            r.unit_policy
+        );
+    }
     assert!(
-        r.unit_policy.contains("MONTHLY-BILLED"),
-        "the basis travels with the prices, or a consumer assumes one: {}",
-        r.unit_policy
+        r.unit_policy.len() < 400,
+        "the served policy is the STATEMENT; its argument stays in the file: {}",
+        r.unit_policy.len()
     );
 
     // Narrowing works, and the filter is not decorative.

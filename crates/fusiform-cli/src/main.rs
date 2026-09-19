@@ -69,6 +69,8 @@ commands:
                             catalog version, row counts
   get                       read the catalog
   history                   every recorded era for one fact
+  plan-prices               curated subscription list prices, with the source
+                            and review date behind each one
   mark-artifact             record that one poll rewrote fusiform's own
                             representation rather than upstream data
   retract-artifact          take back an artifact mark
@@ -342,6 +344,16 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
                 }),
             ))
         }
+        "plan-prices" => Ok((
+            fusiform_module::route::TOOL_PLAN_PRICES,
+            match &args.provider {
+                // Omitted rather than sent as null: the wire field is
+                // Option-with-default, and an explicit null would reach a
+                // stricter future decoder as a value rather than an absence.
+                Some(p) => serde_json::json!({"provider_id": p}),
+                None => serde_json::json!({}),
+            },
+        )),
         "mark-artifact" => {
             let observation = args
                 .observation
@@ -402,6 +414,7 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
         "get" => print_catalog(&response),
         "history" => print!("{}", render_history(&response)),
         "correct" => print_correction(&response),
+        "plan-prices" => print!("{}", render_plan_prices(&response)),
         "mark-artifact" => print_mark(&response),
         "retract-artifact" => print_retraction(&response),
         _ => unreachable!("the command was validated above"),
@@ -1409,6 +1422,78 @@ fn field_id_for_fact_key(key: &str) -> Result<serde_json::Value, String> {
 /// that is not a restatement is a genuine upstream change that survives the
 /// mark. Printing a percentage would hide exactly the case that decided the
 /// design, so both numbers are shown and the remainder is named.
+/// Render curated subscription prices.
+///
+/// A REFUSAL IS PRINTED, not skipped. "Nobody has curated this tier" and "the
+/// vendor publishes no price for it" are different states and only the second
+/// is a completed job — dropping refusals would make a backlog look finished.
+///
+/// Every row carries its source and review date, because a curated plane has no
+/// fetch: nothing can ever contradict a stale row, so the date is the only
+/// liveness signal and an operator reading a price should see how old the
+/// looking is.
+fn render_plan_prices(response: &serde_json::Value) -> String {
+    let mut out = String::new();
+    let rows = response["prices"].as_array().cloned().unwrap_or_default();
+
+    if rows.is_empty() {
+        out.push_str("no curated subscription prices\n");
+        return out;
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
+    for row in &rows {
+        let provider = row["provider_id"].as_str().unwrap_or("?");
+        let tier = row["tier"].as_str().unwrap_or("?");
+
+        let value = match row["price"].as_object() {
+            Some(a) => {
+                let units = a["minor_units"].as_i64().unwrap_or(0);
+                let exponent = a["exponent"].as_i64().unwrap_or(0);
+                let currency = a["currency"].as_str().unwrap_or("?");
+                let period = a["period"].as_str().unwrap_or("?");
+                // Rendered from the exponent rather than assuming cents: the
+                // wire carries the scale precisely so a reader does not have to
+                // guess it, and guessing is how a 100x error looks correct.
+                let scale = 10f64.powi(exponent as i32);
+                format!("{:.2} {currency}/{period}", units as f64 / scale)
+            }
+            None => row["refusal_reason"]
+                .as_str()
+                .map(|r| format!("no price — {r}"))
+                .unwrap_or_else(|| "no price, and no reason recorded".to_string()),
+        };
+
+        out.push_str(&format!("  {provider}/{tier}  {value}\n"));
+
+        let review = row["review_by_ms"].as_i64().unwrap_or(0);
+        let overdue = now > review;
+        out.push_str(&format!(
+            "      established by {} on {}{}\n      source {}\n",
+            row["established_by"].as_str().unwrap_or("?"),
+            format_instant(row["established_at_ms"].as_i64().unwrap_or(0)),
+            if overdue {
+                // Named at the row rather than summarised at the end: an
+                // operator reads the price and stops, so a warning below the
+                // list is one they never reach.
+                format!(", REVIEW OVERDUE since {}", format_instant(review))
+            } else {
+                format!(", review by {}", format_instant(review))
+            },
+            row["source_ref"].as_str().unwrap_or("?"),
+        ));
+    }
+
+    if let Some(policy) = response["unit_policy"].as_str() {
+        out.push_str(&format!("\n{policy}\n"));
+    }
+    out
+}
+
 fn print_mark(response: &serde_json::Value) {
     println!("{}", render_mark(response));
 }
@@ -1671,6 +1756,122 @@ mod tests {
     /// showed the code right and the expectation wrong by eight hours. A cited
     /// source that was not consulted is worse than an uncited guess, because it
     /// stops the next reader from checking.
+    /// A refusal row is PRINTED with its reason, not skipped.
+    ///
+    /// Dropping it would make "nobody has curated this tier" and "the vendor
+    /// publishes no price for it" look identical at the only surface an
+    /// operator reads — and only the second is a completed job, so a backlog
+    /// would look finished.
+    #[test]
+    fn a_refusal_row_is_rendered_with_its_reason() {
+        let response = serde_json::json!({
+            "prices": [
+                {
+                    "provider_id": "anthropic", "tier": "max_20x",
+                    "price": {"minor_units": 20000, "exponent": 2,
+                              "currency": "USD", "period": "month"},
+                    "boundary_at_ms": 1, "established_by": "fusi",
+                    "established_at_ms": 1_000, "review_by_ms": 9_000_000_000_000i64,
+                    "source_ref": "https://example/max"
+                },
+                {
+                    // A DIFFERENT EXPONENT, and the fixture is wrong without it.
+                    //
+                    // Every other row here is exponent 2, which IS 100 — so a
+                    // renderer that hardcodes cents produces identical output
+                    // and the assertion cannot tell the two apart. Measured:
+                    // replacing the exponent maths with a literal 100 survived
+                    // the whole suite until this row existed.
+                    //
+                    // Nanodollars are what the catalog's rates use, so this is
+                    // the shape a future plane could carry rather than an
+                    // invented case.
+                    "provider_id": "acme", "tier": "nano",
+                    "price": {"minor_units": 7_500_000_000i64, "exponent": 9,
+                              "currency": "USD", "period": "month"},
+                    "boundary_at_ms": 1, "established_by": "fusi",
+                    "established_at_ms": 1_000, "review_by_ms": 9_000_000_000_000i64,
+                    "source_ref": "https://example/nano"
+                },
+                {
+                    "provider_id": "openai", "tier": "pro",
+                    "refusal_reason": "tier string does not resolve",
+                    "boundary_at_ms": 1, "established_by": "fusi",
+                    "established_at_ms": 1_000, "review_by_ms": 9_000_000_000_000i64,
+                    "source_ref": "https://example/pro"
+                }
+            ],
+            "resolved_at_ms": 2_000,
+            "unit_policy": "US list price, monthly-billed, web subscription."
+        });
+
+        let out = render_plan_prices(&response);
+
+        // The price is scaled by the wire's EXPONENT, not by an assumed 100.
+        // Guessing the scale is how a 100x error renders as a plausible number.
+        assert!(
+            out.contains("anthropic/max_20x  200.00 USD/month"),
+            "the priced row must render from its own exponent: {out}"
+        );
+        assert!(
+            out.contains("acme/nano  7.50 USD/month"),
+            "a nanodollar price must render from exponent 9, not assumed \
+             cents — a hardcoded scale gives 75000000.00 here: {out}"
+        );
+        assert!(
+            out.contains("openai/pro  no price — tier string does not resolve"),
+            "a refusal must be printed WITH its reason: {out}"
+        );
+        assert!(
+            out.contains("https://example/pro"),
+            "a refusal must carry the source that does NOT publish the price, \
+             so a reviewer checks the same page rather than guessing: {out}"
+        );
+        assert!(
+            out.contains("monthly-billed"),
+            "the basis travels with the prices: {out}"
+        );
+        assert!(
+            !out.contains("OVERDUE"),
+            "a row inside its review window must not be flagged: {out}"
+        );
+    }
+
+    /// An overdue row says so ON THE ROW, not in a summary below the list.
+    ///
+    /// An operator reads the price and stops. A warning under the last row is
+    /// one they never reach, which makes it a warning that exists for the
+    /// author rather than the reader.
+    #[test]
+    fn an_overdue_row_is_flagged_where_the_price_is() {
+        let response = serde_json::json!({
+            "prices": [{
+                "provider_id": "acme", "tier": "pro",
+                "price": {"minor_units": 2000, "exponent": 2,
+                          "currency": "USD", "period": "month"},
+                "boundary_at_ms": 1, "established_by": "fusi",
+                "established_at_ms": 1_000,
+                "review_by_ms": 1_000,
+                "source_ref": "https://example"
+            }],
+            "resolved_at_ms": 2_000,
+            "unit_policy": "x"
+        });
+
+        let out = render_plan_prices(&response);
+        assert!(
+            out.contains("REVIEW OVERDUE since 1970-01-01"),
+            "an overdue row must name it with the date: {out}"
+        );
+
+        let price_line = out.lines().position(|l| l.contains("acme/pro"));
+        let warn_line = out.lines().position(|l| l.contains("OVERDUE"));
+        assert!(
+            warn_line.unwrap() - price_line.unwrap() <= 2,
+            "the warning must sit with the price it is about: {out}"
+        );
+    }
+
     #[test]
     fn instants_render_as_the_dates_they_are() {
         // One millisecond after the epoch, which is still second zero.
