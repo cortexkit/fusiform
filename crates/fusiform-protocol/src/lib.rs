@@ -46,6 +46,35 @@ pub use money::{
 use serde::{Deserialize, Serialize};
 
 /// The tools fusiform serves.
+///
+/// # The dots are deliberate, and they cost the MCP surface
+///
+/// Every name here is `namespace.verb`. SUBC censused the live catalogue on
+/// 2026-09-19 and found the consequence: the MCP gateway skips any tool whose
+/// name is not `[A-Za-z0-9_-]+`, so ALL SEVEN are skipped and fusiform
+/// contributes nothing to an MCP session while the catalogue advertises a
+/// seven-tool surface.
+///
+/// That is correct for this module and stated here so nobody has to ask twice.
+/// Every consumer reaches these over the subc route, programmatically:
+/// `ck-models` for an operator, and astrocyte, broca and alf for machines. None
+/// is a head model choosing a tool from a list, which is the plane the gateway
+/// serves.
+///
+/// The dots earn their place on the route: `catalog.*` and `plan.*` are two
+/// planes with different authorities — one observed from upstream, one curated
+/// by hand — and a consumer reading a tool name can see which it is asking. A
+/// flat `catalog_get` would lose that for a surface none of them use.
+///
+/// WHAT WOULD CHANGE THIS: a head model needing to ask what a model costs.
+/// Then the names become a wire break for four consumers, and the right shape
+/// is probably an MCP-safe alias beside the route name rather than a rename —
+/// so the planes stay legible where they are load-bearing.
+///
+/// Worth knowing that the skip is SILENT from here: it is an eprintln in the
+/// gateway's stderr, and every test here passes because the tools ARE
+/// dispatchable on the route. The advertised-but-unreachable class only shows
+/// up in a census someone else runs.
 pub const TOOL_GET: &str = "catalog.get";
 pub const TOOL_HISTORY: &str = "catalog.history";
 pub const TOOL_STATUS: &str = "catalog.status";
