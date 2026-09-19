@@ -176,6 +176,26 @@ no more exposed than the data it points at. It was world-readable for about an
 hour after the first install, until ENGRAM noticed that every other enrolled
 module keeps both at `0600`/`0700` and fusiform did not.
 
+## Two planes recover at different speeds
+
+Worth stating because it is one store with one backup entry and two different
+expected-recovery states, and an operator reading "restored" will assume one
+number.
+
+| table | rewinds to | heals |
+| --- | --- | --- |
+| `era` | the backup | on the NEXT POLL — 30-minute cadence, so up to 30 minutes stale |
+| `plan_price_era` | the backup | AT BOOT, before the module answers its first read |
+
+The difference is where each plane's authority lives. The catalog's authority is
+UPSTREAM, so it cannot heal without the network. The curated plane's authority
+is the BINARY — the plan-price file is compiled in and re-applied on every start
+— so a rewound table is indistinguishable from an incomplete one and the boot
+diff fills both.
+
+So after a restore, fusiform's subscription pricing is correct immediately while
+its model catalog is stale until the first poll lands.
+
 ## What enrollment does not protect
 
 Enrollment is backup coverage. It is **not** what keeps the catalog version
