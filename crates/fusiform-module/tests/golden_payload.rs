@@ -792,10 +792,30 @@ fn every_served_fact_key_reaches_the_fixture() {
 
     // Scanned from the table rather than listed here, so a key added to
     // `SERVED_FACTS` is checked without anyone remembering this test.
-    let keys: Vec<&str> = src
+    //
+    // SCOPED TO THE TABLE'S BODY, not to the whole file. My first version
+    // matched every `key: "` in lib.rs and happened to collect exactly the 15
+    // SERVED_FACTS entries — correct by accident rather than by construction,
+    // since any other struct with a `key` field would have been swept in and
+    // this fence would then demand a fixture example of something that is not a
+    // served fact.
+    //
+    // The failure direction was safe (a loud, diagnosable red naming the key)
+    // which is exactly why it would have survived: nothing would have gone
+    // wrong until someone added an unrelated field, and the scan's SUBJECT
+    // would have been wrong the whole time.
+    let table = {
+        let start = src
+            .find("pub const SERVED_FACTS")
+            .expect("the served-facts table must exist");
+        let body = &src[start..];
+        let end = body.find("\n];").expect("the table closes");
+        &body[..end]
+    };
+    let keys: Vec<&str> = table
         .match_indices("key: \"")
         .filter_map(|(i, _)| {
-            let rest = &src[i + 6..];
+            let rest = &table[i + 6..];
             rest.find('"').map(|end| &rest[..end])
         })
         .collect();
