@@ -2308,3 +2308,135 @@ fn a_named_read_of_a_retired_model_says_so() {
         audit.retired
     );
 }
+
+/// `plan.prices` serves a curated row, its refusal twin, and the unit policy.
+///
+/// Driven through `serve_tool_call` — the real envelope, the real dispatch —
+/// rather than by calling the handler. A handler tested through its own front
+/// door is tested in a world where its caller is correct, and this tool's
+/// caller is the thing that was just added.
+#[test]
+fn plan_prices_serves_rows_with_their_provenance() {
+    let f = fixture();
+
+    f.store
+        .append_plan_prices(&[
+            fusiform_store::NewPlanPrice {
+                provider_id: "anthropic".to_string(),
+                tier: "max_20x".to_string(),
+                minor_units: Some(20000),
+                exponent: Some(2),
+                currency: Some("USD".to_string()),
+                period: Some("month".to_string()),
+                boundary_at_ms: 1_000,
+                established_by: "fusi".to_string(),
+                established_at_ms: 2_000,
+                review_by_ms: 9_000_000_000_000,
+                source_ref: "https://example/max".to_string(),
+                refusal_reason: None,
+            },
+            fusiform_store::NewPlanPrice {
+                provider_id: "openai".to_string(),
+                tier: "pro".to_string(),
+                minor_units: None,
+                exponent: None,
+                currency: None,
+                period: None,
+                boundary_at_ms: 1_000,
+                established_by: "fusi".to_string(),
+                established_at_ms: 2_000,
+                review_by_ms: 9_000_000_000_000,
+                source_ref: "https://example/pro".to_string(),
+                refusal_reason: Some("tier string does not resolve".to_string()),
+            },
+        ])
+        .expect("curated rows");
+
+    let call = serde_json::json!({"name": "plan.prices", "arguments": {}});
+    let out = serve_tool_call(&f.store, &serde_json::to_vec(&call).unwrap())
+        .expect("plan.prices is served");
+    let ToolResponse::PlanPrices(r) = out else {
+        panic!("wrong response arm");
+    };
+
+    assert_eq!(r.prices.len(), 2);
+
+    let priced = r
+        .prices
+        .iter()
+        .find(|p| p.provider_id == "anthropic")
+        .expect("the priced row");
+    let amount = priced.price.as_ref().expect("carries a price");
+    assert_eq!(amount.minor_units, 20000);
+    assert_eq!(amount.currency, "USD");
+    assert_eq!(amount.period, "month");
+    assert!(
+        priced.refusal_reason.is_none(),
+        "a priced row must not also explain why it has none"
+    );
+    assert_eq!(priced.source_ref, "https://example/max");
+
+    // The refusal: no price, and a REASON rather than a silence. Collapsing
+    // this into absence is the whole thing the plane refuses.
+    let refused = r
+        .prices
+        .iter()
+        .find(|p| p.provider_id == "openai")
+        .expect("the refusal row");
+    assert!(refused.price.is_none());
+    assert_eq!(
+        refused.refusal_reason.as_deref(),
+        Some("tier string does not resolve")
+    );
+    assert!(
+        !refused.source_ref.is_empty(),
+        "a refusal must name the page that does NOT publish the price, so a \
+         reviewer checks the same source rather than guessing at one"
+    );
+
+    assert!(
+        r.unit_policy.contains("MONTHLY-BILLED"),
+        "the basis travels with the prices, or a consumer assumes one: {}",
+        r.unit_policy
+    );
+
+    // Narrowing works, and the filter is not decorative.
+    let call =
+        serde_json::json!({"name": "plan.prices", "arguments": {"provider_id": "anthropic"}});
+    let out = serve_tool_call(&f.store, &serde_json::to_vec(&call).unwrap()).expect("narrowed");
+    let ToolResponse::PlanPrices(r) = out else {
+        panic!("wrong arm");
+    };
+    assert_eq!(r.prices.len(), 1, "the filter must actually narrow");
+    assert_eq!(r.prices[0].provider_id, "anthropic");
+}
+
+/// A provider nobody has curated is REFUSED, not answered with an empty list.
+///
+/// An empty answer reads as "this provider has no subscription pricing", which
+/// is a claim about the world. The truth is that nobody has sourced one, and
+/// only one of those two is someone's job.
+#[test]
+fn an_uncurated_provider_is_refused_rather_than_empty() {
+    let f = fixture();
+
+    let call = serde_json::json!({"name": "plan.prices", "arguments": {"provider_id": "nobody"}});
+    let err = serve_tool_call(&f.store, &serde_json::to_vec(&call).unwrap())
+        .expect_err("an uncurated provider must refuse");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("absence of curation"),
+        "the refusal must say WHICH absence this is: {msg}"
+    );
+
+    // CONTROL: an unfiltered read of an empty plane is a legitimate empty
+    // answer, not a refusal. Without this arm the assertion above passes
+    // against a handler that refuses every empty result.
+    let call = serde_json::json!({"name": "plan.prices", "arguments": {}});
+    let out = serve_tool_call(&f.store, &serde_json::to_vec(&call).unwrap())
+        .expect("an unfiltered read of an empty plane is not an error");
+    let ToolResponse::PlanPrices(r) = out else {
+        panic!("wrong arm");
+    };
+    assert!(r.prices.is_empty());
+}

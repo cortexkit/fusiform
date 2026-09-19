@@ -292,6 +292,27 @@ pub fn manifest() -> ModuleManifest {
                     "additionalProperties": false
                 }),
             },
+            Tool {
+                name: route::TOOL_PLAN_PRICES.to_string(),
+                description: Some(
+                    "What a subscription tier costs per month, curated by hand \
+                         with a source and a review date. US list, monthly-billed, \
+                         web subscription. A row with no price carries the reason \
+                         instead, which is a claim rather than a gap."
+                        .to_string(),
+                ),
+                // Pure, matching every other read here: it answers from the
+                // store and writes nothing. The curated file is applied at
+                // startup rather than on this path, so a replayed call is free.
+                execution_mode: ExecutionMode::Pure,
+                schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "provider_id": {"type": "string"}
+                    },
+                    "additionalProperties": false
+                }),
+            },
         ],
         // EMPTY, and that is a claim rather than an omission.
         //

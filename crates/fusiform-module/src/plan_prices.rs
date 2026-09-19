@@ -67,6 +67,24 @@ pub struct Amount {
 
 const PLAN_PRICES: &str = include_str!("../data/plan-prices.json");
 
+/// What this plane's prices are quoted on, served to consumers verbatim.
+///
+/// Read from the file rather than restated here. A second copy of a policy
+/// sentence is a thing that can disagree with the rows it describes, and the
+/// disagreement would be invisible: the file's editor changes the basis, the
+/// constant keeps saying the old one, and every consumer reads the constant.
+pub static UNIT_POLICY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    serde_json::from_str::<serde_json::Value>(PLAN_PRICES)
+        .ok()
+        .and_then(|v| v["unit_policy"].as_str().map(str::to_string))
+        .unwrap_or_else(|| {
+            // Reached only if the file lost its policy line, which the loader
+            // test would already have caught. Says so rather than inventing a
+            // basis, because a wrong basis is worse than a missing one.
+            "unit policy missing from the curated file".to_string()
+        })
+});
+
 static LOADED: OnceLock<Vec<PlanPrice>> = OnceLock::new();
 
 /// The curated rows, parsed once per process.

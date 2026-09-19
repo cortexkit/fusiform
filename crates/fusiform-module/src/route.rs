@@ -33,10 +33,11 @@ use serde::Deserialize;
 pub use fusiform_protocol::{
     CatalogGetRequest, CatalogGetResponse, CorrectRequest, CorrectResponse, CorrectedFact,
     CorrectionDetail, HistoryEra, HistoryRequest, HistoryResponse, MarkArtifactRequest,
-    MarkArtifactResponse, OverriddenFactWire, PollChanges, RetractArtifactRequest,
-    RetractArtifactResponse, StatusPoll, StatusRequest, StatusResponse, ToolResponse,
-    UncertainFactWire, WithheldFactWire, TOOLS, TOOL_CORRECT, TOOL_GET, TOOL_HISTORY,
-    TOOL_MARK_ARTIFACT, TOOL_RETRACT_ARTIFACT, TOOL_STATUS,
+    MarkArtifactResponse, OverriddenFactWire, PlanAmount, PlanPriceWire, PlanPricesRequest,
+    PlanPricesResponse, PollChanges, RetractArtifactRequest, RetractArtifactResponse, StatusPoll,
+    StatusRequest, StatusResponse, ToolResponse, UncertainFactWire, WithheldFactWire, TOOLS,
+    TOOL_CORRECT, TOOL_GET, TOOL_HISTORY, TOOL_MARK_ARTIFACT, TOOL_PLAN_PRICES,
+    TOOL_RETRACT_ARTIFACT, TOOL_STATUS,
 };
 
 /// Why a request could not be served.
@@ -140,6 +141,7 @@ pub fn serve_tool_call(store: &CatalogStore, body: &[u8]) -> Result<ToolResponse
         TOOL_RETRACT_ARTIFACT => {
             serve_retract_artifact(store, &args).map(ToolResponse::RetractArtifact)
         }
+        TOOL_PLAN_PRICES => serve_plan_prices(store, &args).map(ToolResponse::PlanPrices),
         // Named explicitly rather than served anyway. A module that answers to
         // any tool name keeps answering after a consumer's typo, and the
         // consumer believes it called something else.
@@ -1176,6 +1178,71 @@ fn unknown_model(provider_id: &str, model_id: &str) -> RouteError {
         "unknown model {model_id:?} under provider {provider_id:?}: the provider \
          exists, so check the model id — upstream ids often carry a version suffix"
     ))
+}
+
+/// Serve the curated subscription prices.
+///
+/// Reads at NOW rather than taking an instant, deliberately. A point-in-time
+/// read of this plane would be a different contract — "what did we believe on
+/// day X" rather than "what is in force" — and nobody has asked for it. Adding
+/// it later is additive; guessing at its semantics now is not.
+fn serve_plan_prices(store: &CatalogStore, args: &[u8]) -> Result<PlanPricesResponse, RouteError> {
+    let request: PlanPricesRequest = serde_json::from_slice(args)
+        .map_err(|e| RouteError::bad_request(format!("malformed plan.prices request: {e}")))?;
+
+    let now = now_ms();
+    let rows = store
+        .plan_prices_at(now, request.provider_id.as_deref())
+        .map_err(|e| store_error(&e))?;
+
+    // A named provider with no rows is a REFUSAL, not an empty list.
+    //
+    // Same reasoning as the catalog's unknown-provider arm: an empty answer
+    // reads as "this provider has no subscription pricing", which is a claim
+    // about the world, when the truth is that nobody has curated one. The
+    // states are different and only one of them is someone's job.
+    if rows.is_empty() {
+        if let Some(provider) = &request.provider_id {
+            return Err(RouteError::no_coverage(format!(
+                "no curated subscription prices for provider {provider:?}: fusiform \
+                 holds plan prices only for providers someone has sourced, which is \
+                 a short list — this is an absence of curation rather than a claim \
+                 that the provider has no plans"
+            )));
+        }
+    }
+
+    Ok(PlanPricesResponse {
+        prices: rows
+            .into_iter()
+            .map(|r| PlanPriceWire {
+                provider_id: r.provider_id,
+                tier: r.tier,
+                price: match (r.minor_units, r.exponent, r.currency, r.period) {
+                    (Some(minor_units), Some(exponent), Some(currency), Some(period)) => {
+                        Some(PlanAmount {
+                            minor_units,
+                            exponent,
+                            currency,
+                            period,
+                        })
+                    }
+                    // Any other shape is a refusal row. The store's CHECK makes
+                    // partial amounts unrepresentable, so this arm is reached
+                    // only by rows that genuinely carry no price.
+                    _ => None,
+                },
+                refusal_reason: r.refusal_reason,
+                boundary_at_ms: r.boundary_at_ms,
+                established_by: r.established_by,
+                established_at_ms: r.established_at_ms,
+                review_by_ms: r.review_by_ms,
+                source_ref: r.source_ref,
+            })
+            .collect(),
+        resolved_at_ms: now,
+        unit_policy: crate::plan_prices::UNIT_POLICY.to_string(),
+    })
 }
 
 fn store_error(e: &CatalogError) -> RouteError {

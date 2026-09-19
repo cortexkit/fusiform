@@ -68,6 +68,19 @@ pub const TOOL_MARK_ARTIFACT: &str = "catalog.mark_artifact";
 /// let one be mistaken for the other in a call log.
 pub const TOOL_RETRACT_ARTIFACT: &str = "catalog.retract_artifact";
 
+/// What a subscription tier costs per month.
+///
+/// Its own tool rather than a field on `catalog.get`, and the reason is the
+/// CONSUMER SET rather than the response shape: model rates are read per
+/// request by routers on a hot path, while a plan price is read rarely by
+/// whatever computes a subscription-versus-API multiplier. No caller wants
+/// both in one response, so serving them together would grow every existing
+/// consumer's payload to serve one that reads it occasionally — and hand all
+/// of them a field they must learn to ignore, which is a field someone
+/// eventually misreads in a way that looks like a reasonable interpretation
+/// rather than a bug.
+pub const TOOL_PLAN_PRICES: &str = "plan.prices";
+
 pub const TOOLS: &[&str] = &[
     TOOL_GET,
     TOOL_HISTORY,
@@ -75,7 +88,86 @@ pub const TOOLS: &[&str] = &[
     TOOL_CORRECT,
     TOOL_MARK_ARTIFACT,
     TOOL_RETRACT_ARTIFACT,
+    TOOL_PLAN_PRICES,
 ];
+
+/// Ask what curated subscription prices fusiform holds.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PlanPricesRequest {
+    /// Narrow to one provider. Absent means every provider.
+    ///
+    /// A models.dev slug, the same vocabulary `catalog.get` uses — NOT the
+    /// naming a quota source may use for the same vendor. Those differ, and a
+    /// caller holding `codex` or `claude` has to map them first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+}
+
+/// What one `(provider, tier)` costs, or why fusiform cannot say.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PlanPriceWire {
+    pub provider_id: String,
+    /// The provider's own tier string, unnormalised.
+    ///
+    /// Never canonicalised, because the same string names plans an order of
+    /// magnitude apart across vendors. Match it EXACTLY: a renamed tier may be
+    /// a repriced plan, so falling back to a similar string would inherit a
+    /// price that may no longer apply.
+    pub tier: String,
+    /// Absent when `refusal_reason` is set, and the two are exclusive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price: Option<PlanAmount>,
+    /// Why there is no price, when there is none.
+    ///
+    /// A POSITIVE claim rather than a gap. "Tier not observed" and "tier
+    /// observed and unpriced" are different states and only the second is a
+    /// completed job, so a consumer must not collapse this into absence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal_reason: Option<String>,
+    /// When this price took effect, as best the source allows.
+    pub boundary_at_ms: i64,
+    /// Who established it and when they looked.
+    pub established_by: String,
+    pub established_at_ms: i64,
+    /// When someone must look again.
+    ///
+    /// This plane has no fetch, so nothing can ever contradict a stale row —
+    /// this date is its only liveness signal. A consumer computing a series
+    /// across a period should treat rows past their review date as suspect
+    /// rather than current.
+    pub review_by_ms: i64,
+    /// The page the figure came from.
+    pub source_ref: String,
+}
+
+/// A subscription price: minor units, an exponent, a currency, a period.
+///
+/// Four parts or none. A value without its exponent and currency is a number
+/// rather than an amount, and one without its period is not a price at all.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PlanAmount {
+    pub minor_units: i64,
+    pub exponent: i32,
+    pub currency: String,
+    pub period: String,
+}
+
+/// Curated subscription prices.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PlanPricesResponse {
+    /// Every row in force, including refusals.
+    pub prices: Vec<PlanPriceWire>,
+    /// The instant this answer describes, for round-tripping with a later
+    /// read. Same contract as `CatalogGetResponse::resolved_at_ms`.
+    pub resolved_at_ms: i64,
+    /// What this plane's prices are quoted on, stated rather than assumed.
+    ///
+    /// US list, monthly-billed, web subscription. An operator on an annual
+    /// term, in another country, or subscribed through an app store pays
+    /// something else, and this plane cannot see which — that is a fact about
+    /// one account and belongs on the account's own record.
+    pub unit_policy: String,
+}
 
 /// Take back a mark on one poll.
 ///
@@ -950,6 +1042,7 @@ pub enum ToolResponse {
     Correct(CorrectResponse),
     MarkArtifact(MarkArtifactResponse),
     RetractArtifact(RetractArtifactResponse),
+    PlanPrices(PlanPricesResponse),
 }
 
 /// A `catalog.history` request: every era for one fact.

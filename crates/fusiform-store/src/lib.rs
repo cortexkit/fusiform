@@ -1850,3 +1850,56 @@ impl CatalogStore {
         Ok(written)
     }
 }
+
+impl CatalogStore {
+    /// The plan price in force for every `(provider, tier)` at `at_ms`.
+    ///
+    /// Supersession is by insertion order, matching the ingest's diff: the row
+    /// in force is the newest id among those at or before the instant. A
+    /// correction shares its predecessor's boundary, so ordering by boundary
+    /// alone would be free to serve either one.
+    pub fn plan_prices_at(
+        &self,
+        at_ms: i64,
+        provider_id: Option<&str>,
+    ) -> Result<Vec<NewPlanPrice>, CatalogError> {
+        let rows = self.inner.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT provider_id, tier, minor_units, exponent, currency, period, \
+                        boundary_at_ms, established_by, established_at_ms, \
+                        review_by_ms, source_ref, refusal_reason \
+                 FROM plan_price_era p \
+                 WHERE boundary_at_ms <= ?1 \
+                   AND (?2 IS NULL OR provider_id = ?2) \
+                   AND id = ( \
+                       SELECT id FROM plan_price_era q \
+                       WHERE q.provider_id = p.provider_id AND q.tier = p.tier \
+                         AND q.boundary_at_ms <= ?1 \
+                       ORDER BY q.id DESC LIMIT 1 \
+                   ) \
+                 ORDER BY provider_id, tier",
+            )?;
+            let rows = stmt
+                .query_map(params![at_ms, provider_id], |r| {
+                    Ok(NewPlanPrice {
+                        provider_id: r.get(0)?,
+                        tier: r.get(1)?,
+                        minor_units: r.get(2)?,
+                        exponent: r.get(3)?,
+                        currency: r.get(4)?,
+                        period: r.get(5)?,
+                        boundary_at_ms: r.get(6)?,
+                        established_by: r.get(7)?,
+                        established_at_ms: r.get(8)?,
+                        review_by_ms: r.get(9)?,
+                        source_ref: r.get(10)?,
+                        refusal_reason: r.get(11)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })?;
+
+        Ok(rows)
+    }
+}
