@@ -32,6 +32,24 @@
 # if it is free. So it reads each sibling's ALREADY-FETCHED origin/master, and
 # skips a sibling whose remote ref is missing rather than guessing.
 #
+# THIS GATE CANNOT PREDICT CARGO, AND THE PAIR IS A DIAGNOSTIC.
+#
+# They read DIFFERENT SUBJECTS. Cargo resolves a path dep to the sibling's
+# WORKING TREE; this gate reads the sibling's PUBLISHED ref. So the two can
+# disagree, and the disagreement is informative rather than a bug in either:
+#
+#     cargo --locked refuses  +  this gate says MATCHES
+#       -> the sibling's DISK is ahead of its master. Absorbing would put the
+#          lock in the dangerous AHEAD state. Do not absorb; gate with
+#          --offline instead and leave the lock where it is.
+#
+#     cargo --locked refuses  +  this gate says BEHIND
+#       -> an ordinary wave. Absorb it.
+#
+# Measured 2026-09-19: cargo refused while this gate passed, because subc-core
+# read 0.18.17 on the sibling's disk and 0.18.16 on its master. Absorbing the
+# obvious way would have pinned a version nobody had shipped.
+#
 # WHICH MEANS A STALE CACHED REF PRODUCES A FALSE REFUSAL, and that is the cost.
 #
 # I first wrote here that not fetching only meant "it cannot CATCH a sibling

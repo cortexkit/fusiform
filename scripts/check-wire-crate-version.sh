@@ -59,8 +59,28 @@ fi
 # Reported rather than folded into the comparison, because a dirty tree is not
 # itself a violation — the operator just needs to know the answer does not
 # cover it yet.
-if ! git diff --quiet -- "$src" "$manifest" 2>/dev/null; then
-  echo "  note: $CRATE has UNCOMMITTED changes, which this check does not see." >&2
+# `git diff HEAD` RATHER THAN `git diff`, and the difference is the whole
+# warning.
+#
+# `git diff` compares the working tree to the INDEX, so a STAGED change is
+# identical on both sides and reports nothing. This warning therefore went
+# silent the moment someone ran `git add` — which is the natural order before a
+# commit, and so precisely the moment a human runs this check by hand.
+#
+# Measured, with a wire change planted in the working tree:
+#
+#     git diff       -- lib.rs   sees NOTHING when staged
+#     git diff HEAD  -- lib.rs   sees it
+#
+# The failure was quiet in the worst direction: the check printed
+# "fusiform-protocol unchanged against origin/master" with no note, which reads
+# as a clean pass rather than as an answer that does not cover your edit.
+#
+# Irrelevant in CI, where the checkout is clean — which is exactly why it
+# survived. A hand-run path with no CI coverage is where a gate rots unseen.
+if ! git diff HEAD --quiet -- "$src" "$manifest" 2>/dev/null; then
+  echo "  note: $CRATE has UNCOMMITTED changes (staged or not), which this" >&2
+  echo "        check does not see." >&2
   echo "        It compares $BASE...HEAD. Commit first for a complete answer." >&2
 fi
 
