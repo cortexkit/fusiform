@@ -621,3 +621,122 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
         );
     }
 }
+
+/// Every field of every READ response appears somewhere in the fixture.
+///
+/// # Why this exists as a fence rather than as a habit
+///
+/// I have now found this gap twice by hand. First the rate STATES — the fixture
+/// carried `priced` and nothing else, so a consumer pinning from it would never
+/// meet `stated_zero` or `unpriced` and the first row carrying one would land on
+/// a default arm. Then three whole fields: `plan.prices` (a tool I had shipped
+/// that morning), `retired`, and `uncertain`.
+///
+/// Both were found by asking the same question by hand, and a third pass would
+/// find a fourth gap later. This asks it on every run.
+///
+/// # What a miss costs
+///
+/// Consumers pin from these bytes — ALF by my own recommendation. A field absent
+/// from the fixture is a field whose wire shape no test here constrains, so it
+/// can change and redden nothing until a consumer's decoder meets it in
+/// production. That is quieter than a build failure and lands further from the
+/// change.
+///
+/// # The three WRITE tools are exempt, and that is a finding rather than a gap
+///
+/// `catalog.correct`, `catalog.mark_artifact` and `catalog.retract_artifact`
+/// have exactly one consumer: `ck-models`, in this repository. Their fields are
+/// pinned where that consumer RENDERS them, in the CLI's own tests — checked
+/// rather than assumed, and `restating_eras`, `had_live_mark` and `total_eras`
+/// all appear there.
+///
+/// Adding them here would duplicate that coverage and make this fixture claim a
+/// purpose it does not have: it pins what crosses the seam to OTHER repositories.
+/// An operator tool whose only caller ships beside it does not cross one.
+#[test]
+fn every_read_response_field_reaches_the_fixture() {
+    let src = include_str!("../../fusiform-protocol/src/lib.rs");
+    let golden: serde_json::Value = serde_json::from_str(GOLDEN).expect("the fixture parses");
+
+    let mut present: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    collect_keys(&golden, &mut present);
+    assert!(
+        present.len() > 40,
+        "the fixture must carry a substantial key set, or the absence checks \
+         below pass because nothing was collected: got {}",
+        present.len()
+    );
+
+    // Source-scanned rather than reflected, because Rust has no runtime field
+    // list and a hand-written one is a second statement of the struct that can
+    // drift from it. The same reasoning as the currency-policy fence next door.
+    let mut checked = 0usize;
+    let mut missing: Vec<String> = Vec::new();
+    for want in [
+        "CatalogGetResponse",
+        "HistoryResponse",
+        "StatusResponse",
+        "PlanPricesResponse",
+    ] {
+        let start = src
+            .find(&format!("pub struct {want} {{"))
+            .unwrap_or_else(|| panic!("{want} must exist in the protocol crate"));
+        let body = &src[start..];
+        let end = body.find("\n}").expect("a struct body closes");
+        for line in body[..end].lines() {
+            let line = line.trim();
+            let Some(rest) = line.strip_prefix("pub ") else {
+                continue;
+            };
+            let Some(field) = rest.split(':').next() else {
+                continue;
+            };
+            // `pub struct` itself and any method; fields end with a type.
+            if field.contains(' ') || field.is_empty() {
+                continue;
+            }
+            checked += 1;
+            if !present.contains(field) {
+                missing.push(format!("{want}.{field}"));
+            }
+        }
+    }
+
+    assert!(
+        checked >= 25,
+        "this examined {checked} fields across four structs; they carried 29 \
+         when this was written, so a collapse means the scan broke rather than \
+         the protocol shrinking"
+    );
+
+    assert!(
+        missing.is_empty(),
+        "\n\nThese served fields appear in no golden payload:\n\n  {}\n\n\
+         Consumers pin from this fixture, so a field absent here has its wire \
+         shape constrained by nothing: it can change and redden no test until a \
+         consumer's decoder meets it in production.\n\n\
+         Add a case to `cases()` that PRODUCES the field rather than a synthetic \
+         payload carrying it — the fixture's value is that it records what the \
+         serve path actually emits.\n",
+        missing.join("\n  ")
+    );
+}
+
+/// Every object key anywhere in a document.
+fn collect_keys(value: &serde_json::Value, out: &mut std::collections::BTreeSet<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                out.insert(k.clone());
+                collect_keys(v, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for v in items {
+                collect_keys(v, out);
+            }
+        }
+        _ => {}
+    }
+}
