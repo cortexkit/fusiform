@@ -149,9 +149,22 @@ done
 # is silent: nothing about a successful stage says the directory before it is
 # now a liability.
 #
-# WHY THE DEPLOYED REVISION IS KEPT RATHER THAN JUST THE NEWEST. It is the
-# rollback target. Deleting it would mean a rollback needs a rebuild, and a
-# rebuild during an incident is the worst time to discover the toolchain moved.
+# WHY THE DEPLOYED REVISION IS KEPT RATHER THAN JUST THE NEWEST. It is HALF the
+# rollback. Deleting it would mean a rollback needs a rebuild, and a rebuild
+# during an incident is the worst time to discover the toolchain moved.
+#
+# HALF, and the word is load-bearing. After a placement that MIGRATES the store,
+# putting this binary back is not a rollback: it meets a schema ahead of what it
+# knows and refuses on `store_ahead`, which is correct fail-closed behaviour and
+# also means service does not come back. The other half is a store snapshot,
+# taken before the swap with SQLite's online backup — `.backup`, never `cp`,
+# which would capture a torn .db beside a live -wal and restore to a state that
+# never existed.
+#
+# Keeping the binary and calling it "the rollback target" is a claim that is
+# true about the artifact and wrong about recoverability, which is the class
+# this repo keeps finding: a guard reporting accurately on a subject adjacent to
+# the one that matters.
 # Read from the placed binary rather than assumed, so it stays right when
 # placement lags several stages behind, which is the normal case here.
 #
@@ -269,7 +282,12 @@ echo "            live across one placement, and an unequal control reads as a"
 echo "            discriminator to anyone skimming. On a served value use"
 echo "            model_count, never catalog_version — max(now_ms, current+1)"
 echo "            advances on every restart, so it can never hold still"
-echo "  ARM       name WHICH BINARY renders it, and paste output you EXECUTED"
+echo "  ARM       name WHICH BINARY renders it, and paste output you EXECUTED
+  MIGRATES? if this revision adds a schema migration, SAY SO on the card. The
+            placer's binary snapshot is only half a rollback for a migrating
+            placement: the old binary meets the newer store and refuses on
+            store_ahead, so service does not come back without a store restore
+            too. A card that omits this reads as freely reversible"
 
 # Printed LAST, and the prune block above deliberately sits before it.
 #
