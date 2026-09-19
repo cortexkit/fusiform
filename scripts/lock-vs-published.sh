@@ -129,6 +129,30 @@ while read -r name path; do
     #
     # The discriminator is structural rather than textual: a path dependency has
     # NO `source` line in the lock, while git and registry entries always do.
+    #
+    # AND THE GIT ENTRIES NEED NO CHECK OF THEIR OWN, which is worth writing
+    # down so the next reader does not "extend" this to cover them.
+    #
+    # A git dependency pins an immutable rev:
+    #
+    #     source = "git+https://github.com/cortexkit/commons.git?rev=50a70f2d..."
+    #
+    # CI resolves that exact object, not whatever the branch points at now. So
+    # the wave problem this script exists for — a sibling publishes, my pin goes
+    # stale, CI resolves the remote and disagrees with my local build — cannot
+    # occur: there is no moving target. The lock IS the version.
+    #
+    # Their failure mode is different and much rarer: a force-push plus GC could
+    # orphan the rev, and CI would fail to resolve it at all. That is loud, not
+    # silent, and no local check can predict it.
+    #
+    # SUBC's 2026-09-19 finding is the same distinction from the producer side:
+    # a merged bump and a PUBLISHED version are different facts, and a path
+    # consumer absorbing the merge reads exactly like distribution working. For
+    # fusiform every CortexKit dependency is a path dep, so "published" here
+    # means "on the sibling's master" with no registry hop to diverge — which is
+    # why this script's subject is correct for this repo and would be the wrong
+    # subject for one consuming the same crates from crates.io.
     pinned=$(awk -v n="$name" '
         /^\[\[package\]\]/ { name=""; ver=""; src=""; next }
         $1=="name"    { gsub(/"/,"",$3); name=$3; next }
