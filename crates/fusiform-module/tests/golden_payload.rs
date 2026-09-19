@@ -345,6 +345,26 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
 }
 
 /// The calls whose payloads are pinned, each with why it is here.
+///
+/// # Each case exists for a DISTINCT SHAPE, and consolidating them is the risk
+///
+/// Two fences below check that every response field and every `SERVED_FACTS`
+/// key appears somewhere in the fixture. Both are key-level: they ask whether a
+/// name is present, not whether its shape was separately produced.
+///
+/// So a well-meaning consolidation — folding three cases into one model that
+/// happens to carry all three keys — keeps both fences green while the shapes
+/// stop being independently pinned. ASTRO hit the same thing from the other
+/// side: one test fake of theirs is the sole fence for five role-to-key
+/// mappings, and simplifying it to the two keys a future test needs would drop
+/// three fences with every suite still passing.
+///
+/// The rule, stated because no fence here can enforce it: A CASE EARNS ITS
+/// PLACE BY THE SHAPE IT PRODUCES, not by the keys it happens to contain. If
+/// two cases look redundant, check what each one's comment says it is for
+/// before merging them — the reasons are in the cases rather than in a list
+/// somewhere, precisely so this question is answerable at the point of
+/// temptation.
 fn cases() -> Vec<(&'static str, String)> {
     vec![
         (
