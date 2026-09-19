@@ -428,9 +428,24 @@ impl CatalogStore {
         }
 
         // Withheld facts are reported even when the plane filter would have
-        // excluded them. A consumer reading only rates still needs to know a
-        // rate was withheld, and filtering the notice by the same predicate
-        // would hide exactly the case it exists to report.
+        // excluded them.
+        //
+        // This said "a consumer reading only rates still needs to know a rate
+        // was withheld", which cannot demonstrate the rule: a `rate.` filter
+        // ADMITS `rate.input`, so that case is identical either way. The case
+        // that separates them is a withheld fact on a plane the reader did NOT
+        // ask for — read `limit.`, and a withheld `rate.input` either survives
+        // or vanishes.
+        //
+        // Unfiltered is right because `withheld` is a statement about THE
+        // MODEL'S RECORD rather than about a plane: fusiform is actively
+        // suppressing something here because the stored value is known bad. A
+        // consumer reading limits who learns a rate on the same model is under
+        // correction has learned how far to trust the limits too.
+        //
+        // Filtering would make that disclosure depend on which question was
+        // asked, and a disclosure you receive only when you happen to ask the
+        // matching question is one nobody can rely on.
         Ok(CatalogSnapshot {
             source: query.source,
             resolved_at,

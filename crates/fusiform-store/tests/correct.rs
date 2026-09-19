@@ -748,3 +748,87 @@ fn a_correction_with_nothing_to_repair_is_refused() {
         outcome.err()
     );
 }
+
+/// A withheld notice survives a plane filter that would have excluded it.
+///
+/// # The invariant, and why the comment defending it named the wrong case
+///
+/// `read_catalog` builds `withheld` and returns it UNFILTERED, while `models`
+/// is filtered by the requested prefixes. The comment at that site justified it
+/// with "a consumer reading only rates still needs to know a rate was
+/// withheld" — which the filter ADMITS, so that case is identical either way
+/// and cannot demonstrate the rule.
+///
+/// The case that separates them is a withheld fact on a plane the reader did
+/// NOT ask for: read `limit.`, and a withheld `rate.input` either survives or
+/// vanishes. A mutation filtering `withheld` by the same predicate survived the
+/// entire workspace suite, which is how this gap was found.
+///
+/// # Why unfiltered is right
+///
+/// The `withheld` array is a statement about THE MODEL'S RECORD, not about a
+/// plane. It says fusiform is actively suppressing something here because the
+/// stored value is known bad. A consumer reading limits who learns that a rate
+/// on the same model is under correction has learned something about how far to
+/// trust the limits too — the record is under repair, and the plane boundary is
+/// the consumer's concern rather than a property of the defect.
+///
+/// Filtering would make that disclosure depend on which question was asked,
+/// and a disclosure you only receive when you happen to ask the matching
+/// question is one nobody can rely on.
+#[test]
+fn a_withheld_notice_is_not_filtered_by_the_plane_the_reader_asked_for() {
+    let f = fixture();
+
+    // Correct a RATE, then read only LIMITS. The filter excludes the withheld
+    // key, which is the only configuration in which this rule does anything.
+    let plan = plan(&f, &rates(), BAD_FROM, FIXED_AT);
+    apply_correction(&f.store, SourceId::ModelsDev, &plan, Timestamp(NOW)).unwrap();
+
+    let snapshot = f
+        .store
+        .read_catalog(
+            &fusiform_store::serve::CatalogQuery::at(SourceId::ModelsDev, Timestamp(5_000))
+                .with_prefixes(&["limit."]),
+        )
+        .expect("a limits-only read at an instant inside the window");
+
+    let rate_notices: Vec<&str> = snapshot
+        .withheld
+        .iter()
+        .map(|w| w.fact_key.as_str())
+        .filter(|k| k.starts_with("rate."))
+        .collect();
+
+    assert!(
+        !rate_notices.is_empty(),
+        "a withheld rate must be disclosed to a reader who asked only for \
+         limits: the suppression is a fact about the model's record, not about \
+         the rate plane. Withheld keys seen: {:?}",
+        snapshot
+            .withheld
+            .iter()
+            .map(|w| w.fact_key.as_str())
+            .collect::<Vec<_>>()
+    );
+
+    // CONTROL: the filter is genuinely excluding these keys, or the assertion
+    // above passes for the trivial reason that nothing was filtered at all.
+    let filter_would_exclude = rate_notices.iter().all(|k| !k.starts_with("limit."));
+    assert!(
+        filter_would_exclude,
+        "the withheld keys must be OUTSIDE the requested plane, or this test \
+         proves nothing about filtering: {rate_notices:?}"
+    );
+
+    // CONTROL: the models map IS filtered, so this is not a build where the
+    // filter does nothing anywhere.
+    for m in &snapshot.models {
+        for key in m.facts.keys() {
+            assert!(
+                key.as_str().starts_with("limit."),
+                "models must be filtered to the requested plane, got {key:?}"
+            );
+        }
+    }
+}
