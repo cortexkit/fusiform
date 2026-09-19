@@ -32,11 +32,21 @@
 # if it is free. So it reads each sibling's ALREADY-FETCHED origin/master, and
 # skips a sibling whose remote ref is missing rather than guessing.
 #
-# The consequence, stated rather than hidden: it catches the case where a
-# sibling's working tree is AHEAD of what it published, which is the one that
-# bit. It cannot catch a sibling publishing something this machine has not
-# fetched — but that direction fails loudly at the next `--locked` gate instead
-# of silently, so it is already covered.
+# WHICH MEANS A STALE CACHED REF PRODUCES A FALSE REFUSAL, and that is the cost.
+#
+# I first wrote here that not fetching only meant "it cannot CATCH a sibling
+# publishing something this machine has not fetched". That understated it: a
+# cached `origin/master` behind the real one reports the lock as AHEAD of
+# published when it is merely ahead of my copy, and the refusal blocks a stage
+# with an explanation that is wrong in the direction of alarm.
+#
+# Measured: subc-core 0.18.14 was on the sibling's master, my cached ref said
+# 0.18.13, and the gate refused. A `git fetch` in the sibling resolved it.
+#
+# So the refusal message names the fetch as the FIRST thing to try, ahead of the
+# unlanded-branch explanation. A guard whose commonest false positive has a
+# one-command fix must say that command, or its reader learns to distrust it —
+# and a distrusted guard is one that gets skipped when it is right.
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -126,7 +136,13 @@ while read -r name path; do
         echo "  resolves path deps against REMOTES — will refuse it while every" >&2
         echo "  local gate here keeps passing." >&2
         echo >&2
-        echo "  Usually means the sibling has a branch checked out. Confirm:" >&2
+        echo "  FIRST: this check does not fetch, so a stale cached ref reports" >&2
+        echo "  a divergence that does not exist. Try:" >&2
+        echo >&2
+        echo "      git -C $sibling_repo fetch origin" >&2
+        echo >&2
+        echo "  If it still refuses, the sibling likely has a branch checked" >&2
+        echo "  out. Confirm:" >&2
         echo >&2
         echo "      git -C $sibling_repo log --all -S 'version = \"$pinned\"' -- $rel/Cargo.toml" >&2
         echo >&2
