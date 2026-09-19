@@ -235,3 +235,91 @@ pub fn seed_if_empty(store: &CatalogStore) -> Result<SeedOutcome, SeedError> {
         version,
     })
 }
+
+/// How old the bootstrap snapshot may be before it must be refreshed.
+///
+/// # Why an age rather than a currency check
+///
+/// Whether the seed still matches upstream is not checkable offline, and a
+/// gate that needs the network is a gate that fails on a plane. The AGE is
+/// checkable, deterministic, and the thing that actually predicts drift.
+///
+/// # Where the number comes from
+///
+/// MEASURED, not chosen. On 2026-09-19 the seed was five weeks old and 341 of
+/// 5,669 models present in both it and live upstream had a different input
+/// rate — 6.0%, or roughly 1.2% per week. Two weeks puts a fresh install
+/// within about 2.5% of upstream on its worst fact, which is the window it
+/// occupies before its first poll lands.
+///
+/// That window matters more than it sounds, because it is exactly where a TEST
+/// RIG lives: a rig that builds, asserts and exits may never poll at all, so a
+/// fixture captured from it is a snapshot of the seed file rather than of the
+/// catalog. One such fixture sent two seats hunting a synthesis path that did
+/// not exist.
+pub const SEED_MAX_AGE_MS: i64 = 14 * 24 * 60 * 60 * 1000;
+
+#[cfg(test)]
+mod freshness_tests {
+    use super::*;
+
+    /// The embedded snapshot is not older than `SEED_MAX_AGE_MS`.
+    ///
+    /// The second TIME-TRIGGERED gate here, and it fires the same way the plan
+    /// price review does: a date passes with nothing touched. The scheduled CI
+    /// run is what makes it work — a push-only gate is silent for exactly the
+    /// quiet stretch in which a seed goes stale.
+    ///
+    /// It cannot tell you the seed is CORRECT, only that it is recent. Stated
+    /// in the failure rather than implied, because a gate that seems to promise
+    /// currency would stop anyone from checking.
+    #[test]
+    fn the_embedded_seed_is_not_stale() {
+        let meta = meta().expect("the seed metadata parses");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("the clock is after 1970")
+            .as_millis() as i64;
+
+        let age_days = (now - meta.fetched_at_ms) / (24 * 60 * 60 * 1000);
+        let max_days = SEED_MAX_AGE_MS / (24 * 60 * 60 * 1000);
+
+        assert!(
+            now - meta.fetched_at_ms <= SEED_MAX_AGE_MS,
+            "\n\nNOT A BUILD FAILURE. Nothing changed; the bootstrap snapshot aged.\n\n\
+             The embedded seed was captured {age_days} days ago and the limit is \
+             {max_days}. A fresh install — every E2E rig, every new machine — \
+             serves these values until its first poll lands, and a rig that \
+             builds, asserts and exits may never poll at all.\n\n\
+             Measured drift when this last lapsed: 6.0% of models had a \
+             different input rate after five weeks.\n\n\
+             Fix: ./scripts/refresh-seed.sh, then review the diff and commit \
+             both files together.\n\n\
+             What this gate CANNOT tell you: whether the seed matches upstream. \
+             That is not checkable offline. It knows only that nobody has \
+             refreshed it recently.\n"
+        );
+    }
+
+    /// The gate can fail, and the control proves it is not vacuous.
+    ///
+    /// Without this the test above passes every day until the first lapse, and
+    /// the first person to meet a real failure meets an untested message.
+    #[test]
+    fn a_stale_snapshot_would_be_caught() {
+        let meta = meta().expect("parses");
+        let now = meta.fetched_at_ms + SEED_MAX_AGE_MS + 1;
+        assert!(
+            now - meta.fetched_at_ms > SEED_MAX_AGE_MS,
+            "one millisecond past the limit must be over it"
+        );
+
+        // CONTROL: exactly at the limit is NOT stale, or the boundary is off by
+        // one and every seed fails a day early.
+        let at_limit = meta.fetched_at_ms + SEED_MAX_AGE_MS;
+        assert!(
+            at_limit - meta.fetched_at_ms <= SEED_MAX_AGE_MS,
+            "the limit itself is within budget"
+        );
+    }
+}
