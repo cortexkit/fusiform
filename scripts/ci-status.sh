@@ -34,27 +34,39 @@ command -v gh > /dev/null 2>&1 || {
 }
 
 workflow="${CI_STATUS_WORKFLOW:-ci.yml}"
-# DAYS, not a run count, and the distinction is the first defect this script
-# shipped with.
-#
-# It asked for the last 60 RUNS. The question is about the last few DAYS, and
-# those diverge exactly when the repository is busy: twenty trains in one night
-# flushed both failing scheduled runs out of a 60-run window, and the script
-# reported "no scheduled runs — the schedule may not be firing", which is a
-# false alarm with a credible story. A count window is a proxy for time that
-# fails under load, and load is when you most want the check.
-days="${CI_STATUS_DAYS:-7}"
+days="${CI_STATUS_DAYS:-14}"
 
-# Fetched generously and filtered by DATE below. The limit is a ceiling on the
-# fetch rather than the window itself.
-runs=$(gh run list --workflow="$workflow" --limit 200 \
-    --json event,conclusion,headSha,createdAt 2>/dev/null) || {
-    echo "ci-status: could not read run history for $workflow" >&2
+# `--event schedule` IS FILTERED SERVER-SIDE, and that removes a failure mode
+# rather than bounding it.
+#
+# This script first asked for the last N RUNS and filtered locally. Twenty
+# trains in one night pushed every scheduled run out of a 60-run window, and it
+# reported "the schedule may not be firing at all" — a false alarm with a
+# credible story. A count is a proxy for time and it degrades precisely when
+# there is most to look at, which is the anti-correlation that makes it vicious.
+#
+# Measured here after SUBC measured it on their repo, because a claim about a
+# tool's behaviour is checkable in one command:
+#
+#     gh run list --workflow=ci.yml --limit 30                    -> 0 scheduled
+#     gh run list --workflow=ci.yml --event schedule --limit 30   -> 12 scheduled
+#
+# If the filter were applied after fetching 30, the second would also be 0. So
+# the limit applies to the FILTERED set and a push flood cannot empty it.
+#
+# WHY SCHEDULE RATHER THAN "NOT PUSH", which is what this asked for first: a
+# `workflow_dispatch` run has a reader by construction — the person who
+# dispatched it is waiting for it. Only the schedule fires with nobody
+# attending, so only the schedule has the silence this script exists to break.
+runs=$(gh run list --workflow="$workflow" --event schedule --limit 40 \
+    --json conclusion,headSha,createdAt 2>/dev/null) || {
+    echo "ci-status: could not read scheduled runs for $workflow" >&2
     exit 1
 }
 
-# Non-push runs only. A push run's result is read by whoever pushed; a
-# scheduled or dispatched one has no such reader by construction.
+# The date window still scopes "recently enough to matter". It is no longer
+# load-bearing for CORRECTNESS — the fetch above cannot be flushed — so a bad
+# choice here costs relevance rather than truth.
 unwatched=$(printf '%s' "$runs" | CI_STATUS_DAYS="$days" python3 -c '
 import datetime, json, os, sys
 runs = json.load(sys.stdin)
@@ -62,26 +74,27 @@ days = int(os.environ["CI_STATUS_DAYS"])
 cut = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
 def when(r):
     return datetime.datetime.fromisoformat(r["createdAt"].replace("Z", "+00:00"))
-runs = [r for r in runs if when(r) >= cut]
-rows = [r for r in runs if r["event"] != "push"]
+rows = [r for r in runs if when(r) >= cut]
 if not rows:
     print("NONE")
     sys.exit(0)
 bad = [r for r in rows if r["conclusion"] not in ("success", None, "")]
-print(f"{len(rows)} unwatched run(s) in window, {len(bad)} failed")
+print(f"{len(rows)} scheduled run(s) in window, {len(bad)} failed")
 for r in bad[:10]:
-    when = r["createdAt"][:16]
-    ev = r["event"]
+    stamp = r["createdAt"][:16]
     concl = r["conclusion"]
     sha = r["headSha"][:7]
-    print("  %s  %-10s %-10s %s" % (when, ev, concl, sha))
+    print("  %s  %-10s %s" % (stamp, concl, sha))
 ')
 
 case "$unwatched" in
     NONE)
-        echo "ci-status: no scheduled or dispatched runs in the last $days day(s) —"
-        echo "  the schedule may not be firing at all, which is its own defect:"
-        echo "  a gate that never runs reports the same silence as one that passes."
+        echo "ci-status: NO scheduled runs in the last $days day(s)."
+        echo
+        echo "  This query filters server-side, so a busy repository cannot"
+        echo "  hide them — an empty result means the schedule is not firing."
+        echo "  A gate that never runs reports the same silence as one that"
+        echo "  passes, which is the deadlock QTA hit in September."
         exit 1
         ;;
     *" 0 failed")
@@ -90,10 +103,10 @@ case "$unwatched" in
     *)
         echo "ci-status: $unwatched" >&2
         echo >&2
-        echo "  These ran when nobody had a reason to look. A scheduled red" >&2
-        echo "  usually means master broke with nothing of yours moving —" >&2
-        echo "  most often a sibling published and the committed lock is" >&2
-        echo "  behind, since CI resolves path deps against REMOTES." >&2
+        echo "  These ran with nobody attending. A scheduled red usually" >&2
+        echo "  means master broke with nothing of yours moving — most" >&2
+        echo "  often a sibling published and the committed lock is behind," >&2
+        echo "  since CI resolves path deps against REMOTES." >&2
         echo >&2
         echo "  Check the lock first:  ./scripts/lock-vs-published.sh" >&2
         echo "  Then the log:          gh run view <id> --log-failed" >&2
