@@ -34,6 +34,15 @@ command -v gh > /dev/null 2>&1 || {
 }
 
 workflow="${CI_STATUS_WORKFLOW:-ci.yml}"
+# FOURTEEN because the cron is DAILY, so this is a sample count rather than a
+# duration: fourteen runs is enough for a pattern to be visible and short enough
+# that a fixed-and-green-since failure ages out. A week would show three reds in
+# a bad stretch and read as noise; a month would still be reporting failures
+# whose cause was fixed weeks ago, which trains its reader to skim.
+#
+# Derived from the schedule's own period rather than chosen, because "why is
+# this number what it is" is answerable in seconds and I had never asked it of
+# my own tools until SUBC put the question tonight.
 days="${CI_STATUS_DAYS:-14}"
 
 # `--event schedule` IS FILTERED SERVER-SIDE, and that removes a failure mode

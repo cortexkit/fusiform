@@ -583,8 +583,15 @@ mod tests {
     /// reasoning it cannot act on; an operator got a wall they would skip. A
     /// policy a reader skips is a policy nobody knows.
     ///
-    /// The bound is deliberately loose — this is about ORDER OF MAGNITUDE, not
-    /// a style rule, and a tighter number would fail on a legitimate edit.
+    /// 400 SITS BETWEEN THE TWO MEASURED VALUES, with margin on both sides:
+    /// the policy-as-argument ran to 1,243 characters and the policy-as-
+    /// statement is 188. So the bound is derived rather than chosen — it is
+    /// twice the good value and a third of the bad one, which leaves room for a
+    /// legitimate edit while catching a relapse into prose.
+    ///
+    /// Deliberately loose for that reason. A tighter number would fail on a
+    /// sentence someone adds for a real reason, and a bound that fires on good
+    /// work teaches its reader to raise it.
     #[test]
     fn the_served_policy_is_a_statement_rather_than_an_argument() {
         let doc: serde_json::Value =
