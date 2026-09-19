@@ -1241,6 +1241,7 @@ fn serve_plan_prices(store: &CatalogStore, args: &[u8]) -> Result<PlanPricesResp
             })
             .collect(),
         resolved_at_ms: now,
+        tier_vocabulary: crate::plan_prices::TIER_VOCABULARY.to_string(),
         unit_policy: crate::plan_prices::UNIT_POLICY.to_string(),
     })
 }

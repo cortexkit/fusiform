@@ -80,6 +80,13 @@ const PLAN_PRICES: &str = include_str!("../data/plan-prices.json");
 /// consumer decoding this field got an argument it cannot act on while an
 /// operator reading the CLI got a wall of prose under four rows. A policy a
 /// reader skips is a policy nobody knows.
+pub static TIER_VOCABULARY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    serde_json::from_str::<serde_json::Value>(PLAN_PRICES)
+        .ok()
+        .and_then(|v| v["tier_vocabulary"].as_str().map(str::to_string))
+        .unwrap_or_else(|| "tier vocabulary missing from the curated file".to_string())
+});
+
 pub static UNIT_POLICY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     serde_json::from_str::<serde_json::Value>(PLAN_PRICES)
         .ok()
@@ -623,6 +630,58 @@ mod tests {
         assert!(
             why.contains("FAILURE DIRECTION"),
             "the reason monthly-billed was chosen must survive the split"
+        );
+    }
+
+    /// The tier vocabulary reaches the WIRE, not just the file.
+    ///
+    /// It was file-only for an hour after I wrote it, which made it invisible
+    /// to the one party it exists for. A consumer decoding this response sees
+    /// `tier: "pro_20x"` and cannot tell a vendor tier name from the string
+    /// their own API reports — the exact confusion that produced the defect
+    /// this contract was written to settle.
+    ///
+    /// Same split as `unit_policy`: the STATEMENT is served, the worked example
+    /// stays in `why_tier_vocabulary` for whoever edits the file. The concrete
+    /// case reaches a consumer anyway, on the refusal row for the API string.
+    #[test]
+    fn the_tier_vocabulary_is_a_served_statement() {
+        let doc: serde_json::Value =
+            serde_json::from_str(PLAN_PRICES).expect("the shipped file parses");
+
+        let served = doc["tier_vocabulary"]
+            .as_str()
+            .expect("a tier vocabulary is served");
+        assert!(
+            served.len() < 400,
+            "the served vocabulary is {} chars; the example belongs in \
+             why_tier_vocabulary, which is not on the wire",
+            served.len()
+        );
+
+        // It must still say the two things a consumer acts on: what the column
+        // IS, and that mapping is theirs. Without these the length assertion
+        // passes against an empty string.
+        // CASE-INSENSITIVE, and that is not laziness. I made this exact
+        // mistake in a route assertion earlier today: pinning to CASING fails
+        // on an edit that changes nothing the test cares about, which teaches
+        // its reader to edit the test rather than the code.
+        let lower = served.to_lowercase();
+        for term in ["tier name", "api plan string", "map it"] {
+            assert!(
+                lower.contains(term),
+                "the served vocabulary must name {term:?}: {served}"
+            );
+        }
+
+        // And the example must survive the split, or splitting becomes a way to
+        // delete it quietly.
+        let why = doc["why_tier_vocabulary"]
+            .as_str()
+            .expect("the worked example is kept in the file");
+        assert!(
+            why.contains("Pro 5x") || why.contains("pro_5x"),
+            "the concrete case must survive: {why}"
         );
     }
 

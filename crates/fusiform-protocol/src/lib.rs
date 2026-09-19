@@ -160,6 +160,20 @@ pub struct PlanPricesResponse {
     /// The instant this answer describes, for round-tripping with a later
     /// read. Same contract as `CatalogGetResponse::resolved_at_ms`.
     pub resolved_at_ms: i64,
+    /// What the `tier` field IS, stated rather than left to be assumed.
+    ///
+    /// A consumer decoding this response sees `tier: "pro_20x"` and has no way
+    /// to know whether that is the vendor's own tier name or the string its API
+    /// reports for the account. They are different vocabularies and do not
+    /// correspond one-to-one — OpenAI publishes Pro 5x and Pro 20x while its API
+    /// says `plan_type: "pro"` for both — so a consumer matching an API string
+    /// against this column gets nothing, or worse, gets a wrong match silently.
+    ///
+    /// Served for the same reason `unit_policy` is: the failure this prevents is
+    /// a consumer ASSUMING the answer, and an assumption is invisible until it
+    /// is wrong. The concrete case arrives on the refusal row for the API string
+    /// itself, which is where a reader meets it at the moment it applies.
+    pub tier_vocabulary: String,
     /// What this plane's prices are quoted on, stated rather than assumed.
     ///
     /// US list, monthly-billed, web subscription. An operator on an annual

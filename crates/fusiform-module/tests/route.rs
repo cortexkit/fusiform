@@ -2407,6 +2407,20 @@ fn plan_prices_serves_rows_with_their_provenance() {
             r.unit_policy
         );
     }
+    // The TIER VOCABULARY reaches the wire, asserted at the ROUTE rather than
+    // at the file. A test that reads the curated file proves the file carries a
+    // statement; only driving serve_tool_call proves a consumer receives it,
+    // and emptying this at the serve path survived every other test here.
+    let vocab = r.tier_vocabulary.to_lowercase();
+    for term in ["tier name", "api plan string"] {
+        assert!(
+            vocab.contains(term),
+            "a consumer cannot tell a vendor tier name from their own API's \
+             plan string without this — missing {term:?}: {}",
+            r.tier_vocabulary
+        );
+    }
+
     assert!(
         r.unit_policy.len() < 400,
         "the served policy is the STATEMENT; its argument stays in the file: {}",
