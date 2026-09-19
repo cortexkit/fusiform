@@ -848,3 +848,178 @@ fn every_self_contradicting_anthropic_row_has_a_corrective_cell() {
          failure. If it rose, a new row needs a cell."
     );
 }
+
+/// No served overlay fact is older than `OVERLAY_MAX_AGE_MS`.
+///
+/// # Why this plane needs a review date at all
+///
+/// It is curated: no fetch, no diff, and therefore no possible contradiction.
+/// Nothing here can ever disagree with itself, so a review date is the ONLY
+/// liveness signal this data can carry — the same argument that put one on the
+/// plan-price plane, applied to the plane that predates it by a month.
+///
+/// The decisive case is already shipped: `claude-sonnet-4-5` carries a
+/// `limit.context` override of 200k against an upstream publishing 1M. If
+/// Anthropic ever ships a real 1M window, that override becomes ACTIVELY WRONG
+/// — serving a limit five times too small, which causes premature compaction —
+/// and absolutely nothing would notice. A refusal cell cannot rot that way; a
+/// value cell can.
+///
+/// # Where the interval comes from
+///
+/// Measured on this store, 2026-09-19, rather than chosen:
+///
+///     models carrying a context limit          8672
+///     models that have ever changed it          341   (3.9% over 38 days)
+///
+/// which is a per-model rate of about 1% per 10 days. Across the nine concrete
+/// models this overlay covers:
+///
+///      30 days -> 0.28 expected stale cells
+///      60 days -> 0.56
+///      90 days -> 0.84
+///     120 days -> 1.12
+///
+/// Sixty, because the expected number of stale cells at review time stays
+/// comfortably under one. A gate whose expected finding is MORE than one stale
+/// row is a gate that is usually right to fire, which sounds good and is not:
+/// it means the data is routinely wrong between reviews.
+///
+/// # The proxy, stated because it is imperfect in a known direction
+///
+/// That base rate measures how often MODELS.DEV CHANGES ITS PUBLISHED LIMIT,
+/// and these cells record MEASURED ENFORCEMENT. Those are different quantities,
+/// and the overlay exists precisely because the second is not visible in the
+/// first — so this is the best available signal rather than the right one. It
+/// is a frequency estimate, not a claim that a republished limit implies a
+/// changed wall.
+///
+/// # Reads `observed_at`, which is already there
+///
+/// Deliberately no new field. This file is ingested directly from the repo path
+/// by a consumer, so a schema change is their problem as well as mine, and the
+/// dates needed are already on every fact.
+const OVERLAY_MAX_AGE_MS: i64 = 60 * 24 * 60 * 60 * 1000;
+
+#[test]
+fn no_served_overlay_fact_has_outrun_its_review() {
+    let doc = overlay();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("the clock is after 1970")
+        .as_millis() as i64;
+
+    let mut overdue: Vec<String> = Vec::new();
+    let mut checked = 0usize;
+
+    for cell in doc["cells"].as_array().expect("cells is an array") {
+        let provider = cell["provider_id"].as_str().unwrap_or("?");
+        let model = cell["model_id"].as_str().unwrap_or("?");
+
+        for (key, fact) in cell["facts"].as_object().expect("facts is an object") {
+            // A REFUSAL CELL CANNOT GO STALE, and skipping it is not laziness.
+            //
+            // Its claim is "nobody established this", which stays true until
+            // someone measures — and if someone does, they are adding a value,
+            // not letting one rot. Reviewing these would be asking an operator
+            // to re-confirm an absence on a schedule, which is exactly the
+            // busywork that teaches a reader to rubber-stamp the real ones.
+            let is_refusal = fact["value"]["kind"].as_str() == Some("unknown");
+            if is_refusal {
+                continue;
+            }
+
+            let stamp = fact["observed_at"]
+                .as_str()
+                .or_else(|| fact["asserted_at"].as_str())
+                .unwrap_or_else(|| {
+                    panic!("{provider}/{model} {key} carries no date to review against")
+                });
+
+            let ms = chrono_ms(stamp);
+            checked += 1;
+            let age = now - ms;
+            if age > OVERLAY_MAX_AGE_MS {
+                overdue.push(format!(
+                    "  {provider}/{model}  {key}\n      observed {stamp}, {} days ago\n      source {}",
+                    age / (24 * 60 * 60 * 1000),
+                    fact["source_ref"].as_str().unwrap_or("(none)")
+                ));
+            }
+        }
+    }
+
+    // NON-VACUITY, because every other arm here passes on an empty overlay.
+    assert!(
+        checked >= 20,
+        "this examined {checked} served facts; the overlay had 22 when this was \
+         written, so a collapse to nothing means the walk broke rather than the \
+         data improving"
+    );
+
+    assert!(
+        overdue.is_empty(),
+        "\n\nNOT A BUILD FAILURE. Nothing changed; a review date passed.\n\n\
+         These overlay facts have not been re-checked in {} days:\n\n{}\n\n\
+         Each one OVERRIDES what the upstream publishes, so a stale cell serves \
+         a value fusiform asserts and nobody has confirmed lately.\n\n\
+         Re-read the source, then update observed_at — WHETHER OR NOT the value \
+         moved. Confirming a limit is a real result and the date is what records \
+         that someone looked.\n\n\
+         What this gate does NOT tell you: whether these values are correct. It \
+         knows only that nobody has looked recently.\n",
+        OVERLAY_MAX_AGE_MS / (24 * 60 * 60 * 1000),
+        overdue.join("\n")
+    );
+}
+
+/// The date parser agrees with an independent implementation.
+///
+/// Without this the review gate passes VACUOUSLY: a parser returning a constant
+/// or a wrong epoch makes every fact look fresh, and the gate reports green
+/// while measuring nothing. The values are Python's `datetime`, computed
+/// separately rather than copied from my own output — a fixture generated by
+/// the thing under test agrees with itself for free.
+///
+/// The leap day is in there deliberately. It is the one case civil-date
+/// arithmetic gets wrong when it is written from memory, and a table of
+/// round-numbered dates would never touch it.
+#[test]
+fn the_date_parser_agrees_with_a_second_implementation() {
+    for (stamp, expect) in [
+        ("1970-01-01T00:00:00Z", 0i64),
+        ("2026-08-13T15:12:00Z", 1_786_633_920_000),
+        ("2026-09-19T00:00:00Z", 1_789_776_000_000),
+        ("2024-02-29T12:00:00Z", 1_709_208_000_000),
+    ] {
+        assert_eq!(chrono_ms(stamp), expect, "parsing {stamp}");
+    }
+}
+
+/// Parse an RFC3339 stamp to epoch millis without pulling in a date crate.
+///
+/// The overlay's stamps are all `YYYY-MM-DDTHH:MM:SSZ`, written by hand and
+/// fenced for that shape by `every_fact_is_completely_specified`, so a full
+/// parser would be answering a more general question than this file asks.
+fn chrono_ms(stamp: &str) -> i64 {
+    let (date, rest) = stamp.split_once('T').expect("an RFC3339 stamp has a T");
+    let d: Vec<i64> = date.split('-').map(|p| p.parse().expect("numeric")).collect();
+    let t: Vec<i64> = rest
+        .trim_end_matches('Z')
+        .split(':')
+        .map(|p| p.parse::<f64>().expect("numeric") as i64)
+        .collect();
+
+    // Days since epoch by civil-date arithmetic (Howard Hinnant's algorithm),
+    // which is exact for any proleptic Gregorian date and needs no table.
+    let (y, m, day) = (d[0], d[1], d[2]);
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+
+    (days * 86_400 + t[0] * 3600 + t[1] * 60 + t[2]) * 1000
+}
