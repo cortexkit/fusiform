@@ -1737,7 +1737,9 @@ pub struct NewPlanPrice {
     pub minor_units: Option<i64>,
     pub exponent: Option<i32>,
     pub currency: Option<String>,
-    pub period: String,
+    /// Part of the money group: a refusal has no price and therefore no
+    /// period. Minting one would be a value invented to fill a column.
+    pub period: Option<String>,
     /// The vendor's effective date. Deliberately not paired with a "recorded
     /// at" column — see the schema.
     pub boundary_at_ms: i64,
@@ -1758,7 +1760,7 @@ type HeldPlanPrice = (
     Option<i64>,
     Option<i32>,
     Option<String>,
-    String,
+    Option<String>,
     Option<String>,
 );
 

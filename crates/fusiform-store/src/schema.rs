@@ -388,8 +388,14 @@ CREATE TABLE plan_price_era (
     exponent          INTEGER,
     currency          TEXT,
 
-    -- Stated rather than assumed. A price without its period is not a price.
-    period            TEXT    NOT NULL,
+    -- Stated rather than assumed: a price without its period is not a price.
+    --
+    -- NULLABLE, and in the money group below. A refusal row has no price and
+    -- therefore no period, so NOT NULL here would force every refusal to carry
+    -- an invented one — and a minted "month" is indistinguishable downstream
+    -- from a period the source actually stated. Found by wiring the ingest up
+    -- and watching the mapping quietly default it.
+    period            TEXT,
 
     -- Always `asserted` here, and the CHECK says so rather than leaving it to
     -- be inferred. Every row in this plane arrives with a date the vendor
@@ -438,11 +444,12 @@ CREATE TABLE plan_price_era (
     -- merely unwritten.
     CHECK ((minor_units IS NULL) = (refusal_reason IS NOT NULL)),
 
-    -- A priced row needs all three money parts or none: a value without its
-    -- exponent and currency is a number, not an amount.
+    -- A priced row needs all FOUR money parts or none: a value without its
+    -- exponent, currency and period is a number, not an amount.
     CHECK (
-        (minor_units IS NULL AND exponent IS NULL AND currency IS NULL)
-        OR (minor_units IS NOT NULL AND exponent IS NOT NULL AND currency IS NOT NULL)
+        (minor_units IS NULL AND exponent IS NULL AND currency IS NULL AND period IS NULL)
+        OR (minor_units IS NOT NULL AND exponent IS NOT NULL
+            AND currency IS NOT NULL AND period IS NOT NULL)
     )
 );
 

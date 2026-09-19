@@ -29,6 +29,7 @@ use fusiform_store::CatalogStore;
 use fusiform_module::fetch::{Fetcher, SourceEndpoint};
 use fusiform_module::health;
 use fusiform_module::loop_::{tick, PollContext, POLL_INTERVAL_MS};
+use fusiform_module::plan_prices;
 use fusiform_module::route;
 use fusiform_module::seed;
 use fusiform_module::signals::Signals;
@@ -187,6 +188,29 @@ impl ModuleHandler for Fusiform {
                      succeeds: {e}"
                 );
             }
+        }
+
+        // Apply the curated plan prices on EVERY boot, not only a fresh store.
+        //
+        // Unlike the seed, this file ships with the binary and changes with it:
+        // a release carrying a corrected price must reach the store, and gating
+        // on emptiness would mean the correction only ever landed on a machine
+        // that had never run fusiform. `append_plan_prices` diffs on the claim,
+        // so re-applying an unchanged file writes nothing.
+        //
+        // Failure is not fatal for the same reason the seed's is not — the
+        // catalog is a separate plane and serves fine without this — but the
+        // message says which plane is affected, because "plan prices" means
+        // nothing to an operator holding a model-catalog incident.
+        let plan_rows = plan_prices::store_rows(plan_prices::rows());
+        match store.append_plan_prices(&plan_rows) {
+            Ok(0) => {}
+            Ok(n) => eprintln!("fusiform: recorded {n} curated plan price change(s)"),
+            Err(e) => eprintln!(
+                "fusiform: could not apply curated plan prices, so subscription \
+                 pricing reads will serve whatever the store already held — the \
+                 model catalog is unaffected: {e}"
+            ),
         }
 
         // Adopt the catalog's real age before the loop starts. The staleness

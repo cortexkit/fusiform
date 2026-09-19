@@ -215,6 +215,35 @@ pub fn load_reporting_rejects(doc: &str) -> (Vec<PlanPrice>, Vec<String>) {
     (rows, rejects)
 }
 
+/// The curated rows as the store records them.
+///
+/// Lives here rather than at the startup call site because `main.rs` is
+/// unreachable by every test in this repo — a mapping written there is correct
+/// by inspection and by nothing else. This one already hid a defect: it
+/// defaulted `period` to "month" for refusal rows, minting a value the file
+/// never stated, and that only surfaced because moving it somewhere testable
+/// forced the question.
+pub fn store_rows(rows: &[PlanPrice]) -> Vec<fusiform_store::NewPlanPrice> {
+    rows.iter()
+        .map(|r| fusiform_store::NewPlanPrice {
+            provider_id: r.provider_id.clone(),
+            tier: r.tier.clone(),
+            minor_units: r.price.map(|a| a.minor_units),
+            exponent: r.price.map(|a| a.exponent),
+            currency: r.price.map(|a| a.currency.to_string()),
+            // Absent for a refusal, with the rest of the money group. A
+            // defaulted period would be indistinguishable from a stated one.
+            period: r.price.map(|a| a.period.to_string()),
+            boundary_at_ms: r.boundary_at_ms,
+            established_by: r.established_by.clone(),
+            established_at_ms: r.established_at_ms,
+            review_by_ms: r.review_by_ms,
+            source_ref: r.source_ref.clone(),
+            refusal_reason: r.refusal_reason.clone(),
+        })
+        .collect()
+}
+
 /// A row whose review date has passed, with everything needed to act on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Overdue {
@@ -279,6 +308,28 @@ pub fn overdue_report(overdue: &[Overdue]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One priced row and one refusal, so a mapping test can assert BOTH
+    /// directions. A fixture with only one kind lets a mapping that handles
+    /// neither pass half the assertions.
+    fn rows_for_test() -> &'static [PlanPrice] {
+        static ROWS: OnceLock<Vec<PlanPrice>> = OnceLock::new();
+        ROWS.get_or_init(|| {
+            let doc = r#"{"cells":[
+                {"provider_id":"acme","tier":"pro",
+                 "price":{"minor_units":2000,"exponent":2,"currency":"USD","period":"month"},
+                 "boundary_at_ms":1,"established_by":"x","established_at_ms":2,
+                 "review_by_ms":3,"source_ref":"s"},
+                {"provider_id":"acme","tier":"enterprise","price":null,
+                 "refusal_reason":"tier observed, no published price",
+                 "boundary_at_ms":1,"established_by":"x","established_at_ms":2,
+                 "review_by_ms":3,"source_ref":"s"}
+            ]}"#;
+            let (rows, rejects) = load_reporting_rejects(doc);
+            assert!(rejects.is_empty(), "{rejects:?}");
+            rows
+        })
+    }
 
     /// The shipped file parses with nothing rejected.
     ///
@@ -461,6 +512,42 @@ mod tests {
             overdue_at(&rows, 999).is_empty(),
             "a row inside its review window must not be reported"
         );
+    }
+
+    /// A refusal maps to the store with NO money parts, period included.
+    ///
+    /// The mapping defaulted `period` to "month" for refusals when it lived at
+    /// the startup call site, where nothing could reach it. A minted period is
+    /// indistinguishable downstream from one the source stated — the
+    /// fill-a-slot-to-satisfy-the-type class, in a plane whose entire subject
+    /// is which claims have a page behind them.
+    #[test]
+    fn a_refusal_carries_no_money_parts_at_all() {
+        let rows = store_rows(rows_for_test());
+
+        let refusal = rows
+            .iter()
+            .find(|r| r.minor_units.is_none())
+            .expect("the fixture must contain a refusal");
+        assert!(refusal.exponent.is_none());
+        assert!(refusal.currency.is_none());
+        assert!(
+            refusal.period.is_none(),
+            "a refusal has no price and therefore no period; minting one makes \
+             it indistinguishable from a stated period"
+        );
+        assert!(refusal.refusal_reason.is_some());
+
+        // CONTROL: a priced row must carry all four, or the assertions above
+        // pass against a mapping that drops the money parts entirely.
+        let priced = rows
+            .iter()
+            .find(|r| r.minor_units.is_some())
+            .expect("the fixture must contain a priced row");
+        assert!(priced.exponent.is_some());
+        assert!(priced.currency.is_some());
+        assert_eq!(priced.period.as_deref(), Some("month"));
+        assert!(priced.refusal_reason.is_none());
     }
 
     /// A refusal cell is a ROW, not a dropped one.

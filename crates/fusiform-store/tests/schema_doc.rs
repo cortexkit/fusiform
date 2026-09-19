@@ -354,10 +354,10 @@ fn the_plan_price_table_arrives_on_a_populated_store() {
     // A refusal row: no money parts, a reason.
     conn.execute(
         "INSERT INTO plan_price_era \
-         (provider_id, tier, period, boundary_kind, boundary_at_ms, \
+         (provider_id, tier, boundary_kind, boundary_at_ms, \
           established_by, established_at_ms, review_by_ms, source_ref, \
           refusal_reason) \
-         VALUES ('openai', 'enterprise', 'month', 'asserted', 1000, \
+         VALUES ('openai', 'enterprise', 'asserted', 1000, \
                  'fusi', 2000, 3000, 'https://example', \
                  'tier observed, no published price')",
         [],
@@ -382,9 +382,9 @@ fn the_plan_price_table_arrives_on_a_populated_store() {
 
     let refused_explaining_nothing = conn.execute(
         "INSERT INTO plan_price_era \
-         (provider_id, tier, period, boundary_kind, boundary_at_ms, \
+         (provider_id, tier, boundary_kind, boundary_at_ms, \
           established_by, established_at_ms, review_by_ms, source_ref) \
-         VALUES ('x', 'y', 'month', 'asserted', 1000, 'fusi', 2000, 3000, \
+         VALUES ('x', 'y', 'asserted', 1000, 'fusi', 2000, 3000, \
                  'https://example')",
         [],
     );
@@ -448,14 +448,32 @@ fn the_plan_price_table_arrives_on_a_populated_store() {
         "the newest row at or before the instant is the one in force"
     );
 
-    // An observed boundary is a CATEGORY error here, not a data error: every
-    // row in this plane is a date a vendor stated with no fetch behind it.
-    let observed = conn.execute(
+    // A refusal carrying a period is refused, because period is part of the
+    // money group: a row with no price has no period, and a stored "month"
+    // beside a NULL price is a claim nobody made.
+    let refusal_with_a_period = conn.execute(
         "INSERT INTO plan_price_era \
          (provider_id, tier, period, boundary_kind, boundary_at_ms, \
           established_by, established_at_ms, review_by_ms, source_ref, \
           refusal_reason) \
-         VALUES ('x', 'y', 'month', 'observed', 1000, 'fusi', 2000, 3000, \
+         VALUES ('x', 'y', 'month', 'asserted', 1000, 'fusi', 2000, 3000, \
+                 'https://example', 'why')",
+        [],
+    );
+    assert!(
+        refusal_with_a_period.is_err(),
+        "a refusal has no price and therefore no period; a defaulted one is \
+         indistinguishable from a period the source stated"
+    );
+
+    // An observed boundary is a CATEGORY error here, not a data error: every
+    // row in this plane is a date a vendor stated with no fetch behind it.
+    let observed = conn.execute(
+        "INSERT INTO plan_price_era \
+         (provider_id, tier, boundary_kind, boundary_at_ms, \
+          established_by, established_at_ms, review_by_ms, source_ref, \
+          refusal_reason) \
+         VALUES ('x', 'y', 'observed', 1000, 'fusi', 2000, 3000, \
                  'https://example', 'why')",
         [],
     );
@@ -495,7 +513,7 @@ fn re_applying_the_curated_file_is_a_no_op() {
         minor_units: units,
         exponent: units.map(|_| 2),
         currency: units.map(|_| "USD".to_string()),
-        period: "month".to_string(),
+        period: units.map(|_| "month".to_string()),
         boundary_at_ms: 1_000,
         established_by: by.to_string(),
         established_at_ms: 2_000,
