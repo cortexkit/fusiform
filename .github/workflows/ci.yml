@@ -63,6 +63,37 @@ on:
   # That is also why this must not be dropped once train branches land — a green
   # train sha is green against the siblings AS THEY WERE WHEN CI RAN, and five
   # lock waves reached this repo in a single day.
+  # THE DECLARED TIME IS NOT THE DELIVERED TIME, and the gap is hours.
+  #
+  # Measured over every scheduled run this repo has (n=13, 2026-09-07 to
+  # 2026-09-19): declared 06:00 UTC, fired between 09:50 and 11:19, mean +4h31m.
+  # Not one landed within three hours of the cron.
+  #
+  #     min  +3h50m      mean  +4h31m      max  +5h19m
+  #
+  # WHY THIS IS WRITTEN DOWN. I spent several turns saying "the cron fires at
+  # 10:00Z" — which is the OBSERVED delivery time quoted as if it were the
+  # schedule. Anyone reading this line expects 06:00 and is wrong by half a
+  # working morning, and anyone treating a run as overdue at 07:00 is wrong the
+  # other way.
+  #
+  # THE CAUSE IS UNMEASURED and I am not guessing at one. GitHub documents that
+  # scheduled workflows are delayed under load, which predicts jitter; this is a
+  # consistent offset with ±40 minutes of spread around it, which that
+  # explanation does not obviously fit. Recorded as a measurement rather than a
+  # mechanism, because a named cause nobody verified is the thing a future
+  # reader would stop investigating at.
+  #
+  # WHAT IT DOES NOT CHANGE: the schedule's purpose is to fire when nobody is
+  # attending, so a fixed delay costs nothing. It matters only for reasoning
+  # about WHEN an answer arrives — including whether a run is missing or merely
+  # late, which is the check that sent me here.
+  #
+  # Re-derive rather than trusting these numbers, since they are a dated
+  # measurement of someone else's infrastructure:
+  #
+  #     gh run list --workflow=ci.yml --event schedule --limit 20 \
+  #       --json createdAt --jq '.[].createdAt'
   schedule:
     - cron: '0 6 * * *'
 
