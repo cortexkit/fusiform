@@ -94,6 +94,46 @@ on:
   #
   #     gh run list --workflow=ci.yml --event schedule --limit 20 \
   #       --json createdAt --jq '.[].createdAt'
+  #
+  # DO NOT CHANGE THIS CRON BEFORE 2026-11-02. IT IS A CONTROL ARM.
+  #
+  # Three repos measured, two declared minutes and two declared hours:
+  #
+  #     cerebellum    04:17     n=14   mean +4h54m
+  #     fusiform      06:00     n=13   mean +4h31m
+  #     subconscious  06:00     n=14   mean +4h19m
+  #
+  # Delivery TRACKS the declared time -- cerebellum declares 1h43m earlier and
+  # delivers 1h20m earlier -- so this is an offset rather than a fixed delivery
+  # slot, and the popular-minute story is dead (17 does not sit apart from 0).
+  #
+  # Two explanations survive and they are the SAME EQUATION to within the
+  # jitter:
+  #
+  #     constant offset   delivery = declared_UTC + ~4.5h
+  #     timezone          cron read as US Eastern (UTC-4) + 20-55m of ordinary
+  #                       queue delay
+  #
+  # Moving a declared time cannot separate them: subconscious's `17 3` predicts
+  # 07:45Z under one and 07:47Z under the other. Agreement is only evidence when
+  # the instruments could have disagreed.
+  #
+  # THE FREE DISCRIMINATOR IS A DST BOUNDARY, and it is dated. America/New_York
+  # leaves daylight time at 2026-11-01 06:00Z (verified against the tz database
+  # here, not from the first-Sunday rule). Under a UTC reading this cron keeps
+  # delivering ~10:31Z; under an Eastern reading `0 6` moves from 06:00 EDT
+  # (10:00Z) to 06:00 EST (11:00Z) and delivery shifts an hour to ~11:31Z.
+  #
+  # A ONE-HOUR SEPARATION, on a repo that changed nothing.
+  #
+  # Which is the whole value of holding still: a repo that changed NOTHING
+  # across the boundary separates a timezone shift from whatever else GitHub
+  # does in October. Subconscious moved to a fourth declaration point in
+  # September, so if this one moved too, neither could tell those apart.
+  #
+  # USE 2026-11-02, NOT 11-01. The transition instant is 06:00Z, which is
+  # exactly this cron's declared time, so the 11-01 firing sits on the boundary
+  # and is ambiguous by construction. Cerebellum's 04:17 is clean on 11-01.
   schedule:
     - cron: '0 6 * * *'
 
