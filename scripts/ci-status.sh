@@ -43,6 +43,32 @@ workflow="${CI_STATUS_WORKFLOW:-ci.yml}"
 # Derived from the schedule's own period rather than chosen, because "why is
 # this number what it is" is answerable in seconds and I had never asked it of
 # my own tools until SUBC put the question tonight.
+#
+# THIS NUMBER CANNOT PRODUCE A FALSE "SCHEDULE IS DEAD", AND THE REASON IS
+# WORTH STATING BECAUSE A REASONABLE EDIT WOULD BREAK IT.
+#
+# SUBC's rule, after we measured that the declared cron fires 3h50m to 5h19m
+# late: A CHECK THAT CONCLUDES "IT STOPPED" MUST SIZE ITS WINDOW FROM THE
+# OBSERVED DELIVERY DISTRIBUTION, NOT FROM THE DECLARED SCHEDULE. A daily cron
+# read through a 24-hour window, queried between the declared time and the real
+# delivery, finds nothing and reports a dead schedule that is merely late.
+#
+# It does not apply here, which I established by driving `CI_STATUS_DAYS=1` and
+# getting the correct verdict rather than by reading the code and agreeing with
+# myself. The NONE branch fires on an EMPTY gh RESULT, and that query has no
+# time bound at all -- it is server-filtered by event and capped by --limit. So
+# this window scopes only the older-failures context, exactly as the comment
+# beside the verdict says.
+#
+# WHAT WOULD INTRODUCE THE DEFECT: making NONE mean "no run RECENTLY" by
+# applying `cut` to the emptiness test. That is a natural change -- it makes the
+# verdict answer "is the schedule alive now" instead of "has it ever run" -- and
+# it silently acquires a ~30h floor (one cron period plus the measured maximum
+# delivery delay). Fourteen days would clear it; a day or two would not, and
+# tightening this for noise reasons is equally natural.
+#
+# I wrote the floor above as a live hazard first. It was not one, and my own
+# `CI_STATUS_DAYS=1` run had already shown it.
 days="${CI_STATUS_DAYS:-14}"
 
 # `--event schedule` IS FILTERED SERVER-SIDE, and that removes a failure mode
