@@ -126,6 +126,19 @@ on:
   #
   # A ONE-HOUR SEPARATION, on a repo that changed nothing.
   #
+  # AND IT DOES NOT RESOLVE ON ONE READING. The day-to-day spread inside a
+  # single repo is 21-24 minutes (sd, n=14 each), so a 60-minute shift is only
+  # 2.5-2.9 sigma on ONE observation -- suggestive, and exactly the reading that
+  # gets called conclusive because it points the way you expected.
+  #
+  #     11-01   2 arms          suggestive
+  #     11-02   3 arms          stronger
+  #     11-05   ~12 readings    SE 9-11m, 5.5-6.4 sigma, decisive either way
+  #
+  # The 35-minute figure above is a spread of MEANS across repos. The noise that
+  # governs a single draw is wider than that, and conflating the two is how a
+  # two-sigma hint becomes a settled result.
+  #
   # Which is the whole value of holding still: a repo that changed NOTHING
   # across the boundary separates a timezone shift from whatever else GitHub
   # does in October. Subconscious moved to a fourth declaration point in
