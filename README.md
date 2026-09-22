@@ -30,27 +30,53 @@ no test run. Measured from a fresh clone with no siblings — `cargo build -p
 fusiform-cli` and `cargo build --workspace --exclude fusiform-module` both
 fail at manifest load, before any compilation.
 
-**The failures come in a ladder, and only the second rung is a wall:**
+**One sibling is a permission wall. It used to be two.**
 
-| # | missing dep | repo | |
+| # | missing dep | repo | visibility |
 |---|---|---|---|
 | 1 | `cortexkit-store` | commons | **public** — clone it and you pass |
-| 2 | `subc-client-rs` | subconscious | **private**, and a *regular* dependency |
-| 3 | `engram-core` | engram | **private**, but only a *dev*-dependency |
+| 2 | `subc-client-rs` | subconscious | **public** — clone it and you pass |
+| 3 | `engram-core` | engram | **private**, and a *dev*-dependency |
 
-Worth knowing before you start: the first error names commons, which anyone
-can fix, so the first rung gives no hint that a permission wall waits behind
-it. Cargo reports a directory it could not find, so *"you cannot see this
-repository"* arrives spelled as *"this path is wrong"*.
+Measured 2026-09-22 with `gh api repos/cortexkit/<name> --jq .visibility`,
+because this table was wrong for weeks and nothing here could have caught it.
 
-Issue #1 was filed against rung 3 for that reason — the dev-dependency is the
-one that looks unusual, and removing it would move the failure to rung 2 rather
-than clearing it.
+Until some point after 2026-08-14, subconscious was private, and this section
+said so — it called rung 2 "the hard wall" and rung 3 merely the one that
+*looks* unusual. That reversed after subconscious went public, and a reader
+following rung 2's advice would have gone looking for permission they already
+had. The repository state changed under a recorded measurement, which is the
+failure mode a dated claim has and an undated one hides.
 
-`engram-core` is a **dev**-dependency and powers one test
-(`crates/fusiform-module/tests/enrollment.rs`), which validates the backup
-enrollment descriptor against engram's own parser rather than a hand-written
-schema copy. The other three are regular dependencies and are not optional.
+So issue #1's disposition no longer holds either. It was declined on the
+grounds that removing the dev-dependency would move the failure to rung 2
+rather than clear it. Rung 2 is gone, so removing rung 3 now clears the ladder,
+and issues #6 and #7 re-raise it correctly against the changed state.
+
+`engram-core` is a **dev**-dependency and powers one test file
+(`crates/fusiform-module/tests/enrollment.rs`, 5 tests), which validates the
+backup enrollment descriptor against engram's own parser rather than a
+hand-written schema copy. The other three are regular dependencies.
+
+**A dev-dependency still gates a release build**, which is the part that
+surprises people: Cargo resolves the whole workspace graph before honouring a
+target, so a missing dev-dep manifest fails `cargo build --release -p
+fusiform-module` and `cargo metadata`, not only `cargo test`.
+
+And it cannot be feature-gated away. Both obvious shapes were measured here on
+2026-09-22 and both fail:
+
+```
+optional dev-dependency    cargo refuses the manifest outright:
+                           "dev-dependencies are not allowed to be optional"
+optional PATH dependency   still loads the source with the feature OFF:
+                           "failed to load source for dependency"
+```
+
+The only shape that keeps a path out of the graph is keeping the crate that
+declares it out of the workspace (`[workspace] exclude`), which resolves
+cleanly — also measured. Noted so the next person to propose a feature flag
+reads the refusal rather than discovering it.
 
 Scripts: `scripts/release-build.sh` builds with the commit stamped in and runs
 anywhere. `scripts/stage.sh` signs with an Apple Developer identity and is
