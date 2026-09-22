@@ -40,12 +40,3 @@ tempfile = "3"
 # recorded. Must be sha256 specifically: checking a different hash would verify
 # the test's own arithmetic rather than what the script wrote.
 sha2 = "0.10"
-# Validates the engram enrollment with engram's OWN parser rather than a
-# reimplementation of it. A schema check written here would assert my reading of
-# their format; theirs asserts the format.
-#
-# The `client` feature is required, not optional: `engram_core::catalog` is
-# gated behind it. Building with default-features = false compiles and then
-# fails at the import, because the module simply is not there. `capture-db` is
-# left off — it links a bundled SQLite that a JSON parse has no use for.
-engram-core = { path = "../../../engram/engram-core", default-features = false, features = ["client"] }

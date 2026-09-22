@@ -192,10 +192,10 @@ jobs:
           app-id: ${{ secrets.CK_CI_APP_ID }}
           private-key: ${{ secrets.CK_CI_APP_PRIVATE_KEY }}
           owner: cortexkit
-          repositories: subconscious,commons,engram
+          repositories: subconscious,commons
 
-      # The path deps resolve to ../subconscious, ../commons and ../engram
-      # relative to the workspace, so the siblings check out beside fusiform.
+      # The path deps resolve to ../subconscious and ../commons relative to the
+      # workspace, so the siblings check out beside fusiform.
       - name: Checkout subconscious
         uses: actions/checkout@v5
         with:
@@ -208,13 +208,6 @@ jobs:
         with:
           repository: cortexkit/commons
           path: commons
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Checkout engram
-        uses: actions/checkout@v5
-        with:
-          repository: cortexkit/engram
-          path: engram
           token: ${{ steps.app-token.outputs.token }}
 
       - uses: dtolnay/rust-toolchain@stable
