@@ -16,7 +16,6 @@ fusiform-protocol = { path = "../fusiform-protocol" }
 fusiform-store = { path = "../fusiform-store" }
 
 subc-client-rs = { workspace = true }
-subc-core = { workspace = true }
 subc-protocol = { workspace = true }
 
 serde_json = { workspace = true }

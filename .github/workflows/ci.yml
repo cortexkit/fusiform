@@ -192,17 +192,11 @@ jobs:
           app-id: ${{ secrets.CK_CI_APP_ID }}
           private-key: ${{ secrets.CK_CI_APP_PRIVATE_KEY }}
           owner: cortexkit
-          repositories: subconscious,commons
+          repositories: commons
 
-      # The path deps resolve to ../subconscious and ../commons relative to the
-      # workspace, so the siblings check out beside fusiform.
-      - name: Checkout subconscious
-        uses: actions/checkout@v5
-        with:
-          repository: cortexkit/subconscious
-          path: subconscious
-          token: ${{ steps.app-token.outputs.token }}
-
+      # The commons store crates are the one remaining path dependency
+      # (../commons relative to the workspace), so commons checks out beside
+      # fusiform. Everything from subconscious comes from crates.io.
       - name: Checkout commons
         uses: actions/checkout@v5
         with:

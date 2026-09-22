@@ -13,17 +13,17 @@ Runs as `ck-fusiform`, a supervised module of the subc daemon. See
 
 ## Building
 
-**This repo does not build from a clone of itself alone.** It takes two
-CortexKit siblings as path dependencies, expected as directories beside it:
+**This repo does not build from a clone of itself alone.** The subconscious
+crates come from crates.io, but the commons store crates have never been
+published, so commons is still a path dependency, expected beside this repo:
 
 ```
 cortexkit/
   fusiform/      <- this repo
-  subconscious/  <- subc-client-rs, subc-protocol, subc-transport, subc-core
-  commons/       <- cortexkit-paths, cortexkit-store, cortexkit-store-types
+  commons/       <- cortexkit-store, cortexkit-store-types
 ```
 
-Both are public, so cloning them beside this one is the whole setup. Measured
+Commons is public, so cloning it beside this one is the whole setup. Measured
 2026-09-22 with `gh api repos/cortexkit/<name> --jq .visibility`; re-run that if
 a clone fails on permission, since visibility is a setting in another repository
 and nothing here can notice it change.

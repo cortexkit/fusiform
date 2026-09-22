@@ -4,18 +4,19 @@ members = ["crates/fusiform-core",
     "crates/fusiform-protocol", "crates/fusiform-store", "crates/fusiform-module", "crates/fusiform-cli",
     "crates/fusiform-testkit"]
 
-# Sibling checkouts, matching the layout CI creates. The daemon contract is a
-# library rather than a template: HELLO, HELLO_ACK, route binding, health
-# control and the frame lifecycle all live in subc-client-rs, and re-deriving
-# any of them by hand is how a module ends up subtly wrong at handshake.
+# The daemon contract is a library rather than a template: HELLO, HELLO_ACK,
+# route binding, health control and the frame lifecycle all live in
+# subc-client-rs, and re-deriving any of them by hand is how a module ends up
+# subtly wrong at handshake.
+#
+# Taken from crates.io rather than a sibling checkout, so the build depends on
+# what subconscious released instead of whatever its working tree holds today.
 [workspace.dependencies]
 fusiform-testkit = { path = "crates/fusiform-testkit" }
-subc-client-rs = { path = "../subconscious/crates/subc-client-rs" }
-subc-protocol = { path = "../subconscious/crates/subc-protocol" }
-subc-transport = { path = "../subconscious/crates/subc-transport" }
-subc-core = { path = "../subconscious/crates/subc-core" }
+subc-client-rs = "0.15.4"
+subc-protocol = "0.22.0"
+subc-transport = "0.7.1"
 
-cortexkit-paths = { path = "../commons/crates/cortexkit-paths" }
 cortexkit-store = { path = "../commons/crates/cortexkit-store", features = ["sqlite"] }
 cortexkit-store-types = { path = "../commons/crates/cortexkit-store-types" }
 
