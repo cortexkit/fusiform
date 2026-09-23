@@ -215,7 +215,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -825,7 +825,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -951,7 +951,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1103,9 +1103,9 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "subc-client-rs"
-version = "0.17.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8d22a2461e8c64528980d82bbee9af2ced1d1e9db1f62fea25bfd95c75c2da5"
+checksum = "12dcc94f66ee0e89aff9741e6b8016c0bb65f2b2440145ed692fef045f17d3ce"
 dependencies = [
  "async-trait",
  "serde",
@@ -1119,9 +1119,9 @@ dependencies = [
 
 [[package]]
 name = "subc-control"
-version = "0.17.1"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c22677ea1ce7bd78e6d94595c031551c9bef10f612c402f3087666202ed6a69"
+checksum = "e236f7aa7d55da06edbc5c1680e7ad445e1a86bd34981af7a517dac1e8454e7e"
 dependencies = [
  "serde",
  "serde_json",
@@ -1130,9 +1130,9 @@ dependencies = [
 
 [[package]]
 name = "subc-protocol"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6d931e8b4997c86a21a3a9dc24ea94e95f2b51dbf7959a7af2137c5e5fea1bb"
+checksum = "a105c67f4e011d1d018e3f1fc0aa70edf4f261d107534ee6f530fa7f3ef247aa"
 dependencies = [
  "serde",
  "serde_json",
@@ -1140,9 +1140,9 @@ dependencies = [
 
 [[package]]
 name = "subc-transport"
-version = "0.7.3"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "060ab59acf3bf0635fc86b6bd609e86465d53d1dfc101d02fce808b17be93e02"
+checksum = "30cbf8874a24a6bdbdf342a14efa372835923f0658c0b98ba260dbca27783e3b"
 dependencies = [
  "getrandom 0.2.17",
  "hmac",
@@ -1213,7 +1213,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
