@@ -44,6 +44,7 @@
 #
 # Usage:
 #   scripts/train-push.sh <train-name>
+#   scripts/train-push.sh <train-name> --land
 #   scripts/train-push.sh <train-name> -- <local smoke command...>
 #
 # The optional smoke is the targeted slice the diff touches (the one or two
@@ -83,11 +84,30 @@
 #   2  precondition refusal, bad usage, failed smoke, or no CI run resolved
 #   3  the default branch kept moving through 3 re-queue rounds, or the rebase
 #      conflicted
+#   4  CI is green, but landing failed; re-run with --land to finish without
+#      paying for another CI run
 set -euo pipefail
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(git rev-parse --show-toplevel)"
-cd "$repo_root"
+# Run from a private copy of this file. bash reads a script incrementally, so an
+# edit to scripts/train-push.sh while a train is watching CI (a pick of a
+# peer's fix, a rebase that moves the file) shifts the running instance's read
+# offset and it dies at its next statement with a syntax error, after CI went
+# green and before the fast-forward (train 121, 2026-09-19). The copy is
+# immune; the instance remembers the real path for its own diagnostics.
+if [ -z "${TRAIN_PUSH_EXEC_COPY:-}" ]; then
+  train_push_copy="$(mktemp "${TMPDIR:-/tmp}/train-push.XXXXXX")"
+  cp "${BASH_SOURCE[0]}" "$train_push_copy"
+  TRAIN_PUSH_EXEC_COPY="$train_push_copy" TRAIN_PUSH_SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")" \
+    exec bash "$train_push_copy" "$@"
+fi
+trap 'rm -f "$TRAIN_PUSH_EXEC_COPY"' EXIT
+
+repo_slug_override="${REPO:-}"
+REPO="$(git rev-parse --show-toplevel)" || {
+  printf 'train-push: refusing — cannot resolve the repository while the current working directory is valid\n' >&2
+  exit 2
+}
+script_dir="$REPO/scripts"
 
 remote="origin"
 # Resolved from the remote below, never assumed: this repo's default branch is
@@ -106,7 +126,7 @@ tests_workflow_name="${WATCH_CI_WORKFLOW:-tests.yml}"
 # runs for another repository's trains.
 repo_from_origin() {
   local url
-  url="$(git config --get "remote.$remote.url" 2>/dev/null)" || return 1
+  url="$(git -C "$REPO" config --get "remote.$remote.url" 2>/dev/null)" || return 1
   case "$url" in
     git@github.com:*) url="${url#git@github.com:}" ;;
     https://github.com/*) url="${url#https://github.com/}" ;;
@@ -115,7 +135,7 @@ repo_from_origin() {
   esac
   printf '%s\n' "${url%.git}"
 }
-repo_slug="${REPO:-}"
+repo_slug="$repo_slug_override"
 # How long the first-run probe waits for a run to start. Overridable for the
 # same reason watch-ci.sh's resolver knobs are: tests cannot wait out the
 # real budget.
@@ -139,7 +159,7 @@ refuse() {
 # Arguments
 # ---------------------------------------------------------------------------
 if [ "$#" -eq 0 ]; then
-  refuse "no train name given (usage: scripts/train-push.sh <train-name> [-- <smoke command>])"
+  refuse "no train name given (usage: scripts/train-push.sh <train-name> [--land | -- <smoke command>])"
 fi
 
 train_name="$1"
@@ -148,25 +168,31 @@ case "$train_name" in
   -*) refuse "train name must not look like a flag (got '$train_name')" ;;
 esac
 
+land_only=0
 smoke_given=0
 smoke_cmd=()
 if [ "$#" -gt 0 ]; then
-  if [ "$1" != "--" ]; then
-    refuse "unexpected argument '$1' (the smoke command must follow a bare --)"
+  if [ "$1" = "--land" ]; then
+    land_only=1
+    shift
+    [ "$#" -eq 0 ] || refuse "--land does not accept a smoke command"
+  elif [ "$1" = "--" ]; then
+    shift
+    if [ "$#" -eq 0 ]; then
+      refuse "-- given without a smoke command"
+    fi
+    smoke_given=1
+    smoke_cmd=("$@")
+  else
+    refuse "unexpected argument '$1' (use --land, or put the smoke command after a bare --)"
   fi
-  shift
-  if [ "$#" -eq 0 ]; then
-    refuse "-- given without a smoke command"
-  fi
-  smoke_given=1
-  smoke_cmd=("$@")
 fi
 
 train_ref="train/$train_name"
 # Validate before the name reaches a refspec: a name with a space, a leading
 # dot, or '..' in it produces a confusing git error deep in the push instead of
 # a named refusal here.
-if ! git check-ref-format "refs/heads/$train_ref"; then
+if ! git -C "$REPO" check-ref-format "refs/heads/$train_ref"; then
   refuse "'$train_name' is not a usable branch name component"
 fi
 
@@ -191,7 +217,23 @@ fi
 # only. One operator, one box here; a second machine driving the same remote is
 # invisible to it, which is why leftover refs are still listed below.
 # (Lifted from BROCA's train-push, d588cb6c.)
-train_lock_dir="$(git rev-parse --git-dir 2>/dev/null)/train-push-locks"
+# Absolute so locks and heartbeats remain addressable after the launch cwd is
+# removed; later diagnostics can also name a path usable from anywhere.
+#
+# Two directories, because a linked worktree has both. `git_dir` is THIS
+# worktree's (.git/worktrees/<name>): in-progress operations (MERGE_HEAD,
+# rebase-merge/) live there and are per-worktree. `git_common_dir` is the
+# repository's own .git, shared by every worktree: anything that is one fact
+# per repository (the train lock, the watch heartbeat, the trigger proof,
+# hooks) must live there, or each fresh worktree re-proves the trigger, two
+# worktrees can push the same train at once, and the repo's pre-push hook is
+# looked for in a directory that never has one.
+git_dir="$(git -C "$REPO" rev-parse --absolute-git-dir 2>/dev/null)"
+git_common_dir="$(cd "$REPO" && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)"
+[ -n "$git_common_dir" ] || git_common_dir="$git_dir"
+train_lock_dir="$git_common_dir/train-push-locks"
+watch_name="${train_name//\//-}"
+watch_heartbeat="$git_common_dir/train-push-$watch_name.watch"
 mkdir -p "$train_lock_dir" 2>/dev/null || true
 train_lock_held="$train_lock_dir/held"
 
@@ -250,11 +292,11 @@ done
 # train. They are listed with the delete composed, because the operator reaching
 # this line is usually mid-CI-failure and composing `--delete train/<name>` by
 # hand next to several refs is where the wrong one gets deleted.
-stale_refs=$(git ls-remote --heads "$remote" 'train/*' 2>/dev/null | wc -l | tr -d ' ')
+stale_refs=$(git -C "$REPO" ls-remote --heads "$remote" 'train/*' 2>/dev/null | wc -l | tr -d ' ')
 if [ "${stale_refs:-0}" -gt 0 ]; then
   printf 'train-push: %s train ref(s) on %s with no live train here:\n' \
     "$stale_refs" "$remote" >&2
-  git ls-remote --heads "$remote" 'train/*' 2>/dev/null |
+  git -C "$REPO" ls-remote --heads "$remote" 'train/*' 2>/dev/null |
     sed "s|.*refs/heads/|    git push $remote --delete |" >&2
   printf '  (proceeding: a ref without a process cannot race this train)\n' >&2
 fi
@@ -263,15 +305,217 @@ fi
 # Sourced up front because the trigger probe, the default-branch fallback, and
 # watch-ci.sh all need it - failing here beats failing after a CI run.
 # shellcheck source=lib/operator-gh.sh
-source "$script_dir/lib/operator-gh.sh" || exit 2
+source "$REPO/scripts/lib/operator-gh.sh" || exit 2
 
 if [ -z "$repo_slug" ]; then
   repo_slug="$(repo_from_origin)" ||
     refuse "cannot derive the repository from $remote's URL; set REPO=owner/name"
 fi
-# watch-ci.sh derives the same value the same way; exporting it pins the watch
-# to the repository this script proved the trigger on.
-export REPO="$repo_slug"
+# watch-ci.sh receives the GitHub slug for its own REPO interface at each call;
+# this process keeps REPO as the stable checkout path used by every git command.
+
+# Read the default branch off the remote. Every later message, the moved-branch
+# check and the fast-forward target all come from this one answer.
+resolve_default_branch() {
+  local ref
+  local name
+
+  ref="$(git -C "$REPO" symbolic-ref -q "refs/remotes/$remote/HEAD" 2>/dev/null || true)"
+  name="${ref#refs/remotes/"$remote"/}"
+  if [ -n "$ref" ] && [ -n "$name" ] && [ "$name" != "$ref" ]; then
+    printf '%s\n' "$name"
+    return 0
+  fi
+
+  name="$("$OPERATOR_GH" repo view "$repo_slug" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
+  [ -n "$name" ] || return 1
+  printf '%s\n' "$name"
+}
+
+resolve_ci_run() {
+  local sha="$1"
+  "$OPERATOR_GH" run list --repo "$repo_slug" --workflow "$tests_workflow_name" \
+    --event "${WATCH_CI_EVENT:-push}" --limit 40 --json databaseId,headSha \
+    --jq ".[] | select(.headSha==\"$sha\") | .databaseId" 2>/dev/null | head -1
+}
+
+ci_run_url() {
+  "$OPERATOR_GH" run view "$1" --repo "$repo_slug" --json url --jq '.url' 2>/dev/null || true
+}
+
+report_existing_red() {
+  local sha="$1"
+  local run_url="$2"
+  printf 'train-push: CI red for previously pushed %s\n' "$sha" >&2
+  [ -z "$run_url" ] || printf 'train-push: run %s\n' "$run_url" >&2
+  printf 'train-push: %s/%s still holds %s — fix, commit, and re-run: scripts/train-push.sh %s\n' \
+    "$remote" "$train_ref" "$sha" "$train_name" >&2
+}
+
+landing_failed() {
+  local reason="$1"
+  local sha="$2"
+  local run_url="$3"
+  {
+    printf 'train-push: CI green, but landing failed — %s\n' "$reason"
+    printf '  green run: %s\n' "$run_url"
+    printf '  train sha: %s\n' "$sha"
+    printf '  finish without re-running CI:\n'
+    printf '    scripts/train-push.sh %s --land\n' "$train_name"
+  } >&2
+  exit 4
+}
+
+require_repo_after_green() {
+  local sha="$1"
+  local run_url="$2"
+  if [ ! -d "$REPO" ]; then
+    landing_failed "repository path $REPO no longer exists" "$sha" "$run_url"
+  fi
+}
+
+process_start_time() {
+  ps -p "$1" -o lstart= 2>/dev/null | awk '{$1=$1; print}' || true
+}
+
+read_watcher_heartbeat() {
+  heartbeat_pid=""
+  heartbeat_start=""
+  heartbeat_updated=""
+  heartbeat_dead_note=""
+  [ -f "$watch_heartbeat" ] || return 0
+
+  heartbeat_pid="$(sed -n 's/^pid=//p' "$watch_heartbeat" | head -1)"
+  heartbeat_start="$(sed -n 's/^start=//p' "$watch_heartbeat" | head -1)"
+  heartbeat_updated="$(sed -n 's/^updated=//p' "$watch_heartbeat" | head -1)"
+  case "$heartbeat_pid" in
+    '' | *[!0-9]*) heartbeat_now="" ;;
+    *) heartbeat_now="$(process_start_time "$heartbeat_pid")" ;;
+  esac
+
+  if [ -n "$heartbeat_now" ] && [ "$heartbeat_now" = "$heartbeat_start" ] && kill -0 "$heartbeat_pid" 2>/dev/null; then
+    refuse "watcher $heartbeat_pid is still running for $remote/$train_ref; wait for it"
+  fi
+
+  heartbeat_dead_note="watcher ${heartbeat_pid:-unknown} died at ${heartbeat_updated:-an unknown time}"
+}
+
+refuse_non_fast_forward() {
+  local sha="$1"
+  refuse "$sha is not a fast-forward of $remote/$default_branch; rebase and re-run: scripts/train-push.sh $train_name"
+}
+
+land_verified_sha() {
+  local sha="$1"
+  local run_url="$2"
+
+  require_repo_after_green "$sha" "$run_url"
+  git -C "$REPO" fetch -q "$remote" "$default_branch" ||
+    landing_failed "git fetch $remote $default_branch failed" "$sha" "$run_url"
+  if ! git -C "$REPO" merge-base --is-ancestor "$remote_default" "$sha"; then
+    refuse_non_fast_forward "$sha"
+  fi
+
+  say "landing CI-verified $sha on $remote/$default_branch"
+  set +e
+  git -C "$REPO" push "$remote" "$sha:refs/heads/$default_branch" 2>&1 | tee "$push_log"
+  land_rc="${PIPESTATUS[0]}"
+  set -e
+  if [ "$land_rc" -ne 0 ]; then
+    land_reason="push of $sha to $remote/$default_branch failed; $remote/$train_ref still holds the tested sha"
+    if grep -qE 'GH006|equired status check|rotected branch update failed' "$push_log"; then
+      land_reason="refused: $sha has no status check on origin. Merge onto the train branch and push there; CI runs on the merge sha, then main fast-forwards."
+    fi
+    landing_failed "$land_reason" "$sha" "$run_url"
+  fi
+
+  git -C "$REPO" fetch -q "$remote" "$default_branch" ||
+    landing_failed "could not verify $remote/$default_branch after push" "$sha" "$run_url"
+  if ! git -C "$REPO" merge-base --is-ancestor "$sha" "$remote_default"; then
+    landing_failed "push reported success but $sha is not on $remote/$default_branch" "$sha" "$run_url"
+  fi
+
+  say "landed previously-verified sha $sha from $run_url on $remote/$default_branch"
+  if ! git -C "$REPO" push -q "$remote" --delete "$train_ref"; then
+    printf 'train-push: warning — could not delete %s/%s (delete it by hand)\n' "$remote" "$train_ref" >&2
+  fi
+  rm -f "$watch_heartbeat"
+  say "done"
+}
+
+watch_log="$(mktemp "${TMPDIR:-/tmp}/train-push-watch.XXXXXX")"
+push_log="$(mktemp "${TMPDIR:-/tmp}/train-push-push.XXXXXX")"
+trap 'rm -f "$watch_log" "$push_log" "$TRAIN_PUSH_EXEC_COPY"' EXIT
+
+git -C "$REPO" fetch -q --prune "$remote" || refuse "git fetch $remote failed"
+default_branch="$(resolve_default_branch || true)"
+if [ -z "$default_branch" ]; then
+  refuse "could not determine $remote's default branch (run: git remote set-head $remote -a)"
+fi
+remote_default="refs/remotes/$remote/$default_branch"
+if ! git -C "$REPO" rev-parse --verify -q "$remote_default" >/dev/null; then
+  refuse "no $remote/$default_branch to land on"
+fi
+
+head_sha="$(git -C "$REPO" rev-parse HEAD)"
+train_remote_sha=""
+if git -C "$REPO" rev-parse --verify -q "refs/remotes/$remote/$train_ref" >/dev/null; then
+  train_remote_sha="$(git -C "$REPO" rev-parse "refs/remotes/$remote/$train_ref")"
+fi
+
+recover_existing=0
+if [ "$land_only" -eq 1 ]; then
+  [ -n "$train_remote_sha" ] || refuse "--land needs an existing $remote/$train_ref"
+  recover_existing=1
+elif [ -n "$train_remote_sha" ] && [ "$train_remote_sha" = "$head_sha" ]; then
+  recover_existing=1
+fi
+
+if [ "$recover_existing" -eq 1 ]; then
+  verified_sha="$train_remote_sha"
+  read_watcher_heartbeat
+  run_id="$(resolve_ci_run "$verified_sha")"
+  run_url=""
+  run_status=""
+  run_conclusion=""
+
+  if [ -n "$run_id" ]; then
+    verdict="$("$OPERATOR_GH" run view "$run_id" --repo "$repo_slug" \
+      --json status,conclusion --jq '[.status, (.conclusion // "")] | @tsv' 2>/dev/null || true)"
+    IFS=$'\t' read -r run_status run_conclusion <<< "$verdict"
+    run_url="$(ci_run_url "$run_id")"
+  fi
+
+  if [ "$run_status" = "completed" ] && [ "$run_conclusion" != "success" ]; then
+    report_existing_red "$verified_sha" "$run_url"
+    exit 1
+  fi
+
+  if [ "$run_status" != "completed" ]; then
+    watch_target="${run_id:-$verified_sha}"
+    say "attaching to CI for existing $remote/$train_ref at $verified_sha"
+    set +e
+    (cd "$REPO" && REPO="$repo_slug" WATCH_CI_HEARTBEAT="$watch_heartbeat" \
+      "$script_dir/watch-ci.sh" "$watch_target") 2>&1 | tee "$watch_log"
+    watch_rc="${PIPESTATUS[0]}"
+    set -e
+    run_url="$(grep -m1 '^CI_RUN_URL ' "$watch_log" 2>/dev/null | sed 's/^CI_RUN_URL //' || true)"
+    if [ "$watch_rc" -ne 0 ]; then
+      if [ "$watch_rc" -eq 1 ]; then
+        report_existing_red "$verified_sha" "$run_url"
+        exit 1
+      fi
+      refuse "could not watch CI for existing $remote/$train_ref at $verified_sha (watch-ci exit $watch_rc)"
+    fi
+  fi
+
+  [ -n "$run_url" ] || run_url="(run url not reported)"
+  if [ -n "$heartbeat_dead_note" ]; then
+    say "$heartbeat_dead_note; landing its verified sha $verified_sha"
+  fi
+  land_verified_sha "$verified_sha" "$run_url"
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # Preconditions
@@ -290,25 +534,22 @@ export REPO="$repo_slug"
 # depends on the ref. The path derives from the same variable the probe and
 # the watch use: two spellings of the workflow name in one script disagreed on
 # every lift whose gate is not called tests.yml.
-tests_workflow=".github/workflows/$tests_workflow_name"
-gate_scanner="$script_dir/lib/workflow-gates.py"
-# Absolute, so the pre-push warning below names a path the reader can act on
-# from anywhere rather than one relative to the repo root.
-git_dir="$(git rev-parse --absolute-git-dir)"
+tests_workflow="$REPO/.github/workflows/$tests_workflow_name"
+gate_scanner="$REPO/scripts/lib/workflow-gates.py"
 
 command -v python3 >/dev/null 2>&1 ||
   refuse "python3 is required to read the workflow files"
 if [ ! -f "$tests_workflow" ]; then
   # `ls` on an unmatched glob exits nonzero, which under `set -e` would end the
   # script inside this substitution before the refusal is printed.
-  present="$({ find .github/workflows -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null || true; } | sort | tr '\n' ' ')"
+  present="$({ find "$REPO/.github/workflows" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null || true; } | sort | tr '\n' ' ')"
   refuse "no $tests_workflow — set WATCH_CI_WORKFLOW=<file> to the workflow that gates a landing (present: ${present:-none}), and add \`train/**\` to on.push.branches in that file"
 fi
 
 set +e
 gate_report="$(python3 "$gate_scanner" --train-ref "$train_ref" \
   --tests-workflow "$tests_workflow" \
-  .github/workflows/*.yml .github/workflows/*.yaml 2>&1)"
+  "$REPO"/.github/workflows/*.yml "$REPO"/.github/workflows/*.yaml 2>&1)"
 scanner_rc=$?
 set -e
 if [ "$scanner_rc" -ne 0 ]; then
@@ -316,7 +557,12 @@ if [ "$scanner_rc" -ne 0 ]; then
   refuse "could not read the workflow files (workflow-gates.py exit $scanner_rc)"
 fi
 
-if ! printf '%s\n' "$gate_report" | grep -qx 'trigger|ok'; then
+# A here-string rather than `printf | grep -q`: under pipefail, grep -q closes
+# the pipe on its first match and a producer still writing takes SIGPIPE, so
+# the pipeline returns 141 and the guard reads FALSE exactly when the row is
+# present. The report is small enough today that the writer usually finishes
+# first, which is the kind of reasoning that hides the defect until it does not.
+if ! grep -qx 'trigger|ok' <<<"$gate_report"; then
   refuse "tests.yml does not run on $train_ref — add \`train/**\` to on.push.branches in .github/workflows/tests.yml"
 fi
 
@@ -368,12 +614,18 @@ fi
 # here to find out would be the very cost being warned about.
 warn_repo_local_pre_push() {
   local configured
-  local repo_local="$git_dir/hooks/pre-push"
+  local repo_local="$git_common_dir/hooks/pre-push"
   local hook
   local -a candidates
 
   candidates=("$repo_local")
-  configured="$(git config --get core.hooksPath 2>/dev/null || true)"
+  configured="$(git -C "$REPO" config --get core.hooksPath 2>/dev/null || true)"
+  if [ -n "$configured" ]; then
+    case "$configured" in
+      /*) : ;;
+      *) configured="$REPO/$configured" ;;
+    esac
+  fi
   if [ -n "$configured" ]; then
     case "$configured" in
       # AFT's managed dispatcher is not a gate: it chains to the repo-local
@@ -425,58 +677,92 @@ if [ -e "$git_dir/REBASE_HEAD" ]; then
   say "note: REBASE_HEAD present with no rebase in progress (a finished rebase's leftover ref; ignored)"
 fi
 
-# CI tests the pushed commit, not the working tree. Uncommitted work would be
-# invisible to the gate and then silently absent from what lands on main.
-if [ -n "$(git status --porcelain)" ]; then
-  refuse "working tree is not clean (commit or stash before pushing a train)"
-fi
-
-git fetch -q --prune "$remote" || refuse "git fetch $remote failed"
-
-# Read the default branch off the remote. Every later message, the moved-branch
-# check and the fast-forward target all come from this one answer, so a repo
-# whose default is not called main is landed on correctly instead of silently
-# having a 'main' created for it.
-resolve_default_branch() {
-  local ref
-  local name
-
-  ref="$(git symbolic-ref -q "refs/remotes/$remote/HEAD" 2>/dev/null || true)"
-  name="${ref#refs/remotes/"$remote"/}"
-  if [ -n "$ref" ] && [ -n "$name" ] && [ "$name" != "$ref" ]; then
-    printf '%s\n' "$name"
-    return 0
+# Editors run cargo without --locked on save (rust-analyzer's check-on-save
+# is the measured case), and in a repository that path-depends on sibling
+# checkouts that rewrites Cargo.lock to whatever those checkouts happen to be
+# at: the `version =` line of each source-less package moves and nothing
+# else. That diff cannot be an intentional edit here, because pins advance
+# through refresh-siblings-lock.sh, which moves siblings.lock in the same
+# change. So a lone Cargo.lock drift of exactly that shape is restored and
+# named rather than refused. Anything wider (a `source =` or `checksum =`
+# line, a dependency list, any other dirty file) is still the operator's
+# uncommitted work and stays a refusal. The gate's guarantee holds either
+# way: CI tests the pushed commit, and the restored lock IS that commit's.
+#
+# Prints the drifted package names, one per line, when the working tree is
+# dirty in exactly that way; prints nothing and returns 1 otherwise.
+sibling_lock_drift_packages() {
+  [ "$(git -C "$REPO" status --porcelain)" = " M Cargo.lock" ] || return 1
+  # Every changed line must be a version line. -U1 keeps the `name =` line
+  # that precedes `version =` in a [[package]] block as context.
+  local diff non_version
+  diff="$(git -C "$REPO" diff -U1 -- Cargo.lock)"
+  # One awk pass rather than a grep pipeline ending in -q: under pipefail a
+  # `grep -qv` that meets a non-version line first exits, the writers behind
+  # it take SIGPIPE, the pipeline returns 141, and the `if` reads FALSE — so a
+  # real working-tree change early in a large diff was classified as pure
+  # drift and Cargo.lock was RESTORED over the operator's uncommitted work.
+  # Reading to EOF and counting cannot be inverted that way.
+  non_version="$(printf '%s\n' "$diff" | awk '
+    /^(\+\+\+|---)/ { next }
+    /^[-+]/ && !/^[-+]version = "/ { n++ }
+    END { print n + 0 }')"
+  if [ "$non_version" -ne 0 ]; then
+    return 1
   fi
-
-  # A remote wired up by hand has no origin/HEAD to read; ask the forge rather
-  # than guessing a name.
-  name="$("$OPERATOR_GH" repo view "$repo_slug" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
-  [ -n "$name" ] || return 1
-  printf '%s\n' "$name"
+  # For each removed version line, find the [[package]] block in HEAD's lock
+  # with that name and that version and require it to have no `source =`.
+  # A name can appear twice (a path copy beside a registry or git copy of
+  # the same crate), which is why the block is matched on both fields.
+  local head_lock names name old
+  head_lock="$(git -C "$REPO" show HEAD:Cargo.lock)"
+  names=""
+  while IFS= read -r line; do
+    case "$line" in
+      'name = "'*) name="${line#name = \"}"; name="${name%\"}" ;;
+      '-version = "'*)
+        old="${line#-version = \"}"; old="${old%\"}"
+        [ -n "$name" ] || return 1
+        printf '%s\n' "$head_lock" | awk -v n="$name" -v v="$old" '
+          /^\[\[package\]\]/ { inblk=1; hit=0; src=0; next }
+          inblk && $0 == "name = \"" n "\"" { hit=1; next }
+          inblk && hit && $0 == "version = \"" v "\"" { ver=1; next }
+          inblk && hit && ver && /^source = / { src=1 }
+          inblk && /^$/ { if (hit && ver) { found=1; if (src) bad=1 } inblk=0; hit=0; ver=0; src=0 }
+          END { if (hit && ver) { found=1; if (src) bad=1 } exit !(found && !bad) }
+        ' || return 1
+        names="${names}${name}\n"
+        name=""
+        ;;
+    esac
+  done <<EOF_DIFF
+$(printf '%s\n' "$diff" | grep -E '^( name = "|-version = ")' | sed 's/^ //')
+EOF_DIFF
+  [ -n "$names" ] || return 1
+  printf '%b' "$names"
 }
 
-default_branch="$(resolve_default_branch || true)"
-if [ -z "$default_branch" ]; then
-  refuse "could not determine $remote's default branch (run: git remote set-head $remote -a)"
+# CI tests the pushed commit, not the working tree. Uncommitted work would be
+# invisible to the gate and then silently absent from what lands on main.
+if drifted="$(sibling_lock_drift_packages)"; then
+  git -C "$REPO" checkout -- Cargo.lock
+  say "restored Cargo.lock: sibling path-dependency drift in $(printf '%s' "$drifted" | paste -sd, -) (an editor's cargo run without --locked; the committed lock is what CI tests)"
 fi
-
-remote_default="refs/remotes/$remote/$default_branch"
-if ! git rev-parse --verify -q "$remote_default" >/dev/null; then
-  refuse "no $remote/$default_branch to land on"
+if [ -n "$(git -C "$REPO" status --porcelain)" ]; then
+  refuse "working tree is not clean (commit or stash before pushing a train)"
 fi
 
 # A local main behind origin/main means the train was built on a stale base:
 # CI would test it green and the land would still be refused in step 5.
-if git rev-parse --verify -q refs/heads/"$default_branch" >/dev/null; then
-  if ! git merge-base --is-ancestor "$remote_default" "refs/heads/$default_branch"; then
+if git -C "$REPO" rev-parse --verify -q refs/heads/"$default_branch" >/dev/null; then
+  if ! git -C "$REPO" merge-base --is-ancestor "$remote_default" "refs/heads/$default_branch"; then
     refuse "local $default_branch is behind $remote/$default_branch (git merge --ff-only $remote/$default_branch first)"
   fi
 fi
 
-head_sha="$(git rev-parse HEAD)"
 # HEAD is what lands, so HEAD is what has to fast-forward main. Checked here so
 # a doomed train is refused before it costs a CI run, and again after CI.
-if ! git merge-base --is-ancestor "$remote_default" "$head_sha"; then
+if ! git -C "$REPO" merge-base --is-ancestor "$remote_default" "$head_sha"; then
   refuse "HEAD is not a descendant of $remote/$default_branch (rebase onto $remote/$default_branch first)"
 fi
 
@@ -498,9 +784,9 @@ run_trigger_probe() {
   say "first train in this repo — proving $tests_workflow_name starts on a train branch"
   # commit-tree writes the probe commit as a loose object: HEAD, the index and
   # the working tree are untouched by the probe.
-  probe_sha="$(git commit-tree "$head_sha^{tree}" -p "$head_sha" -m "train-push trigger probe")" ||
+  probe_sha="$(git -C "$REPO" commit-tree "$head_sha^{tree}" -p "$head_sha" -m "train-push trigger probe")" ||
     refuse "could not build the trigger probe commit"
-  git push -q --force "$remote" "$probe_sha:refs/heads/$probe_ref" ||
+  git -C "$REPO" push -q --force "$remote" "$probe_sha:refs/heads/$probe_ref" ||
     refuse "could not push the trigger probe to $remote/$probe_ref"
 
   # ~2 minutes. A run that is going to exist is queued within seconds; waiting
@@ -525,8 +811,10 @@ run_trigger_probe() {
     sleep "$probe_sleep"
   done
 
-  git push -q "$remote" --delete "$probe_ref" ||
-    printf 'train-push: warning — could not delete %s/%s\n' "$remote" "$probe_ref" >&2
+  local delete_error
+  if ! delete_error="$(git -C "$REPO" push -q "$remote" --delete "$probe_ref" 2>&1)"; then
+    printf 'train-push: warning — could not delete %s/%s: %s\n' "$remote" "$probe_ref" "$delete_error" >&2
+  fi
 
   if [ -z "$rid" ]; then
     refuse "no $tests_workflow_name run started for the probe on $probe_ref — the platform does not run it on train branches, whatever the workflow file says"
@@ -549,21 +837,21 @@ fi
 # runs; both are read-only here (scripts/align-governed-docs.sh is the
 # writing half and stays the remedy, not something this script performs).
 preflights_ran=()
-if [ -f scripts/audit-v049-agent-surface.ts ]; then
-  bun scripts/audit-v049-agent-surface.ts \
+if [ -f "$REPO/scripts/audit-v049-agent-surface.ts" ]; then
+  bun "$REPO/scripts/audit-v049-agent-surface.ts" \
     || refuse "governed-surface audit failed — run scripts/align-governed-docs.sh"
   preflights_ran+=(governed-surface-audit)
 fi
-if [ -f scripts/release-gate-v049.mjs ]; then
-  node scripts/release-gate-v049.mjs \
+if [ -f "$REPO/scripts/release-gate-v049.mjs" ]; then
+  node "$REPO/scripts/release-gate-v049.mjs" \
     || refuse "release gate failed — run scripts/align-governed-docs.sh"
   preflights_ran+=(release-gate)
 fi
 # A repository may add its own preflights beside this script without editing
 # it; the hook is sourced so it can call `refuse` and `say`.
-if [ -f scripts/train-push.local.sh ]; then
+if [ -f "$REPO/scripts/train-push.local.sh" ]; then
   # shellcheck disable=SC1091
-  . scripts/train-push.local.sh
+  . "$REPO/scripts/train-push.local.sh"
   preflights_ran+=(train-push.local.sh)
 fi
 if [ "${#preflights_ran[@]}" -eq 0 ]; then
@@ -582,12 +870,12 @@ if [ "$smoke_given" -eq 1 ]; then
     # A single argument is a shell string, which may be a pipeline. Without
     # pipefail a failing first stage is hidden behind a successful last stage,
     # so the smoke would report green over a failed command.
-    bash -c "set -o pipefail
-${smoke_cmd[0]}"
+    (cd "$REPO" && bash -c "set -o pipefail
+${smoke_cmd[0]}")
   else
     # Argv form runs bare: this script adds no pipe of its own, so the
     # command's own status is the status we read.
-    "${smoke_cmd[@]}"
+    (cd "$REPO" && "${smoke_cmd[@]}")
   fi
   smoke_rc=$?
   set -e
@@ -611,28 +899,20 @@ round=1
 # The sha a check actually ran green against. Only this sha may land.
 verified_sha=""
 
-watch_log="$(mktemp "${TMPDIR:-/tmp}/train-push-watch.XXXXXX")"
-push_log="$(mktemp "${TMPDIR:-/tmp}/train-push-push.XXXXXX")"
-trap 'rm -f "$watch_log" "$push_log"' EXIT
-
 # What we believe $remote/$train_ref points at. Tracked explicitly so every
 # re-push leases against the sha WE pushed instead of trusting a remote-tracking
 # ref to have been refreshed along the way.
-train_remote_sha=""
-if git rev-parse --verify -q "refs/remotes/$remote/$train_ref" >/dev/null; then
-  train_remote_sha="$(git rev-parse "refs/remotes/$remote/$train_ref")"
-fi
 
 push_train() {
   if [ -z "$train_remote_sha" ]; then
     # Create with a plain push: a mistyped train name must not be able to
     # clobber a branch that already exists.
     say "creating $remote/$train_ref -> $head_sha"
-    git push "$remote" "$head_sha:refs/heads/$train_ref" ||
+    git -C "$REPO" push "$remote" "$head_sha:refs/heads/$train_ref" ||
       refuse "could not create $remote/$train_ref"
   else
     say "updating $remote/$train_ref -> $head_sha"
-    git push --force-with-lease="refs/heads/$train_ref:$train_remote_sha" \
+    git -C "$REPO" push --force-with-lease="refs/heads/$train_ref:$train_remote_sha" \
       "$remote" "$head_sha:refs/heads/$train_ref" ||
       refuse "could not update $remote/$train_ref (it moved since we pushed it — check who else is running this train)"
   fi
@@ -657,7 +937,7 @@ rebase_onto_main() {
   # it. A merge is a permitted train shape (see the header), so refuse the
   # automatic requeue and leave the remote train ref intact for the operator,
   # who knows what the merge resolved. (BROCA's find, 2026-09-11.)
-  merges="$(git rev-list --merges "$remote_default..$before" 2>/dev/null || true)"
+  merges="$(git -C "$REPO" rev-list --merges "$remote_default..$before" 2>/dev/null || true)"
   if [ -n "$merges" ]; then
     {
       printf 'train-push: %s/%s moved and the train carries merge commit(s) — not rebasing.\n' \
@@ -671,13 +951,13 @@ rebase_onto_main() {
     return 1
   fi
 
-  if git rebase "$remote_default"; then
+  if git -C "$REPO" rebase "$remote_default"; then
     return 0
   fi
 
-  conflicted="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
-  git rebase --abort >/dev/null 2>&1 || true
-  now="$(git rev-parse HEAD)"
+  conflicted="$(git -C "$REPO" diff --name-only --diff-filter=U 2>/dev/null || true)"
+  git -C "$REPO" rebase --abort >/dev/null 2>&1 || true
+  now="$(git -C "$REPO" rev-parse HEAD)"
   {
     printf 'train-push: rebase onto %s/%s conflicted — stopping.\n' "$remote" "$default_branch"
     if [ -n "$conflicted" ]; then
@@ -702,7 +982,8 @@ while true; do
   verified_sha=""
   say "watching CI for $head_sha on $train_ref in $repo_slug (round $round of $max_rounds)"
   set +e
-  "$script_dir/watch-ci.sh" "$head_sha" 2>&1 | tee "$watch_log"
+  (cd "$REPO" && REPO="$repo_slug" WATCH_CI_HEARTBEAT="$watch_heartbeat" \
+    "$script_dir/watch-ci.sh" "$head_sha") 2>&1 | tee "$watch_log"
   watch_rc="${PIPESTATUS[0]}"
   set -e
 
@@ -746,12 +1027,14 @@ while true; do
   say "CI green: $run_url"
 
   # Re-check right before the push, not just at the start of the script.
-  git fetch -q "$remote" "$default_branch" || refuse "git fetch $remote $default_branch failed"
-  if git merge-base --is-ancestor "$remote_default" "$head_sha"; then
+  require_repo_after_green "$head_sha" "$run_url"
+  git -C "$REPO" fetch -q "$remote" "$default_branch" ||
+    landing_failed "git fetch $remote $default_branch failed" "$head_sha" "$run_url"
+  if git -C "$REPO" merge-base --is-ancestor "$remote_default" "$head_sha"; then
     break
   fi
 
-  moved_sha="$(git rev-parse "$remote_default")"
+  moved_sha="$(git -C "$REPO" rev-parse "$remote_default")"
   printf 'train-push: %s/%s moved to %s while CI ran (round %s of %s) — %s was tested on the old base\n' \
     "$remote" "$default_branch" "$moved_sha" "$round" "$max_rounds" "$head_sha" >&2
 
@@ -769,7 +1052,7 @@ while true; do
   if ! rebase_onto_main "$head_sha"; then
     exit 3
   fi
-  head_sha="$(git rev-parse HEAD)"
+  head_sha="$(git -C "$REPO" rev-parse HEAD)"
   round=$((round + 1))
   say "rebased onto $moved_sha — train head is now $head_sha"
 done
@@ -778,42 +1061,39 @@ done
 # ran against. If any future edit moves HEAD between the watch and this push,
 # this stops main from fast-forwarding to a commit nothing verified.
 if [ "$verified_sha" != "$head_sha" ]; then
-  printf 'train-push: refusing to land %s — the green check ran against %s\n' \
-    "$head_sha" "${verified_sha:-nothing}" >&2
-  exit 1
+  landing_failed "refusing to land $head_sha because the green check ran against ${verified_sha:-nothing}" \
+    "$head_sha" "$run_url"
 fi
 
 say "landing $head_sha on $remote/$default_branch"
 set +e
-git push "$remote" "$head_sha:refs/heads/$default_branch" 2>&1 | tee "$push_log"
+git -C "$REPO" push "$remote" "$head_sha:refs/heads/$default_branch" 2>&1 | tee "$push_log"
 land_rc="${PIPESTATUS[0]}"
 set -e
 if [ "$land_rc" -ne 0 ]; then
   # Branch protection rejecting the sha for want of a check is the one push
   # failure with a specific remedy, so say what it is instead of leaving the
   # operator to decode GH006.
+  land_reason="push of $head_sha to $remote/$default_branch failed; $remote/$train_ref still holds the tested sha"
   if grep -qE 'GH006|equired status check|rotected branch update failed' "$push_log"; then
-    printf 'refused: %s has no status check on origin. Merge onto the train branch and push there; CI runs on the merge sha, then main fast-forwards.\n' \
-      "$head_sha" >&2
+    land_reason="refused: $head_sha has no status check on origin. Merge onto the train branch and push there; CI runs on the merge sha, then main fast-forwards."
   fi
-  printf 'train-push: push of %s to %s/%s failed; %s/%s still holds the tested sha\n' \
-    "$head_sha" "$remote" "$default_branch" "$remote" "$train_ref" >&2
-  exit 1
+  landing_failed "$land_reason" "$head_sha" "$run_url"
 fi
 
 # Outcome check, not just command check: a push can report success through a
 # wrapper (or fail on auth) while origin never moved.
-git fetch -q "$remote" "$default_branch"
-if ! git merge-base --is-ancestor "$head_sha" "$remote_default"; then
-  printf 'train-push: push reported success but %s is not on %s/%s — origin did not move\n' \
-    "$head_sha" "$remote" "$default_branch" >&2
-  exit 1
+git -C "$REPO" fetch -q "$remote" "$default_branch" ||
+  landing_failed "could not verify $remote/$default_branch after push" "$head_sha" "$run_url"
+if ! git -C "$REPO" merge-base --is-ancestor "$head_sha" "$remote_default"; then
+  landing_failed "push reported success but $head_sha is not on $remote/$default_branch" "$head_sha" "$run_url"
 fi
 say "landed $head_sha on $remote/$default_branch"
 
 # The branch existed to carry the train through CI; once the sha is on main it
 # is noise. A failed delete does not un-land the commit, so it is a warning.
-if ! git push -q "$remote" --delete "$train_ref"; then
+if ! git -C "$REPO" push -q "$remote" --delete "$train_ref"; then
   printf 'train-push: warning — could not delete %s/%s (delete it by hand)\n' "$remote" "$train_ref" >&2
 fi
+rm -f "$watch_heartbeat"
 say "done"
