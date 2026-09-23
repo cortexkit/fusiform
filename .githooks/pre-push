@@ -73,10 +73,10 @@ if ! cargo metadata --locked --offline --format-version 1 > /dev/null 2>&1; then
     echo "pre-push refused: Cargo.lock does not resolve --locked" >&2
     echo >&2
     echo "  A manifest changed without the lock following it. CI builds with" >&2
-    echo "  --locked, so the push would fail there. Update the lock in its own" >&2
-    echo "  step and gate on it:" >&2
+    echo "  --locked, so the push would fail there. Update each dependency" >&2
+    echo "  whose version you changed, by name, and gate on it:" >&2
     echo >&2
-    echo "      cargo update -w" >&2
+    echo "      cargo update -p <crate> [-p <crate> ...]" >&2
     echo "      cargo t --workspace && cargo c" >&2
     echo >&2
     exit 1
