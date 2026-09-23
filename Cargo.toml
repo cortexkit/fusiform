@@ -9,16 +9,18 @@ members = ["crates/fusiform-core",
 # subc-client-rs, and re-deriving any of them by hand is how a module ends up
 # subtly wrong at handshake.
 #
-# Taken from crates.io rather than a sibling checkout, so the build depends on
-# what subconscious released instead of whatever its working tree holds today.
+# Every CortexKit dependency comes from crates.io rather than a sibling
+# checkout, so the build depends on what subconscious and commons released
+# instead of whatever their working trees hold today, and the repository
+# builds from a clone of itself alone.
 [workspace.dependencies]
 fusiform-testkit = { path = "crates/fusiform-testkit" }
 subc-client-rs = "0.15.4"
 subc-protocol = "0.22.0"
 subc-transport = "0.7.1"
 
-cortexkit-store = { path = "../commons/crates/cortexkit-store", features = ["sqlite"] }
-cortexkit-store-types = { path = "../commons/crates/cortexkit-store-types" }
+cortexkit-store = { version = "0.2.0", features = ["sqlite"] }
+cortexkit-store-types = "0.2.2"
 
 async-trait = "0.1"
 blake3 = "1"

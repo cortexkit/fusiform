@@ -9,15 +9,10 @@
 # that it fires when you are not looking, which is exactly why its result
 # arrives when you are not looking.
 #
-# MEASURED, and this is not hypothetical: two consecutive scheduled runs failed
-# on 2026-09-17 and 2026-09-18 and went unnoticed for two days. Both were a
-# stale Cargo.lock against sibling REMOTES — the failure mode the scheduled run
-# was added to catch, working perfectly, reported to nobody. Found by accident
-# while checking an unrelated claim.
-#
-# Same shape as a review date with no reader, which this repo fixed twice today
-# for curated data and had not fixed for its own CI: a signal that fails in the
-# QUIET direction, where the absence of a reaction is indistinguishable from the
+# Two consecutive scheduled failures (2026-09-17 and 2026-09-18) once went
+# unnoticed for two days, found by accident while checking an unrelated claim.
+# Same shape as a review date with no reader: a signal that fails in the QUIET
+# direction, where the absence of a reaction is indistinguishable from the
 # absence of a problem.
 #
 # WHAT IT DOES NOT DO
@@ -177,72 +172,18 @@ fi
 
 echo "ci-status: newest scheduled run FAILED  ($stamp, $concl, $sha)" >&2
 echo >&2
-echo "  It ran with nobody attending. A scheduled red usually means" >&2
-echo "  master broke with nothing of yours moving — most often a" >&2
-echo "  sibling published and the committed lock is behind, since CI" >&2
-echo "  resolves path deps against REMOTES." >&2
+# Every dependency is a crates.io version pinned in Cargo.lock, so nothing can
+# move underneath a commit that is sitting still. A scheduled red on an
+# unchanged commit therefore means something that depends on the DATE fired —
+# the curated plan-price and window-overlay review gates, or the seed freshness
+# gate — or the world outside the repository changed: the Rust toolchain,
+# which CI takes as `stable`, or GitHub itself. Each of those needs the log;
+# none is cleared by touching the lock.
+echo "  It ran with nobody attending. With every dependency pinned, the" >&2
+echo "  likely causes are a date-triggered gate (a curated review date or" >&2
+echo "  seed freshness) or a new stable toolchain. Read the log:" >&2
 echo >&2
-# RUN THE CHEAP CAUSE RATHER THAN NAMING IT, because this red is the
-# EXPECTED state most mornings and a report you cannot act on is one you
-# stop reading.
-#
-# Measured: 7 of 12 scheduled runs here have failed, nearly all of them a
-# lock that went stale after a sibling published. So "usually a stale lock"
-# is true often enough that printing it as a guess wastes the reader's only
-# useful moment — and rare enough that assuming it would be wrong.
-#
-# Running it splits the two cases, which is the whole value:
-#
-#     lock BEHIND  -> the known cause. One command clears it, and the red
-#                     is self-healing rather than something to investigate.
-#     lock CLEAN   -> the interesting case. The known cause is ruled out,
-#                     so this needs a log and deserves attention NOW.
-#
-# Without the split both look identical, and the frequent harmless one
-# teaches the reader to skim past the rare real one — the failure this
-# script's own commit message warned about.
-# THE FAILING SHA'S LOCK, NOT HEAD'S — and my first version of this got it
-# wrong, which is the class it exists to catch.
-#
-# The red happened on a specific commit, against the lock THAT COMMIT
-# carried. Reading HEAD's lock answers a different question, and the two
-# diverge in exactly the case that matters: the moment after you absorb the
-# wave. Measured on the run this was written against — 4a9a3ec pinned
-# 0.18.16, HEAD pinned 0.18.17, published was 0.18.17 — so a HEAD-based
-# check reported "cause ruled out" about a red the lock had caused.
-#
-# Comparing the two locks is enough and needs no second tool: if the lock
-# MOVED since the failing sha, the likeliest story is that the cause was
-# absorbed already, and the next scheduled run is the thing that confirms it.
-head_lock=$(git show HEAD:Cargo.lock 2>/dev/null | shasum | cut -d' ' -f1)
-sha_lock=$(git show "$sha:Cargo.lock" 2>/dev/null | shasum | cut -d' ' -f1)
-
-if [ -n "$sha_lock" ] && [ "$head_lock" != "$sha_lock" ]; then
-    echo "  THE LOCK HAS MOVED since that commit, so the usual cause was" >&2
-    echo "  most likely already absorbed. The next scheduled run confirms" >&2
-    echo "  it; nothing to do now unless it fails again." >&2
-elif [ -x ./scripts/lock-vs-published.sh ]; then
-    if ./scripts/lock-vs-published.sh > /dev/null 2>&1; then
-        echo "  THE LOCK IS UNCHANGED since that commit AND current against" >&2
-        echo "  every sibling's published ref, so the usual cause is RULED" >&2
-        echo "  OUT. This one needs a log:" >&2
-        echo >&2
-        echo "      gh run view <id> --log-failed" >&2
-    else
-        echo "  CAUSE FOUND — the lock is stale against a sibling's published" >&2
-        echo "  ref, which is what CI resolves against:" >&2
-        echo >&2
-        ./scripts/lock-vs-published.sh 2>&1 | sed -n '2,3p' | sed 's/^/    /' >&2
-        echo >&2
-        echo "  Absorb it, and this clears at the next scheduled run:" >&2
-        echo >&2
-        echo "      cargo update -w --offline" >&2
-    fi
-else
-    echo "  Cheapest first, regardless of likelihood:" >&2
-    echo "    ./scripts/lock-vs-published.sh        local, free" >&2
-    echo "    gh run view <id> --log-failed         one fetch" >&2
-fi
+echo "      gh run view <id> --log-failed" >&2
 if [ "$older" -gt 0 ]; then
     echo >&2
     echo "  $older earlier failure(s) in the last $days day(s):" >&2

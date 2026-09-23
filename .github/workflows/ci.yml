@@ -13,56 +13,15 @@ on:
   pull_request:
   workflow_call:
   # A push gate asks "is this change good". Only a scheduled run asks "is what
-  # already landed still good against the world as it is now" — and for this
-  # repo the second answer changes on its own, because CI resolves eight sibling
-  # path dependencies (subconscious ×4, commons ×3, engram ×1) against their
-  # REMOTES rather than a pinned rev.
+  # already landed still good against the world as it is now".
   #
-  # So master can go red with no commit of mine responsible, and the push gate
-  # cannot see it: it only runs when I push. Without this, the break surfaces at
-  # my next push attached to an unrelated change, and reads as that change
-  # breaking something.
+  # Every dependency is a crates.io version pinned in Cargo.lock, so the lock
+  # cannot go stale beneath a still commit. What still changes on its own is
+  # the DATE: the curated plan-price and window-overlay review gates and the
+  # seed freshness gate fail when time passes with nothing touched, and a
+  # push-only gate is silent for exactly the quiet stretch in which those dates
+  # lapse. The toolchain moves too, since CI takes `stable`.
   #
-  # MEASURED HERE, on this repository's own history (2026-09-19). Same sha,
-  # four runs, two verdicts, and the only variable is WHEN:
-  #
-  #     afd4bef  2026-09-16T17:38  push:success
-  #     afd4bef  2026-09-16T17:41  push:success
-  #     afd4bef  2026-09-17T10:42  schedule:failure
-  #     afd4bef  2026-09-18T10:17  schedule:failure
-  #
-  # Nothing in the commit changed. Siblings published, the committed lock went
-  # stale against their remotes, and a commit that was genuinely green became
-  # genuinely red while sitting still. Check it with:
-  #
-  #     gh run list --workflow=ci.yml --limit 200 \
-  #       --json event,conclusion,headSha --jq \
-  #       '.[] | select(.headSha|startswith("afd4bef"))'
-  #
-  # CKCRED measured the same shape first (fleet channel, 2026-09-06): green on
-  # push at 07:59, red on schedule at 11:14. Theirs arrived three hours apart
-  # and mine two DAYS apart, which is the part that matters — the window is not
-  # a race, it is however long the repo sits still.
-  #
-  # Kept alongside rather than replaced: a borrowed measurement is one a reader
-  # here cannot check, and a local one is one they can.
-  #
-  # THE CONTROL ARM, which is worth more than a third confirming instance.
-  # SUBC ran the same query on subconscious expecting to be one, and was NOT:
-  # both their scheduled failures were ALREADY red on push, same verdict on both
-  # triggers, same sha. Their repo has ZERO sibling path deps — every dependency
-  # is a pinned crates.io version under --locked — so there is nothing that can
-  # go stale beneath a still commit, and it CANNOT produce the four rows above.
-  #
-  # That names the precondition rather than repeating the observation: the
-  # divergence needs a path-dep or git-dep edge to something that publishes
-  # independently. Two positives in repos that have one, and a negative in a
-  # repo that does not, is the shape that makes this a property of the
-  # arrangement rather than an accident of either seat.
-  #
-  # That is also why this must not be dropped once train branches land — a green
-  # train sha is green against the siblings AS THEY WERE WHEN CI RAN, and five
-  # lock waves reached this repo in a single day.
   # THE DECLARED TIME IS NOT THE DELIVERED TIME, and the gap is hours.
   #
   # Measured over every scheduled run this repo has (n=13, 2026-09-07 to
@@ -167,43 +126,17 @@ jobs:
     # A wedged test must surface as a fast red run rather than burning the
     # runner for the 6-hour Actions default. Healthy runs finish in minutes.
     timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: fusiform
     steps:
       - name: Checkout fusiform
         uses: actions/checkout@v5
         with:
-          path: fusiform
           # Full history so the version-discipline check can diff against
           # origin/master. The default depth of 1 makes that ref unresolvable.
           fetch-depth: 0
 
-      # Fusiform path-deps three private siblings: subconscious (the subc wire
-      # crates), commons (the cortexkit-store family), and engram (its catalog
-      # parser, used to validate this repo's backup enrollment against the
-      # real thing rather than a local schema check). The default GITHUB_TOKEN
-      # is scoped to this repo only, so mint a short-lived token from the
-      # org-installed cortexkit-ci GitHub App.
-      - name: Mint cross-repo read token
-        id: app-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.CK_CI_APP_ID }}
-          private-key: ${{ secrets.CK_CI_APP_PRIVATE_KEY }}
-          owner: cortexkit
-          repositories: commons
-
-      # The commons store crates are the one remaining path dependency
-      # (../commons relative to the workspace), so commons checks out beside
-      # fusiform. Everything from subconscious comes from crates.io.
-      - name: Checkout commons
-        uses: actions/checkout@v5
-        with:
-          repository: cortexkit/commons
-          path: commons
-          token: ${{ steps.app-token.outputs.token }}
-
+      # Every dependency, CortexKit crates included, comes from crates.io, so
+      # the repository builds from its own checkout with no siblings beside it
+      # and no cross-repository token.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -239,8 +172,7 @@ jobs:
       # The served schema is what consumers compile against, and a consumer
       # that path-depends on this repo cannot see a code change that does not
       # move the version: Cargo.lock records a path dep with no source and no
-      # checksum, so `--locked` passes over moved code. Measured in this repo's
-      # own lock file against subc-protocol.
+      # checksum, so `--locked` passes over moved code.
       #
       # Fetch depth 0 above so origin/master resolves for the comparison.
       - name: Served schema version discipline

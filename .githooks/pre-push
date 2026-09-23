@@ -1,47 +1,26 @@
 #!/bin/sh
-# Refuse a push whose Cargo.lock does not resolve against the siblings on disk.
+# Refuse a push that CI would fail for reasons a local check can see in under a
+# second: a committed lock that is not the validated one, unformatted code, or
+# a lock that does not resolve.
 #
-# WHY THIS EXISTS AS A HOOK RATHER THAN A HABIT
+# WHY A HOOK RATHER THAN A HABIT
 #
-# Twice now a SHELL-ONLY commit has been pushed after a `bash -n` check and
-# failed CI on `--locked`. Nothing in either commit could break the build; the
-# lock had gone stale underneath the tree since the last full gate, because a
-# sibling published while I was editing something unrelated.
-#
-# The reasoning that produced it both times is the reasonable one: "my change
-# cannot need a cargo gate". THAT IS THE WRONG QUESTION. The gate is about the
-# TREE BEING PUSHED, not about the diff. A commit that cannot possibly break the
-# build still rides a tree that is already broken.
-#
-# I wrote that sentence into the first commit's message and repeated the defect
-# four commits later, which is the measured failure of rules that live in prose:
-# a rule in a message protects its reader once, and the thing under the defect
-# is never what you are attending to.
-#
-# WHY `cargo metadata` RATHER THAN check OR test
-#
-# It answers exactly the question a stale lock asks — does this lockfile resolve
-# — and answers it in 0.167s against a warm tree. A `cargo check` would take
-# tens of seconds and prove more than a pre-push hook should: the full suite is
-# CI's job, and a hook slow enough to resent is a hook someone disables.
+# "My change cannot need a cargo gate" is the wrong question. The gate is about
+# the TREE being pushed, not the diff, so a shell-only commit still rides
+# whatever lock and formatting the tree carries. A rule in prose protects its
+# reader once; this runs every time.
 #
 # Invoked through AFT's managed dispatcher, which walks to `$repo_root/.githooks`
-# after the git-dir hooks. Tracked in the repo deliberately, so a fresh clone
-# has it and it is reviewable like any other file.
-# RE-PROVING THIS HOOK IS WIRED, which needs a precondition nobody states.
+# after the git-dir hooks. Tracked in the repo so a fresh clone has it.
+#
+# RE-PROVING THIS HOOK IS WIRED needs a precondition nobody states:
 #
 #     printf '#!/bin/sh\necho REACHED >&2\nexit 1\n' > .githooks/pre-push
 #     git push origin HEAD:refs/heads/probe-hook-reach     <- a NEW ref
 #
 # The new ref is load-bearing. Push something already at origin and git does no
 # work, never invokes the hook, and prints nothing — which reads exactly like a
-# hook that ran and passed. SUBC hit that on their first attempt and nearly
-# banked the silence as proof.
-#
-# So there are three states, not two: ran-and-passed, never-called-because-
-# unwired, and never-called-because-there-was-nothing-to-do. Only the first two
-# are about the hook, and a wiring test that does not force work to exist cannot
-# tell them apart.
+# hook that ran and passed.
 set -eu
 
 if ! command -v cargo > /dev/null 2>&1; then
@@ -51,20 +30,10 @@ if ! command -v cargo > /dev/null 2>&1; then
 fi
 
 # The lock being PUSHED is the one CI resolves, and it is not necessarily the
-# one just validated below.
-#
-# SUBC named this shape after comparing hooks: theirs tests the commit, mine
-# tested the working tree, and they are different questions. The gap is one I
-# have already been bitten by from the other side — a gate run WITHOUT --locked
-# makes cargo a lock WRITER, and the documented remediation for that is to stage
-# explicit paths rather than `git add -A`. Do exactly that while the toolchain
-# has rewritten the lock, and the working tree resolves perfectly while the
-# commit carries the stale pin. Measured: the check below returns 0 throughout.
-#
-# Compared rather than resolved-in-an-archive because the sibling path deps are
-# relative to the repo's own location, so a copy elsewhere cannot resolve them.
-# Equality is the whole proof: if the committed bytes are the validated bytes,
-# the result below covers the push.
+# one validated below. A gate run without --locked rewrites the lock; stage
+# explicit paths afterwards and the working tree resolves while the commit
+# carries the old pin. Equality is the whole proof: if the committed bytes are
+# the validated bytes, the checks below cover the push.
 if ! cmp -s "$(git rev-parse --show-toplevel)/Cargo.lock" /dev/stdin <<CMPEOF
 $(git show HEAD:Cargo.lock)
 CMPEOF
@@ -81,35 +50,10 @@ then
     exit 1
 fi
 
-# Does the lock match what the siblings PUBLISHED, not just what is on disk.
-#
-# The cargo check below asks whether the lockfile resolves against the siblings
-# as they are HERE. CI resolves them against their REMOTES. Those agree almost
-# always and disagree exactly when a sibling has a branch checked out, at which
-# point every local gate passes forever and CI goes red against a version nobody
-# shipped.
-if ! "$(dirname "$0")/../scripts/lock-vs-published.sh"; then
-    exit 1
-fi
-
-# FORMAT, BECAUSE CI CHECKS IT AND I DO NOT.
-#
-# `cargo fmt --all -- --check` is the FIRST thing ci.yml runs, and nothing local
-# ran it. So a commit could pass every gate I have and fail CI on whitespace —
-# which it did, on 237caa9, after a full test-and-clippy run reported green.
-#
-# Same shape as the clippy alias that omitted `-D warnings` and so answered "are
-# there errors" while CI asked "are there warnings or errors". Both are a local
-# gate answering a WEAKER question than the gate that decides the push, and both
-# are invisible until CI disagrees.
-#
-# Cheap enough to be unconditional: it reads files and compares, no build. That
-# is the test for anything living in a hook — it must cost nothing when it was
-# unnecessary, or it gets removed the first time someone is in a hurry.
-#
-# --check rather than rewriting: a hook that EDITS the tree during a push would
-# format files that are not in the commit being pushed, which is a worse
-# surprise than a refusal.
+# `cargo fmt --all -- --check` is the first thing ci.yml runs. Cheap enough to be
+# unconditional: it reads files and compares, no build. --check rather than
+# rewriting, because a hook that edits the tree during a push would format files
+# that are not in the commit being pushed.
 if ! cargo fmt --all -- --check > /dev/null 2>&1; then
     echo "pre-push refused: formatting" >&2
     echo >&2
@@ -122,55 +66,18 @@ if ! cargo fmt --all -- --check > /dev/null 2>&1; then
     exit 1
 fi
 
+# Does the lock resolve against the manifests. Every dependency is a crates.io
+# version pinned in the lock, so this answers the same question CI's --locked
+# build does, in a fraction of a second and without compiling anything.
 if ! cargo metadata --locked --offline --format-version 1 > /dev/null 2>&1; then
-    # CARGO AND THE PUBLISHED-VERSION GATE READ DIFFERENT SUBJECTS, and when
-    # they disagree the lock is RIGHT and cargo is looking at something else.
-    #
-    # Cargo resolves a path dep to the sibling's WORKING TREE. So a sibling with
-    # unpublished work checked out makes `--locked` refuse a lock that exactly
-    # matches what that sibling has PUBLISHED — which is the lock CI wants,
-    # because CI resolves against remotes.
-    #
-    # Refusing there blocks a correct push for as long as someone else has a
-    # branch checked out, and the reason is invisible from this repo. Measured
-    # 2026-09-19: subc-core read 0.18.17 on the sibling's disk and 0.18.16 on
-    # its master; the lock said 0.18.16 and this hook refused it.
-    #
-    # So ask the other question before refusing. If the lock matches every
-    # sibling's published ref, the only thing wrong is local, and the push is
-    # the one CI will accept.
-    if [ -x ./scripts/lock-vs-published.sh ] \
-        && ./scripts/lock-vs-published.sh > /dev/null 2>&1; then
-        echo "pre-push: cargo --locked refuses, but the lock matches every" >&2
-        echo "  sibling's PUBLISHED ref — so a sibling has unpublished work on" >&2
-        echo "  disk and cargo is resolving against that. The lock is what CI" >&2
-        echo "  wants. Allowing the push." >&2
-        echo >&2
-        echo "  Gate locally with --offline until that sibling publishes, and" >&2
-        echo "  stage explicit paths rather than -A, because an --offline run" >&2
-        echo "  rewrites the lock." >&2
-        exit 0
-    fi
-
     echo "pre-push refused: Cargo.lock does not resolve --locked" >&2
     echo >&2
-    echo "  A sibling published while this tree was being edited. The commit" >&2
-    echo "  being pushed does not have to touch Rust for this to matter: CI" >&2
-    echo "  runs --locked, so the push fails there instead of here." >&2
+    echo "  A manifest changed without the lock following it. CI builds with" >&2
+    echo "  --locked, so the push would fail there. Update the lock in its own" >&2
+    echo "  step and gate on it:" >&2
     echo >&2
-    echo "  Check the version against the sibling's PUBLISHED ref, not its" >&2
-    echo "  working tree:" >&2
-    echo >&2
-    echo "      git -C ../<sibling> show origin/master:crates/<pkg>/Cargo.toml \\" >&2
-    echo "        | grep -m1 '^version'" >&2
-    echo >&2
-    echo "  A CLEAN manifest is not a PUBLISHED one. A sibling with a feature" >&2
-    echo "  branch checked out shows no dirt at a version that never landed," >&2
-    echo "  and pinning it turns CI red against a version that does not exist" >&2
-    echo "  on master while your local gate passes. Then:" >&2
-    echo >&2
-    echo "      cargo update -w --offline" >&2
-    echo "      cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings" >&2
+    echo "      cargo update -w" >&2
+    echo "      cargo t --workspace && cargo c" >&2
     echo >&2
     exit 1
 fi
