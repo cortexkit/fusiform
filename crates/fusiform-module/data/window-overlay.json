@@ -120,7 +120,7 @@
           },
           "grade": "provider_asserted_doc",
           "units": "provider",
-          "boundary": "Asserted",
+          "boundary": "Observed",
           "source_ref": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-08-13) \u2014 'Context window overflow behavior'",
           "observed_at": "2026-08-13T12:54:15Z"
         }
@@ -370,10 +370,10 @@
             "value": "forwards"
           },
           "grade": "measured",
-          "boundary": "Asserted",
+          "boundary": "Observed",
           "units": "provider",
           "observed_at": "2026-08-14T16:05:00Z",
-          "source_ref": "Measured across the live catalog: openrouter serves 348 model ids spanning 59 distinct first-party vendors, and routes a request to whichever backend it selects. The wall a request hits therefore belongs to that backend, not to openrouter \u2014 which is why window.advertised at this provider carries not_single_valued_at_this_key rather than a number."
+          "source_ref": "Measured across the live catalog: openrouter serves 348 model ids spanning 59 distinct first-party vendors, and routes a request to whichever backend it selects. The wall a request hits therefore belongs to that backend, not to openrouter \u2014 which is why window.advertised at this provider carries not_single_valued_at_key rather than a number."
         }
       }
     },
@@ -387,7 +387,7 @@
             "value": "imposes"
           },
           "grade": "measured",
-          "boundary": "Asserted",
+          "boundary": "Observed",
           "units": "provider",
           "observed_at": "2026-08-14T16:05:00Z",
           "source_ref": "Measured: ollama-cloud carries other vendors' weights (glm, deepseek, kimi, minimax) and is a gateway by every id-based test, but enforces its OWN serving-infrastructure ceiling uniformly \u2014 65,536 output against an advertised 1,048,576. The wall is ollama-cloud's, so its authored numbers describe its own path and must NOT be demoted as a forwarder's would be."

@@ -497,6 +497,24 @@ fn every_fact_is_completely_specified() {
                 "{id} {key}: boundary {boundary:?} is outside the vocabulary"
             );
 
+            // `boundary` says whose clock `observed_at` is on. `Asserted` means
+            // a SOURCE stated an effective date, so `observed_at` is that date
+            // rather than when anyone looked. A `measured` fact is by
+            // definition fusiform's own observation, so its clock is fusiform's
+            // and the label must be `Observed`. The two wall-ownership cells
+            // carried this contradiction, which told a reader that openrouter
+            // began forwarding at the instant it was measured.
+            //
+            // This catches only the mechanical half. A doc page read with no
+            // date on it is `Observed` too, and whether a page states a date
+            // is not checkable here.
+            assert!(
+                !(grade == "measured" && boundary == "Asserted"),
+                "{id} {key}: a measured fact is fusiform's own observation, so \
+                 its boundary is Observed; Asserted claims a source stated an \
+                 effective date"
+            );
+
             assert!(
                 !fact["source_ref"].as_str().unwrap().is_empty(),
                 "{id} {key}: source_ref is required and must resolve to something"
