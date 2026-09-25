@@ -924,10 +924,10 @@ impl CatalogStore {
 
     /// The ETag from the most recent observation that received one.
     ///
-    /// Read from the store on every tick rather than held in memory: an
-    /// in-process cache is empty after a restart, so the first poll of every
-    /// new process would be unconditional and pull the whole document when a
-    /// 304 would have done.
+    /// Read from the store rather than held in memory, so it survives a
+    /// restart. The poll loop still sends no validator on a process's first
+    /// poll, until that process has read a full document, because a 304 means
+    /// the bytes are unchanged, not that the running binary has read them.
     pub fn last_etag(&self, source: SourceId) -> Result<Option<String>, CatalogError> {
         let etag = self.inner.with_conn(|conn| {
             conn.query_row(

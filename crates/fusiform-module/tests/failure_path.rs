@@ -156,15 +156,15 @@ fn harness(url: &str) -> Harness {
     signals.store_opened();
 
     Harness {
-        ctx: PollContext {
-            store: Arc::new(store),
-            fetcher: Fetcher::new().unwrap(),
-            endpoint: SourceEndpoint {
+        ctx: PollContext::new(
+            Arc::new(store),
+            Fetcher::new().unwrap(),
+            SourceEndpoint {
                 source: SourceId::ModelsDev,
                 url: url.to_string(),
             },
-            signals: Arc::clone(&signals),
-        },
+            Arc::clone(&signals),
+        ),
         signals,
         _dir: dir,
     }

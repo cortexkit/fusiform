@@ -27,6 +27,7 @@
 //! in six hours" from "we have not successfully asked in six hours". Those look
 //! identical from the era table alone.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use fusiform_core::normalize::normalize_models_dev;
@@ -96,6 +97,28 @@ pub struct PollContext {
     pub fetcher: Fetcher,
     pub endpoint: SourceEndpoint,
     pub signals: Arc<Signals>,
+    /// Whether THIS process has read a full document yet. Until it has, a poll
+    /// sends no validator; see `tick`. Private so the only way to set it is a
+    /// poll that actually received a body.
+    document_read: AtomicBool,
+}
+
+impl PollContext {
+    /// A context for a process that has not polled yet.
+    pub fn new(
+        store: Arc<CatalogStore>,
+        fetcher: Fetcher,
+        endpoint: SourceEndpoint,
+        signals: Arc<Signals>,
+    ) -> Self {
+        Self {
+            store,
+            fetcher,
+            endpoint,
+            signals,
+            document_read: AtomicBool::new(false),
+        }
+    }
 }
 
 /// Run one poll cycle: fetch, then apply.
@@ -114,22 +137,43 @@ pub async fn tick(ctx: &PollContext, now_ms: i64) -> Result<TickReport, TickErro
     // unreachable from the test suite is a signal that can be silently removed.
     ctx.signals.attempted(now_ms);
 
-    // The ETag from the last observation that carried one. Read per tick rather
-    // than cached in memory: after a restart the in-memory value would be gone
-    // and every first poll after a restart would pull 3.6 MB it did not need.
-    let etag = ctx
-        .store
-        .last_etag(ctx.endpoint.source)
-        .map_err(TickError::Store)?;
+    // No validator until this process has read a full document.
+    //
+    // A 304 says the upstream's BYTES have not changed since the stored ETag.
+    // It does not say THIS binary has read them, and after a deploy it has not:
+    // a build that extracts a new fact would otherwise get a 304 on every poll
+    // until the upstream happened to move, and serve nothing new in the
+    // meantime. Measured on 2026-09-25: a build adding tier prices was placed
+    // at 20:15:25Z, its first poll sent the previous binary's ETag, received
+    // 304, and served no tier price at all. The ingest diff makes the full read
+    // safe: an unchanged document writes no era.
+    //
+    // The cost is one full download (about 4 MB) per process start, and only
+    // until the first body arrives: a failed first poll leaves the next one
+    // unconditional too.
+    let etag = if ctx.document_read.load(Ordering::Acquire) {
+        ctx.store
+            .last_etag(ctx.endpoint.source)
+            .map_err(TickError::Store)?
+    } else {
+        None
+    };
 
     let outcome = ctx.fetcher.poll(&ctx.endpoint, etag.as_deref()).await;
-    apply(
+    let report = apply(
         &ctx.store,
         &ctx.signals,
         ctx.endpoint.source,
         outcome,
         now_ms,
-    )
+    )?;
+    if matches!(
+        report.outcome,
+        TickOutcome::Changed { .. } | TickOutcome::Unchanged
+    ) {
+        ctx.document_read.store(true, Ordering::Release);
+    }
+    Ok(report)
 }
 
 /// The pieces `apply` writes through. A borrow-only view, so the apply half

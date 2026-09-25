@@ -303,12 +303,12 @@ async fn the_stored_validator_reaches_the_next_request() {
 
     let signals = Arc::new(Signals::new());
     signals.store_opened();
-    let ctx = PollContext {
-        store: Arc::new(store),
-        fetcher: Fetcher::new().unwrap(),
-        endpoint: upstream.endpoint(),
+    let ctx = PollContext::new(
+        Arc::new(store),
+        Fetcher::new().unwrap(),
+        upstream.endpoint(),
         signals,
-    };
+    );
 
     // First poll: nothing stored, so nothing conditional.
     tick(&ctx, 1_000).await.expect("the first poll must record");
@@ -341,5 +341,83 @@ async fn the_stored_validator_reaches_the_next_request() {
         ctx.store.last_etag(SourceId::ModelsDev).unwrap().as_deref(),
         Some("\"v1\""),
         "a 304 must not erase the stored validator"
+    );
+}
+
+/// A new process reads the whole document once before it trusts a validator
+/// stored by the process before it.
+///
+/// A 304 only says the bytes are unchanged. After a deploy the running binary
+/// has never read those bytes, and a build that extracts a new fact would get
+/// 304 until the upstream happened to move, serving nothing new meanwhile. That
+/// is what happened on 2026-09-25 to a build adding tier prices.
+#[tokio::test]
+async fn a_new_process_reads_the_document_before_trusting_a_stored_validator() {
+    use fusiform_core::SourceId;
+    use fusiform_module::loop_::{tick, PollContext};
+    use fusiform_module::signals::Signals;
+    use fusiform_store::CatalogStore;
+
+    let upstream = Upstream::start(Answer::Body);
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        CatalogStore::open(&cortexkit_store_types::StorageDescriptor {
+            module_id: "fusiform".to_string(),
+            storage_namespace: "default".to_string(),
+            isolation: cortexkit_store_types::Isolation::Module,
+            backend: cortexkit_store_types::StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().to_string(),
+            },
+        })
+        .unwrap(),
+    );
+    let process = || {
+        let signals = Arc::new(Signals::new());
+        signals.store_opened();
+        PollContext::new(
+            Arc::clone(&store),
+            Fetcher::new().unwrap(),
+            upstream.endpoint(),
+            signals,
+        )
+    };
+
+    // The previous process polls once and leaves a validator in the store.
+    let before = process();
+    tick(&before, 1_000)
+        .await
+        .expect("the first process must record");
+    drop(before);
+
+    // CONTROL: the validator really is stored, so the next assertion cannot
+    // pass merely because there was nothing to send.
+    assert_eq!(
+        store.last_etag(SourceId::ModelsDev).unwrap().as_deref(),
+        Some("\"v1\""),
+        "the previous process must have stored a validator"
+    );
+
+    // A restart: same store, new process.
+    let after = process();
+    tick(&after, 2_000)
+        .await
+        .expect("the new process must record");
+    assert!(
+        header_line(&upstream.heads()[1], "if-none-match").is_none(),
+        "a new process must read the whole document once before trusting a \
+         stored validator. Head was:\n{}",
+        upstream.heads()[1]
+    );
+
+    // Once it has read a body, it goes back to conditional polls.
+    upstream.set(Answer::NotModified);
+    tick(&after, 3_000)
+        .await
+        .expect("the third poll must record");
+    let third = &upstream.heads()[2];
+    assert!(
+        header_line(third, "if-none-match").is_some_and(|v| v.contains("\"v1\"")),
+        "after reading a body the process must poll conditionally again. Head \
+         was:\n{third}"
     );
 }

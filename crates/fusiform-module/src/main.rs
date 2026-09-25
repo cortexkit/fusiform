@@ -263,12 +263,7 @@ async fn run_poll_loop(store: Arc<CatalogStore>, signals: Arc<Signals>) {
         }
     };
 
-    let ctx = PollContext {
-        store,
-        fetcher,
-        endpoint: SourceEndpoint::models_dev(),
-        signals,
-    };
+    let ctx = PollContext::new(store, fetcher, SourceEndpoint::models_dev(), signals);
 
     let mut interval =
         tokio::time::interval(std::time::Duration::from_millis(POLL_INTERVAL_MS as u64));

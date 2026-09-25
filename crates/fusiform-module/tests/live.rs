@@ -32,12 +32,12 @@ fn context(dir: &tempfile::TempDir) -> PollContext {
     })
     .expect("store opens");
 
-    PollContext {
-        store: Arc::new(store),
-        fetcher: Fetcher::new().expect("http client builds"),
-        endpoint: SourceEndpoint::models_dev(),
-        signals: Arc::new(Signals::new()),
-    }
+    PollContext::new(
+        Arc::new(store),
+        Fetcher::new().expect("http client builds"),
+        SourceEndpoint::models_dev(),
+        Arc::new(Signals::new()),
+    )
 }
 
 fn now_ms() -> i64 {
