@@ -1,0 +1,69 @@
+{
+  "schema": "model-aliases/v1",
+  "purpose": "Ids a route exposes for a model that models.dev publishes under a different id. Each row says the alias id IS the target row's model, so catalog.get serves the target's current facts under the alias id and marks every rate as borrowed. Served at read time only; nothing here is written to the store.",
+  "why_this_is_curated_rather_than_inferred": "Two ids that look alike are not evidence of one model: a plugin can route one tier of an id to a different backend (antigravity-gemini-3.5-flash sends its high tier to gemini-3-flash-agent). So a row goes in only when someone has read the routing code and seen EVERY tier of the alias id reach the target's own backend model, and the row cites the file and revision that was read.",
+  "prices_through_an_alias": "Rates served through an alias are the target's API list price, carried so a consumer can relate a subscription route to what the same model costs on the API. They are marked inherited_from with basis alias and never presented as the route's own published price.",
+  "how_to_add_a_row": "Read the routing code at a pinned revision. Include the alias only if every reasoning tier resolves to the target's own backend model id and the target exists in the embedded models.dev seed. Record the revision in source_ref, the day you read it in established_at_ms, and review_by_ms 60 days later. A near miss belongs in the declared-exclusions list in src/aliases.rs with its reason, not here.",
+  "aliases": [
+    {
+      "provider_id": "google",
+      "model_id": "antigravity-gemini-3.8-flash",
+      "target": {
+        "provider_id": "google",
+        "model_id": "gemini-3.8-flash"
+      },
+      "basis": "The plugin resolves every tier of this id through GEMINI_38_FLASH_ROUTES: low, medium and high go to gemini-3.8-flash-low, -medium and -high, and a missing or unknown tier defaults to gemini-3.8-flash-medium. The suffix is how Code Assist spells a reasoning level, so every request reaches Google's gemini-3.8-flash.",
+      "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
+      "established_at_ms": 1790294400000,
+      "review_by_ms": 1795478400000
+    },
+    {
+      "provider_id": "google",
+      "model_id": "antigravity-gemini-3.7-flash",
+      "target": {
+        "provider_id": "google",
+        "model_id": "gemini-3.7-flash"
+      },
+      "basis": "The plugin resolves every tier of this id through GEMINI_37_FLASH_ROUTES: low, medium and high go to gemini-3.7-flash-low, -medium and -high, and a missing or unknown tier defaults to gemini-3.7-flash-medium. The suffix is how Code Assist spells a reasoning level, so every request reaches Google's gemini-3.7-flash.",
+      "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (GEMINI_37_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
+      "established_at_ms": 1790294400000,
+      "review_by_ms": 1795478400000
+    },
+    {
+      "provider_id": "google",
+      "model_id": "antigravity-gemini-3.6-flash",
+      "target": {
+        "provider_id": "google",
+        "model_id": "gemini-3.6-flash"
+      },
+      "basis": "The plugin resolves every tier of this id through GEMINI_36_FLASH_ROUTES: low, medium and high go to gemini-3.6-flash-low, -medium and -high, and a missing or unknown tier defaults to gemini-3.6-flash-medium. The suffix is how Code Assist spells a reasoning level, so every request reaches Google's gemini-3.6-flash.",
+      "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (GEMINI_36_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
+      "established_at_ms": 1790294400000,
+      "review_by_ms": 1795478400000
+    },
+    {
+      "provider_id": "google",
+      "model_id": "antigravity-claude-sonnet-4-6-thinking",
+      "target": {
+        "provider_id": "anthropic",
+        "model_id": "claude-sonnet-4-6"
+      },
+      "basis": "The resolver strips the antigravity- prefix and looks the rest up in RESOLVER_ALIASES, which maps claude-sonnet-4-6-thinking and its -low, -medium and -high forms all to claude-sonnet-4-6. Every tier therefore reaches the claude-sonnet-4-6 backend; the thinking budget the plugin sends is request rendering, not a different model.",
+      "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (RESOLVER_ALIASES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
+      "established_at_ms": 1790294400000,
+      "review_by_ms": 1795478400000
+    },
+    {
+      "provider_id": "google",
+      "model_id": "antigravity-gemini-3.1-flash-image",
+      "target": {
+        "provider_id": "google",
+        "model_id": "gemini-3.1-flash-image"
+      },
+      "basis": "The id defines no reasoning variants, and the resolver sends it unchanged: an explicit antigravity- Gemini 3 id skips the alias map, and image models get no tier suffix, so the backend model is gemini-3.1-flash-image.",
+      "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, skipAlias and isImageModel)",
+      "established_at_ms": 1790294400000,
+      "review_by_ms": 1795478400000
+    }
+  ]
+}

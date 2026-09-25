@@ -74,6 +74,17 @@ fn every_served_rate_decodes_with_the_protocol_type() {
                          None: {raw}"
                     );
                 }
+                // Same property one level down: an alias marker names the
+                // target's model id, and a type that dropped it would leave a
+                // consumer unable to tell whose row the price came from.
+                if let Some(model_id) = raw["inherited_from"].get("model_id") {
+                    assert_eq!(
+                        inherited_from.as_ref().and_then(|i| i.model_id.as_deref()),
+                        model_id.as_str(),
+                        "the wire carries inherited_from.model_id and the type \
+                         did not decode it: {raw}"
+                    );
+                }
                 assert!(
                     amount.units > 0,
                     "a priced rate must carry its units through the decode: {raw}"

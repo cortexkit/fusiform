@@ -580,6 +580,51 @@ pub struct CatalogGetResponse {
     /// audit. Both are correct, and the default is the safe one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overridden: Vec<OverriddenFactWire>,
+    /// Entries in `models` served under an ALIAS id with another row's facts.
+    ///
+    /// # What an alias is, and what it is not
+    ///
+    /// Some routes expose a model under their own id — a Google Code Assist
+    /// plugin serves `google/gemini-3.8-flash` as
+    /// `google/antigravity-gemini-3.8-flash` — and models.dev has no row for
+    /// that id. An alias is an AUTHORED identity claim: a curated row in
+    /// fusiform's source saying "this id is that model", naming the target
+    /// exactly and citing where the claim was read. It is never inferred from
+    /// the names.
+    ///
+    /// - **Current reads only.** A point-in-time read never aliases: fusiform
+    ///   never observed the alias id, so it has no past to report.
+    /// - **Rates through an alias are the TARGET's API list price, not the
+    ///   route's cost.** Every rate on an aliased entry carries
+    ///   `inherited_from` with `basis: "alias"` and the target's `model_id`.
+    ///   The route may be a subscription plane whose marginal cost is zero.
+    /// - **A real row always wins.** If the upstream ever publishes the alias
+    ///   id itself, that row is served and the alias is not applied.
+    ///
+    /// Every other disclosure on the response (`overridden`, `uncertain`,
+    /// `withheld`) about the facts an alias served names the TARGET's
+    /// identity, because that is the row the facts came from.
+    ///
+    /// Omitted when empty, which is every read that touched no alias.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliased: Vec<AliasedModelWire>,
+}
+
+/// One entry in `models` whose facts are another row's, served under a curated
+/// alias id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AliasedModelWire {
+    /// `provider_id/model_id` of the ALIAS, the key the entry sits under in
+    /// `models`.
+    pub model: String,
+    /// The provider of the row whose facts are served.
+    pub target_provider_id: String,
+    /// The model id of the row whose facts are served. `catalog.history`
+    /// questions about this entry belong to this row.
+    pub target_model_id: String,
+    /// Where the identity claim was read: the file and pinned revision that
+    /// routes the alias id to the target's backend model.
+    pub source_ref: String,
 }
 
 /// One fact whose served value differs from the upstream's.
@@ -1208,6 +1253,12 @@ pub struct HistoryResponse {
     /// never will: the value is derived at serve time, and its history lives
     /// on the named provider's row. A consumer asking "when did this price
     /// change" should ask there.
+    ///
+    /// Also set, for ANY fact key, when the requested id is a curated alias
+    /// (see `CatalogGetResponse::aliased`): fusiform never observed the alias
+    /// id, so it has no eras, and this names the target row — `basis` is
+    /// `"alias"` and `model_id` carries the target's model id — whose history
+    /// is the one to ask for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inherited_from: Option<crate::money::InheritedFrom>,
     /// The override in force on this fact right now, when there is one.

@@ -242,12 +242,34 @@ pub struct InheritedFrom {
     /// The provider whose published price this is.
     pub provider_id: String,
     /// The weights family both rows share, as the upstream names it.
+    ///
+    /// Under `basis: "alias"` this is the TARGET row's `model.family`, and an
+    /// empty string only when the target publishes no family at all.
     pub family: String,
-    /// Why the two rows are relatable at all. `open_weights` today: two
-    /// providers serving the same OPEN weights serve the same artefact, which
-    /// is what makes one's price say anything about the other's row. A closed
-    /// model served by two providers is two offerings sharing a name.
+    /// Why the two rows are relatable at all.
+    ///
+    /// - `open_weights`: two providers serving the same OPEN weights serve the
+    ///   same artefact, which is what makes one's price say anything about the
+    ///   other's row. A closed model served by two providers is two offerings
+    ///   sharing a name.
+    /// - `alias`: the serving id is a curated alias of another row (see
+    ///   `CatalogGetResponse::aliased`). An alias is an authored identity
+    ///   claim, served on current reads only, and a real row for the alias id
+    ///   always wins over it.
     pub basis: String,
+    /// The model id of the row whose price this is, when it differs from the
+    /// serving row's.
+    ///
+    /// Set under `basis: "alias"`, where the alias id and the target id are
+    /// different strings. Absent under `open_weights`, where both rows carry
+    /// the same model id, so rates inherited that way serialize exactly as
+    /// they did before this field existed.
+    ///
+    /// A rate carrying this is the target's API LIST PRICE, not the cost of
+    /// the route that serves the alias id: that route may be a subscription
+    /// plane whose marginal cost is zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
 }
 
 impl Floor {

@@ -178,6 +178,28 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
     // Reached only when the read found nothing, so the ordinary path pays no
     // extra query.
     if rows.is_empty() {
+        // An alias id has no eras because fusiform never observed it: its facts
+        // are another row's, served under the alias at read time. Name that
+        // row instead of refusing the id as unknown, so a consumer knows whose
+        // history to ask for.
+        if let Some(alias) = alias_in_effect(
+            store,
+            source,
+            crate::aliases::aliases(),
+            &request.provider_id,
+            &request.model_id,
+        )? {
+            return Ok(HistoryResponse {
+                source: source.as_str().to_string(),
+                provider_id: request.provider_id,
+                model_id: request.model_id,
+                fact_key: request.fact_key,
+                eras: Vec::new(),
+                last_changed_at_ms: None,
+                inherited_from: Some(alias_origin(store, source, alias)),
+                overridden: None,
+            });
+        }
         if !store
             .provider_is_known(source, &request.provider_id)
             .map_err(|e| store_error(&e))?
@@ -757,6 +779,24 @@ pub fn serve_catalog_get(
     // rather than merely absent.
     refuse_before_the_record(store, source, at)?;
 
+    let aliases = crate::aliases::aliases();
+    let named = request.provider_id.is_some() && request.model_id.is_some();
+    if let (Some(provider_id), Some(model_id)) =
+        (request.provider_id.as_deref(), request.model_id.as_deref())
+    {
+        if let Some(alias) = alias_in_effect(store, source, aliases, provider_id, model_id)? {
+            return serve_named_alias(
+                store,
+                source,
+                provider_id,
+                model_id,
+                alias,
+                at,
+                request.fact_prefixes.as_ref(),
+            );
+        }
+    }
+
     let (snapshot, retired) = if let (Some(provider_id), Some(model_id)) =
         (request.provider_id.as_deref(), request.model_id.as_deref())
     {
@@ -841,6 +881,18 @@ pub fn serve_catalog_get(
     // with the bulk path, which has no retirements to report, and threading an
     // always-empty argument through it would invite a future caller to fill it.
     response.retired = retired;
+    // Aliases on a bulk read, current view only for the same reason as the
+    // named read: fusiform never observed an alias id, so it has no past.
+    if !named && at.is_none() {
+        add_aliases_to_bulk(
+            store,
+            source,
+            aliases,
+            &mut response,
+            request.provider_id.as_deref(),
+            request.fact_prefixes.as_ref(),
+        )?;
+    }
     Ok(response)
 }
 
@@ -1158,6 +1210,9 @@ fn render(
         // history, so attaching them to every read would ship hundreds of
         // ancient retirements to callers who asked about none of them.
         retired: Vec::new(),
+        // Filled by the alias paths in `serve_catalog_get`, which are the only
+        // callers that serve one row's facts under another id.
+        aliased: Vec::new(),
     }
 }
 
@@ -2083,6 +2138,355 @@ mod inheritance_tests {
     }
 }
 
+/// Curated aliases, driven through `serve_tool_call` with the SHIPPED table.
+///
+/// Through the route rather than the helpers, so a route that stops calling
+/// the alias logic reddens a test: a helper test passes against a correct
+/// helper nobody calls, which is how the `--rates` inheritance defect above
+/// shipped.
+#[cfg(test)]
+mod alias_tests {
+    use super::*;
+    use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+    use fusiform_core::BoundaryKind;
+    use fusiform_store::NewEra;
+
+    const ALIAS: &str = "google/antigravity-gemini-3.8-flash";
+    const TARGET: &str = "google/gemini-3.8-flash";
+
+    fn store() -> (CatalogStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open(&StorageDescriptor {
+            module_id: "fusiform".to_string(),
+            storage_namespace: "default".to_string(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().to_string(),
+            },
+        })
+        .unwrap();
+        (store, dir)
+    }
+
+    fn era_at(model: &str, key: &str, value: &str, at: i64) -> NewEra {
+        NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "google".to_string(),
+            model_id: model.to_string(),
+            fact_key: FactKey::from_stored(key.to_string()),
+            value_json: value.to_string(),
+            boundary_at: Timestamp(at),
+            boundary_kind: BoundaryKind::Seed,
+            observation_id: None,
+        }
+    }
+
+    /// A google row with a family, a limit, reasoning options and a price.
+    fn seed_model(store: &CatalogStore, model: &str, units: i64) {
+        store
+            .append_eras(&[
+                era_at(model, "existence", r#""present""#, 1_000),
+                era_at(model, "model.family", r#""gemini-flash""#, 1_000),
+                era_at(model, "limit.context", "1048576", 1_000),
+                era_at(
+                    model,
+                    "capability.reasoning_options",
+                    r#"["low","medium","high"]"#,
+                    1_000,
+                ),
+                era_at(
+                    model,
+                    "rate.input",
+                    &format!(
+                        r#"{{"state":"priced","units":{units},"exponent":9,"currency":"USD"}}"#
+                    ),
+                    1_000,
+                ),
+            ])
+            .unwrap();
+    }
+
+    fn get(store: &CatalogStore, args: &str) -> Result<CatalogGetResponse, RouteError> {
+        let body = format!(r#"{{"name":"catalog.get","arguments":{args}}}"#);
+        match serve_tool_call(store, body.as_bytes())? {
+            ToolResponse::Catalog(c) => Ok(c),
+            other => panic!("catalog.get must answer with a catalog: {other:?}"),
+        }
+    }
+
+    fn named(prefixes: &str) -> String {
+        format!(r#"{{"provider_id":"google","model_id":"antigravity-gemini-3.8-flash"{prefixes}}}"#)
+    }
+
+    #[test]
+    fn a_named_alias_read_serves_the_target_under_the_alias_key() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-3.8-flash", 300_000_000);
+
+        let got = get(&store, &named("")).expect("an alias id must be served");
+        let facts = got
+            .models
+            .get(ALIAS)
+            .unwrap_or_else(|| panic!("the entry must sit under the alias key: {got:?}"));
+        assert!(
+            !got.models.contains_key(TARGET),
+            "the target must not be served under its own key on a read that \
+             named the alias: {got:?}"
+        );
+        assert_eq!(facts["limit.context"], 1_048_576);
+        assert_eq!(
+            facts["capability.reasoning_options"],
+            serde_json::json!(["low", "medium", "high"])
+        );
+        assert_eq!(facts["model.family"], "gemini-flash");
+
+        let rate = &facts["rate.input"];
+        assert_eq!(rate["units"], 300_000_000);
+        assert_eq!(
+            rate["inherited_from"],
+            serde_json::json!({
+                "provider_id": "google",
+                "model_id": "gemini-3.8-flash",
+                "family": "gemini-flash",
+                "basis": "alias",
+            }),
+            "a price through an alias is the target's list price and must say so"
+        );
+
+        assert_eq!(
+            got.aliased,
+            vec![fusiform_protocol::AliasedModelWire {
+                model: ALIAS.to_string(),
+                target_provider_id: "google".to_string(),
+                target_model_id: "gemini-3.8-flash".to_string(),
+                source_ref: crate::aliases::aliases()[&(
+                    "google".to_string(),
+                    "antigravity-gemini-3.8-flash".to_string()
+                )]
+                    .source_ref
+                    .clone(),
+            }]
+        );
+
+        // CONTROL: the target read directly carries no alias marker, so the
+        // marker above is the alias path's doing rather than the store's.
+        let direct = get(
+            &store,
+            r#"{"provider_id":"google","model_id":"gemini-3.8-flash"}"#,
+        )
+        .unwrap();
+        assert!(direct.aliased.is_empty());
+        assert!(direct.models[TARGET]["rate.input"]
+            .get("inherited_from")
+            .is_none());
+    }
+
+    #[test]
+    fn a_real_row_for_the_alias_id_wins() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-3.8-flash", 300_000_000);
+        seed_model(&store, "antigravity-gemini-3.8-flash", 7);
+
+        let got = get(&store, &named("")).unwrap();
+        assert!(
+            got.aliased.is_empty(),
+            "a real row must not be disclosed as aliased: {got:?}"
+        );
+        let rate = &got.models[ALIAS]["rate.input"];
+        assert_eq!(rate["units"], 7, "the real row's own price must be served");
+        assert!(rate.get("inherited_from").is_none());
+
+        // The bulk read must not add a second entry for it either.
+        let bulk = get(&store, r#"{"provider_id":"google"}"#).unwrap();
+        assert_eq!(bulk.models[ALIAS]["rate.input"]["units"], 7);
+        assert!(
+            !bulk.aliased.iter().any(|a| a.model == ALIAS),
+            "{:?}",
+            bulk.aliased
+        );
+    }
+
+    #[test]
+    fn an_absent_target_serves_nothing_and_names_it() {
+        let (store, _d) = store();
+        // The provider exists, so this cannot pass by refusing the provider.
+        seed_model(&store, "gemini-3.7-flash", 1);
+
+        let err = get(&store, &named("")).expect_err("an alias of nothing must refuse");
+        assert_eq!(err.code, fusiform_protocol::CODE_NO_COVERAGE);
+        assert!(err.message.contains(TARGET), "{}", err.message);
+
+        let bulk = get(&store, r#"{"provider_id":"google"}"#).unwrap();
+        assert!(!bulk.models.contains_key(ALIAS), "{bulk:?}");
+        assert!(!bulk.aliased.iter().any(|a| a.model == ALIAS));
+    }
+
+    #[test]
+    fn a_retired_target_serves_nothing() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-3.8-flash", 1);
+        seed_model(&store, "gemini-3.7-flash", 1);
+        store
+            .append_eras(&[era_at(
+                "gemini-3.8-flash",
+                "existence",
+                r#""absent""#,
+                2_000,
+            )])
+            .unwrap();
+
+        let err = get(&store, &named("")).expect_err("an alias of a retired row must refuse");
+        assert_eq!(err.code, fusiform_protocol::CODE_NO_COVERAGE);
+        assert!(err.message.contains(TARGET), "{}", err.message);
+
+        let bulk = get(&store, r#"{"provider_id":"google"}"#).unwrap();
+        assert!(!bulk.models.contains_key(ALIAS), "{bulk:?}");
+    }
+
+    #[test]
+    fn a_point_in_time_read_never_aliases() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-3.8-flash", 1);
+
+        let err = get(&store, &named(r#","at_ms":1500"#))
+            .expect_err("an at read of an alias id must refuse");
+        assert_eq!(err.code, fusiform_protocol::CODE_NO_COVERAGE);
+        assert!(
+            err.message.contains("current reads only"),
+            "{}",
+            err.message
+        );
+
+        let bulk = get(&store, r#"{"provider_id":"google","at_ms":1500}"#).unwrap();
+        assert!(bulk.aliased.is_empty(), "{bulk:?}");
+        assert!(!bulk.models.contains_key(ALIAS));
+    }
+
+    #[test]
+    fn a_bulk_read_includes_the_alias() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-3.8-flash", 300_000_000);
+
+        for args in [r#"{}"#, r#"{"provider_id":"google"}"#] {
+            let bulk = get(&store, args).unwrap();
+            let facts = bulk
+                .models
+                .get(ALIAS)
+                .unwrap_or_else(|| panic!("{args}: the alias must be in a bulk read: {bulk:?}"));
+            assert_eq!(facts["rate.input"]["inherited_from"]["basis"], "alias");
+            assert!(
+                bulk.models.contains_key(TARGET),
+                "the target keeps its own entry"
+            );
+            assert_eq!(
+                bulk.aliased
+                    .iter()
+                    .map(|a| a.model.as_str())
+                    .collect::<Vec<_>>(),
+                vec![ALIAS],
+                "{args}: only aliases whose target is present are disclosed"
+            );
+        }
+
+        // A provider filter that is not the alias's provider excludes it.
+        seed_model(&store, "gemini-3.7-flash", 1);
+        store
+            .append_eras(&[NewEra {
+                provider_id: "anthropic".to_string(),
+                ..era_at("claude-x", "existence", r#""present""#, 1_000)
+            }])
+            .unwrap();
+        let other = get(&store, r#"{"provider_id":"anthropic"}"#).unwrap();
+        assert!(other.aliased.is_empty(), "{other:?}");
+    }
+
+    #[test]
+    fn a_rate_filter_still_gets_rates_through_the_alias() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-3.8-flash", 300_000_000);
+
+        let got = get(&store, &named(r#","fact_prefixes":["rate."]"#)).unwrap();
+        let facts = &got.models[ALIAS];
+        assert_eq!(facts["rate.input"]["units"], 300_000_000);
+        assert_eq!(
+            facts["rate.input"]["inherited_from"]["family"], "gemini-flash",
+            "the family is read from model.* facts, which the filter must not \
+             take away from the alias path"
+        );
+        assert!(
+            facts.keys().all(|k| k.starts_with("rate.")),
+            "the widening must not leak into a --rates answer: {facts:?}"
+        );
+
+        let bulk = get(
+            &store,
+            r#"{"provider_id":"google","fact_prefixes":["rate."]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            bulk.models[ALIAS]["rate.input"]["inherited_from"]["family"],
+            "gemini-flash"
+        );
+    }
+
+    #[test]
+    fn history_of_an_alias_names_the_target() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-3.8-flash", 1);
+
+        for fact in ["rate.input", "limit.context"] {
+            let body = format!(
+                r#"{{"name":"catalog.history","arguments":{{"provider_id":"google","model_id":"antigravity-gemini-3.8-flash","fact_key":"{fact}"}}}}"#
+            );
+            let ToolResponse::History(h) = serve_tool_call(&store, body.as_bytes())
+                .unwrap_or_else(|e| panic!("{fact}: history of an alias id must answer: {e:?}"))
+            else {
+                panic!("history must answer with a history");
+            };
+            assert!(h.eras.is_empty(), "fusiform never observed the alias id");
+            let origin = h.inherited_from.expect("the target must be named");
+            assert_eq!(origin.provider_id, "google");
+            assert_eq!(origin.model_id.as_deref(), Some("gemini-3.8-flash"));
+            assert_eq!(origin.basis, "alias");
+            assert_eq!(origin.family, "gemini-flash");
+        }
+    }
+
+    /// A rate the target itself inherited keeps the marker naming the real
+    /// origin, rather than being restamped as the target's own price.
+    #[test]
+    fn a_target_rate_that_was_already_inherited_keeps_its_marker() {
+        let alias = crate::aliases::Alias {
+            target_provider_id: "ollama-cloud".to_string(),
+            target_model_id: "glm-x".to_string(),
+            basis: "b".to_string(),
+            source_ref: "s".to_string(),
+            established_at_ms: 1,
+            review_by_ms: 2,
+        };
+        let original =
+            serde_json::json!({"provider_id":"zai","family":"glm","basis":"open_weights"});
+        let mut facts = BTreeMap::from([
+            ("model.family".to_string(), serde_json::json!("glm")),
+            (
+                "rate.input".to_string(),
+                serde_json::json!({"state":"priced","units":1,"inherited_from": original.clone()}),
+            ),
+            (
+                "rate.output".to_string(),
+                serde_json::json!({"state":"priced","units":2}),
+            ),
+        ]);
+        mark_rates_borrowed_through_alias(&mut facts, &alias);
+        assert_eq!(facts["rate.input"]["inherited_from"], original);
+        assert_eq!(facts["rate.output"]["inherited_from"]["basis"], "alias");
+        assert!(
+            facts["model.family"].get("inherited_from").is_none(),
+            "only rates are marked"
+        );
+    }
+}
+
 #[cfg(test)]
 mod wire_value_tests {
     use super::*;
@@ -2388,5 +2792,269 @@ fn inherit_rate_for(
             );
         }
         facts.insert(key, value);
+    }
+}
+
+/// The curated alias for a named id, when it applies.
+///
+/// A REAL ROW WINS: if the store has ever recorded the id itself — present or
+/// retired — the upstream now publishes it, and serving another row's facts
+/// under it would overwrite what the upstream says with what fusiform assumed.
+/// The check is on the store rather than on the table, so an alias goes quiet
+/// the moment the real row lands, with no edit needed here.
+fn alias_in_effect<'a>(
+    store: &CatalogStore,
+    source: SourceId,
+    aliases: &'a crate::aliases::Aliases,
+    provider_id: &str,
+    model_id: &str,
+) -> Result<Option<&'a crate::aliases::Alias>, RouteError> {
+    let Some(alias) = aliases.get(&(provider_id.to_string(), model_id.to_string())) else {
+        return Ok(None);
+    };
+    if store
+        .model_is_known(source, provider_id, model_id)
+        .map_err(|e| store_error(&e))?
+    {
+        return Ok(None);
+    }
+    Ok(Some(alias))
+}
+
+/// A named `catalog.get` of an alias id.
+///
+/// Refuses rather than answering empty in both cases it cannot serve, and says
+/// which target it would have served, so the caller can ask for that row.
+fn serve_named_alias(
+    store: &CatalogStore,
+    source: SourceId,
+    provider_id: &str,
+    model_id: &str,
+    alias: &crate::aliases::Alias,
+    at: Option<Timestamp>,
+    prefixes: Option<&Vec<String>>,
+) -> Result<CatalogGetResponse, RouteError> {
+    let target = format!("{}/{}", alias.target_provider_id, alias.target_model_id);
+    if at.is_some() {
+        // An alias is today's reading of a route's code, and fusiform never
+        // observed the alias id, so there is no past to report under it.
+        // Serving the target's past under the alias would claim the route
+        // existed and routed there at that instant, which nobody established.
+        return Err(RouteError::no_coverage(format!(
+            "{provider_id}/{model_id} is a curated alias of {target}, and aliases \
+             apply to current reads only: fusiform never observed the alias id, \
+             so it has no past. Read {target} at that instant instead"
+        )));
+    }
+    aliased_response(store, source, provider_id, model_id, alias, prefixes)?.ok_or_else(|| {
+        RouteError::no_coverage(format!(
+            "{provider_id}/{model_id} is a curated alias of {target}, which is \
+             absent or retired in the current catalog, so the alias serves \
+             nothing"
+        ))
+    })
+}
+
+/// The target's current served facts under the alias key, or `None` when the
+/// target is absent or retired.
+///
+/// Runs the SAME named read the target would get — inheritance, overrides and
+/// all — so an alias can never serve something different from what a caller
+/// asking for the target directly receives, apart from the rate markers.
+///
+/// The fact filter is widened exactly as `widened_for_inheritance` widens it:
+/// the rate markers name the target's `model.family`, and a `--rates` read
+/// would otherwise filter that input away and mark every rate with an empty
+/// family. The widening is dropped again before the entry is returned.
+fn aliased_response(
+    store: &CatalogStore,
+    source: SourceId,
+    provider_id: &str,
+    model_id: &str,
+    alias: &crate::aliases::Alias,
+    prefixes: Option<&Vec<String>>,
+) -> Result<Option<CatalogGetResponse>, RouteError> {
+    let target_request = CatalogGetRequest {
+        provider_id: Some(alias.target_provider_id.clone()),
+        model_id: Some(alias.target_model_id.clone()),
+        fact_prefixes: prefixes.cloned(),
+        ..CatalogGetRequest::default()
+    };
+    let (snapshot, retired) = match single_model_snapshot(
+        store,
+        source,
+        &alias.target_provider_id,
+        &alias.target_model_id,
+        None,
+        &target_request,
+    ) {
+        Ok(read) => read,
+        // The target is not in the store at all: the alias has nothing to
+        // stand for. Any other failure is a real error and propagates.
+        Err(e) if e.code == fusiform_protocol::CODE_NO_COVERAGE => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    if !retired.is_empty() {
+        return Ok(None);
+    }
+
+    let wide = prefixes.map(|p| widened_for_inheritance(p));
+    let mut response = render(
+        source,
+        snapshot,
+        None,
+        overlay::corrections(),
+        Some((store, crate::creators::creators())),
+        wide.as_ref(),
+    );
+    let target_key = format!("{}/{}", alias.target_provider_id, alias.target_model_id);
+    let Some(mut facts) = response.models.remove(&target_key) else {
+        return Ok(None);
+    };
+    mark_rates_borrowed_through_alias(&mut facts, alias);
+    narrow_to_requested(&mut facts, prefixes);
+
+    let alias_key = format!("{provider_id}/{model_id}");
+    response.models.insert(alias_key.clone(), facts);
+    response.aliased.push(fusiform_protocol::AliasedModelWire {
+        model: alias_key,
+        target_provider_id: alias.target_provider_id.clone(),
+        target_model_id: alias.target_model_id.clone(),
+        source_ref: alias.source_ref.clone(),
+    });
+    Ok(Some(response))
+}
+
+/// Mark every rate on an aliased entry as the target's, not the route's.
+///
+/// The price is the target's API list price, which a consumer uses to relate
+/// a subscription route to API cost; read as the route's own published price
+/// it would bill calls that may cost nothing at the margin.
+///
+/// A rate the target itself inherited keeps its ORIGINAL marker: that marker
+/// names the provider whose price it really is, and restamping it would hide
+/// the first hop.
+fn mark_rates_borrowed_through_alias(
+    facts: &mut BTreeMap<String, serde_json::Value>,
+    alias: &crate::aliases::Alias,
+) {
+    let family = facts
+        .get("model.family")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let marker = serde_json::to_value(fusiform_protocol::money::InheritedFrom {
+        provider_id: alias.target_provider_id.clone(),
+        family,
+        basis: "alias".to_string(),
+        model_id: Some(alias.target_model_id.clone()),
+    })
+    .expect("a struct of strings serialises");
+    for (key, value) in facts.iter_mut() {
+        if !key.starts_with(fusiform_store::prefix::RATE) {
+            continue;
+        }
+        let Some(obj) = value.as_object_mut() else {
+            continue;
+        };
+        if obj.contains_key("inherited_from") {
+            continue;
+        }
+        obj.insert("inherited_from".to_string(), marker.clone());
+    }
+}
+
+/// Add alias entries to a current bulk read.
+///
+/// An alias is included when its provider passes the caller's provider filter
+/// and its target is present — even when the target's provider is filtered
+/// out, because the caller asked about the ALIAS's provider. Like the bulk
+/// read itself, an entry the fact filter leaves empty is dropped.
+///
+/// Disclosures about the target (`overridden`, `withheld`, `uncertain`) are
+/// merged once each, since the bulk read may already carry them for the
+/// target's own entry.
+fn add_aliases_to_bulk(
+    store: &CatalogStore,
+    source: SourceId,
+    aliases: &crate::aliases::Aliases,
+    response: &mut CatalogGetResponse,
+    provider_filter: Option<&str>,
+    prefixes: Option<&Vec<String>>,
+) -> Result<(), RouteError> {
+    for (provider_id, model_id) in aliases.keys() {
+        if provider_filter.is_some_and(|p| p != provider_id) {
+            continue;
+        }
+        let Some(alias) = alias_in_effect(store, source, aliases, provider_id, model_id)? else {
+            continue;
+        };
+        let Some(entry) = aliased_response(store, source, provider_id, model_id, alias, prefixes)?
+        else {
+            continue;
+        };
+        let CatalogGetResponse {
+            models,
+            aliased,
+            overridden,
+            withheld,
+            uncertain,
+            ..
+        } = entry;
+        if models.values().all(|facts| facts.is_empty()) {
+            continue;
+        }
+        response.models.extend(models);
+        response.aliased.extend(aliased);
+        for o in overridden {
+            if !response.overridden.contains(&o) {
+                response.overridden.push(o);
+            }
+        }
+        for w in withheld {
+            if !response.withheld.contains(&w) {
+                response.withheld.push(w);
+            }
+        }
+        for u in uncertain {
+            if !response.uncertain.contains(&u) {
+                response.uncertain.push(u);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The origin `catalog.history` names for an alias id: the target row.
+///
+/// The family is read from the target's current row so the marker matches
+/// the one `catalog.get` puts on the alias's rates.
+fn alias_origin(
+    store: &CatalogStore,
+    source: SourceId,
+    alias: &crate::aliases::Alias,
+) -> fusiform_protocol::money::InheritedFrom {
+    let family = store
+        .read_model(
+            source,
+            &alias.target_provider_id,
+            &alias.target_model_id,
+            None,
+        )
+        .ok()
+        .and_then(|(found, _)| found)
+        .and_then(|model| {
+            model
+                .facts
+                .iter()
+                .find(|(k, _)| k.as_str() == "model.family")
+                .and_then(|(_, raw)| fact_for_the_wire(raw).as_str().map(str::to_string))
+        })
+        .unwrap_or_default();
+    fusiform_protocol::money::InheritedFrom {
+        provider_id: alias.target_provider_id.clone(),
+        family,
+        basis: "alias".to_string(),
+        model_id: Some(alias.target_model_id.clone()),
     }
 }

@@ -1,4 +1,106 @@
 {
+  "catalog.get — a curated alias": {
+    "request": {
+      "arguments": {
+        "model_id": "antigravity-gemini-3.8-flash",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "aliased": [
+        {
+          "model": "google/antigravity-gemini-3.8-flash",
+          "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
+          "target_model_id": "gemini-3.8-flash",
+          "target_provider_id": "google"
+        }
+      ],
+      "catalog_version": 0,
+      "models": {
+        "google/antigravity-gemini-3.8-flash": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "audio",
+            "image",
+            "pdf",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          ],
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": 65536,
+          "model.family": "gemini-flash",
+          "model.open_weights": false,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 75000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 750000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3750000000
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — a model stating it takes no reasoning options": {
     "request": {
       "arguments": {
@@ -552,6 +654,29 @@
       "source": "models.dev"
     }
   },
+  "catalog.history — an alias id names its target": {
+    "request": {
+      "arguments": {
+        "fact_key": "rate.input",
+        "model_id": "antigravity-gemini-3.8-flash",
+        "provider_id": "google"
+      },
+      "name": "catalog.history"
+    },
+    "response": {
+      "eras": [],
+      "fact_key": "rate.input",
+      "inherited_from": {
+        "basis": "alias",
+        "family": "gemini-flash",
+        "model_id": "gemini-3.8-flash",
+        "provider_id": "google"
+      },
+      "model_id": "antigravity-gemini-3.8-flash",
+      "provider_id": "google",
+      "source": "models.dev"
+    }
+  },
   "catalog.status": {
     "request": {
       "arguments": {
@@ -561,15 +686,15 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 235,
+      "era_count": 249,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
         "last_class": "http_status",
         "polls_back": 1
       },
-      "model_count": 16,
-      "models_priced": 10,
+      "model_count": 17,
+      "models_priced": 11,
       "overridden": [
         {
           "authority": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-08-13) — 'Other Claude models, including Claude Sonnet 4.5, have a 200k-token context window'",

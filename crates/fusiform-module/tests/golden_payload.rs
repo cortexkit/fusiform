@@ -110,6 +110,18 @@ const INHERITANCE_PAIR: &str = r#"{
 }"#;
 const GOLDEN: &str = include_str!("../fixtures/served-payloads.json");
 
+/// The embedded models.dev seed, read only to cut ONE real row out of it.
+const SEED: &str = include_str!("../data/models-dev-seed.json");
+
+/// The target of the shipped alias the fixture pins.
+///
+/// A curated alias serves only when its target is in the store, and the real
+/// excerpt's `google` entry does not carry it. The row is cut from the embedded
+/// seed rather than written here, so the aliased entry in the fixture shows
+/// the facts a real target publishes — the same rule the rest of this file
+/// follows for upstream data.
+const ALIAS_TARGET: (&str, &str) = ("google", "gemini-3.8-flash");
+
 /// The real upstream cut with the synthetic unknown-reasoning provider added.
 ///
 /// Merged as JSON rather than concatenated as text, so a malformed splice fails
@@ -126,6 +138,23 @@ fn merged_upstream() -> String {
             );
         }
     }
+
+    let seed: serde_json::Value = serde_json::from_str(SEED).expect("the seed parses");
+    let target = seed[ALIAS_TARGET.0]["models"][ALIAS_TARGET.1].clone();
+    assert!(
+        target.is_object(),
+        "the alias target must be in the embedded seed, or the alias cases \
+         below pin a refusal instead of an aliased entry"
+    );
+    let models = obj
+        .get_mut(ALIAS_TARGET.0)
+        .and_then(|p| p.get_mut("models"))
+        .and_then(|m| m.as_object_mut())
+        .expect("the excerpt carries the target's provider");
+    assert!(
+        models.insert(ALIAS_TARGET.1.to_string(), target).is_none(),
+        "the excerpt already carries the alias target; drop the splice"
+    );
     serde_json::to_string(&doc).unwrap()
 }
 
@@ -531,6 +560,23 @@ fn cases() -> Vec<(&'static str, String)> {
             r#"{"name":"catalog.get","arguments":{"provider_id":"zai","model_id":"synthetic-glm"}}"#.to_string(),
         ),
         (
+            // A CURATED ALIAS: a route's id that models.dev does not publish,
+            // served with its target's facts under the alias key. The only
+            // case producing `aliased` and an `inherited_from` carrying
+            // `model_id` with `basis: "alias"` — the marker that says a price
+            // is the target's API list price and not the route's own.
+            "catalog.get — a curated alias",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"google","model_id":"antigravity-gemini-3.8-flash"}}"#.to_string(),
+        ),
+        (
+            // History of an alias id: no eras, because fusiform never observed
+            // the id, and the target named so a consumer knows whose history
+            // to ask for. Distinct from the inherited-rate explanation, which
+            // names another PROVIDER for the same model id.
+            "catalog.history — an alias id names its target",
+            r#"{"name":"catalog.history","arguments":{"provider_id":"google","model_id":"antigravity-gemini-3.8-flash","fact_key":"rate.input"}}"#.to_string(),
+        ),
+        (
             "catalog.status",
             r#"{"name":"catalog.status","arguments":{"polls":3}}"#.to_string(),
         ),
@@ -670,6 +716,9 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
         // The placeholder for the one unpinnable field. If this vanishes, the
         // substitution stopped happening and the fixture will churn.
         r#""resolved_at_ms": -1"#,
+        // A curated alias and the marker on a price borrowed through it.
+        r#""aliased""#,
+        r#""basis": "alias""#,
     ] {
         assert!(
             GOLDEN.contains(needle),

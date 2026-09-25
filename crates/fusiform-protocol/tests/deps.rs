@@ -199,6 +199,12 @@ fn every_response_type_round_trips() {
             superseded_after_ms: 1_786_400_000_000,
             superseded_by_ms: 1_786_488_349_024,
         }],
+        aliased: vec![fusiform_protocol::AliasedModelWire {
+            model: "google/antigravity-gemini-3.8-flash".into(),
+            target_provider_id: "google".into(),
+            target_model_id: "gemini-3.8-flash".into(),
+            source_ref: "antigravity-auth@44eb8fa packages/core/src/model-registry.ts".into(),
+        }],
     };
     let text = serde_json::to_string(&catalog).unwrap();
     let back: CatalogGetResponse = serde_json::from_str(&text).unwrap();

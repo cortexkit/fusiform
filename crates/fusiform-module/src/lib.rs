@@ -8,6 +8,7 @@
 //! compiles every module twice, once per target, and each copy sees the other's
 //! exports as unused.
 
+pub mod aliases;
 pub mod creators;
 pub mod fetch;
 pub mod health;

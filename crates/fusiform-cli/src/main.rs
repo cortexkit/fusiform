@@ -1012,18 +1012,29 @@ fn render_history(response: &serde_json::Value) -> String {
                 .get("provider_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            let model = response
-                .get("model_id")
-                .and_then(|v| v.as_str())
+            // The origin names its own model id when it differs from the one
+            // asked about (a curated alias); an open-weight origin shares the
+            // requested id and omits it.
+            let target_model = origin.get("model_id").and_then(|v| v.as_str());
+            let model = target_model
+                .or_else(|| response.get("model_id").and_then(|v| v.as_str()))
                 .unwrap_or("?");
             let fact = response
                 .get("fact_key")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            out.push_str(&format!(
-                "\nno eras here: this provider publishes no rate, so the value \
-                 is served from {provider}'s card for the same weights\n"
-            ));
+            if origin.get("basis").and_then(|v| v.as_str()) == Some("alias") {
+                out.push_str(&format!(
+                    "\nno eras here: fusiform never observed this id; it is a \
+                     curated alias of {provider}/{model}, whose facts are served \
+                     under it on current reads\n"
+                ));
+            } else {
+                out.push_str(&format!(
+                    "\nno eras here: this provider publishes no rate, so the value \
+                     is served from {provider}'s card for the same weights\n"
+                ));
+            }
             out.push_str(&format!(
                 "its history is at: ck models history --provider {provider} \
                  --model {model} --fact {fact}\n"
@@ -2769,6 +2780,41 @@ mod render_history_tests {
             !out.contains("check the fact key"),
             "and must NOT be sent to hunt a typo in a key catalog.get just \
              answered: {out}"
+        );
+    }
+
+    /// An alias id points at the TARGET's model id, not the alias id: the
+    /// history lives on a row with a different model id, and a hint reusing
+    /// the requested id would send the operator to a row that does not exist.
+    #[test]
+    fn an_alias_history_points_at_the_target_row() {
+        let response = serde_json::json!({
+            "provider_id": "google",
+            "model_id": "antigravity-gemini-3.8-flash",
+            "fact_key": "rate.input",
+            "eras": [],
+            "inherited_from": {
+                "provider_id": "google",
+                "model_id": "gemini-3.8-flash",
+                "family": "gemini-flash",
+                "basis": "alias"
+            }
+        });
+
+        let out = render_history(&response);
+        assert!(
+            out.contains(
+                "ck models history --provider google --model gemini-3.8-flash --fact rate.input"
+            ),
+            "the hint must name the target row: {out}"
+        );
+        assert!(
+            out.contains("curated alias of google/gemini-3.8-flash"),
+            "{out}"
+        );
+        assert!(
+            !out.contains("same weights"),
+            "an alias is not open-weight inheritance: {out}"
         );
     }
 
