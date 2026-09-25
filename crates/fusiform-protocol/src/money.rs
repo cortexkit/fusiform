@@ -206,7 +206,10 @@ pub enum RateValue {
         /// distinction the enum exists to hold, applied to its own rollout.
         #[serde(default = "Floor::unknown")]
         floor: Floor,
-        /// Present when this price is NOT this provider's own.
+        /// Present when this price is NOT this provider's own. The same
+        /// marker, with the same meaning, rides on [`RateValue::StatedZero`]
+        /// and [`RateValue::Unpriced`]: whatever state a borrowed rate is in,
+        /// the state is the named row's statement, not this provider's.
         ///
         /// models.dev keeps an open-weight model's list price on the
         /// ORIGINATOR's provider entry, so a reseller serving the same weights
@@ -230,9 +233,23 @@ pub enum RateValue {
     },
     /// The source stated exactly zero. Not "free" — a stated zero. Whether a
     /// zero is a real price is the consumer's policy, not fusiform's.
-    StatedZero,
+    StatedZero {
+        /// Present when the zero is ANOTHER row's statement, borrowed by
+        /// open-weight inheritance or through a curated alias. Without it a
+        /// borrowed zero decodes as this provider stating the model is free,
+        /// which is the published/borrowed collapse [`InheritedFrom`] exists
+        /// to prevent. Absent on the provider's own zero, so those bytes are
+        /// `{"state":"stated_zero"}` exactly as before the field existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inherited_from: Option<InheritedFrom>,
+    },
     Unpriced {
         reason: UnpricedReason,
+        /// Present when the unpriced state is another row's, borrowed the same
+        /// way as a price. See the field of the same name on
+        /// [`RateValue::StatedZero`].
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inherited_from: Option<InheritedFrom>,
     },
 }
 
@@ -280,5 +297,44 @@ impl Floor {
     /// this type is that a floor must be stated rather than assumed.
     pub fn unknown() -> Self {
         Floor::Unknown
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A provider's OWN zero and unpriced rate keep the exact bytes they had
+    /// before those states could carry a marker, in both directions.
+    #[test]
+    fn an_unmarked_zero_and_unpriced_keep_their_bytes() {
+        for bytes in [
+            r#"{"state":"stated_zero"}"#,
+            r#"{"state":"unpriced","reason":"missing_rate"}"#,
+        ] {
+            let decoded: RateValue = serde_json::from_str(bytes).expect("decodes");
+            assert_eq!(serde_json::to_string(&decoded).unwrap(), bytes);
+        }
+        assert_eq!(
+            serde_json::from_str::<RateValue>(r#"{"state":"stated_zero"}"#).unwrap(),
+            RateValue::StatedZero {
+                inherited_from: None
+            }
+        );
+    }
+
+    /// A borrowed zero keeps its marker through the type.
+    #[test]
+    fn a_marked_zero_round_trips_its_marker() {
+        let bytes = r#"{"state":"stated_zero","inherited_from":{"provider_id":"zai","family":"glm","basis":"open_weights"}}"#;
+        let decoded: RateValue = serde_json::from_str(bytes).expect("decodes");
+        let RateValue::StatedZero {
+            inherited_from: Some(origin),
+        } = &decoded
+        else {
+            panic!("the marker must decode: {decoded:?}");
+        };
+        assert_eq!(origin.provider_id, "zai");
+        assert_eq!(serde_json::to_string(&decoded).unwrap(), bytes);
     }
 }

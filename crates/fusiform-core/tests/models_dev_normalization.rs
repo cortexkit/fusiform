@@ -112,11 +112,15 @@ fn a_stated_zero_rate_is_distinct_from_no_rate() {
     let flash = model(&outcome, "zhipuai/glm-4.5-flash");
     assert_eq!(
         rate(flash, TokenClass::Input, &RateCondition::Always),
-        &RateValue::StatedZero
+        &RateValue::StatedZero {
+            inherited_from: None
+        }
     );
     assert_eq!(
         rate(flash, TokenClass::CacheWrite, &RateCondition::Always),
-        &RateValue::StatedZero
+        &RateValue::StatedZero {
+            inherited_from: None
+        }
     );
 
     // A model with no cost object at all produces no rate rows — the absence is
@@ -347,7 +351,8 @@ fn an_unattributable_charge_key_is_unpriced_and_reported() {
     let gemini = model_by(&outcome, "google/gemini-flash-latest");
     assert!(gemini.rates.iter().any(|r| r.value
         == RateValue::Unpriced {
-            reason: UnpricedReason::UnknownChargeBasis
+            reason: UnpricedReason::UnknownChargeBasis,
+            inherited_from: None,
         }));
 }
 

@@ -219,7 +219,7 @@ fn every_variant_the_producer_writes_decodes() {
 
         // Exhaustive: adding a variant breaks this until its bytes are stated.
         match decoded {
-            RateValue::StatedZero => assert_eq!(*label, "stated_zero"),
+            RateValue::StatedZero { .. } => assert_eq!(*label, "stated_zero"),
             RateValue::Unpriced { .. } => assert!(label.starts_with("unpriced/")),
             RateValue::Priced { .. } => {
                 panic!("{label} decoded as Priced, which would silently price a rate that is not")
@@ -307,6 +307,51 @@ fn no_served_rate_field_is_invisible_to_the_published_type() {
          see them: {dropped:?}. Add them to the type or stop serving them — a \
          field that only exists in the bytes is one every typed consumer is \
          blind to."
+    );
+}
+
+/// A borrowed marker survives the published type in EVERY rate state.
+///
+/// The test above walks priced rates only, and the marker is not a priced-rate
+/// property: inheritance and aliases attach it to whatever state the other row
+/// published, `stated_zero` included. When only `Priced` named the field, a
+/// borrowed zero decoded as this provider stating the model is free — the
+/// published/borrowed collapse the marker exists to prevent, one state over.
+///
+/// Requires the fixture to carry a non-priced borrowed rate, so the walk
+/// below cannot pass by finding only the priced ones the older fence covers.
+#[test]
+fn a_borrowed_marker_survives_the_published_type_in_every_state() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(SERVED).expect("the served fixture parses");
+    let mut shapes: Vec<String> = Vec::new();
+    collect_rate_shapes(&fixture, &mut shapes);
+
+    let marked: Vec<serde_json::Value> = shapes
+        .iter()
+        .map(|s| serde_json::from_str::<serde_json::Value>(s).expect("a shape parses"))
+        .filter(|v| v.get("inherited_from").is_some())
+        .collect();
+    assert!(
+        marked.iter().any(|v| v["state"] == "stated_zero"),
+        "the fixture must carry a borrowed stated_zero, or this fence checks \
+         only the priced state the older test already covers: {marked:?}"
+    );
+
+    let mut lost: Vec<String> = Vec::new();
+    for served in &marked {
+        let decoded: RateValue = serde_json::from_value(served.clone())
+            .unwrap_or_else(|e| panic!("a served rate must decode: {e}\n  {served}"));
+        let back = serde_json::to_value(&decoded).expect("the type re-serializes");
+        if back.get("inherited_from") != served.get("inherited_from") {
+            lost.push(served.to_string());
+        }
+    }
+    assert!(
+        lost.is_empty(),
+        "these served rates carry inherited_from and the published type does \
+         not carry it through, so a typed consumer reads a borrowed value as \
+         this provider's own statement: {lost:?}"
     );
 }
 
@@ -425,7 +470,7 @@ fn the_fixture_carries_every_rate_state() {
     for shape in &shapes {
         match serde_json::from_str::<RateValue>(shape) {
             Ok(RateValue::Priced { .. }) => seen_priced = true,
-            Ok(RateValue::StatedZero) => seen_stated_zero = true,
+            Ok(RateValue::StatedZero { .. }) => seen_stated_zero = true,
             Ok(RateValue::Unpriced { .. }) => seen_unpriced = true,
             // A served rate that does not decode is the flatten defect, and the
             // fence above this one is what reports it. Ignored here so this test

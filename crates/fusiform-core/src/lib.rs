@@ -594,9 +594,12 @@ mod tests {
 
     #[test]
     fn unpriced_zero_and_priced_zero_are_distinguishable() {
-        let stated = RateValue::StatedZero;
+        let stated = RateValue::StatedZero {
+            inherited_from: None,
+        };
         let unpriced = RateValue::Unpriced {
             reason: UnpricedReason::MissingRate,
+            inherited_from: None,
         };
         // "No price" and "the price is zero" have opposite consequences for a
         // cap, so they must never compare equal or serialise alike.

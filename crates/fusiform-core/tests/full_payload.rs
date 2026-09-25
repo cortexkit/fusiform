@@ -110,7 +110,7 @@ fn every_zero_rate_on_live_data_was_stated_as_zero() {
                         model.key
                     );
                 }
-                RateValue::StatedZero => stated_zero += 1,
+                RateValue::StatedZero { .. } => stated_zero += 1,
                 RateValue::Unpriced { .. } => unpriced += 1,
             }
         }

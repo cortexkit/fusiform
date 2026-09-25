@@ -686,15 +686,15 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 249,
+      "era_count": 273,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
         "last_class": "http_status",
         "polls_back": 1
       },
-      "model_count": 17,
-      "models_priced": 11,
+      "model_count": 19,
+      "models_priced": 12,
       "overridden": [
         {
           "authority": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-08-13) — 'Other Claude models, including Claude Sonnet 4.5, have a 200k-token context window'",
@@ -852,6 +852,43 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 250000000
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "inherited stated zero": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "rate."
+        ],
+        "model_id": "synthetic-glm-free",
+        "provider_id": "synthetic-reseller"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "synthetic-reseller/synthetic-glm-free": {
+          "rate.input": {
+            "inherited_from": {
+              "basis": "open_weights",
+              "family": "glm",
+              "provider_id": "zai"
+            },
+            "state": "stated_zero"
+          },
+          "rate.output": {
+            "inherited_from": {
+              "basis": "open_weights",
+              "family": "glm",
+              "provider_id": "zai"
+            },
+            "state": "stated_zero"
           }
         }
       },

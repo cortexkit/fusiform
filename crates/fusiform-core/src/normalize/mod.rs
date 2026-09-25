@@ -518,6 +518,7 @@ fn normalize_rates(
             condition: RateCondition::Always,
             value: RateValue::Unpriced {
                 reason: UnpricedReason::UnknownChargeBasis,
+                inherited_from: None,
             },
         });
     }
@@ -587,7 +588,9 @@ const TOKEN_COST_KEYS: &[(&str, TokenClass)] = &[
 /// price.
 fn rate_value(label: &str, field: &str, literal: &str) -> Result<RateValue, NormalizeError> {
     match decimal_str_to_minor_units(literal, NANO_EXPONENT) {
-        Ok(0) => Ok(RateValue::StatedZero),
+        Ok(0) => Ok(RateValue::StatedZero {
+            inherited_from: None,
+        }),
         // `Floor::Unknown`, and it is the TRUE state rather than a placeholder.
         //
         // models.dev publishes no minimum-charge data of any kind, so nobody

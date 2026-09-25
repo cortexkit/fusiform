@@ -91,6 +91,14 @@ const INHERITANCE_PAIR: &str = r#"{
         "open_weights": true,
         "limit": { "context": 128000, "output": 8192 },
         "cost": { "input": 0.075, "output": 0.25 }
+      },
+      "synthetic-glm-free": {
+        "id": "synthetic-glm-free",
+        "name": "A model whose creator states every dimension free",
+        "family": "glm",
+        "open_weights": true,
+        "limit": { "context": 128000, "output": 8192 },
+        "cost": { "input": 0, "output": 0 }
       }
     }
   },
@@ -101,6 +109,13 @@ const INHERITANCE_PAIR: &str = r#"{
       "synthetic-glm": {
         "id": "synthetic-glm",
         "name": "The same weights served by someone who publishes no rate",
+        "family": "glm",
+        "open_weights": true,
+        "limit": { "context": 128000, "output": 8192 }
+      },
+      "synthetic-glm-free": {
+        "id": "synthetic-glm-free",
+        "name": "Free weights served by someone who publishes no rate",
         "family": "glm",
         "open_weights": true,
         "limit": { "context": 128000, "output": 8192 }
@@ -551,6 +566,16 @@ fn cases() -> Vec<(&'static str, String)> {
             // verify is indistinguishable from one that is wrong.
             "inherited rate",
             r#"{"name":"catalog.get","arguments":{"provider_id":"synthetic-reseller","model_id":"synthetic-glm"}}"#.to_string(),
+        ),
+        (
+            // A BORROWED ZERO: the creator states the model free and the
+            // reseller publishes nothing, so the reseller's rates are
+            // `stated_zero` carrying `inherited_from`. The only case where the
+            // marker rides on a non-priced state, which is the shape a consumer
+            // decoding through `RateValue` would otherwise read as the reseller
+            // itself stating the model is free.
+            "inherited stated zero",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"synthetic-reseller","model_id":"synthetic-glm-free","fact_prefixes":["rate."]}}"#.to_string(),
         ),
         (
             // The creator's own row, as the CONTROL: it publishes its own price

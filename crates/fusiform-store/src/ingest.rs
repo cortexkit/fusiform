@@ -444,6 +444,7 @@ fn withdrawal_value(key: &FactKey) -> String {
     if key.as_str().starts_with("rate.") {
         json_rate(&RateValue::Unpriced {
             reason: fusiform_core::UnpricedReason::MissingRate,
+            inherited_from: None,
         })
     } else {
         "null".to_string()
@@ -673,8 +674,12 @@ fn json_rate(value: &RateValue) -> String {
             amount.exponent,
             amount.currency.as_str()
         ),
-        RateValue::StatedZero => r#"{"state":"stated_zero"}"#.to_string(),
-        RateValue::Unpriced { reason } => format!(
+        // The marker is dropped on every state, for the reason given above.
+        RateValue::StatedZero { inherited_from: _ } => r#"{"state":"stated_zero"}"#.to_string(),
+        RateValue::Unpriced {
+            reason,
+            inherited_from: _,
+        } => format!(
             r#"{{"state":"unpriced","reason":"{}"}}"#,
             unpriced_reason_str(*reason)
         ),
