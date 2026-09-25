@@ -833,7 +833,7 @@ against the 2026-08-11 payload, here is how much:
 | Priced models missing a `cache_write` rate | 4,637 | 79.5% |
 | Priced models missing a `reasoning` rate | 5,726 | 98.2% |
 | Models with audio rates → `UnknownChargeBasis` absent a unit policy | 81 | — |
-| Models with `experimental` modes **and** a base rate → base rate only, up to 6.67x low if used in a mode | 33 of 38 | — |
+| Models with `experimental` modes **and** a base rate → base rate only, up to 6.67x low if used in a mode (as of 2026-08-11; mode rates served since 2026-09-25, see §6) | 33 of 38 | — |
 
 `input` and `output` are present on 100% of priced models; every other class
 is sparse. So a consumer metering cache-read traffic will find fusiform
@@ -1341,9 +1341,17 @@ discriminator that lives inside a renderer-selection field. Fusiform cannot
 serve the mode's rate without serving the mode, and serving the mode means
 serving request bytes.
 
-v1 therefore serves a model at its **base rate only** and records modes in raw
+v1 therefore served a model at its **base rate only** and recorded modes in raw
 provenance. A consumer metering a request made in a non-base mode would price
 it up to 6.67x low — a *stated coverage limit*, not an oversight.
+
+**Since 2026-09-25 the rates are served and the bytes still are not.** Each
+mode's published rates are facts keyed `rate.<class>.mode.<name>` (the
+upstream's mode name, restricted to `[a-z0-9_-]+`); the mode's `provider`
+block is dropped at the parse boundary. A dimension a mode does not price is
+absent, never the base rate. The paragraph below is the reasoning as it stood
+before that; the run-engine prerequisite it names now sits with the consuming
+fleet rather than with this catalog.
 
 The eventual fix keeps the quarantine intact: a mode becomes a `RateCondition`
 (§4) carrying only its discriminating identity, never its `provider` block.

@@ -1087,6 +1087,33 @@ pub struct ServedFact {
     /// Generalising it to the other tiered providers would be the same error
     /// as letting one vendor's documentation adjudicate another's serving
     /// path — the bill belongs to whoever charges it.
+    ///
+    /// # Mode rates: `rate.<class>.mode.<name>`
+    ///
+    /// A rate that applies when a request runs in one of the upstream's named
+    /// modes (models.dev `experimental.modes.<name>.cost`) appends
+    /// `.mode.<name>`, e.g. `rate.input.mode.fast`, `rate.cache_read.mode.fast`,
+    /// `rate.input.mode.priority`. Like tiered keys they are matched by prefix
+    /// against the base keys listed here, and not enumerated: the mode names
+    /// are the upstream's.
+    ///
+    /// - VALUE: the same shape as the base rate of that class, including the
+    ///   serve-time currency provenance. A published 0 is `stated_zero`.
+    /// - NAME: the upstream's label, verbatim, restricted to `[a-z0-9_-]+`.
+    ///   fusiform does not map names to service tiers or speed settings; which
+    ///   request selects a mode is the consumer's to know. A mode whose name or
+    ///   price fusiform cannot read serves no rate at all.
+    /// - ABSENT: a dimension the mode does not price has no key, and means
+    ///   UNPRICED in that mode. It is never the base rate or a multiple of it,
+    ///   even when the base prices that dimension.
+    /// - A mode that publishes no price (OpenAI `pro` today) has no keys.
+    /// - A model may carry mode rates and no base rate; it is served as
+    ///   published.
+    /// - The request bytes that select a mode (body parameters such as
+    ///   `service_tier` or `speed`, and headers) are never served.
+    /// - Open-weight rate inheritance never supplies a mode rate. A curated
+    ///   alias carries its target's mode rates, marked `inherited_from` with
+    ///   basis `alias`, like its other rates.
     pub key: &'static str,
     pub class: FactClass,
     /// What the value means, in one line, for a consumer deciding what to do
@@ -1395,7 +1422,10 @@ pub struct StatusResponse {
     ///
     /// Tiered keys are NOT enumerated: the threshold is the upstream's and is
     /// not fusiform's to invent. They appear as `<key>.above_context.<size>`,
-    /// matched by prefix against the keys listed here.
+    /// matched by prefix against the keys listed here. Mode rates are not
+    /// enumerated either, for the same reason: they appear as
+    /// `<key>.mode.<name>` under the upstream's mode name (see
+    /// [`ServedFact::key`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub served_facts: Vec<String>,
     /// How many polls have EVER failed, and when the last one was.

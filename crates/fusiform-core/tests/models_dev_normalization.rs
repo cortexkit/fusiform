@@ -320,7 +320,9 @@ fn a_legacy_key_with_a_non_200k_threshold_is_accepted() {
                 == ChargeBasis::PerMillionTokens {
                     class: TokenClass::Input,
                 }
-                && r.condition != RateCondition::Always
+                // Threshold rates only: this model's `fast` mode input rate
+                // is also conditional, and is not what this counts.
+                && matches!(r.condition, RateCondition::MinContextTokens { .. })
         })
         .count();
     assert_eq!(

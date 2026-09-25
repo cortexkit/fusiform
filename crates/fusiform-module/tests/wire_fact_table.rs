@@ -90,6 +90,16 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             );
             continue;
         }
+        if key.contains(".mode.") {
+            // Mode rates carry the upstream's mode name; the base class is
+            // what the table describes, as for tiers.
+            let base = key.split_once(".mode.").unwrap().0;
+            assert!(
+                tabled.contains(&base),
+                "mode fact {key:?} has base {base:?}, which the wire table does not list"
+            );
+            continue;
+        }
         assert!(
             tabled.contains(&key.as_str()),
             "the producer emits {key:?} and the wire table does not list it — a \

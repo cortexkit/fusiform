@@ -445,16 +445,30 @@ fn cases() -> Vec<(&'static str, String)> {
             r#"{"name":"catalog.get","arguments":{"provider_id":"greenpt","model_id":"green-s","fact_prefixes":["rate."]}}"#.to_string(),
         ),
         (
-            // NO COST OBJECT UPSTREAM, so every rate is `unpriced` with a
-            // reason. The reason is load-bearing: a consumer that treats this
-            // as zero charges nothing for a model that may bill, and one that
-            // treats it as an error refuses a model that is merely undocumented.
+            // NO BASE COST OBJECT UPSTREAM, but a priced `fast` mode: the row
+            // carries `rate.<class>.mode.fast` and no base `rate.<class>` at
+            // all. Five live rows have this shape. A consumer must read the
+            // missing base keys as unpriced, not as zero, and must not price a
+            // base-mode request from the mode's rates.
             //
-            // The other half of the pair above. Both states now appear in the
-            // fixture, so a decoder pinned to these bytes has to handle all
-            // three of `priced`, `stated_zero` and `unpriced`.
-            "catalog.get — a model the upstream prices not at all",
+            // This case used to pin a row with no rate facts whatsoever; the
+            // same row now serves its mode rates, which is the shape worth
+            // pinning, and a row with no rates at all is still pinned by the
+            // unknown-reasoning case below.
+            "catalog.get — a model priced only in a mode, with no base rate",
             r#"{"name":"catalog.get","arguments":{"provider_id":"anyapi","model_id":"anthropic/claude-opus-4-6"}}"#.to_string(),
+        ),
+        (
+            // MODE RATES BESIDE BASE RATES, from a real row: OpenAI
+            // gpt-5.6-luna publishes a base card, context tiers, a priced
+            // `fast` mode (service_tier priority upstream) and a `pro` mode
+            // with no cost. The rate plane shows `rate.<class>.mode.fast` next
+            // to the base and tiered keys, in the base rates' value shape, and
+            // NOTHING for `pro`: a mode without a published price has no key,
+            // which a consumer reads as unpriced in that mode. The request
+            // bytes that select either mode appear nowhere.
+            "catalog.get — mode rates beside base rates, and a mode with no price",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"openai","model_id":"gpt-5.6-luna","fact_prefixes":["rate."]}}"#.to_string(),
         ),
         (
             // The WITHDRAWN rate, tombstoned as `unpriced/missing_rate` by the

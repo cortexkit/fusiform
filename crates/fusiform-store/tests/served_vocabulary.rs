@@ -98,9 +98,13 @@ fn the_served_fact_set_is_exactly_this() {
     // rather than guessed — an earlier version of this test guessed
     // `_above_context_` and the real format is `.above_context.`, which sorted
     // every tiered key into the wrong bucket.
-    let (tiered, flat): (Vec<String>, Vec<String>) = produced
+    let (tiered, rest): (Vec<String>, Vec<String>) = produced
         .into_iter()
         .partition(|k| k.contains(".above_context."));
+    // Mode rate keys carry the upstream's mode name, and are checked
+    // structurally for the same reason as tiers.
+    let (moded, flat): (Vec<String>, Vec<String>) =
+        rest.into_iter().partition(|k| k.contains(".mode."));
 
     for key in &flat {
         assert!(
@@ -137,6 +141,32 @@ fn the_served_fact_set_is_exactly_this() {
         );
     }
 
+    // A mode key must be a rate key whose base class is in the vocabulary and
+    // whose mode name is safe inside a dotted key. The separator is written out
+    // as a literal here, independently of the key constructor, so a change to
+    // the served spelling reddens this rather than moving with it.
+    assert!(
+        !moded.is_empty(),
+        "the fixture must produce mode rate keys, or this branch proves nothing"
+    );
+    for key in &moded {
+        let (base, name) = key
+            .split_once(".mode.")
+            .expect("partitioned on this separator");
+        assert!(
+            SERVED_FACT_KEYS.contains(&base) && base.starts_with("rate."),
+            "mode key {key:?} has base {base:?}, which is not a served rate key"
+        );
+        assert!(
+            !name.is_empty()
+                && name.bytes().all(|b| b.is_ascii_lowercase()
+                    || b.is_ascii_digit()
+                    || b == b'_'
+                    || b == b'-'),
+            "mode key {key:?} carries a name outside [a-z0-9_-]+: {name:?}"
+        );
+    }
+
     // And the reverse direction: a key in the vocabulary that nothing produces
     // is a consumer reading something that will never arrive.
     for expected in SERVED_FACT_KEYS {
@@ -168,6 +198,62 @@ fn unreliable_and_renderer_selecting_fields_are_not_facts() {
                 );
             }
         }
+    }
+}
+
+/// The request bytes that switch a mode on never reach a stored fact.
+///
+/// A mode's `cost` is served as mode rates; its `provider` block is literal
+/// request body parameters and headers. They sit side by side in one upstream
+/// object, so the plausible way for bytes to leak is a parser that keeps the
+/// whole mode. This looks for the fixture's actual byte values, in keys and in
+/// values, on every model that carries a mode.
+#[test]
+fn mode_request_bytes_never_reach_a_fact() {
+    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
+
+    // Every byte-level value the fixture's modes carry: the body parameter
+    // names, their values, the header name and the header value.
+    const MODE_BYTES: &[&str] = &[
+        "service_tier",
+        "speed",
+        "anthropic-beta",
+        "fast-mode-2026-02-01",
+    ];
+
+    let mut moded_models = 0usize;
+    let mut mode_rates = 0usize;
+    for model in outcome.catalog.models() {
+        if model.quarantined.experimental_modes.is_empty() {
+            continue;
+        }
+        moded_models += 1;
+        for (key, value) in fusiform_store::ingest::facts_with_values(model) {
+            if key.as_str().contains(".mode.") {
+                mode_rates += 1;
+            }
+            for needle in MODE_BYTES {
+                assert!(
+                    !key.as_str().contains(needle) && !value.contains(needle),
+                    "{}: a mode's request bytes reached the fact {} = {value}: \
+                     found {needle:?}",
+                    model.key,
+                    key.as_str()
+                );
+            }
+        }
+    }
+
+    // Controls: the fixture really does carry moded models and their bytes, and
+    // their prices DO reach facts, so the loop above looked at the right rows.
+    assert!(moded_models >= 2, "the fixture must carry moded models");
+    assert!(mode_rates > 0, "the moded models must produce mode rates");
+    let raw = std::str::from_utf8(FIXTURE).unwrap();
+    for needle in MODE_BYTES {
+        assert!(
+            raw.contains(needle),
+            "the fixture must contain {needle:?}, or its absence above proves nothing"
+        );
     }
 }
 

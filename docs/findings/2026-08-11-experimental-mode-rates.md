@@ -7,6 +7,32 @@ Severity: **latent across the fleet, with a named arming condition.** No
 charge is wrong today. Two independent conditions keep it dormant, and both
 are choices rather than structural guarantees.
 
+## Resolution (2026-09-25)
+
+The catalog half is built. fusiform now serves each mode's published rates as
+`rate.<class>.mode.<name>` beside the base rates (`rate.input.mode.fast`,
+`rate.cache_read.mode.fast`, `rate.input.mode.priority`), in the base rates'
+value shape, under the upstream's mode name verbatim. The request bytes still
+never reach the domain, the store or the wire: a mode is parsed down to its
+`cost` block and its `provider` block (`body`, `headers`) is dropped at the
+parse boundary. That is the split this finding said the producer could not
+make alone; it could, once the rate was keyed by the mode's NAME rather than
+by serving the mode.
+
+What holds: a dimension a mode does not price is absent (unpriced in that
+mode), never filled from the base; a mode with no `cost` (OpenAI `pro`, 7
+models on 2026-09-25) serves nothing; a model with mode rates and no base rate
+(5 models) is served as published; a mode whose name falls outside
+`[a-z0-9_-]+` or whose cost does not parse serves nothing and is reported as a
+normalizer finding. Measured that day: 68 modes on 61 models (`fast` 41,
+`priority` 20, `pro` 7).
+
+The ledger precondition below (the mode a run actually used must be stamped on
+the fact before mode pricing is metered) is no longer an open dependency of
+this catalog. It is an item in BROCA's proposal for a `service_tier` control on
+a send, which is the consumer that asked for these rates. The rest of this
+finding is kept as the history of why the rates were withheld until then.
+
 ## The shape
 
 `experimental` is a per-model field in models.dev. Measured on the 2026-08-11

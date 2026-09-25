@@ -1405,6 +1405,11 @@ fn field_id_for_fact_key(key: &str) -> Result<serde_json::Value, String> {
                  command cannot address yet"
             ));
         }
+        // A mode rate names its mode, which the correction must carry so it
+        // maps back to exactly this key.
+        if let Some((class, mode)) = class.split_once(fusiform_store::rate_key::MODE) {
+            return Ok(serde_json::json!({"field": "mode_rate", "class": class, "mode": mode}));
+        }
         return Ok(serde_json::json!({"field": "rate", "class": class}));
     }
     if let Some(limit) = key.strip_prefix("limit.") {
@@ -1656,6 +1661,26 @@ fn print_correction(response: &serde_json::Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A mode rate key translates to the `mode_rate` field id, carrying the
+    /// mode name so the correction maps back to exactly this key.
+    ///
+    /// Without the mode branch the key falls through to the base-rate arm as
+    /// class `input.mode.fast`, which the route refuses with a serde message
+    /// about an unknown variant instead of recording the correction.
+    #[test]
+    fn a_mode_rate_key_translates_to_a_mode_rate_field() {
+        let field = field_id_for_fact_key("rate.input.mode.fast").unwrap();
+        assert_eq!(
+            field,
+            serde_json::json!({"field": "mode_rate", "class": "input", "mode": "fast"})
+        );
+        // Control: a base rate still takes the base arm.
+        assert_eq!(
+            field_id_for_fact_key("rate.input").unwrap(),
+            serde_json::json!({"field": "rate", "class": "input"})
+        );
+    }
 
     /// The override block renders, and says everything an operator needs.
     ///

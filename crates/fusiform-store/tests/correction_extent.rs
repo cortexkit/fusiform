@@ -232,8 +232,9 @@ fn the_closed_vocabulary_matches_the_normalizer() {
     for model in outcome.catalog.models() {
         for k in fact_keys_of(model) {
             let k = k.as_str().to_string();
-            // Tiered keys carry an upstream threshold and are not enumerable.
-            if !k.contains(".above_context.") {
+            // Tiered and mode keys carry an upstream threshold or mode name
+            // and are not enumerable.
+            if !k.contains(".above_context.") && !k.contains(".mode.") {
                 produced.push(k);
             }
         }
@@ -259,6 +260,36 @@ fn the_closed_vocabulary_matches_the_normalizer() {
             "the closed vocabulary lists {key:?}, which the normalizer never produces"
         );
     }
+}
+
+/// A mode rate is correctable: its field id names exactly its fact key.
+///
+/// A wrong mode price misprices requests made in that mode, so an operator must
+/// be able to write a correction for it whose extent the store can check
+/// against the row. The wire spelling is pinned too, because the CLI and the
+/// route both build or parse it as JSON.
+#[test]
+fn a_mode_rate_field_names_exactly_its_fact() {
+    let field = FieldId::ModeRate {
+        class: TokenClass::CacheRead,
+        mode: "fast".to_string(),
+    };
+    assert_eq!(
+        FactKey::for_field(field.clone()).map(|k| k.as_str().to_string()),
+        Some("rate.cache_read.mode.fast".to_string())
+    );
+    assert_eq!(
+        serde_json::to_value(&field).unwrap(),
+        serde_json::json!({"field": "mode_rate", "class": "cache_read", "mode": "fast"})
+    );
+    // A name the normalizer would refuse names no fact, rather than an odd key.
+    assert_eq!(
+        FactKey::for_field(FieldId::ModeRate {
+            class: TokenClass::Input,
+            mode: "Fast.Tier".to_string(),
+        }),
+        None
+    );
 }
 
 /// A correction naming nothing is refused.

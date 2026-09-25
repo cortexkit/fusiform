@@ -12,8 +12,11 @@
 //! # What this module refuses to do
 //!
 //! - **Serve a renderer-selecting field.** `provider.npm`, per-model `provider`
-//!   overrides and `experimental` decide how a request is spoken, not what a
-//!   model is. They are parsed only far enough to be quarantined.
+//!   overrides and a mode's `provider` block under `experimental` decide how a
+//!   request is spoken, not what a model is. They are parsed only far enough
+//!   to be quarantined. A mode's `cost` block is the exception inside
+//!   `experimental`: it is a price, and it is served as mode rates while the
+//!   bytes that select the mode are dropped at the parse boundary.
 //! - **Infer a semantic from a field's name.** `tier.size` is read as a
 //!   threshold only where `tier.type` says `context`; anywhere else it is a
 //!   parse error rather than a guess.
@@ -123,8 +126,11 @@ pub struct Quarantine {
     /// Measured on 229 model rows, and one was observed being deleted within
     /// 36 minutes while `last_updated` stayed unchanged.
     pub provider_override: bool,
-    /// An `experimental.modes` block. Measured on 38 models; all 38 carry
-    /// per-mode `cost`, and 33 also carry a base rate.
+    /// The names of the model's `experimental.modes`, whether or not they
+    /// carry a price. Measured 2026-09-25: 68 modes on 61 models. A mode's
+    /// rates are served separately as `rate.<class>.mode.<name>`; what stays
+    /// here is only that the mode exists, never the request bytes that switch
+    /// it on.
     pub experimental_modes: Vec<String>,
 }
 
@@ -256,6 +262,22 @@ pub enum NormalizeError {
     /// and the model still normalizes. The variant exists so the count is
     /// reportable.
     UnattributableChargeUnit { model: String, key: String },
+    /// A named mode under `experimental.modes` whose price could not be served.
+    ///
+    /// Not fatal, and never a fallback: the mode produces no rate at all, the
+    /// model's base rates are unaffected, and a consumer asking for the mode's
+    /// price finds it absent (unpriced) rather than receiving the base rate or
+    /// a guess. Reported so the refusal is counted rather than silent.
+    ///
+    /// Two causes. The NAME falls outside `[a-z0-9_-]+`, and serving it would
+    /// mint a fact key from arbitrary upstream text. Or the COST is not the
+    /// shape a rate schedule has (not an object, a non-numeric value, a key
+    /// with no known charge unit, or a literal the money boundary refuses).
+    RefusedMode {
+        model: String,
+        mode: String,
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for NormalizeError {
@@ -303,6 +325,14 @@ impl std::fmt::Display for NormalizeError {
             NormalizeError::UnattributableChargeUnit { model, key } => {
                 write!(f, "{model}: cost key {key:?} has no establishable charge unit")
             }
+            NormalizeError::RefusedMode {
+                model,
+                mode,
+                reason,
+            } => write!(
+                f,
+                "{model}: experimental mode {mode:?} serves no rate: {reason}"
+            ),
         }
     }
 }
@@ -436,7 +466,7 @@ fn normalize_model(
         },
     };
 
-    let rates = match &raw.cost {
+    let mut rates = match &raw.cost {
         Some(cost) => normalize_rates(&label, cost, findings)?,
         // No cost object at all. Measured on 420 models. Recording nothing here
         // is correct: the absence is expressed by there being no rate rows, and
@@ -445,6 +475,15 @@ fn normalize_model(
         // can imagine.
         None => Vec::new(),
     };
+
+    // Mode rates are read whether or not the model has a base cost: five live
+    // models (anyapi and snowflake-cortex rows) price a mode and publish no
+    // base rate, and that is served as published rather than dropped.
+    if let Some(experimental) = &raw.experimental {
+        for (name, mode) in &experimental.modes {
+            rates.extend(normalize_mode_rates(&label, name, mode, findings));
+        }
+    }
 
     let quarantined = Quarantine {
         provider_override: raw.provider.is_some(),
@@ -573,6 +612,90 @@ fn normalize_rates(
     }
 
     Ok(rates)
+}
+
+/// Whether an upstream mode name may become part of a fact key.
+///
+/// `[a-z0-9_-]+`, which every measured name satisfies (`fast`, `priority`,
+/// `pro`). The name is served verbatim inside `rate.<class>.mode.<name>`, so a
+/// dot, a space or an uppercase letter would produce a key that a prefix filter
+/// or a consumer splitting on `.` reads differently from the one written.
+pub fn is_servable_mode_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+}
+
+/// The rates one named mode publishes, or none.
+///
+/// A mode with no `cost` (OpenAI's `pro` today) is a mode without a published
+/// price and yields nothing, silently: nothing was refused. Every other way a
+/// mode can fail yields nothing AND a [`NormalizeError::RefusedMode`] finding,
+/// so the refusal is counted. No path here reads or falls back to the base
+/// rate; a dimension the mode does not price stays absent, which a consumer
+/// reads as unpriced for that mode.
+///
+/// All or nothing per mode: if any key in the cost block is unusable the whole
+/// mode is refused, because serving the dimensions that happened to parse would
+/// present a partial schedule as the complete one.
+fn normalize_mode_rates(
+    label: &str,
+    name: &str,
+    mode: &raw::RawMode,
+    findings: &mut Vec<NormalizeError>,
+) -> Vec<NormalizedRate> {
+    let refuse = |findings: &mut Vec<NormalizeError>, reason: String| {
+        findings.push(NormalizeError::RefusedMode {
+            model: label.to_string(),
+            mode: name.to_string(),
+            reason,
+        });
+        Vec::new()
+    };
+
+    if mode.malformed {
+        return refuse(findings, "the mode is not an object".to_string());
+    }
+    let Some(cost) = &mode.cost else {
+        return Vec::new();
+    };
+    if !is_servable_mode_name(name) {
+        return refuse(
+            findings,
+            "the name is outside [a-z0-9_-]+ and cannot form a fact key".to_string(),
+        );
+    }
+    let Some(cost) = cost.as_object() else {
+        return refuse(findings, format!("cost is not an object: {cost}"));
+    };
+
+    let mut rates = Vec::new();
+    for (key, value) in cost {
+        let Some((_, class)) = TOKEN_COST_KEYS.iter().find(|(k, _)| k == key) else {
+            // Tiers, legacy tier blocks and audio keys have never been measured
+            // inside a mode, so their meaning there is unestablished.
+            return refuse(
+                findings,
+                format!("cost key {key:?} has no known charge unit inside a mode"),
+            );
+        };
+        let Some(number) = value.as_number() else {
+            return refuse(findings, format!("cost.{key} is not a number: {value}"));
+        };
+        let value = match rate_value(label, key, &number.to_string()) {
+            Ok(v) => v,
+            Err(e) => return refuse(findings, e.to_string()),
+        };
+        rates.push(NormalizedRate {
+            basis: ChargeBasis::PerMillionTokens { class: *class },
+            condition: RateCondition::Mode {
+                name: name.to_string(),
+            },
+            value,
+        });
+    }
+    rates
 }
 
 /// The cost keys whose charge unit is established: per million tokens.

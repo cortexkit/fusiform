@@ -1693,6 +1693,76 @@ mod inheritance_tests {
         );
     }
 
+    /// Inheritance carries the creator's base rates and never its mode rates.
+    ///
+    /// A mode is a way of calling the creator's own endpoint; the reseller may
+    /// not offer it at all, so the creator's price for it would read as the
+    /// reseller's price for a mode nobody established it has.
+    #[test]
+    fn inheritance_never_supplies_a_mode_rate() {
+        let (store, _d) = store();
+        seed(&store, "zai", "glm-m", Some(75_000_000), true);
+        add_rate(
+            &store,
+            "zai",
+            "glm-m",
+            "rate.input.mode.fast",
+            r#"{"state":"priced","units":150000000,"exponent":9,"currency":"USD"}"#,
+        );
+        seed(&store, "ollama-cloud", "glm-m", None, true);
+
+        let mut facts = facts_of(&store, "ollama-cloud", "glm-m");
+        inherit_rate_for(
+            &store,
+            SourceId::ModelsDev,
+            &creators(),
+            &mut facts,
+            "glm-m",
+        );
+
+        // Control: inheritance did fire, so the absence below is the filter.
+        assert_eq!(facts["rate.input"]["units"], 75_000_000);
+        assert!(
+            !facts.contains_key("rate.input.mode.fast"),
+            "a mode rate must never be inherited: {facts:?}"
+        );
+    }
+
+    /// A row that publishes only mode rates has a price card, so it does not
+    /// inherit base rates from the creator.
+    #[test]
+    fn a_row_with_only_mode_rates_does_not_inherit() {
+        let (store, _d) = store();
+        seed(&store, "zai", "glm-n", Some(75_000_000), true);
+        seed(&store, "ollama-cloud", "glm-n", None, true);
+        add_rate(
+            &store,
+            "ollama-cloud",
+            "glm-n",
+            "rate.input.mode.fast",
+            r#"{"state":"priced","units":90000000,"exponent":9,"currency":"USD"}"#,
+        );
+
+        let mut facts = facts_of(&store, "ollama-cloud", "glm-n");
+        inherit_rate_for(
+            &store,
+            SourceId::ModelsDev,
+            &creators(),
+            &mut facts,
+            "glm-n",
+        );
+
+        assert!(
+            !facts.contains_key("rate.input"),
+            "a row publishing a mode rate publishes a price card and must not \
+             have its base filled from the creator: {facts:?}"
+        );
+        assert_eq!(
+            facts["rate.input.mode.fast"]["units"], 90_000_000,
+            "its own mode rate stays exactly as published"
+        );
+    }
+
     /// A published rate is never replaced. This fills a hole; it does not
     /// correct anyone's price.
     #[test]
@@ -2684,6 +2754,11 @@ fn inherit_rate_for(
     // This keeps the case it was built for: ollama-cloud/glm-5.3-flash has zero
     // rate facts in the store (measured), which is why its rates went missing
     // rather than arriving as zeros.
+    //
+    // A mode rate counts as publishing a rate. A row that prices only a mode
+    // (five live rows do) has a price card that simply states no base price,
+    // and filling its base dimensions from another provider would be the same
+    // top-up the stated_zero case above describes.
     let publishes_a_rate = facts
         .keys()
         .any(|k| k.starts_with(fusiform_store::prefix::RATE));
@@ -2731,10 +2806,17 @@ fn inherit_rate_for(
     // STANDS IN, DISCLOSED. Tiered keys ride along under the same rule; none
     // exist among the inheriting rows today, so this is the rule applying
     // uniformly rather than a case anyone has exercised.
+    //
+    // MODE RATES DO NOT RIDE ALONG. A mode is a way of calling one provider's
+    // endpoint (a service tier, a speed flag), and whether a reseller offers
+    // that mode at all is something only the reseller's own row can say. The
+    // creator's price for a mode the reseller may not have would read as the
+    // reseller's price for it.
     let inheritable: Vec<(String, String)> = origin
         .facts
         .iter()
         .filter(|(k, _)| k.as_str().starts_with(fusiform_store::prefix::RATE))
+        .filter(|(k, _)| !fusiform_store::rate_key::is_mode_rate(k.as_str()))
         .map(|(k, v)| (k.as_str().to_string(), v.clone()))
         .collect();
 

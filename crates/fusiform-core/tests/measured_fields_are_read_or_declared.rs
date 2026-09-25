@@ -332,6 +332,77 @@ fn every_nested_key_the_document_records_is_read() {
     );
 }
 
+/// Keys inside one `experimental.modes.<name>` entry the parser deliberately
+/// does not read, each with the reason.
+///
+/// Kept apart from [`DECLARED_UNREAD`] because `experimental` itself IS read:
+/// its modes' `cost` blocks are served as mode rates. What is declared here is
+/// the rest of a mode.
+const DECLARED_UNREAD_IN_A_MODE: &[(&str, &str)] = &[(
+    "provider",
+    "the request bytes that switch the mode on: `body` parameters such as \
+     `service_tier: priority` or `speed: fast`, and `headers` such as \
+     `anthropic-beta`. They would land verbatim in an outbound request, so \
+     serving them would make this catalog decide how a consumer's request is \
+     spoken. Not a field of `RawMode`, so the bytes are dropped at the parse \
+     boundary and nothing downstream can store or serve them.",
+)];
+
+/// Every key the measurement document records inside a mode is either read by
+/// `RawMode` or declared unread, and no declared key is secretly read.
+///
+/// The inventory row for `experimental` carries no brace shape for the nested
+/// fence above to parse, so the mode's keys are taken from the document's
+/// worked example of a mode instead.
+#[test]
+fn every_key_inside_a_mode_is_read_or_declared_unread() {
+    // The worked example in the document is a JSON block under `modes`.
+    let start = MEASURED
+        .find("\"modes\": {")
+        .expect("the measurement document must show a worked example of a mode");
+    let example = &MEASURED[start..];
+    let example = &example[..example.find("```").expect("the example is fenced")];
+    let documented: Vec<&str> = ["cost", "provider"]
+        .into_iter()
+        .filter(|k| example.contains(&format!("\"{k}\":")))
+        .collect();
+    assert_eq!(
+        documented,
+        ["cost", "provider"],
+        "the document's mode example no longer shows both keys a mode carries; \
+         this check is reading nothing"
+    );
+
+    let decl = "pub struct RawMode {";
+    let sstart = RAW.find(decl).expect("RawMode must exist");
+    let body = &RAW[sstart..];
+    let send = body.find("\n}").expect("a closed struct");
+    let read: Vec<String> = body[..send]
+        .lines()
+        .filter_map(|l| {
+            let rest = l.trim().strip_prefix("pub ")?;
+            if rest.starts_with("struct ") {
+                return None;
+            }
+            Some(rest.split(':').next()?.trim().to_string())
+        })
+        .collect();
+
+    for key in documented {
+        let is_read = read.iter().any(|r| r == key);
+        let is_declared = DECLARED_UNREAD_IN_A_MODE.iter().any(|(k, _)| *k == key);
+        assert!(
+            is_read != is_declared,
+            "inside a mode, `{key}` must be exactly one of read by RawMode ({is_read}) \
+             or declared unread ({is_declared})"
+        );
+    }
+    assert!(
+        read.iter().any(|r| r == "cost"),
+        "RawMode must read the mode's cost, which is what mode rates are served from"
+    );
+}
+
 #[test]
 fn a_declared_unread_field_is_actually_unread() {
     // A declaration that has quietly become false is worse than no declaration:

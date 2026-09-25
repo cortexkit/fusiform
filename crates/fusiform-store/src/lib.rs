@@ -151,6 +151,14 @@ impl FactKey {
         use fusiform_core::{CapabilityId, FieldId, LimitId};
         Some(match field {
             FieldId::Rate { class } => Self::rate(class),
+            // A name that could not have been served cannot name a served
+            // fact, so it maps to nothing rather than to an odd key.
+            FieldId::ModeRate { class, mode } => {
+                if !fusiform_core::normalize::is_servable_mode_name(&mode) {
+                    return None;
+                }
+                Self::rate_in_mode(class, &mode)
+            }
             FieldId::Existence => Self::existence(),
             FieldId::Limit { limit } => Self::limit(match limit {
                 LimitId::Context => "context",
@@ -187,7 +195,8 @@ impl FactKey {
 /// reads as a legitimate one. A caller filtering on `"rate."` after the
 /// namespace moved gets zero rates and no indication anything is wrong.
 pub mod prefix {
-    /// Pricing facts, including tiered rates like `rate.input.above_context.200000`.
+    /// Pricing facts, including tiered rates like `rate.input.above_context.200000`
+    /// and mode rates like `rate.input.mode.fast`.
     pub const RATE: &str = "rate.";
     /// Declared capabilities.
     pub const CAPABILITY: &str = "capability.";
@@ -201,6 +210,26 @@ pub mod prefix {
     /// serving the same weights agree on these and disagree on rates, which is
     /// exactly what makes them useful for relating rows across providers.
     pub const MODEL: &str = "model.";
+}
+
+/// The infixes that make a rate key conditional, and the one question every
+/// caller asks of them.
+///
+/// Named here rather than spelled at each site, for the reason [`prefix`]
+/// gives: a filter written against a misspelled infix matches nothing and
+/// reads as "this model has no such rates".
+pub mod rate_key {
+    /// A rate that applies above a context threshold:
+    /// `rate.<class>.above_context.<tokens>`.
+    pub const ABOVE_CONTEXT: &str = ".above_context.";
+    /// A rate that applies in the upstream's named mode:
+    /// `rate.<class>.mode.<name>`.
+    pub const MODE: &str = ".mode.";
+
+    /// Whether a fact key is a mode rate.
+    pub fn is_mode_rate(key: &str) -> bool {
+        key.starts_with(super::prefix::RATE) && key.contains(MODE)
+    }
 }
 
 impl FactKey {
@@ -218,9 +247,26 @@ impl FactKey {
     /// for a model and filter.
     pub fn rate_above_context(class: fusiform_core::TokenClass, tokens: u64) -> Self {
         Self(format!(
-            "{}{}.above_context.{tokens}",
+            "{}{}{}{tokens}",
             prefix::RATE,
-            token_class_str(class)
+            token_class_str(class),
+            rate_key::ABOVE_CONTEXT
+        ))
+    }
+
+    /// The key for a rate that applies only in the upstream's named mode.
+    ///
+    /// The mode name is part of the KEY, as the threshold is for a tier, so a
+    /// provider repricing one mode opens an era on that mode's key alone and a
+    /// consumer pricing a mode asks for exactly the rate it needs. The name is
+    /// the upstream's label, verbatim; the normalizer admits only names that
+    /// are safe inside a dotted key.
+    pub fn rate_in_mode(class: fusiform_core::TokenClass, mode: &str) -> Self {
+        Self(format!(
+            "{}{}{}{mode}",
+            prefix::RATE,
+            token_class_str(class),
+            rate_key::MODE
         ))
     }
 

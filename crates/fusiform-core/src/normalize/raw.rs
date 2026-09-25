@@ -108,7 +108,47 @@ pub struct RawModalities {
 #[derive(Debug, Clone, Deserialize)]
 pub struct RawExperimental {
     #[serde(default)]
-    pub modes: BTreeMap<String, serde_json::Value>,
+    pub modes: BTreeMap<String, RawMode>,
+}
+
+/// One named mode under `experimental.modes`, reduced to its rate schedule.
+///
+/// A mode fuses two things: a `cost` block (a rate schedule that applies when
+/// the request runs in this mode) and a `provider` block (literal request body
+/// parameters and headers that switch the mode on). Only `cost` is kept.
+/// `provider` is not a field here on purpose, so its bytes are dropped at the
+/// parse boundary and nothing downstream can store or serve them: a catalog
+/// that handed out header values and body parameters would be deciding how a
+/// consumer's request is spoken.
+///
+/// Built from the mode's raw JSON rather than derived, so a mode whose shape is
+/// wrong (not an object) is recorded as malformed instead of failing the whole
+/// document: one bad mode must refuse that mode, not every model upstream.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(from = "serde_json::Value")]
+pub struct RawMode {
+    /// The mode's `cost` block, untyped, so the normalizer can refuse a wrong
+    /// shape with a reported reason rather than serde dropping it. `None` when
+    /// the mode publishes no `cost` at all, which is a mode with no price and
+    /// produces no rate.
+    pub cost: Option<serde_json::Value>,
+    /// True when the mode itself was not a JSON object.
+    pub malformed: bool,
+}
+
+impl From<serde_json::Value> for RawMode {
+    fn from(value: serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::Object(mut obj) => RawMode {
+                cost: obj.remove("cost"),
+                malformed: false,
+            },
+            _ => RawMode {
+                cost: None,
+                malformed: true,
+            },
+        }
+    }
 }
 
 /// A cost block, read as a flat map so unknown keys survive.
@@ -240,8 +280,10 @@ mod tests {
     /// These types hold the upstream document verbatim, including the two
     /// fields fusiform must never emit: a model's `provider` override (literal
     /// headers and body parameters) and `experimental.modes` (per-mode request
-    /// overrides). Both are `serde_json::Value` passthroughs, kept whole so the
-    /// normalizer can flag their presence without interpreting them.
+    /// overrides). The override is a `serde_json::Value` passthrough, kept whole
+    /// so the normalizer can flag its presence without interpreting it; a mode
+    /// keeps only its `cost` block, but that block is still untyped upstream
+    /// JSON until the normalizer has checked it.
     ///
     /// They derive `Deserialize` and not `Serialize`, so a quarantined value
     /// cannot be written back out. That is the strongest form of the

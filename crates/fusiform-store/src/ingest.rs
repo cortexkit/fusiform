@@ -286,8 +286,9 @@ pub fn catalog_digest(catalog: &NormalizedCatalog) -> String {
 /// rather than a per-type comparison that must be written for each new fact.
 ///
 /// Only served facts appear here. Fields that decide HOW a request is spoken to
-/// a provider — the SDK adapter, per-model header and body overrides, named
-/// experimental modes — are deliberately absent, because fusiform describes what
+/// a provider — the SDK adapter, per-model header and body overrides, the body
+/// parameters and headers that switch on an experimental mode — are
+/// deliberately absent (a mode's PRICE is served, as a mode rate), because fusiform describes what
 /// models are and never how to talk to them. Their absence is structural rather
 /// than a rule someone must remember: they are not in this function, so no code
 /// path can write them into an era, and a field added to the normalizer later
@@ -314,8 +315,9 @@ pub fn fact_keys_of(model: &NormalizedModel) -> Vec<FactKey> {
 /// correction expresses a model being wrongly recorded as present. A mutation
 /// mapping `FieldId::Existence` to the wrong key survived because of it.
 ///
-/// Tiered rate keys are not listed: they carry an upstream threshold and are
-/// checked structurally, since the thresholds are not fusiform's to enumerate.
+/// Tiered and mode rate keys are not listed: they carry an upstream threshold
+/// or mode name and are checked structurally, since neither is fusiform's to
+/// enumerate.
 pub const SERVED_FACT_NAMESPACE: &[&str] = &[
     "existence",
     // Artefact facts: what the model IS, independent of who serves it. Two
@@ -422,6 +424,12 @@ fn facts_of(model: &NormalizedModel) -> Vec<(FactKey, String)> {
                 fusiform_core::RateCondition::Always => FactKey::rate(class),
                 fusiform_core::RateCondition::MinContextTokens { tokens } => {
                     FactKey::rate_above_context(class, tokens)
+                }
+                // A mode's price, under the upstream's mode name. Only the
+                // rate schedule reaches here; the request bytes that select
+                // the mode were dropped when the document was parsed.
+                fusiform_core::RateCondition::Mode { ref name } => {
+                    FactKey::rate_in_mode(class, name)
                 }
             };
             facts.push((key, json_rate(&rate.value)));

@@ -205,6 +205,14 @@ fn a_fact_prefix_filter_narrows_the_response() {
         .filter(|k| k.contains(".above_context."))
         .count();
     assert!(tiered > 0, "tiered rates belong to the rate plane");
+    // So must a mode rate.
+    let moded: usize = rates
+        .models
+        .values()
+        .flat_map(|f| f.keys())
+        .filter(|k| k.contains(".mode."))
+        .count();
+    assert!(moded > 0, "mode rates belong to the rate plane");
 }
 
 /// A single-model request returns one model.
@@ -1039,6 +1047,12 @@ fn every_field_id() -> Vec<fusiform_core::FieldId> {
         },
         FieldId::Rate {
             class: TokenClass::Reasoning,
+        },
+        // One representative: mode names are the upstream's and cannot be
+        // enumerated, so the list names the variant rather than every key.
+        FieldId::ModeRate {
+            class: TokenClass::Input,
+            mode: "fast".to_string(),
         },
         FieldId::Limit {
             limit: LimitId::Context,
@@ -2125,6 +2139,13 @@ fn status_names_served_keys_no_model_in_this_store_carries() {
             .iter()
             .any(|k| k.contains("above_context")),
         "tiered keys must not be listed — their thresholds come from the \
+         upstream and cannot be enumerated: {:?}",
+        status.served_facts
+    );
+    // Nor are mode rate keys: the mode names are the upstream's labels.
+    assert!(
+        !status.served_facts.iter().any(|k| k.contains(".mode.")),
+        "mode rate keys must not be listed — their names come from the \
          upstream and cannot be enumerated: {:?}",
         status.served_facts
     );

@@ -239,6 +239,13 @@ pub enum FieldId {
     /// wrong" and "the over-threshold rate was wrong" could not be told apart,
     /// and they have different affected sets.
     TierRate,
+    /// A rate that applies only in the upstream's named mode, per token class.
+    ///
+    /// Separate from `Rate` because a wrong mode price misprices only requests
+    /// made in that mode, and a correction to it must not tell a consumer to
+    /// re-examine every base-rate charge. Unlike a tier, the mode name is part
+    /// of the id, so this maps to exactly one fact key.
+    ModeRate { class: TokenClass, mode: String },
     /// So a tombstone correction — this model was recorded as present after it
     /// was actually retired — is expressible without claiming a rate was wrong.
     Existence,
@@ -367,6 +374,16 @@ pub enum RateCondition {
     /// Applies at or above this prompt size in tokens.
     MinContextTokens {
         tokens: u64,
+    },
+    /// Applies when the request runs in the upstream's named mode.
+    ///
+    /// The name is the upstream's own label (`fast`, `priority`), carried
+    /// verbatim and never mapped onto a tier: which request switches a mode on
+    /// is the consumer's to know, and this catalog serves only what the mode
+    /// costs. Only names matching [`normalize::is_servable_mode_name`] reach
+    /// this variant, because the name becomes part of a fact key.
+    Mode {
+        name: String,
     },
 }
 
