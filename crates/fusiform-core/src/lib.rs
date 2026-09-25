@@ -296,6 +296,11 @@ pub enum CapabilityId {
     /// Whether the model reasons. A consumer gates its reasoning policy on
     /// this, so a wrong value changes the bytes of every request.
     Reasoning,
+    /// The reasoning settings the model accepts. Correctable on its own rather
+    /// than folded into `Reasoning`: a consumer refuses any setting this list
+    /// does not name, so a wrong list changes which requests it will send even
+    /// when the reasoning flag itself is right.
+    ReasoningOptions,
     ToolCall,
     Attachment,
     InputModalities,

@@ -326,6 +326,7 @@ pub const SERVED_FACT_NAMESPACE: &[&str] = &[
     "limit.context",
     "limit.output",
     "capability.reasoning",
+    "capability.reasoning_options",
     "capability.tool_call",
     "capability.attachment",
     "capability.input_modalities",
@@ -383,6 +384,16 @@ fn facts_of(model: &NormalizedModel) -> Vec<(FactKey, String)> {
         (
             FactKey::capability("reasoning"),
             json_opt_bool(model.capabilities.reasoning),
+        ),
+        // The reasoning settings the model accepts, stored as the upstream
+        // published them. Unlike the modality lists below this is NOT sorted:
+        // effort levels are listed in order and a consumer relies on that
+        // order, so a reordering upstream is a real change and must open an
+        // era. `null` when the key was absent, `[]` when the upstream stated
+        // the model takes no options.
+        (
+            FactKey::capability("reasoning_options"),
+            json_opt_value(model.capabilities.reasoning_options.as_ref()),
         ),
         (
             FactKey::capability("tool_call"),
@@ -455,6 +466,16 @@ fn json_opt_u64(v: Option<u64>) -> String {
 fn json_opt_str(v: Option<&str>) -> String {
     match v {
         Some(s) => serde_json::Value::String(s.to_string()).to_string(),
+        None => "null".to_string(),
+    }
+}
+
+/// An upstream JSON value stored as-is, or `null` when the upstream published
+/// none. Serialized through serde, so array order and every element (including
+/// `null`s) survive exactly as parsed.
+fn json_opt_value(v: Option<&serde_json::Value>) -> String {
+    match v {
+        Some(value) => value.to_string(),
         None => "null".to_string(),
     }
 }

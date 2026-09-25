@@ -158,6 +158,7 @@ impl FactKey {
             }),
             FieldId::Capability { capability } => Self::capability(match capability {
                 CapabilityId::Reasoning => "reasoning",
+                CapabilityId::ReasoningOptions => "reasoning_options",
                 CapabilityId::ToolCall => "tool_call",
                 CapabilityId::Attachment => "attachment",
                 CapabilityId::InputModalities => "input_modalities",

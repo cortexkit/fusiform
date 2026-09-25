@@ -475,6 +475,18 @@ fn cases() -> Vec<(&'static str, String)> {
             r#"{"name":"catalog.get","arguments":{"provider_id":"nebius","model_id":"Qwen/Qwen3-Next-80B-A3B-Thinking","fact_prefixes":["rate."]}}"#.to_string(),
         ),
         (
+            // `capability.reasoning_options` published as `[]`: the upstream
+            // states the model takes NO reasoning settings. A different claim
+            // from the `null` the unknown-reasoning case below carries (the
+            // upstream said nothing) and from the populated list on the first
+            // case, and a consumer that collapses `[]` and `null` either
+            // refuses a model it knows nothing about or sends settings to one
+            // that was stated to take none. Scoped to the capability plane so
+            // this case earns its place by that one shape.
+            "catalog.get — a model stating it takes no reasoning options",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"nebius","model_id":"Qwen/Qwen3-Next-80B-A3B-Thinking","fact_prefixes":["capability."]}}"#.to_string(),
+        ),
+        (
             "catalog.history — a corrected fact",
             r#"{"name":"catalog.history","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","fact_key":"rate.input"}}"#.to_string(),
         ),

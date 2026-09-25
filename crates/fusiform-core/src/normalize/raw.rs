@@ -51,6 +51,12 @@ pub struct RawModel {
     pub knowledge: Option<String>,
     pub open_weights: Option<bool>,
     pub reasoning: Option<bool>,
+    /// The reasoning settings the model accepts, held as the upstream's JSON
+    /// untouched. A pass-through on purpose: entry types fusiform has not seen
+    /// and `null` elements inside `values` are real upstream data, and a typed
+    /// struct would drop or reject them. `None` when the key is absent, which is
+    /// a different claim from a published `[]`.
+    pub reasoning_options: Option<serde_json::Value>,
     pub tool_call: Option<bool>,
     pub attachment: Option<bool>,
     pub limit: Option<RawLimit>,

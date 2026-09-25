@@ -1,4 +1,35 @@
 {
+  "catalog.get — a model stating it takes no reasoning options": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "capability."
+        ],
+        "model_id": "Qwen/Qwen3-Next-80B-A3B-Thinking",
+        "provider_id": "nebius"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "nebius/Qwen/Qwen3-Next-80B-A3B-Thinking": {
+          "capability.attachment": false,
+          "capability.input_modalities": [
+            "text"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [],
+          "capability.tool_call": true
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — a model that prices reasoning separately": {
     "request": {
       "arguments": {
@@ -92,6 +123,24 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "toggle"
+            },
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            {
+              "max": 127999,
+              "min": 1024,
+              "type": "budget_tokens"
+            }
+          ],
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -120,6 +169,7 @@
           "capability.input_modalities": null,
           "capability.output_modalities": null,
           "capability.reasoning": null,
+          "capability.reasoning_options": null,
           "capability.tool_call": null,
           "existence": "present",
           "limit.context": 128000,
@@ -287,6 +337,12 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "min": 1024,
+              "type": "budget_tokens"
+            }
+          ],
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -370,6 +426,12 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "min": 1024,
+              "type": "budget_tokens"
+            }
+          ],
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 200000,
@@ -499,7 +561,7 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 218,
+      "era_count": 235,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
@@ -548,6 +610,7 @@
         "limit.context",
         "limit.output",
         "capability.reasoning",
+        "capability.reasoning_options",
         "capability.tool_call",
         "capability.attachment",
         "capability.input_modalities",
@@ -579,6 +642,7 @@
           "capability.input_modalities": null,
           "capability.output_modalities": null,
           "capability.reasoning": null,
+          "capability.reasoning_options": null,
           "capability.tool_call": null,
           "existence": "present",
           "limit.context": 128000,
@@ -627,6 +691,7 @@
           "capability.input_modalities": null,
           "capability.output_modalities": null,
           "capability.reasoning": null,
+          "capability.reasoning_options": null,
           "capability.tool_call": null,
           "existence": "present",
           "limit.context": 128000,

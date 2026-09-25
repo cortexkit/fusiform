@@ -28,6 +28,11 @@ const SERVED_FACT_KEYS: &[&str] = &[
     "limit.context",
     "limit.output",
     "capability.reasoning",
+    // The reasoning settings the model accepts, verbatim from the upstream.
+    // Admitted deliberately: a consumer maps its own reasoning levels onto this
+    // list and refuses any the model does not name. The mapping from an entry
+    // to request bytes stays the consumer's; fusiform serves only the list.
+    "capability.reasoning_options",
     "capability.tool_call",
     "capability.attachment",
     "capability.input_modalities",
@@ -532,6 +537,7 @@ fn every_capability_field_reaches_a_fact() {
         input_modalities,
         output_modalities,
         reasoning,
+        reasoning_options,
         tool_call,
         attachment,
     } = &model.capabilities;
@@ -545,6 +551,7 @@ fn every_capability_field_reaches_a_fact() {
         (input_modalities.is_some(), "capability.input_modalities"),
         (output_modalities.is_some(), "capability.output_modalities"),
         (reasoning.is_some(), "capability.reasoning"),
+        (reasoning_options.is_some(), "capability.reasoning_options"),
         (tool_call.is_some(), "capability.tool_call"),
         (attachment.is_some(), "capability.attachment"),
     ] {

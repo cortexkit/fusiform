@@ -176,6 +176,9 @@ fn every_served_fact_has_a_field_id() {
             capability: CapabilityId::Reasoning,
         },
         FieldId::Capability {
+            capability: CapabilityId::ReasoningOptions,
+        },
+        FieldId::Capability {
             capability: CapabilityId::ToolCall,
         },
         FieldId::Capability {

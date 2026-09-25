@@ -920,6 +920,21 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                see the note on FactClass.",
     },
     ServedFact {
+        key: "capability.reasoning_options",
+        class: FactClass::ByteAffecting,
+        note: "verbatim models.dev `reasoning_options`: the reasoning settings \
+               the model accepts, as an array of entries. null means the \
+               upstream said nothing; [] means the upstream states the model \
+               takes no options, a different claim. ORDER IS SIGNIFICANT, both \
+               of entries and of each entry's values, and a reorder is a change. \
+               null elements inside values and entry types fusiform does not \
+               know are passed through for the consumer to decide on, never \
+               dropped. The mapping from an entry to request bytes is the \
+               consumer's; fusiform serves only the list. Reclassified from \
+               unread 2026-09-25 because BROCA maps its reasoning variants \
+               from it and refuses any setting the list does not name.",
+    },
+    ServedFact {
         key: "capability.tool_call",
         class: FactClass::Advisory,
         note: "whether the model accepts tool definitions",

@@ -61,6 +61,20 @@ pub struct Capabilities {
     /// What the model produces. `None` when unpublished, per `input_modalities`.
     pub output_modalities: Option<Vec<Modality>>,
     pub reasoning: Option<bool>,
+    /// The reasoning settings the model accepts, exactly as models.dev
+    /// publishes them under `reasoning_options`.
+    ///
+    /// Carried verbatim rather than parsed into a closed type. A consumer maps
+    /// its own reasoning levels onto these entries and refuses anything the
+    /// model does not list, so an unknown entry type or a `null` inside
+    /// `values` must reach it intact for IT to decide; a parser that dropped
+    /// them would turn "fusiform did not understand this" into "the model
+    /// does not accept this". Order is part of the claim (effort levels are
+    /// listed in order) and is preserved.
+    ///
+    /// `None` when the key is absent — the upstream said nothing. `Some([])`
+    /// is the upstream stating the model takes no options, a different claim.
+    pub reasoning_options: Option<serde_json::Value>,
     pub tool_call: Option<bool>,
     pub attachment: Option<bool>,
 }
@@ -375,6 +389,7 @@ fn normalize_model(
             .as_ref()
             .map(|m| m.output.iter().map(|s| Modality::parse(s)).collect()),
         reasoning: raw.reasoning,
+        reasoning_options: raw.reasoning_options.clone(),
         tool_call: raw.tool_call,
         attachment: raw.attachment,
     };

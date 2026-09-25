@@ -398,6 +398,91 @@ fn reordering_a_modality_array_is_not_a_change() {
     );
 }
 
+/// Reordering a model's reasoning effort values IS a change, and re-polling
+/// the identical document is not.
+///
+/// The opposite rule from modalities, on purpose. A consumer maps its own
+/// reasoning levels onto these values by position (lowest to highest effort),
+/// so the upstream reordering them changes what that consumer would send. A
+/// diff that compared this list order-insensitively, the way modalities are
+/// compared, would keep serving the old order as current with no era to say
+/// it moved.
+#[test]
+fn reordering_reasoning_option_values_is_a_change() {
+    let f = fixture();
+    seed(&f, 1_000);
+    observe(&f, 2_000, ObservationOutcome::Unchanged);
+
+    // CONTROL first: the identical document writes nothing. Without it the
+    // assertion below would also pass on a diff that opened an era for this
+    // fact on every poll.
+    let identical = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &identical,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        None,
+    )
+    .unwrap();
+    assert!(
+        plan.is_empty(),
+        "re-polling the identical document must open no era, got {:?}",
+        plan.eras
+            .iter()
+            .map(|e| e.fact_key.as_str())
+            .collect::<Vec<_>>()
+    );
+
+    // Reversed through the parsed form, so a wrong path panics rather than
+    // silently leaving the document unchanged.
+    let mutated = {
+        let mut doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        let values = doc["openai"]["models"]["gpt-5.6-luna"]["reasoning_options"][0]["values"]
+            .as_array_mut()
+            .expect("this model publishes effort values");
+        let before = values.clone();
+        values.reverse();
+        assert_ne!(
+            *values, before,
+            "the reversal must actually change the order"
+        );
+        serde_json::to_string(&doc).unwrap()
+    };
+
+    let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+    let plan = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(4_000),
+        BoundaryKind::Observed,
+        None,
+    )
+    .unwrap();
+
+    let touched: Vec<(String, String)> = plan
+        .eras
+        .iter()
+        .map(|e| (e.model_id.clone(), e.fact_key.as_str().to_string()))
+        .collect();
+    assert_eq!(
+        touched,
+        vec![(
+            "gpt-5.6-luna".to_string(),
+            "capability.reasoning_options".to_string()
+        )],
+        "reordering effort values must open exactly one era, on this fact"
+    );
+
+    // And the era records the NEW order, not a normalized one.
+    let stored: serde_json::Value = serde_json::from_str(&plan.eras[0].value_json).unwrap();
+    let mutated_doc: serde_json::Value = serde_json::from_str(&mutated).unwrap();
+    assert_eq!(
+        stored, mutated_doc["openai"]["models"]["gpt-5.6-luna"]["reasoning_options"],
+        "the stored value must be the upstream's list in the upstream's order"
+    );
+}
+
 /// A withdrawn rate is tombstoned, so a stale price never stays current.
 ///
 /// The gap this closes: a diff that only visits facts present in the new

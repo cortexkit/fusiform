@@ -1050,6 +1050,9 @@ fn every_field_id() -> Vec<fusiform_core::FieldId> {
             capability: CapabilityId::Reasoning,
         },
         FieldId::Capability {
+            capability: CapabilityId::ReasoningOptions,
+        },
+        FieldId::Capability {
             capability: CapabilityId::ToolCall,
         },
         FieldId::Capability {
