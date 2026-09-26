@@ -151,18 +151,19 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
     }
 }
 
-/// `limit.output` is advisory, and this is the test that would notice it moving
-/// back.
+/// `limit.output` is byte-affecting, because a named consumer renders it.
 ///
-/// It carried `ByteAffecting` for one commit on my assumption that a consumer
-/// renders it as a request parameter. BROCA enumerated their render path and
-/// found zero reads of `limits.max_output` — the output cap in a request comes
-/// from the caller, never from a catalog.
+/// Its class follows a consumer's render path, not how the field sounds, and
+/// that path has changed once already. Until 2026-09-25 BROCA took the output
+/// cap only from the caller's max_tokens and had zero reads of this fact, so it
+/// was advisory. BROCA v0.3.125 (placed 2026-09-25) made the catalog maximum
+/// the default max_tokens for any send whose caller sets no cap, so a wrong
+/// value now changes request bytes.
 ///
-/// Pinned because the plausible-sounding classification is the wrong one, so a
-/// future reader "fixing" it would be restoring the error.
+/// Pinned so a move in either direction is deliberate: moving it back needs
+/// BROCA to stop rendering it, not a reader deciding it looks advisory.
 #[test]
-fn limit_output_is_advisory_because_no_consumer_renders_it() {
+fn limit_output_is_byte_affecting_because_broca_renders_it_as_the_default_cap() {
     use fusiform_protocol::{FactClass, SERVED_FACTS};
 
     let fact = SERVED_FACTS
@@ -172,11 +173,10 @@ fn limit_output_is_advisory_because_no_consumer_renders_it() {
 
     assert_eq!(
         fact.class,
-        FactClass::Advisory,
-        "limit.output reads like a request parameter and is not one: BROCA's \
-         render path takes the output cap from the caller's max_tokens and \
-         never from the catalog. Reclassifying it byte-affecting would be \
-         restoring an assumption a consumer already refuted from source."
+        FactClass::ByteAffecting,
+        "limit.output is BROCA's default max_tokens since v0.3.125, so a wrong \
+         value changes request bytes. Reclassifying it advisory needs BROCA to \
+         stop rendering it first."
     );
 }
 

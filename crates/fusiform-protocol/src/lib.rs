@@ -950,11 +950,16 @@ pub const SERVED_FACTS: &[ServedFact] = &[
     },
     ServedFact {
         key: "limit.output",
-        class: FactClass::Advisory,
-        note: "the model's maximum output. NOT the request's output cap: BROCA \
-               takes that from the caller's max_tokens, never from a catalog. \
-               Reclassified 2026-08-12 after they enumerated their render path \
-               and found zero reads of it.",
+        class: FactClass::ByteAffecting,
+        note: "the model's maximum output. Since BROCA v0.3.125 (placed \
+               2026-09-25) it is the rendered max_tokens of every send whose \
+               caller sets no cap, frozen once per episode, so a wrong value \
+               changes request bytes. It was Advisory from 2026-08-12, when \
+               BROCA's render path had zero reads of it. Upstream publishes \
+               placeholders: in 1,147 of 7,963 rows it is not below \
+               limit.context, and a consumer must not reserve that as an \
+               output cap. BROCA treats those rows as unknown. NULL means \
+               UNKNOWN and must not be defaulted to a number.",
     },
     ServedFact {
         key: "capability.reasoning",
