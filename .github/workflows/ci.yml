@@ -80,23 +80,32 @@ on:
   # THE FREE DISCRIMINATOR IS A DST BOUNDARY, and it is dated. America/New_York
   # leaves daylight time at 2026-11-01 06:00Z (verified against the tz database
   # here, not from the first-Sunday rule). Under a UTC reading this cron keeps
-  # delivering ~10:31Z; under an Eastern reading `0 6` moves from 06:00 EDT
-  # (10:00Z) to 06:00 EST (11:00Z) and delivery shifts an hour to ~11:31Z.
+  # delivering ~10:52Z (its 2026-09-21..27 mean; the table above is older); under an Eastern reading `0 6` moves from 06:00 EDT
+  # (10:00Z) to 06:00 EST (11:00Z), an hour later.
   #
-  # A ONE-HOUR SEPARATION, on a repo that changed nothing.
+  # EXPECT ABOUT 40 MINUTES OF SHIFT, NOT 60. After subconscious moved to
+  # `17 3`, the seven days 2026-09-21..27 gave mean delays of 334m (03:17),
+  # 317m (04:17) and 292m (06:00): the later a run fires, the less it waits,
+  # about 15-20 minutes less per hour. An hour-later fire therefore arrives
+  # roughly 40 minutes later, on a repo that changed nothing.
   #
   # AND IT DOES NOT RESOLVE ON ONE READING. The day-to-day spread inside a
-  # single repo is 21-24 minutes (sd, n=14 each), so a 60-minute shift is only
-  # 2.5-2.9 sigma on ONE observation -- suggestive, and exactly the reading that
-  # gets called conclusive because it points the way you expected.
+  # single repo is 17-24 minutes (sd), so a ~40-minute shift is under 2 sigma
+  # on ONE observation -- and exactly the reading that gets called conclusive
+  # because it points the way you expected.
   #
-  #     11-01   2 arms          suggestive
-  #     11-02   3 arms          stronger
-  #     11-05   ~12 readings    SE 9-11m, 5.5-6.4 sigma, decisive either way
+  #     11-01   2 arms          suggestive at best
+  #     11-02   3 arms          still weak
+  #     11-05   ~12 readings    SE ~8-10m, ~4-5 sigma, the first real read
   #
-  # The 35-minute figure above is a spread of MEANS across repos. The noise that
-  # governs a single draw is wider than that, and conflating the two is how a
-  # two-sigma hint becomes a settled result.
+  # Compare across PAIRS AT MATCHED GAPS, not pooled. Day-to-day noise is
+  # shared between repos in proportion to how close their declared times are
+  # (paired-difference sd: 0 min apart 2.8m, 60 min 4.9m, 103 min 10.5-10.9m,
+  # 163 min 15.5m), so a pooled figure mixes correlated and independent noise.
+  #
+  # The spread of means across repos in the table above is not the noise on a
+  # single draw, which is wider, and conflating the two is how a two-sigma hint
+  # becomes a settled result.
   #
   # Which is the whole value of holding still: a repo that changed NOTHING
   # across the boundary separates a timezone shift from whatever else GitHub
