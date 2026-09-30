@@ -69,7 +69,11 @@ for bin in ck-fusiform ck-models; do
   # macOS grants tied to that requirement still apply.
   codesign --force --sign "$IDENTITY" --identifier "$bin" -o runtime "$STAGE/$bin"
   codesign --verify --strict "$STAGE/$bin"
-  if ! codesign -dv "$STAGE/$bin" 2>&1 | grep -q 'flags=.*(runtime)'; then
+  # Captured first, not piped into `grep -q`: under pipefail, `grep -q` exits
+  # on its first match, codesign then dies of SIGPIPE, and the pipeline fails
+  # exactly when the flag IS present.
+  signature="$(codesign -dv "$STAGE/$bin" 2>&1)"
+  if [[ "$signature" != *"(runtime)"* ]]; then
     echo "stage.sh: $bin was signed without the hardened runtime" >&2
     rm -rf "$STAGE"
     exit 1
