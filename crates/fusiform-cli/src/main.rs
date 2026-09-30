@@ -172,7 +172,7 @@ async fn main() {
 ///
 /// `subc-client-rs` falls back to `SUBC_MODULE_ID` and `SUBC_LAUNCH_NONCE` from
 /// the process environment when a call carries no explicit consumer identity
-/// (re-derived from `subc-client-rs/src/consumer.rs` 2026-09-06),
+/// (`consumer_identity_from_env` in `subc-client-rs` 0.23.2, read 2026-09-30),
 /// and there is no way to say "explicitly none" — an absent identity in
 /// `CallOptions` *means* "read the environment".
 ///
@@ -192,11 +192,20 @@ async fn main() {
 /// Clearing them here rather than passing an explicit identity, because the
 /// honest statement is that this process has no module identity at all — not
 /// that it has a different one.
+///
+/// `SUBC_LAUNCH_NONCE_FD` goes too. The daemon now hands a module its nonce
+/// through a pipe whose descriptor number that variable names, and a shell
+/// spawned from the module inherits the variable without the pipe. The SDK
+/// only reads the nonce after finding `SUBC_MODULE_ID`, so removing that is
+/// enough today; but a reader that ever consulted the descriptor variable
+/// first would read and close whatever unrelated file this process happens
+/// to hold at that number.
 fn disown_inherited_module_identity() {
     // Before any task is spawned, so no other thread can be reading the
     // environment concurrently.
     env::remove_var("SUBC_MODULE_ID");
     env::remove_var("SUBC_LAUNCH_NONCE");
+    env::remove_var("SUBC_LAUNCH_NONCE_FD");
 }
 
 struct Args {
@@ -1954,6 +1963,7 @@ mod tests {
         // Deliberately set both, as a supervised module's environment has them.
         env::set_var("SUBC_MODULE_ID", "aft");
         env::set_var("SUBC_LAUNCH_NONCE", "a-live-nonce");
+        env::set_var("SUBC_LAUNCH_NONCE_FD", "7:12345");
         assert!(
             env::var("SUBC_MODULE_ID").is_ok(),
             "the test must actually set the variable, or it proves nothing"
@@ -1968,6 +1978,10 @@ mod tests {
         assert!(
             env::var("SUBC_LAUNCH_NONCE").is_err(),
             "an inherited launch nonce must not survive"
+        );
+        assert!(
+            env::var("SUBC_LAUNCH_NONCE_FD").is_err(),
+            "an inherited nonce descriptor must not survive"
         );
     }
 
