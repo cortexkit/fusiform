@@ -62,8 +62,18 @@ for bin in ck-fusiform ck-models; do
   # Sign under signing-topology v2 with a pinned identifier. Never `--sign -`:
   # an ad-hoc identifier is derived from LC_UUID, which changes on every
   # rebuild and orphans the TCC grants attached to the previous one.
-  codesign --force --sign "$IDENTITY" --identifier "$bin" "$STAGE/$bin"
+  #
+  # `-o runtime` enables the hardened runtime, which the daemon's placement
+  # gate requires before it stops handing modules their launch nonce through
+  # the environment. It leaves the designated requirement unchanged, so the
+  # macOS grants tied to that requirement still apply.
+  codesign --force --sign "$IDENTITY" --identifier "$bin" -o runtime "$STAGE/$bin"
   codesign --verify --strict "$STAGE/$bin"
+  if ! codesign -dv "$STAGE/$bin" 2>&1 | grep -q 'flags=.*(runtime)'; then
+    echo "stage.sh: $bin was signed without the hardened runtime" >&2
+    rm -rf "$STAGE"
+    exit 1
+  fi
 
   # THE GATE. Ask the signed bytes what they are.
   reported="$("$STAGE/$bin" --version | grep -oE '\([0-9a-f]{40}\)' | tr -d '()')"
