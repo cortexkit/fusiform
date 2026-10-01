@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "Test helpers shared across fusiform's crates. Dev-only: nothing in this crate ships in a binary."
+license = "MIT"
 
 [dependencies]

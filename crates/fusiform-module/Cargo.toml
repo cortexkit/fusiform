@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "The ck-fusiform daemon: fetches upstream catalogs on a cadence and serves the history."
+license = "MIT"
 
 [[bin]]
 name = "ck-fusiform"

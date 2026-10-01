@@ -35,3 +35,7 @@ descriptor is engram's job at capture time.
 Scripts: `scripts/release-build.sh` builds with the commit stamped in and runs
 anywhere. `scripts/stage.sh` signs with an Apple Developer identity and is
 macOS-only; it refuses immediately elsewhere rather than failing partway.
+
+## License
+
+MIT; see `LICENSE`.

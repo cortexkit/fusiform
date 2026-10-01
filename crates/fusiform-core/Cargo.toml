@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "Pure domain for the ck-fusiform AI-model capability catalog: identity, observations, eras, and rates."
+license = "MIT"
 
 [dependencies]
 fusiform-protocol = { path = "../fusiform-protocol" }

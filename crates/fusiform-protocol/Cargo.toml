@@ -3,20 +3,22 @@ name = "fusiform-protocol"
 # The served wire schema's version, moved by a CI check whenever the types
 # change. This is the number a consumer pins, so it must not track fusiform's
 # module version — the module deploys far more often than its contract moves.
-version = "0.27.1"
+version = "0.27.2"
 edition = "2021"
-publish = false
-description = "Fusiform's served wire schema: the request and response types for catalog.get, catalog.history and catalog.status. Types only — no store, no network, no runtime."
+description = "Request and response types for the fusiform model-catalog daemon's tools. Types only: no store, no network, no runtime."
+license = "MIT"
+repository = "https://github.com/cortexkit/fusiform"
+readme = "README.md"
 
 # Deliberately minimal, and this is a contract rather than an oversight.
 #
-# ASTRO's condition for depending on a module-owned crate was that it must not
-# drag in the module's internals: "if the replacement drags in a client, a tokio
-# runtime, or a database driver, then depending on it does couple me to your
-# internals regardless of where it lives — and I would refuse that." They
-# declined QTA's `quota-core` on exactly that ground, mirroring three types
-# instead rather than take a dependency that pulled in crypto and network
-# libraries for three struct definitions.
+# A consumer's condition for depending on a module-owned crate was that it must
+# not drag in the module's internals: "if the replacement drags in a client, a
+# tokio runtime, or a database driver, then depending on it does couple me to
+# your internals regardless of where it lives — and I would refuse that." The
+# same consumer declined another module's `quota-core` on exactly that ground,
+# mirroring three types instead rather than take a dependency that pulled in
+# crypto and network libraries for three struct definitions.
 #
 # So this crate depends on serde and nothing else, and a test asserts the whole
 # dependency tree stays that shape.

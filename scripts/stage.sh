@@ -45,11 +45,22 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
+# The signing identity comes from the environment rather than this file, so the
+# script carries no one's certificate name. Checked here, before building, for
+# the same reason as the platform check above: a build that runs to completion
+# and only then finds it cannot sign leaves a half-staged directory behind.
+if [[ -z "${FUSIFORM_SIGNING_IDENTITY:-}" ]]; then
+  echo "stage.sh needs FUSIFORM_SIGNING_IDENTITY: the codesign identity to sign" >&2
+  echo "  the staged binaries with, as listed by 'security find-identity -v -p codesigning'." >&2
+  echo "  example: FUSIFORM_SIGNING_IDENTITY=\"Apple Development: <Name> (<TEAMID>)\"" >&2
+  exit 1
+fi
+
 cd "$(dirname "$0")/.."
 
 HEAD_REV="$(git rev-parse HEAD)"
 STAGE="$HOME/ck-stage/fusiform-$(date -u +%Y%m%dT%H%M%SZ)"
-IDENTITY="Apple Development: ISMET UFUK ALTINOK (7UX762GU88)"
+IDENTITY="$FUSIFORM_SIGNING_IDENTITY"
 
 # Unfiltered and unpiped: this script's own refusals must reach the terminal
 # for the same reason the release script's must.

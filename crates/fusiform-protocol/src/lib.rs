@@ -3,13 +3,13 @@
 //! Fusiform's served wire schema.
 //!
 //! These are the types a consumer compiles against to call `catalog.get`,
-//! `catalog.history` and `catalog.status`. They are the contract; everything
-//! else in fusiform is implementation.
+//! `catalog.history`, `catalog.status` and the rest of the tools in [`TOOLS`].
+//! They are the contract; everything else in fusiform is implementation.
 //!
 //! # Why this crate exists, and why it holds nothing else
 //!
-//! The fleet's cross-repo payload rule is that one definition is consumed by
-//! both sides of a wire. SUBC ruled that a module-owned published crate is the
+//! The cross-repo payload rule this crate follows is that one definition is
+//! consumed by both sides of a wire, and a module-owned published crate is the
 //! house pattern for that — `subc-protocol` is the precedent, owned by the
 //! daemon's repo and compiled against by every client — because a served schema
 //! is a DECLARATION authored by the producer. Producer ownership makes drift
@@ -49,15 +49,15 @@ use serde::{Deserialize, Serialize};
 ///
 /// # The dots are deliberate, and they cost the MCP surface
 ///
-/// Every name here is `namespace.verb`. SUBC censused the live catalogue on
-/// 2026-09-19 and found the consequence: the MCP gateway skips any tool whose
+/// Every name here is `namespace.verb`. A census of the live catalogue on
+/// 2026-09-19 found the consequence: the MCP gateway skips any tool whose
 /// name is not `[A-Za-z0-9_-]+`, so ALL SEVEN are skipped and fusiform
 /// contributes nothing to an MCP session while the catalogue advertises a
 /// seven-tool surface.
 ///
 /// That is correct for this module and stated here so nobody has to ask twice.
 /// Every consumer reaches these over the subc route, programmatically:
-/// `ck-models` for an operator, and astrocyte, broca and alf for machines. None
+/// `ck-models` for an operator, and three other modules for machines. None
 /// is a head model choosing a tool from a list, which is the plane the gateway
 /// serves.
 ///
@@ -355,7 +355,7 @@ pub struct CatalogGetResponse {
     /// - **You asked for the past.** `resolved_at_ms` is the instant you sent.
     ///   Fewer models is correct — models arrive daily, so any past instant has
     ///   fewer than now.
-    /// - **Fusiform's store went backwards** (an engram restore returns it to an
+    /// - **Fusiform's store went backwards** (a restore from backup returns it to an
     ///   older generation). `resolved_at_ms` is approximately NOW, and the
     ///   missing models are missing from the current catalog.
     ///
@@ -440,7 +440,8 @@ pub struct CatalogGetResponse {
     ///
     /// # Auditing a consumer for this: look at WRITES, not reads
     ///
-    /// BROCA's, after checking their own uses and finding both correct. The
+    /// This audit comes from a consumer that checked its own uses this way and
+    /// found both correct. The
     /// misuse is invisible at the read site — every read of this field looks
     /// the same, and comparing two versions is the field's whole purpose. What
     /// distinguishes correct from broken is whether the value is PERSISTED and
@@ -451,11 +452,11 @@ pub struct CatalogGetResponse {
     /// sites are fine by construction; storage sites are where the defect
     /// lives.
     ///
-    /// Their own immunity turned out to be structural rather than careful, and
-    /// the shape is worth knowing: BROCA forbids `at_ms` on refresh requests
+    /// That consumer's immunity turned out to be structural rather than careful,
+    /// and the shape is worth knowing: it forbids `at_ms` on refresh requests
     /// outright, with a test asserting the request shape omits it. That guard
     /// exists for an unrelated reason — a historical read would resolve an
-    /// identity set they no longer serve — and it happens to make this hazard
+    /// identity set it no longer serves — and it happens to make this hazard
     /// unconstructible, because every read is current and the watermark
     /// therefore advances monotonically with read time. A request-shape
     /// prohibition can confer immunity to hazards its author never considered,
@@ -677,8 +678,8 @@ pub struct UncertainFactWire {
 /// `CARGO_PKG_VERSION` answers "is this fusiform" and never "which fusiform".
 /// It has not moved in this project's lifetime, and the deploy ladder's other
 /// identity — LC_UUID — is PATH-DEPENDENT: the same commit built in the main
-/// tree and in a git worktree produces different UUIDs (measured by CKCRED,
-/// 2026-08-12). LC_UUID proves two FILES match, which is what a placement
+/// tree and in a git worktree produces different UUIDs (measured 2026-08-12).
+/// LC_UUID proves two FILES match, which is what a placement
 /// needs, and cannot name a commit, which is what an incident needs.
 ///
 /// This gap was not hypothetical here. Fusiform ran for several hours on a
@@ -694,7 +695,8 @@ pub struct UncertainFactWire {
 /// provenance, and stamping a possibly-dirty tree's HEAD would assert
 /// otherwise.
 ///
-/// Convention adopted from CKCRED via SUBC.
+/// The convention is adopted from a sibling module that runs under the same
+/// daemon.
 ///
 /// # It names WHOEVER built this crate, not fusiform
 ///
@@ -756,7 +758,7 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// It lived in fusiform's charter and in one conversation with the consumer who
 /// named the three byte-affecting fields. Neither is reachable from the artifact
 /// a consumer compiles against, which makes it a relationship recorded nowhere a
-/// check can see — the failure mode ASTRO and I isolated on 2026-08-12, where
+/// check can see — the failure mode isolated with a consumer on 2026-08-12, where
 /// every available verification confirms the shapes and none can find the error,
 /// because what is missing is not a wrong value but an unrecorded meaning.
 ///
@@ -764,9 +766,10 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 ///
 /// **Byte-affecting.** A consumer legitimately renders these into a request, so
 /// a wrong value changes what goes on the wire to a provider with nothing
-/// failing. BROCA named these from their own source: `limits.context` drives
-/// transform pressure, `limits.output` is rendered as a request parameter, and
-/// `capability.reasoning` gates their reasoning policy — a false value strips
+/// failing. A consumer that renders requests from this catalog named these from
+/// its own source: `limits.context` drives transform pressure, `limits.output`
+/// is rendered as a request parameter, and `capability.reasoning` gates its
+/// reasoning policy — a false value strips
 /// thinking blocks and the model simply stops reasoning, silently.
 ///
 /// **Money.** Rates price real usage. Absent, zero and unknown are three
@@ -779,8 +782,8 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// # The classes are not symmetrically evidenced, and the difference matters
 ///
 /// `ByteAffecting` is a fact about a CONSUMER'S RENDERER, not about the value.
-/// The three entries carrying it are there because BROCA read them out of their
-/// own source and said so. Nothing in fusiform can verify or refute that, and
+/// The three entries carrying it are there because a consumer read them out of
+/// its own source and said so. Nothing in fusiform can verify or refute that, and
 /// nothing in fusiform can discover a fourth.
 ///
 /// So `Advisory` here means "no consumer has told fusiform this reaches their
@@ -794,8 +797,8 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 ///
 /// That instruction has already worked in the other direction: `limit.output`
 /// was `ByteAffecting` on my belief that a consumer rendered it as a request
-/// parameter, until BROCA enumerated their render path and found zero reads of
-/// it. A wrong classification is not always over-cautious.
+/// parameter, until that consumer enumerated its render path and found zero
+/// reads of it. A wrong classification is not always over-cautious.
 ///
 /// # `null` means UNKNOWN, and coercing it to `false` is the failure this
 /// distinction exists to prevent
@@ -805,14 +808,14 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// silence is a positive claim about a model, made from an absence of
 /// information.
 ///
-/// The hazard is measured rather than hypothetical. BROCA's parse reads
+/// The hazard is measured rather than hypothetical. One consumer's parse reads
 /// `entry.get(k).and_then(Value::as_bool).unwrap_or(false)`, and `as_bool()`
 /// returns `None` on a JSON null — so absent, explicitly false, and null all
 /// collapse to `false`, which routes a model to `ReasoningPolicy::None` and
 /// strips thinking blocks from a model that supports them. Nothing fails.
 ///
-/// **That parse is no longer on BROCA's serving path.** It reads their VENDORED
-/// snapshot, which their catalog cutover took off the path entirely. The
+/// **That parse is no longer on that consumer's serving path.** It reads its
+/// VENDORED snapshot, which its catalog cutover took off the path entirely. The
 /// runtime index now treats an absent key as a TYPED ERROR rather than a
 /// default: `Some(Bool)` is known, `Some(Null)` is Unknown, absent fails the
 /// whole catalog load. Fail-closed where the vendored path was fail-quiet.
@@ -838,8 +841,8 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 ///
 /// The rule survives the correction: **a consumer must carry unknown through to
 /// the point that decides what to do about it, rather than resolving it at the
-/// parse boundary where the only available default is a guess.** BROCA's
-/// runtime index now does exactly that.
+/// parse boundary where the only available default is a guess.** That
+/// consumer's runtime index now does exactly that.
 ///
 /// The three collapsed cases are not one defect with three inputs, and the
 /// difference decides what a fix has to do:
@@ -921,8 +924,8 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// WHAT exists; it never says HOW to speak to it.
 /// `crates/fusiform-store/tests/served_vocabulary.rs` fails if one appears.
 ///
-/// **This is not merely an omission, and BROCA supplied the reason from their
-/// own render path.** The field the rule excludes is `provider.wire_family`,
+/// **This is not merely an omission, and a consumer supplied the reason from
+/// its own render path.** The field the rule excludes is `provider.wire_family`,
 /// which SELECTS THE RENDERER — so it does not affect one field of a request,
 /// it decides every byte of it. Every other entry in this table is a value a
 /// consumer may render; that one would be fusiform choosing how a consumer
@@ -951,15 +954,16 @@ pub const SERVED_FACTS: &[ServedFact] = &[
     ServedFact {
         key: "limit.output",
         class: FactClass::ByteAffecting,
-        note: "the model's maximum output. Since BROCA v0.3.125 (placed \
-               2026-09-25) it is the rendered max_tokens of every send whose \
-               caller sets no cap, frozen once per episode, so a wrong value \
-               changes request bytes. It was Advisory from 2026-08-12, when \
-               BROCA's render path had zero reads of it. Upstream publishes \
+        note: "the model's maximum output. Since 2026-09-25 a consumer renders \
+               it as the default max_tokens of every send whose caller sets no \
+               cap, frozen once per episode, so a wrong value changes request \
+               bytes. It was Advisory from 2026-08-12, when that consumer's \
+               render path had zero reads of it. Upstream publishes \
                placeholders: in 1,147 of 7,963 rows it is not below \
                limit.context, and a consumer must not reserve that as an \
-               output cap. BROCA treats those rows as unknown. NULL means \
-               UNKNOWN and must not be defaulted to a number.",
+               output cap; the consumer that renders it treats those rows as \
+               unknown. NULL means UNKNOWN and must not be defaulted to a \
+               number.",
     },
     ServedFact {
         key: "capability.reasoning",
@@ -981,7 +985,7 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                know are passed through for the consumer to decide on, never \
                dropped. The mapping from an entry to request bytes is the \
                consumer's; fusiform serves only the list. Reclassified from \
-               unread 2026-09-25 because BROCA maps its reasoning variants \
+               unread 2026-09-25 because a consumer maps its reasoning variants \
                from it and refuses any setting the list does not name.",
     },
     ServedFact {

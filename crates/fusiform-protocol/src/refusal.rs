@@ -2,7 +2,7 @@
 //!
 //! # Why this is here
 //!
-//! ASTRO went looking for fusiform's before-history refusal and could not find
+//! A consumer went looking for fusiform's before-history refusal and could not find
 //! it at source, because it lives in the module crate rather than this one. So
 //! the protocol crate carried neither the payload vocabulary nor the refusal
 //! contract, and both omissions have the same consequence: a consumer builds a

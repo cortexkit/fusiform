@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "Durable observation and era history for the ck-fusiform catalog."
+license = "MIT"
 
 [dependencies]
 fusiform-core = { path = "../fusiform-core" }

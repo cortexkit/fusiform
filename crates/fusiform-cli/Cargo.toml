@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "Operator CLI for ck-fusiform, dispatched as `ck models`: read the catalog, a fact's history, what the daemon has been doing, and record corrections."
+license = "MIT"
 
 [[bin]]
 name = "ck-models"

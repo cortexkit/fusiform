@@ -9,8 +9,8 @@
 //! configured for arbitrary precision. No consumer could depend on that, so
 //! every consumer wrote its own decoder.
 //!
-//! A second copy of this vocabulary is worse than no copy, and ASTRO named the
-//! reason precisely: adding a variant to [`UnpricedReason`] would not FAIL a
+//! A second copy of this vocabulary is worse than no copy, for a reason a
+//! consumer named precisely: adding a variant to [`UnpricedReason`] would not FAIL a
 //! hand-written decoder, it would fall into a default arm and price something
 //! that should have been refused. A copy that still parses is the dangerous
 //! kind, and it collapses exactly the absent/zero/unknown distinction this
@@ -182,8 +182,8 @@ pub enum RateValue {
     Priced {
         /// Flattened, because the SERVED bytes are flat.
         ///
-        /// This was wrong when the type moved here and ASTRO found it by
-        /// building against the crate rather than reading the notice: their
+        /// This was wrong when the type moved here, and a consumer found it by
+        /// building against the crate rather than reading the notice: its
         /// decoder refused every priced rate fusiform serves, with
         /// `missing field "amount"`.
         ///

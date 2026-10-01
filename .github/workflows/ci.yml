@@ -131,7 +131,7 @@ jobs:
   # talks to the subc daemon through the SDK.
   test:
     name: Test (ubuntu)
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     # A wedged test must surface as a fast red run rather than burning the
     # runner for the 6-hour Actions default. Healthy runs finish in minutes.
     timeout-minutes: 20

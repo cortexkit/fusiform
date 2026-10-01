@@ -275,7 +275,7 @@ fn every_response_type_round_trips() {
 /// # Why this is a structural guarantee rather than a courtesy
 ///
 /// The CLI and the module are deployed by DIFFERENT PARTIES — `ck-models` into
-/// `~/.local/bin` is mine, `ck-fusiform` into the fleet bin dir is SUBC's — so
+/// `~/.local/bin` by one, `ck-fusiform` into the daemon's bin dir by another — so
 /// they are never placed simultaneously. A version skew window is not a risk to
 /// be managed, it is a certainty of the deployment shape, and it is open for as
 /// long as it takes a message to cross a seam.
