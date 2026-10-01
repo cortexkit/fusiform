@@ -163,8 +163,8 @@ fn the_design_note_names_the_tables_that_exist() {
 /// name is what this refuses.
 #[test]
 fn the_design_note_names_functions_that_exist() {
-    let note = include_str!("../../../docs/design/schema-and-store.md");
-    let ingest = include_str!("../src/ingest.rs");
+    let note = include_str!("../../../../docs/design/schema-and-store.md");
+    let ingest = include_str!("../../src/ingest.rs");
 
     // Named in the note as the shared definition of what the upstream said.
     // One name today; add to this check rather than beside it, so the reason

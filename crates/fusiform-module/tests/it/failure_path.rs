@@ -132,7 +132,7 @@ fn serve_one(mut stream: TcpStream, behaviour: Behaviour) {
     }
 }
 
-const CATALOG: &[u8] = include_bytes!("../../fusiform-core/fixtures/models-dev-excerpt.json");
+const CATALOG: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
 struct Harness {
     ctx: PollContext,
@@ -563,7 +563,7 @@ async fn a_tick_stamps_the_attempt_on_every_outcome() {
 /// guards should say so.
 #[test]
 fn the_failure_signal_is_stamped_before_the_store_write() {
-    const SOURCE: &str = include_str!("../src/loop_.rs");
+    const SOURCE: &str = include_str!("../../src/loop_.rs");
 
     let body = SOURCE
         .split_once("fn record_failure(")

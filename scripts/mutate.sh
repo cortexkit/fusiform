@@ -40,16 +40,23 @@
 # Usage:
 #   scripts/mutate.sh <file> <old> <new> [cargo test args...]
 #
+# Scoping: each crate's integration tests build into ONE test binary named
+# `it` (crates/<crate>/tests/it/main.rs), with every former tests/<name>.rs
+# now the module `<name>`. So `--test <name>` no longer exists for those files;
+# scope to one with `--test it <name>::`, a libtest name filter. A file left
+# at tests/<name>.rs because it needs a process of its own is still
+# `--test <name>`.
+#
 # Example:
 #   scripts/mutate.sh crates/fusiform-store/src/serve.rs \
 #     'boundary_at_ms <= ?2' 'boundary_at_ms < ?2' \
-#     -p fusiform-store --test serve
+#     -p fusiform-store --test it serve::
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
 if [ "$#" -lt 3 ]; then
-  sed -n '2,40p' "$0" >&2
+  sed -n '2,53p' "$0" >&2
   exit 2
 fi
 
@@ -137,13 +144,19 @@ fi
 # must not receive them. Passing them through made a valid mutation report
 # DID NOT COMPILE — the harness failing in a fourth new way while being written
 # to stop it failing in three.
+#
+# The build runs as `cargo test --no-run`, not `cargo build --tests`, because
+# only `cargo test` accepts the positional name filter that scopes a run to
+# one file of a shared test binary (`--test it serve::`). `cargo build` rejects
+# that argument and every such run would read DID NOT COMPILE. `--no-run`
+# still compiles without running, and its exit code is still the compiler's.
 BUILD_ARGS=()
 for arg in "${TEST_ARGS[@]}"; do
   [ "$arg" = "--" ] && break
   BUILD_ARGS+=("$arg")
 done
 
-if ! cargo build --tests "${BUILD_ARGS[@]}" >/dev/null 2>&1; then
+if ! cargo test --no-run "${BUILD_ARGS[@]}" >/dev/null 2>&1; then
   echo "DID NOT COMPILE"
   echo "  Nothing was tested. The mutation is not valid code, so this run says"
   echo "  nothing about the guard. Try a mutation that type-checks."
@@ -232,7 +245,8 @@ echo "       and then writes a test for a case that cannot exist."
 echo "    3. YOUR --test FILTER EXCLUDED THE TESTS THAT COVER IT. Before"
 echo "       concluding anything, re-run without the filter. Measured"
 echo "       2026-08-14: removing \"seeded\" from CONFIRMING_OUTCOMES survived"
-echo "       under --test history and was caught by TWELVE tests crate-wide."
+echo "       scoped to the history tests (now --test it history::) and was"
+echo "       caught by TWELVE tests crate-wide."
 echo
 echo "  Cause 3 is the same shape as ANCHOR MISSING: the tool did not ask the"
 echo "  question, and the output looks exactly like the answer no."

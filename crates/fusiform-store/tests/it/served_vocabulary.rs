@@ -16,7 +16,7 @@ use fusiform_core::normalize::normalize_models_dev;
 use fusiform_store::ingest::fact_keys_of;
 use fusiform_store::FactKey;
 
-const FIXTURE: &[u8] = include_bytes!("../../fusiform-core/fixtures/models-dev-excerpt.json");
+const FIXTURE: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
 /// Every fact key fusiform can produce, as a closed set.
 ///

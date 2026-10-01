@@ -228,7 +228,7 @@ fn a_modes_request_bytes_are_never_stored() {
     }
 }
 
-const EXCERPT: &str = include_str!("../../fusiform-core/fixtures/models-dev-excerpt.json");
+const EXCERPT: &str = include_str!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
 fn store() -> (CatalogStore, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();

@@ -14,7 +14,7 @@ use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp, Token
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, FactKey, NewObservation};
 
-const FIXTURE: &str = include_str!("../../fusiform-core/fixtures/models-dev-excerpt.json");
+const FIXTURE: &str = include_str!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
 fn store(dir: &tempfile::TempDir) -> CatalogStore {
     CatalogStore::open(&StorageDescriptor {
@@ -33,7 +33,7 @@ fn store(dir: &tempfile::TempDir) -> CatalogStore {
 /// This exercises `plan_ingest` directly, below the module's seeding path. The
 /// module DOES record an observation when it seeds — stamped at the instant the
 /// snapshot was fetched, so a later disagreeing fetch has a left edge (see
-/// `fusiform-module/tests/bootstrap.rs`). What is checked here is narrower and
+/// `fusiform-module/tests/it/bootstrap.rs`). What is checked here is narrower and
 /// still load-bearing: the era rows themselves claim no observation and no
 /// window, whatever wrote them.
 #[test]
@@ -116,7 +116,7 @@ fn a_first_fetch_agreeing_with_the_seed_writes_nothing() {
 /// no left edge, so an observed boundary at that instant is unwritable.
 ///
 /// The module's seeding path avoids this by recording a `Seeded` observation
-/// (see `fusiform-module/tests/bootstrap.rs`). This asserts the underlying
+/// (see `fusiform-module/tests/it/bootstrap.rs`). This asserts the underlying
 /// mechanism, so a change that stops recording that observation fails here with
 /// an explanation rather than silently producing a second seed boundary that
 /// claims the store came into existence twice.

@@ -61,8 +61,8 @@
 
 use std::collections::BTreeMap;
 
-const SEED: &str = include_str!("../data/models-dev-seed.json");
-const CREATORS: &str = include_str!("../data/model-creators.json");
+const SEED: &str = include_str!("../../data/models-dev-seed.json");
+const CREATORS: &str = include_str!("../../data/model-creators.json");
 
 #[derive(serde::Deserialize)]
 struct Row {

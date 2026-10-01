@@ -14,7 +14,7 @@ use fusiform_core::{
 };
 use fusiform_testkit::mutate;
 
-const FIXTURE: &[u8] = include_bytes!("../fixtures/models-dev-excerpt.json");
+const FIXTURE: &[u8] = include_bytes!("../../fixtures/models-dev-excerpt.json");
 
 fn catalog() -> fusiform_core::NormalizeOutcome {
     normalize_models_dev(FIXTURE).expect("the measured document must normalize")

@@ -225,7 +225,8 @@ fn the_closed_vocabulary_matches_the_normalizer() {
     use fusiform_core::normalize::normalize_models_dev;
     use fusiform_store::ingest::{fact_keys_of, SERVED_FACT_NAMESPACE};
 
-    const FIXTURE: &[u8] = include_bytes!("../../fusiform-core/fixtures/models-dev-excerpt.json");
+    const FIXTURE: &[u8] =
+        include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
     let outcome = normalize_models_dev(FIXTURE).unwrap();
 
     let mut produced: Vec<String> = Vec::new();

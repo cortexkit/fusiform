@@ -38,8 +38,8 @@
 
 use std::collections::BTreeSet;
 
-const MEASURED: &str = include_str!("../../../docs/upstream-models-dev-measured.md");
-const RAW: &str = include_str!("../src/normalize/raw.rs");
+const MEASURED: &str = include_str!("../../../../docs/upstream-models-dev-measured.md");
+const RAW: &str = include_str!("../../src/normalize/raw.rs");
 
 /// Fields the parser deliberately does not read, each with the reason.
 ///

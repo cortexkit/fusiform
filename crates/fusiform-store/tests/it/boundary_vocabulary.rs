@@ -33,8 +33,8 @@
 
 use std::collections::BTreeSet;
 
-const SCHEMA: &str = include_str!("../src/schema.rs");
-const STORE: &str = include_str!("../src/lib.rs");
+const SCHEMA: &str = include_str!("../../src/schema.rs");
+const STORE: &str = include_str!("../../src/lib.rs");
 
 /// The kinds the schema will accept.
 fn schema_vocabulary() -> BTreeSet<String> {

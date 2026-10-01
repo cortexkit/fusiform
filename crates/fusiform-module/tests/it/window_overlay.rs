@@ -33,8 +33,8 @@ use std::collections::BTreeSet;
 /// can follow while refactoring.
 const OVERLAY_PATH: &str = "crates/fusiform-module/data/window-overlay.json";
 
-const OVERLAY: &str = include_str!("../data/window-overlay.json");
-const SEED: &str = include_str!("../data/models-dev-seed.json");
+const OVERLAY: &str = include_str!("../../data/window-overlay.json");
+const SEED: &str = include_str!("../../data/models-dev-seed.json");
 
 /// Every grade the schema allows, strongest first.
 const GRADES: &[&str] = &[

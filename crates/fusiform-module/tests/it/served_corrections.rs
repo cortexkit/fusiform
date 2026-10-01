@@ -1264,7 +1264,7 @@ fn only_one_currency_policy_has_ever_existed() {
     // scans SOURCE, so its path is part of its subject — and it failed loudly
     // on the move rather than passing against a file that no longer mints
     // policies, which is the behaviour a source-scanning guard has to have.
-    let src = include_str!("../../fusiform-protocol/src/money.rs");
+    let src = include_str!("../../../fusiform-protocol/src/money.rs");
     let constructors: Vec<&str> = src
         .lines()
         .filter(|l| l.trim_start().starts_with("pub fn "))

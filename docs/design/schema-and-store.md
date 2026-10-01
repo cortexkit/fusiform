@@ -1469,7 +1469,7 @@ four queries with four indexes to keep aligned. `snapshot` and `raw_document`
 were dropped for the reason two paragraphs down: one store, one capture, one
 restore.
 
-The list is pinned by a test now (`crates/fusiform-store/tests/schema_doc.rs`)
+The list is pinned by a test now (`crates/fusiform-store/tests/it/schema_doc.rs`)
 rather than by anyone remembering to update it, because ASTRO's finding on
 2026-08-13 is that **a note cannot say whether it describes an intention or the
 shipped artifact**, and attention is not a fix for that.
@@ -1920,7 +1920,7 @@ database driver, because then the location stops mattering and the coupling is
 real — they have declined a crate on exactly that ground, mirroring three
 types by hand rather than take a dependency that pulled in cryptographic and
 network libraries for three struct definitions. `fusiform-protocol` depends on
-`serde` and `serde_json`, and `crates/fusiform-protocol/tests/deps.rs` fails
+`serde` and `serde_json`, and `crates/fusiform-protocol/tests/it/deps.rs` fails
 if anything else arrives.
 
 #### Lockstep: the argument this note made was wrong

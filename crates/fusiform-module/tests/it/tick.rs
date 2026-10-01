@@ -19,7 +19,7 @@ use fusiform_module::loop_::{apply, TickOutcome};
 use fusiform_module::signals::Signals;
 use fusiform_testkit::mutate;
 
-const FIXTURE: &[u8] = include_bytes!("../../fusiform-core/fixtures/models-dev-excerpt.json");
+const FIXTURE: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
 struct Fixture {
     store: Arc<CatalogStore>,

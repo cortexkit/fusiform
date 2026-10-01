@@ -41,7 +41,7 @@
 use fusiform_core::normalize::normalize_models_dev;
 use fusiform_store::ingest::fact_keys_of;
 
-const FIXTURE: &[u8] = include_bytes!("../../fusiform-core/fixtures/models-dev-excerpt.json");
+const FIXTURE: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
 /// The wire crate's fact table lists exactly the facts fusiform serves.
 ///
@@ -194,7 +194,7 @@ fn limit_output_is_byte_affecting_because_broca_renders_it_as_the_default_cap() 
 /// rest of that table is prose about behaviour and stays a human's job.
 #[test]
 fn the_design_notes_serve_row_lists_every_served_tool() {
-    const NOTE: &str = include_str!("../../../docs/design/schema-and-store.md");
+    const NOTE: &str = include_str!("../../../../docs/design/schema-and-store.md");
 
     let row = NOTE
         .lines()

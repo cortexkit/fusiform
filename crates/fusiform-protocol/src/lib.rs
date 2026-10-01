@@ -922,7 +922,7 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// Renderer-selection fields — `provider.npm`, per-model provider overrides,
 /// and `experimental` — are parsed, flagged, and never emitted. Fusiform says
 /// WHAT exists; it never says HOW to speak to it.
-/// `crates/fusiform-store/tests/served_vocabulary.rs` fails if one appears.
+/// `crates/fusiform-store/tests/it/served_vocabulary.rs` fails if one appears.
 ///
 /// **This is not merely an omission, and a consumer supplied the reason from
 /// its own render path.** The field the rule excludes is `provider.wire_family`,

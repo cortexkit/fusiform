@@ -23,7 +23,7 @@
 
 use fusiform_protocol::money::{Floor, RateValue};
 
-const SERVED: &str = include_str!("../fixtures/served-payloads.json");
+const SERVED: &str = include_str!("../../fixtures/served-payloads.json");
 
 /// Every priced rate in the served fixture decodes with the protocol type.
 ///

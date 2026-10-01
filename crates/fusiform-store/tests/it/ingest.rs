@@ -15,7 +15,7 @@ use fusiform_store::{CatalogStore, FactKey, NewEra, NewObservation};
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_testkit::mutate;
 
-const FIXTURE: &str = include_str!("../../fusiform-core/fixtures/models-dev-excerpt.json");
+const FIXTURE: &str = include_str!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
 struct Fixture {
     store: CatalogStore,

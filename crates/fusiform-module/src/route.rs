@@ -2838,7 +2838,7 @@ fn inherit_rate_for(
         // reads (see the `at.is_none()` gate in `render`). Withholding appears
         // exactly where inheritance does not run.
         //
-        // Fenced in fusiform-store/tests/correction_never_denies_now.rs. If
+        // Fenced in fusiform-store/tests/it/correction_never_denies_now.rs. If
         // that bound is ever relaxed, this loop needs the withheld key set
         // passed in; nothing here would fail loudly on its own.
         //

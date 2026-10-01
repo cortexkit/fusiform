@@ -12,7 +12,7 @@ use fusiform_store::ingest::plan_ingest;
 use fusiform_store::serve::{CatalogQuery, POINT_IN_TIME_SQL};
 use fusiform_store::{CatalogStore, FactKey, NewObservation};
 
-const FIXTURE: &str = include_str!("../../fusiform-core/fixtures/models-dev-excerpt.json");
+const FIXTURE: &str = include_str!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
 struct Fixture {
     store: CatalogStore,
