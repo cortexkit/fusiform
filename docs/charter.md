@@ -294,8 +294,8 @@ Supervised module under subc (`ck-fusiform`, pinned codesign identifier);
 Health-Path-Rule v3 compliant health checks (insulated lane, no subprocess
 exec, no live store reads on the reply path); deploy via the fleet ladder
 (stage-signed under `signing-topology/v2`, digests published, inode
-verification); CI on Blacksmith with `--locked` builds; `cortexkit-ci`
-GitHub App secrets for private-repo CI.
+verification); CI on GitHub-hosted runners with `--locked` builds, every
+dependency from crates.io.
 
 ### Backup enrollment, and the obligation it creates
 
