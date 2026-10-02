@@ -141,6 +141,18 @@ fn fields_in_the_document() -> BTreeSet<String> {
             }
         }
     }
+
+    // The detector must find something before its silence means anything.
+    // Measured: the inventory table carries 19 rows at the time of writing.
+    // Held here rather than in one test, because three tests read this set and
+    // a parse that finds nothing would pass each of them green.
+    assert!(
+        out.len() >= 15,
+        "the field inventory parse found only {} fields, which means the \
+         document's table shape changed and these fences are reading nothing. \
+         Fix the parse before trusting anything that uses it.",
+        out.len()
+    );
     out
 }
 
@@ -151,7 +163,7 @@ fn fields_the_parser_reads() -> BTreeSet<String> {
         .expect("RawModel must exist for this fence to mean anything");
     let body = &RAW[start..];
     let end = body.find("\n}").expect("RawModel must be a closed struct");
-    body[..end]
+    let read: BTreeSet<String> = body[..end]
         .lines()
         .filter_map(|l| {
             let l = l.trim();
@@ -164,30 +176,24 @@ fn fields_the_parser_reads() -> BTreeSet<String> {
             let name = rest.split(':').next()?.trim();
             (!name.is_empty()).then(|| name.to_string())
         })
-        .collect()
+        .collect();
+
+    // Same reason as the document parse: three tests compare against this set,
+    // and an empty one makes "the parser reads nothing undocumented" and "no
+    // declared-unread field is read" both trivially true.
+    assert!(
+        read.len() >= 10,
+        "the RawModel parse found only {} fields; the struct's shape changed \
+         and these fences are comparing against an empty set",
+        read.len()
+    );
+    read
 }
 
 #[test]
 fn every_measured_field_is_read_or_declared_unread() {
     let documented = fields_in_the_document();
     let read = fields_the_parser_reads();
-
-    // The detector must find something before its silence means anything.
-    // Measured: the inventory table carries 19 rows at the time of writing, and
-    // a parse that finds none of them would otherwise pass this test green.
-    assert!(
-        documented.len() >= 15,
-        "the field inventory parse found only {} fields, which means the \
-         document's table shape changed and this fence is reading nothing. \
-         Fix the parse before trusting anything below it.",
-        documented.len()
-    );
-    assert!(
-        read.len() >= 10,
-        "the RawModel parse found only {} fields; the struct's shape changed \
-         and this fence is comparing against an empty set",
-        read.len()
-    );
 
     let declared: BTreeSet<&str> = DECLARED_UNREAD.iter().map(|(f, _)| *f).collect();
     let unaccounted: Vec<&String> = documented

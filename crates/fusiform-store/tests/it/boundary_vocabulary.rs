@@ -48,11 +48,28 @@ fn schema_vocabulary() -> BTreeSet<String> {
         .expect("the CHECK's list must close")
         + start;
 
-    SCHEMA[start..end]
+    let kinds: BTreeSet<String> = SCHEMA[start..end]
         .split(',')
         .map(|s| s.trim().trim_matches('\'').to_string())
         .filter(|s| !s.is_empty())
-        .collect()
+        .collect();
+    assert_found_the_kinds("schema", &kinds);
+    kinds
+}
+
+/// The control: the extraction found the kinds that exist.
+///
+/// Held here rather than in one test, because both directions compare these
+/// sets and an extraction that found nothing leaves two empty sets agreeing.
+/// A control in only one test protects the other only while both run.
+fn assert_found_the_kinds(side: &str, kinds: &BTreeSet<String>) {
+    assert!(
+        kinds.len() >= 4,
+        "the {side} extraction found {} kinds, which is fewer than the four \
+         that exist — the parser has drifted from the source's shape and these \
+         tests are no longer reading what they claim to. Found: {kinds:?}",
+        kinds.len()
+    );
 }
 
 /// The kinds the encoder produces.
@@ -69,7 +86,7 @@ fn encoder_vocabulary() -> BTreeSet<String> {
         .find("\n}\n")
         .expect("the function must close at column zero");
 
-    body[..end]
+    let kinds = body[..end]
         .lines()
         .filter_map(|line| {
             // Every arm produces its column value as the first element of a
@@ -104,29 +121,15 @@ fn encoder_vocabulary() -> BTreeSet<String> {
                 }
             }),
         )
-        .collect()
+        .collect::<BTreeSet<String>>();
+    assert_found_the_kinds("encoder", &kinds);
+    kinds
 }
 
 #[test]
 fn every_kind_the_encoder_produces_is_accepted_by_the_schema() {
     let schema = schema_vocabulary();
     let encoder = encoder_vocabulary();
-
-    // The control: both extractions found something. Without it, a refactor
-    // that breaks either parser leaves two empty sets comparing equal, and a
-    // green test asserting nothing.
-    assert!(
-        encoder.len() >= 4,
-        "the encoder extraction found {} kinds, which is fewer than the four \
-         that exist — the parser has drifted from the source's shape and this \
-         test is no longer reading what it claims to. Found: {encoder:?}",
-        encoder.len()
-    );
-    assert!(
-        schema.len() >= 4,
-        "the schema extraction found {} kinds. Found: {schema:?}",
-        schema.len()
-    );
 
     let unaccepted: Vec<_> = encoder.difference(&schema).collect();
     assert!(
