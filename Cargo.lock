@@ -1103,9 +1103,9 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "subc-client-rs"
-version = "0.26.0"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22961845d10f595319b1a8fc5cb614ed95d43452b4f7c6ba24fca9662cc20665"
+checksum = "d671a838c7777805070da19080045ef5149882636b3bd8193c5e913a590c7315"
 dependencies = [
  "async-trait",
  "serde",

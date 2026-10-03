@@ -15,7 +15,7 @@ members = ["crates/fusiform-core",
 # builds from a clone of itself alone.
 [workspace.dependencies]
 fusiform-testkit = { path = "crates/fusiform-testkit" }
-subc-client-rs = "0.26.0"
+subc-client-rs = "0.26.1"
 subc-protocol = "0.29.0"
 subc-transport = "0.10.0"
 
