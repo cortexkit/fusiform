@@ -502,3 +502,20 @@ expect_red = ["route::inheritance_tests::a_published_rate_is_left_exactly_as_pub
 only = false
 timeout_s = 600
 equivalent = "Dead under the gate above it: inherit_rate_for returns early when the row carries any rate.* key, and every key this loop considers starts with rate., so facts.contains_key(&key) is always false when it runs. Proved SURVIVED across the whole fusiform-module package. Drop this marker if the publishes_a_rate gate is ever narrowed, because this check then becomes the only thing keeping a published rate from being overwritten."
+
+[[control]]
+id = "inherit-point-in-time-never-inherits"
+guards = "a point-in-time catalog.get serves what the catalog held and never an inherited rate"
+file = "crates/fusiform-module/src/route.rs"
+old = "if let (Some((store, creators)), None) = (inherit, at) {"
+new = "if let (Some((store, creators)), _) = (inherit, at) {"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::inheritance_tests::a_point_in_time_read_does_not_inherit"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+

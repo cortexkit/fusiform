@@ -118,8 +118,13 @@ on:
   schedule:
     - cron: '0 6 * * *'
 
+# Keyed on the event as well as the ref. The nightly runs on master's ref, and
+# its mutation replay takes hours; keyed on the ref alone, any push to master
+# in that window cancels the nightly, so on a busy day the full replay never
+# completes and its absence reads like a pass. Pushes still cancel superseded
+# pushes, and a newer schedule still cancels an older one.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
