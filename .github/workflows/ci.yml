@@ -186,3 +186,90 @@ jobs:
       # Fetch depth 0 above so origin/master resolves for the comparison.
       - name: Served schema version discipline
         run: ./scripts/check-wire-crate-version.sh origin/master
+
+  # Replays the mutation proofs in mutations.toml: each row breaks one guarded
+  # rule and names the test that must go red. A proof written once and never
+  # rerun stops proving anything the moment a later edit makes its test
+  # vacuous, and nothing announces that; this job is what announces it.
+  #
+  # A push or pull request replays only the rows whose mutated file, test file
+  # or catalogue entry the change touched, which keeps a typical push to a few
+  # rows. The schedule replays every row, because a change to a helper or
+  # fixture that a guarding test leans on selects nothing here and only the
+  # full run sees it.
+  mutations:
+    name: Mutation proofs (ubuntu)
+    runs-on: ubuntu-latest
+    # Every replayed row rebuilds its package's test binary with the mutant in
+    # place, and that rebuild, not the test run, is nearly all the time: a full
+    # replay measured 2h52m locally for 28 rows on a loaded machine, almost all
+    # of it in builds. So the nightly gets close to the hosted runner's
+    # six-hour job limit, while a push or pull request, which replays a few
+    # rows, is held to a bound that still notices a hang.
+    timeout-minutes: ${{ github.event_name == 'schedule' && 330 || 45 }}
+    steps:
+      - name: Checkout fusiform
+        uses: actions/checkout@v5
+        with:
+          # Full history: the selection below diffs against an earlier commit,
+          # which a depth-1 clone does not have.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Pinned to a reviewed commons commit. --locked would build the runner
+      # from that commit's own Cargo.lock, but commons ignores Cargo.lock, so
+      # today cargo warns that none was published and resolves the runner's
+      # dependencies afresh at install time. The commit pin still fixes the
+      # runner's own code.
+      - name: Install ck-mutate
+        run: >-
+          cargo install --locked --git https://github.com/cortexkit/commons
+          --rev d406ec3f788886e9cdf01fdf672190717a84e7b2 cortexkit-mutate
+
+      # Validates every row's anchor, files and expected test names before any
+      # source is touched, so a stale row fails here by name.
+      - name: Check the catalogue
+        run: ck-mutate check
+
+      # One step for every event, choosing the base in shell, so each event
+      # runs the same steps. A master push diffs against the commit it replaced.
+      # When that commit is not in the clone (the all-zeros `before` of a new
+      # branch, or a force-push's discarded tip) it falls back to the
+      # merge-base, as a train/** push always does.
+      - name: Replay mutation proofs
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          merge_base() { git merge-base origin/master HEAD; }
+          case "$EVENT" in
+            schedule)
+              selection=(--all) ;;
+            pull_request)
+              selection=(--diff "$PR_BASE") ;;
+            push)
+              if [ "$REF" = refs/heads/master ] \
+                && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+                selection=(--diff "$BEFORE")
+              else
+                selection=(--diff "$(merge_base)")
+              fi ;;
+            *)
+              # Any other trigger (a calling workflow, say) has no change to
+              # select from, so it replays everything.
+              selection=(--all) ;;
+          esac
+          echo "ck-mutate run ${selection[*]}"
+          ck-mutate run "${selection[@]}" --report mutations.json
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutations
+          path: mutations.json
+          if-no-files-found: ignore

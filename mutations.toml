@@ -1,0 +1,504 @@
+# Mutation proofs for fusiform's standing guards, replayed by ck-mutate.
+#
+# Each row breaks one guarded rule (`old` replaced by `new`) and names, by full
+# libtest path, the tests that must go red. CI replays the rows a change touches
+# on every push and every row nightly; see the README's "Mutation proofs"
+# section for how to add one. Prefer `ck-mutate prove`, which appends a row only
+# when the named tests actually fail.
+[[control]]
+id = "correction-never-creates-a-fact"
+guards = "a correction naming a fact with no recorded history is refused, never planned into existence"
+file = "crates/fusiform-store/src/correct.rs"
+old = "            refusals.push(CorrectionRefusal::NoSuchFact {"
+new = "            let _ = (CorrectionRefusal::NoSuchFact {"
+edits = []
+test_file = "crates/fusiform-store/tests/it/correct.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["correct::correcting_a_fact_with_no_history_is_refused"]
+only = false
+timeout_s = 600
+
+
+[[control]]
+id = "point-in-time-boundary-inclusive-outer"
+guards = "a point-in-time read AT an era's boundary instant serves that era (outer select's <=)"
+file = "crates/fusiform-store/src/serve.rs"
+old = '       AND e.boundary_at_ms <= ?2 \'
+new = '       AND e.boundary_at_ms < ?2 \'
+edits = []
+test_file = "crates/fusiform-store/tests/it/serve.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["serve::a_read_at_a_boundary_instant_returns_the_new_value"]
+only = false
+timeout_s = 600
+
+
+[[control]]
+id = "point-in-time-boundary-inclusive-subquery"
+guards = "a point-in-time read AT an era's boundary instant serves that era (correlated subquery's <=)"
+file = "crates/fusiform-store/src/serve.rs"
+old = 'AND e2.boundary_at_ms <= ?2 \'
+new = 'AND e2.boundary_at_ms < ?2 \'
+edits = []
+test_file = "crates/fusiform-store/tests/it/serve.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["serve::a_read_at_a_boundary_instant_returns_the_new_value"]
+only = false
+timeout_s = 600
+
+
+[[control]]
+id = "ingest-diff-compares-the-upstream-claim"
+guards = "the ingest diff compares parsed upstream claims with producer annotations stripped, so fusiform's own annotation never opens an era"
+file = "crates/fusiform-store/src/ingest.rs"
+old = "    upstream_claim_of(a) == upstream_claim_of(b)"
+new = "    a == b"
+edits = []
+test_file = "crates/fusiform-store/tests/it/ingest.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["ingest::an_annotation_fusiform_added_does_not_open_an_era"]
+only = false
+timeout_s = 600
+
+
+[[control]]
+id = "ingest-diff-call-site"
+guards = "plan_ingest decides 'unchanged' through states_the_same_upstream_claim, not a text comparison"
+file = "crates/fusiform-store/src/ingest.rs"
+old = "                .map(|held| states_the_same_upstream_claim(held, &value_json))"
+new = "                .map(|held| *held == value_json)"
+edits = []
+test_file = "crates/fusiform-store/tests/it/ingest.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["ingest::an_annotation_fusiform_added_does_not_open_an_era"]
+only = false
+timeout_s = 600
+
+
+[[control]]
+id = "stored-rate-carries-no-inherited-from"
+guards = "a stored priced rate carries only the upstream's fields; an inherited_from key in storage reddens the stored-shape tests"
+file = "crates/fusiform-store/src/ingest.rs"
+old = '            r#"{{"state":"priced","units":{},"exponent":{},"currency":"{}"}}"#,'
+new = '            r#"{{"state":"priced","units":{},"exponent":{},"currency":"{}","inherited_from":null}}"#,'
+edits = []
+test_file = "crates/fusiform-store/tests/it/mode_rates.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["mode_rates::a_moded_model_stores_its_mode_rates_beside_its_base_rates"]
+only = false
+timeout_s = 600
+
+
+[[control]]
+id = "plan-price-dropped-key-is-tombstoned"
+guards = "a plan-price key dropped from the curated file gets a tombstone era rather than staying current"
+file = "crates/fusiform-store/src/lib.rs"
+old = "                if curated.contains(&(provider_id.as_str(), tier.as_str())) {"
+new = "                if true {"
+edits = []
+test_file = "crates/fusiform-store/tests/it/schema_doc.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["schema_doc::a_key_dropped_from_the_file_is_tombstoned"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "shrink-guard-limit-is-inclusive"
+guards = "the ingest shrink guard allows a drop of exactly MAX_SHRINK_FRACTION and refuses one model more"
+file = "crates/fusiform-module/src/loop_.rs"
+old = "    if fraction <= MAX_SHRINK_FRACTION {"
+new = "    if fraction < MAX_SHRINK_FRACTION {"
+edits = []
+test_file = "crates/fusiform-module/tests/it/shrink_guard.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["shrink_guard::the_limit_is_where_it_says_it_is"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "shrink-guard-call-site"
+guards = "apply consults implausible_shrink before writing, so a collapsed document is refused"
+file = "crates/fusiform-module/src/loop_.rs"
+old = "            if let Some(reason) = implausible_shrink(ctx, &catalog).map_err(TickError::Store)? {"
+new = "            if let Some(reason) = None::<String> {"
+edits = []
+test_file = "crates/fusiform-module/tests/it/shrink_guard.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["shrink_guard::a_collapsed_document_is_refused_and_writes_nothing", "shrink_guard::an_empty_document_is_refused"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "first-poll-sends-no-validator"
+guards = "a process's first poll is unconditional: no If-None-Match until this process has read a full document"
+file = "crates/fusiform-module/src/loop_.rs"
+old = "    let etag = if ctx.document_read.load(Ordering::Acquire) {"
+new = "    let etag = if true {"
+edits = []
+test_file = "crates/fusiform-module/tests/it/conditional_get.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["conditional_get::a_new_process_reads_the_document_before_trusting_a_stored_validator"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "first-poll-gate-reopens-after-a-body"
+guards = "after the first full read, later polls are conditional again (the read flag is set)"
+file = "crates/fusiform-module/src/loop_.rs"
+old = "        ctx.document_read.store(true, Ordering::Release);"
+new = "        ctx.document_read.store(false, Ordering::Release);"
+edits = []
+test_file = "crates/fusiform-module/tests/it/conditional_get.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["conditional_get::a_new_process_reads_the_document_before_trusting_a_stored_validator"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "inherit-never-tops-up-a-published-card"
+guards = "serve-time inheritance never adds to a row that published any rate, including stated_zero"
+file = "crates/fusiform-module/src/route.rs"
+old = "    if publishes_a_rate {"
+new = "    if false {"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::inheritance_tests::a_provider_that_published_any_rate_keeps_its_own_card", "route::inheritance_tests::a_partial_card_is_not_topped_up_from_the_creator"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "inherit-closed-weights-never-inherit"
+guards = "a closed-weight row never inherits a creator's rate"
+file = "crates/fusiform-module/src/route.rs"
+old = '    if facts.get("model.open_weights").and_then(|v| v.as_bool()) != Some(true) {'
+new = "    if false {"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::inheritance_tests::a_closed_weight_row_does_not_inherit"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "inherit-call-site-in-render"
+guards = "the bulk and single-model render path actually calls inherit_rate_for"
+file = "crates/fusiform-module/src/route.rs"
+old = "            inherit_rate_for(store, source, creators, &mut facts, &model.model_id);"
+new = "            let _ = (store, creators);"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::inheritance_tests::the_bulk_path_inherits_under_a_rate_filter"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "refusal-no-coverage-code"
+guards = "an unknown provider or model is refused with no_coverage, not bad_request"
+file = "crates/fusiform-module/src/route.rs"
+old = "            code: fusiform_protocol::CODE_NO_COVERAGE,"
+new = "            code: fusiform_protocol::CODE_BAD_REQUEST,"
+edits = []
+test_file = "crates/fusiform-module/tests/it/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["route::an_unknown_provider_is_refused_rather_than_answered_with_zero", "route::an_unknown_model_names_the_provider_as_known"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "refusal-unknown-model-call-site"
+guards = "unknown_model builds a no_coverage refusal"
+file = "crates/fusiform-module/src/route.rs"
+old = """
+fn unknown_model(provider_id: &str, model_id: &str) -> RouteError {
+    RouteError::no_coverage("""
+new = """
+fn unknown_model(provider_id: &str, model_id: &str) -> RouteError {
+    RouteError::bad_request("""
+edits = []
+test_file = "crates/fusiform-module/tests/it/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["route::an_unknown_model_names_the_provider_as_known"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "refusal-unknown-provider-bulk-call-site"
+guards = "a bulk read of an unknown provider is refused with no_coverage"
+file = "crates/fusiform-module/src/route.rs"
+old = """
+return Err(RouteError::no_coverage(format!(
+                    "unknown provider {provider:?}"""
+new = """
+return Err(RouteError::bad_request(format!(
+                    "unknown provider {provider:?}"""
+edits = []
+test_file = "crates/fusiform-module/tests/it/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["route::an_unknown_provider_is_refused_rather_than_answered_with_zero"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "wire-rate-amount-is-flattened"
+guards = "RateValue::Priced flattens its amount, so the published type decodes the rates fusiform serves"
+file = "crates/fusiform-protocol/src/money.rs"
+old = "        #[serde(flatten)]"
+new = '        #[serde(rename = "amount")]'
+edits = []
+test_file = "crates/fusiform-module/tests/it/wire_types_decode_the_wire.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["wire_types_decode_the_wire::every_served_rate_decodes_with_the_protocol_type"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "scan-floor-boundary-schema-extractor"
+guards = "the boundary-kind schema extractor fails loudly when it reads nothing"
+file = "crates/fusiform-store/tests/it/boundary_vocabulary.rs"
+old = "        .filter(|s| !s.is_empty())"
+new = "        .filter(|s| s.is_empty())"
+edits = []
+test_file = "crates/fusiform-store/tests/it/boundary_vocabulary.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["boundary_vocabulary::every_kind_the_encoder_produces_is_accepted_by_the_schema", "boundary_vocabulary::the_schema_accepts_no_kind_the_encoder_cannot_produce"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "scan-floor-boundary-encoder-extractor"
+guards = "the boundary-kind encoder extractor fails loudly when it reads nothing"
+file = "crates/fusiform-store/tests/it/boundary_vocabulary.rs"
+old = 'line.strip_prefix("BoundaryKind::")'
+new = 'line.strip_prefix("BoundaryKindX::")'
+edits = []
+test_file = "crates/fusiform-store/tests/it/boundary_vocabulary.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["boundary_vocabulary::every_kind_the_encoder_produces_is_accepted_by_the_schema", "boundary_vocabulary::the_schema_accepts_no_kind_the_encoder_cannot_produce"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "scan-floor-measured-document-extractor"
+guards = "the measurement-document field extractor fails loudly when it reads nothing"
+file = "crates/fusiform-core/tests/it/measured_fields_are_read_or_declared.rs"
+old = "        if !first.starts_with('`') {"
+new = "        if first.starts_with('`') {"
+edits = []
+test_file = "crates/fusiform-core/tests/it/measured_fields_are_read_or_declared.rs"
+runner = "cargo"
+package = "fusiform-core"
+target = "--test it"
+expect_red = ["measured_fields_are_read_or_declared::every_measured_field_is_read_or_declared_unread", "measured_fields_are_read_or_declared::the_document_names_every_field_the_parser_reads"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "scan-floor-measured-parser-extractor"
+guards = "the RawModel field extractor fails loudly when it reads nothing"
+file = "crates/fusiform-core/tests/it/measured_fields_are_read_or_declared.rs"
+old = "    let read: BTreeSet<String> = body[..end]"
+new = "    let read: BTreeSet<String> = body[..0]"
+edits = []
+test_file = "crates/fusiform-core/tests/it/measured_fields_are_read_or_declared.rs"
+runner = "cargo"
+package = "fusiform-core"
+target = "--test it"
+expect_red = ["measured_fields_are_read_or_declared::every_measured_field_is_read_or_declared_unread", "measured_fields_are_read_or_declared::the_document_names_every_field_the_parser_reads", "measured_fields_are_read_or_declared::a_declared_unread_field_is_actually_unread"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "store-write-fence-observation"
+guards = "every store write runs inside with_conn_fenced; a write moved outside the fence is named by the source scan"
+file = "crates/fusiform-store/src/lib.rs"
+old = "        let id = self.inner.with_conn_fenced(|tx| {"
+new = "        let id = self.inner.with_conn(|tx| {"
+edits = []
+test_file = "crates/fusiform-store/tests/it/every_write_is_fenced.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["every_write_is_fenced::no_write_escapes_the_fence"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "correction-cas-refuses-a-moved-boundary"
+guards = "a poll or correction landing between plan and apply makes apply_correction refuse instead of writing the old value back"
+file = "crates/fusiform-store/src/correct.rs"
+old = "        if current.boundary_at != row.current_since {"
+new = "        if false {"
+edits = []
+test_file = "crates/fusiform-store/tests/it/correct.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["correct::a_poll_between_plan_and_apply_is_refused", "correct::a_second_correction_between_plan_and_apply_is_refused"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "refusal-unknown-provider-single-model-call-site"
+guards = "a single-model read of an unknown provider is refused with no_coverage"
+file = "crates/fusiform-module/src/route.rs"
+old = """
+return Err(RouteError::no_coverage(format!(
+                "unknown provider {provider_id:?}"""
+new = """
+return Err(RouteError::bad_request(format!(
+                "unknown provider {provider_id:?}"""
+edits = []
+test_file = "crates/fusiform-module/tests/it/served_corrections.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["served_corrections::a_correction_cannot_create_a_fact_the_upstream_never_published", "served_corrections::a_historical_read_is_distinguishable_from_a_current_one", "served_corrections::a_named_model_with_no_facts_in_the_plane_is_still_returned", "served_corrections::a_read_before_the_record_is_refused_rather_than_answered_empty"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "scan-floor-schema-doc-table-names"
+guards = "the design-note table-name extractor fails loudly when it reads nothing"
+file = "crates/fusiform-store/tests/it/schema_doc.rs"
+old = "line.split('`').skip(1).step_by(2)"
+new = "line.split('~').skip(1).step_by(2)"
+edits = []
+test_file = "crates/fusiform-store/tests/it/schema_doc.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["schema_doc::the_design_note_names_the_tables_that_exist"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "scan-floor-golden-served-facts"
+guards = "the SERVED_FACTS key scan fails loudly when it reads nothing"
+file = "crates/fusiform-module/tests/it/golden_payload.rs"
+old = '.match_indices("key: \"")'
+new = '.match_indices("kee: \"")'
+edits = []
+test_file = "crates/fusiform-module/tests/it/golden_payload.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["golden_payload::every_served_fact_key_reaches_the_fixture"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "correction-apply-call-site"
+guards = "a committed catalog.correct reaches apply_correction and its compare-and-swap"
+file = "crates/fusiform-module/src/route.rs"
+old = "        apply_correction(store, source, &plan, now).map_err(|e| store_error(&e))?;"
+new = "        let _ = now;"
+edits = []
+test_file = "crates/fusiform-module/tests/it/correct_route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["correct_route::a_committed_correction_makes_the_window_refuse"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "inherit-per-key-never-overwrites"
+guards = "inheritance never replaces a rate key the row already carries"
+file = "crates/fusiform-module/src/route.rs"
+old = "        if facts.contains_key(&key) {"
+new = "        if false {"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::inheritance_tests::a_published_rate_is_left_exactly_as_published"]
+only = false
+timeout_s = 600
+equivalent = "Dead under the gate above it: inherit_rate_for returns early when the row carries any rate.* key, and every key this loop considers starts with rate., so facts.contains_key(&key) is always false when it runs. Proved SURVIVED across the whole fusiform-module package. Drop this marker if the publishes_a_rate gate is ever narrowed, because this check then becomes the only thing keeping a published rate from being overwritten."
