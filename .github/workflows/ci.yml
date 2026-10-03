@@ -222,15 +222,13 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Pinned to a reviewed commons commit. --locked would build the runner
-      # from that commit's own Cargo.lock, but commons ignores Cargo.lock, so
-      # today cargo warns that none was published and resolves the runner's
-      # dependencies afresh at install time. The commit pin still fixes the
-      # runner's own code.
+      # Pinned to a reviewed commons commit. commons commits its Cargo.lock, so
+      # --locked builds the runner from that commit's own lock: the pin fixes
+      # the runner's dependencies as well as its code.
       - name: Install ck-mutate
         run: >-
           cargo install --locked --git https://github.com/cortexkit/commons
-          --rev d406ec3f788886e9cdf01fdf672190717a84e7b2 cortexkit-mutate
+          --rev 6bada448cb3efc83efbd90bf5052d12c1969ce2c cortexkit-mutate
 
       # Validates every row's anchor, files and expected test names before any
       # source is touched, so a stale row fails here by name.
