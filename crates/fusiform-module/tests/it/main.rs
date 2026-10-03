@@ -18,6 +18,7 @@ mod reasoning_options;
 mod restart_adoption;
 mod restart_health;
 mod route;
+mod scope_and_preset;
 mod served_corrections;
 mod shrink_guard;
 mod tick;

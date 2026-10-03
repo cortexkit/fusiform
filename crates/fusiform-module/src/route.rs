@@ -103,6 +103,14 @@ struct ToolCall {
     name: String,
     #[serde(default)]
     arguments: serde_json::Value,
+    /// The session's tool preset, forwarded by a carrier outside the
+    /// arguments. fusiform serves one surface and no presets, so an absent
+    /// preset gets that surface and any named preset is refused (see
+    /// `serve_tool_call`). Read explicitly rather than left to serde's
+    /// unknown-field tolerance, which would accept the call and silently
+    /// ignore the preset: the caller would believe a restriction applied.
+    #[serde(default)]
+    preset: Option<String>,
 }
 
 /// Serve one tool call, unwrapping the wire envelope and dispatching by name.
@@ -122,6 +130,16 @@ pub fn serve_tool_call(store: &CatalogStore, body: &[u8]) -> Result<ToolResponse
             "a tool call must be {{\"name\": \"<tool>\", \"arguments\": {{...}}}}: {e}"
         ))
     })?;
+
+    // A provider refuses a preset it does not serve, by name, instead of
+    // falling back to a default. fusiform serves none, so every named preset
+    // is refused; a call without one gets the only surface there is.
+    if let Some(preset) = &call.preset {
+        return Err(RouteError::bad_request(format!(
+            "fusiform serves no tool presets, so preset {preset:?} is refused; \
+             call without a preset to use its one surface"
+        )));
+    }
 
     // `null` arguments and an absent `arguments` key both mean "no arguments".
     let args = if call.arguments.is_null() {

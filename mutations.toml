@@ -519,3 +519,20 @@ only = false
 timeout_s = 600
 build_timeout_s = 1800
 
+
+[[control]]
+id = "preset-named-is-refused"
+guards = "a call carrying a tool preset is refused by name, never served as though the preset were absent"
+file = "crates/fusiform-module/src/route.rs"
+old = "if let Some(preset) = &call.preset {"
+new = "if let Some(preset) = None::<&String> {"
+edits = []
+test_file = "crates/fusiform-module/tests/it/scope_and_preset.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["scope_and_preset::a_named_preset_is_refused_and_an_absent_one_is_served"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
