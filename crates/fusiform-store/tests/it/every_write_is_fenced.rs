@@ -182,7 +182,8 @@ fn no_write_escapes_the_fence() {
     // The loop above asserts nothing when `write_lines` finds nothing, so a
     // detector that stops matching passes this test in total silence — an empty
     // match arriving as a pass, which is the same asymmetry that produced seven
-    // separate misreports in scripts/mutate.sh: a harness's failure path
+    // separate misreports in this repository's former mutation script (since
+    // replaced by `ck-mutate`): a harness's failure path
     // returns the SAME TYPE as its success path, so failure-to-measure arrives
     // pre-dressed in evidence's clothes.
     //
