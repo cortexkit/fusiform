@@ -2115,6 +2115,49 @@ mod inheritance_tests {
         );
     }
 
+    /// A point-in-time read never inherits.
+    ///
+    /// `at` asks what the catalog HELD at an instant. An inherited rate is a
+    /// derivation fusiform makes today, from a creator table that may not have
+    /// existed then, so serving it into a historical answer puts a
+    /// present-tense claim inside a past-tense one. Every other inheritance
+    /// test reads the current catalog, so removing the `at` condition from the
+    /// gate passed the whole package until this test existed.
+    #[test]
+    fn a_point_in_time_read_does_not_inherit() {
+        let (store, _d) = store();
+        seed(&store, "zai", "glm-x", Some(75_000_000), true);
+        seed(&store, "ollama-cloud", "glm-x", None, true);
+
+        // Control: the current read of the same row inherits, so the assertion
+        // below cannot pass against a store where inheritance never fires.
+        let now = serve_catalog_get(
+            &store,
+            br#"{"provider_id":"ollama-cloud","model_id":"glm-x"}"#,
+        )
+        .expect("the current read must be served");
+        assert!(
+            now.models["ollama-cloud/glm-x"].contains_key("rate.input"),
+            "control: the current read must inherit"
+        );
+
+        let then = serve_catalog_get(
+            &store,
+            br#"{"provider_id":"ollama-cloud","model_id":"glm-x","at_ms":2000}"#,
+        )
+        .expect("the point-in-time read must be served");
+        let facts = then
+            .models
+            .get("ollama-cloud/glm-x")
+            .expect("the model existed at that instant");
+        assert!(
+            !facts.contains_key("rate.input"),
+            "a point-in-time read must serve what the catalog held, which had no \
+             rate for this row; an inherited rate here is today's derivation \
+             presented as history. Got: {facts:?}"
+        );
+    }
+
     /// A rate filter must not switch inheritance off.
     ///
     /// # This is the test that was missing, and production proved it
