@@ -536,3 +536,54 @@ only = false
 timeout_s = 600
 build_timeout_s = 1800
 
+
+[[control]]
+id = "artifact-status-reads-marked-action"
+guards = "an observation counts as an artifact only while its latest event is a mark"
+file = "crates/fusiform-store/src/lib.rs"
+old = "AND ev.action = 'marked'))"
+new = "AND ev.action = 'nonesuch'))"
+edits = []
+test_file = "crates/fusiform-store/tests/it/ingest.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["ingest::an_artifact_poll_is_not_a_change", "ingest::a_real_change_inside_a_marked_poll_is_kept", "ingest::a_retracted_mark_stops_excluding_and_stays_on_the_record"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "artifact-status-is-the-latest-event"
+guards = "a retraction after a mark ends the exclusion: status comes from the newest event, not the oldest"
+file = "crates/fusiform-store/src/lib.rs"
+old = "WHERE ev.id = (SELECT MAX(id)"
+new = "WHERE ev.id = (SELECT MIN(id)"
+edits = []
+test_file = "crates/fusiform-store/tests/it/ingest.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["ingest::a_retracted_mark_stops_excluding_and_stays_on_the_record"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "artifact-exclusion-needs-a-restatement"
+guards = "an era inside a marked poll is skipped only if it restates the previous claim, so a real change in that poll still counts"
+file = "crates/fusiform-store/src/lib.rs"
+old = "if *marked && restates_previous {"
+new = "if *marked {"
+edits = []
+test_file = "crates/fusiform-store/tests/it/ingest.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["ingest::a_real_change_inside_a_marked_poll_is_kept"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
