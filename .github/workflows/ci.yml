@@ -228,7 +228,7 @@ jobs:
       - name: Install ck-mutate
         run: >-
           cargo install --locked --git https://github.com/cortexkit/commons
-          --rev 6bada448cb3efc83efbd90bf5052d12c1969ce2c cortexkit-mutate
+          --rev c46f324133c5df6411703714e4c147f7cc8554a0 cortexkit-mutate
 
       # Validates every row's anchor, files and expected test names before any
       # source is touched, so a stale row fails here by name.
@@ -251,7 +251,12 @@ jobs:
           merge_base() { git merge-base origin/master HEAD; }
           case "$EVENT" in
             schedule)
-              selection=(--all) ;;
+              # --broad runs every test target in each row's package, not only
+              # the one the row names, so a mutant that also reddens tests in
+              # another target is graded CAUGHT_BROADLY: caught, but by a
+              # breakage wider than the rule it was written for. It costs a
+              # wider test run per row, so only the nightly pays it.
+              selection=(--all --broad) ;;
             pull_request)
               selection=(--diff "$PR_BASE") ;;
             push)
