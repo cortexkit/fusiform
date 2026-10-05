@@ -81,3 +81,12 @@ if ! cargo metadata --locked --offline --format-version 1 > /dev/null 2>&1; then
     echo >&2
     exit 1
 fi
+
+# No dependency may resolve from a path outside this repo. A sibling path dep
+# goes stale on every sibling release; see the script for why.
+if ! "$(git rev-parse --show-toplevel)/scripts/no-outside-path-deps.sh"; then
+    echo "pre-push refused: a dependency resolves from outside this repository" >&2
+    echo >&2
+    echo "  Take it from crates.io, or pin a git rev if it is unpublished." >&2
+    exit 1
+fi

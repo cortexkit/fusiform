@@ -158,6 +158,14 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
+      # The self-test first: it plants a path dependency outside a throwaway
+      # workspace and requires a refusal, so a check that could never fail
+      # cannot pass here.
+      - name: No path dependency outside the repo
+        run: |
+          scripts/no-outside-path-deps.sh --self-test
+          scripts/no-outside-path-deps.sh
+
       - name: Clippy
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
