@@ -89,7 +89,7 @@ days="${CI_STATUS_DAYS:-14}"
 # dispatched it is waiting for it. Only the schedule fires with nobody
 # attending, so only the schedule has the silence this script exists to break.
 runs=$(gh run list --workflow="$workflow" --event schedule --limit 40 \
-    --json conclusion,headSha,createdAt 2>/dev/null) || {
+    --json status,conclusion,headSha,createdAt 2>/dev/null) || {
     echo "ci-status: could not read scheduled runs for $workflow" >&2
     exit 1
 }
@@ -124,16 +124,30 @@ def when(r):
 def bad(r):
     return r["conclusion"] not in ("success", None, "")
 
+# The verdict comes from the newest COMPLETED run. A queued or running run has
+# no conclusion yet, and bad() reads an empty conclusion as not-bad, so taking
+# the newest run of any status printed PASSED for a run that had not started.
+# A newer unfinished run is reported beside the verdict instead.
+completed = [r for r in runs if r.get("status") == "completed"]
+if not completed:
+    print("UNFINISHED")
+    sys.exit(0)
+
 # gh returns newest first. Taken by DATE rather than by position, because a
 # trust in list ordering is the kind of assumption that holds until it does not.
-newest = max(runs, key=when)
-window = [r for r in runs if when(r) >= cut]
+newest = max(completed, key=when)
+pending = [r for r in runs
+           if r.get("status") != "completed" and when(r) > when(newest)]
+later = max(pending, key=when) if pending else None
+window = [r for r in completed if when(r) >= cut]
 older = [r for r in window if bad(r) and r is not newest]
 
 state = "RED" if bad(newest) else "GREEN"
-print("%s|%s|%s|%s|%d" % (
+print("%s|%s|%s|%s|%d|%s" % (
     state, newest["createdAt"][:16], newest["conclusion"], newest["headSha"][:7],
-    len(older)))
+    len(older),
+    "%s %s %s" % (later["status"], later["createdAt"][:16], later["headSha"][:7])
+    if later else ""))
 for r in older[:8]:
     print("  %s  %-10s %s" % (r["createdAt"][:16], r["conclusion"], r["headSha"][:7]))
 ')
@@ -148,6 +162,12 @@ case "$verdict" in
         echo "  passes, which is the deadlock QTA hit in September."
         exit 1
         ;;
+    UNFINISHED)
+        echo "ci-status: scheduled runs exist but none has completed yet."
+        echo
+        echo "  There is no verdict to report; run this again once one finishes."
+        exit 1
+        ;;
 esac
 
 head=$(printf '%s' "$verdict" | head -1)
@@ -158,6 +178,13 @@ stamp=$(printf '%s' "$head" | cut -d'|' -f2)
 concl=$(printf '%s' "$head" | cut -d'|' -f3)
 sha=$(printf '%s' "$head" | cut -d'|' -f4)
 older=$(printf '%s' "$head" | cut -d'|' -f5)
+later=$(printf '%s' "$head" | cut -d'|' -f6)
+
+# Printed before the verdict so it cannot be read as part of it: the verdict
+# below is about the newest FINISHED run, not this one.
+if [ -n "$later" ]; then
+    echo "ci-status: a newer scheduled run is not finished yet: $later"
+fi
 
 if [ "$state" = "GREEN" ]; then
     echo "ci-status: newest scheduled run PASSED  ($stamp, $sha)"
