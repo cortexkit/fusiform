@@ -21,8 +21,9 @@
 #
 #   scripts/no-outside-path-deps.sh --self-test
 #
-# builds a throwaway workspace with a path dependency on a crate beside it and
-# requires this script to refuse it, then a clean one it must accept. Without
+# builds a throwaway workspace that reaches a crate beside it, first by a path
+# dependency and then by a [patch.crates-io] entry, requires this script to
+# refuse both, then requires a clean workspace to pass. Without
 # that, a check that never fails is indistinguishable from one that works.
 set -eu
 
@@ -58,6 +59,9 @@ if not local:
 for name, path in outside:
     print("no-outside-path-deps: %s resolves from %s, outside %s" % (name, path, root),
           file=sys.stderr)
+if not outside:
+    # Printed so a log shows how much the check saw, not only that it passed.
+    print("no-outside-path-deps: %d local package(s), all inside the repo" % len(local))
 sys.exit(1 if outside else 0)
 '
 }
@@ -82,6 +86,19 @@ if [ "${1:-}" = "--self-test" ]; then
         cat "$tmp/err" >&2
         exit 1
     }
+    # The same crate reached through a [patch.crates-io] entry instead of a
+    # direct path dependency. Patches are the spelling a manifest grep misses.
+    printf '[package]\nname = "planted"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\noutside = "0.1"\n\n[patch.crates-io]\noutside = { path = "../outside" }\n' \
+        > "$tmp/repo/Cargo.toml"
+    if "$script" --manifest-path "$tmp/repo/Cargo.toml" 2> "$tmp/err"; then
+        echo "self-test FAILED: a [patch] to a path outside the repo was accepted" >&2
+        exit 1
+    fi
+    grep -q 'outside resolves from' "$tmp/err" || {
+        echo "self-test FAILED: refused the [patch], but not for the planted crate:" >&2
+        cat "$tmp/err" >&2
+        exit 1
+    }
     # Control: the same workspace without the outside dependency must pass, or
     # the refusal above could come from a check that refuses everything.
     printf '[package]\nname = "planted"\nversion = "0.1.0"\nedition = "2021"\n' \
@@ -90,7 +107,7 @@ if [ "${1:-}" = "--self-test" ]; then
         echo "self-test FAILED: a clean workspace was refused" >&2
         exit 1
     }
-    echo "no-outside-path-deps self-test: refuses the planted dependency, accepts the clean control"
+    echo "no-outside-path-deps self-test: refuses a planted path dependency and a planted [patch], accepts the clean control"
     exit 0
 fi
 
