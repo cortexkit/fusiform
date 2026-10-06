@@ -329,13 +329,18 @@ echo "  ARM       name WHICH BINARY renders it, and paste output you EXECUTED
 # Written to a STABLE path so a stale card is recoverable without asking me. It
 # carries the sha as well as the directory, so a placer can check that what it
 # found is what was declared rather than trusting the pointer.
-current="$HOME/ck-stage/fusiform.current"
-{
-    echo "stage=$STAGE"
-    echo "revision=$(git rev-parse HEAD)"
-    echo "declared_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-} > "$current.tmp"
-mv -f "$current.tmp" "$current"
+#
+# The placer's gate looks the declaration up per binary: `fusiform.current` for
+# the module and `ck-models.current` for the CLI. Both are written here from the
+# one stage, with identical contents, so they cannot name different builds.
+declaration="stage=$STAGE
+revision=$(git rev-parse HEAD)
+declared_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+for name in fusiform ck-models; do
+    current="$HOME/ck-stage/$name.current"
+    printf '%s\n' "$declaration" > "$current.tmp"
+    mv -f "$current.tmp" "$current"
+done
 
 # Written through a temp file and renamed, because a reader can open this at any
 # moment: a truncated declaration naming half a path is worse than a stale one
