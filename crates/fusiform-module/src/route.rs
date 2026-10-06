@@ -3023,20 +3023,27 @@ fn aliased_response(
         fact_prefixes: prefixes.cloned(),
         ..CatalogGetRequest::default()
     };
-    let (snapshot, retired) = match single_model_snapshot(
+    // If the store has never recorded the target model, the alias has nothing
+    // to stand for and serves nothing. Ask the store directly. Do not infer it
+    // from the refusal code `single_model_snapshot` returns (`no_coverage`):
+    // that code is reported to callers, and changing how an unknown model is
+    // reported must not change whether an alias is served.
+    if !store
+        .model_is_known(source, &alias.target_provider_id, &alias.target_model_id)
+        .map_err(|e| store_error(&e))?
+    {
+        return Ok(None);
+    }
+    // The store confirmed the target exists, so any refusal
+    // `single_model_snapshot` returns now is a real error and propagates.
+    let (snapshot, retired) = single_model_snapshot(
         store,
         source,
         &alias.target_provider_id,
         &alias.target_model_id,
         None,
         &target_request,
-    ) {
-        Ok(read) => read,
-        // The target is not in the store at all: the alias has nothing to
-        // stand for. Any other failure is a real error and propagates.
-        Err(e) if e.code == fusiform_protocol::CODE_NO_COVERAGE => return Ok(None),
-        Err(e) => return Err(e),
-    };
+    )?;
     if !retired.is_empty() {
         return Ok(None);
     }

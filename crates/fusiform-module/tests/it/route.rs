@@ -1476,6 +1476,48 @@ fn an_unknown_provider_is_refused_rather_than_answered_with_zero() {
     assert!(ok.model_count() > 0, "a known provider must still answer");
 }
 
+/// An unknown provider is refused with `no_coverage` on the single-model path.
+///
+/// Naming a model as well as a provider sends the read through the one-model
+/// lookup instead of the provider filter tested above, and that lookup builds
+/// its own unknown-provider refusal. This is the only test that reaches that
+/// refusal directly; a mutation turning its code into `bad_request` is caught
+/// here and nowhere else.
+#[test]
+fn an_unknown_provider_is_refused_on_the_single_model_path_too() {
+    let f = fixture();
+
+    match serve_catalog_get(
+        &f.store,
+        br#"{"provider_id": "notaprovider", "model_id": "claude-sonnet-4-5"}"#,
+    ) {
+        Err(e) => {
+            assert_eq!(e.code, fusiform_protocol::CODE_NO_COVERAGE);
+            assert!(
+                e.message.contains("unknown provider") && e.message.contains("notaprovider"),
+                "the refusal must say it is the provider that is unknown, got {:?}",
+                e.message
+            );
+        }
+        Ok(r) => panic!(
+            "an unknown provider must be refused on the single-model path, got {} models",
+            r.model_count()
+        ),
+    }
+
+    // Control: the same model under a provider the store knows is answered,
+    // so the refusal above is about the provider and not the model id.
+    let ok = get(
+        &f,
+        r#"{"provider_id": "anthropic", "model_id": "claude-sonnet-4-5"}"#,
+    );
+    assert_eq!(
+        ok.model_count(),
+        1,
+        "a known provider and model must answer"
+    );
+}
+
 /// An unknown model under a KNOWN provider is refused, and says so distinctly.
 ///
 /// Two refusals rather than one because the operator's next action differs: a

@@ -236,7 +236,7 @@ jobs:
       - name: Install ck-mutate
         run: >-
           cargo install --locked --git https://github.com/cortexkit/commons
-          --rev c46f324133c5df6411703714e4c147f7cc8554a0 cortexkit-mutate
+          --rev 695c97b6c4d74042011ec0aeeebe966f377353be cortexkit-mutate
 
       # Validates every row's anchor, files and expected test names before any
       # source is touched, so a stale row fails here by name.

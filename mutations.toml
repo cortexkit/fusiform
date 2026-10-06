@@ -235,6 +235,8 @@ expect_red = ["route::inheritance_tests::the_bulk_path_inherits_under_a_rate_fil
 only = false
 timeout_s = 600
 build_timeout_s = 1800
+hub = "This is the one call that applies rate inheritance on render, and the golden payload fixture in the it suite deliberately pins an inherited rate, so removing it changes served bytes there as well as the lib inheritance tests."
+hub_targets = ["it"]
 
 
 [[control]]
@@ -252,6 +254,8 @@ expect_red = ["route::an_unknown_provider_is_refused_rather_than_answered_with_z
 only = false
 timeout_s = 600
 build_timeout_s = 1800
+hub = "Every coverage refusal is built by this one constructor (unknown provider or model, an unknown observation, and the refusals the alias path passes on), and the alias and dispatch tests in route.rs's own unit tests assert that code as well as the it suite."
+hub_targets = ["fusiform_module"]
 
 
 [[control]]
@@ -426,11 +430,11 @@ new = """
 return Err(RouteError::bad_request(format!(
                 "unknown provider {provider_id:?}"""
 edits = []
-test_file = "crates/fusiform-module/tests/it/served_corrections.rs"
+test_file = "crates/fusiform-module/tests/it/route.rs"
 runner = "cargo"
 package = "fusiform-module"
 target = "--test it"
-expect_red = ["served_corrections::a_correction_cannot_create_a_fact_the_upstream_never_published", "served_corrections::a_historical_read_is_distinguishable_from_a_current_one", "served_corrections::a_named_model_with_no_facts_in_the_plane_is_still_returned", "served_corrections::a_read_before_the_record_is_refused_rather_than_answered_empty"]
+expect_red = ["route::an_unknown_provider_is_refused_on_the_single_model_path_too"]
 only = false
 timeout_s = 600
 build_timeout_s = 1800
