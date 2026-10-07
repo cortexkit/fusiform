@@ -1,0 +1,83 @@
+{
+  "schema": "billing-planes/v1",
+  "how_to_add_a_plane": "Read a source that states how the auth method bills, not just where its model ids route. Record the source, who established the claim and when, and a review date 60 days later. A ruleless quota proxy is still a billing claim and needs its own provenance and review.",
+  "planes": [
+    {
+      "provider_id": "openai",
+      "auth_method": "chatgpt",
+      "kind": "quota_proxy",
+      "source_ref": "https://help.openai.com/en/articles/20001106",
+      "established_by": "fusiform",
+      "established_at_ms": 1791331200000,
+      "review_by_ms": 1796515200000,
+      "note": "The Codex rate card says usage is priced based on API token usage. These are relative quota weights, not amounts billed by a ChatGPT subscription.",
+      "rules": [
+        {
+          "class": "cache_write",
+          "state": "billed_as",
+          "as_class": "input",
+          "source_ref": "https://help.openai.com/en/articles/20001106",
+          "established_by": "fusiform",
+          "established_at_ms": 1791331200000,
+          "review_by_ms": 1796515200000,
+          "note": "The rate card meters input tokens, cached input tokens and output tokens, with no cache-write class. Cache writes have no separate surcharge; that does not make the input tokens free."
+        }
+      ]
+    },
+    {
+      "provider_id": "anthropic",
+      "auth_method": "oauth",
+      "kind": "quota_proxy",
+      "source_ref": "https://support.anthropic.com/en/articles/9797557",
+      "established_by": "fusiform",
+      "established_at_ms": 1791331200000,
+      "review_by_ms": 1796515200000,
+      "note": "Claude Code shares Pro/Max plan limits, and cached portions count less against those limits. The API's discounted cache-read rate reflects that direction, but is a quota proxy rather than a subscription charge. No numeric per-class rule is published.",
+      "rules": []
+    },
+    {
+      "provider_id": "xai",
+      "auth_method": "apikey",
+      "kind": "upstream",
+      "source_ref": "https://docs.x.ai/docs/guides/prompt-caching#usage-and-pricing",
+      "established_by": "fusiform",
+      "established_at_ms": 1791331200000,
+      "review_by_ms": 1796515200000,
+      "note": "Prompt-caching usage and pricing gives input and cached-input columns, not a separate write column.",
+      "rules": [
+        {
+          "class": "cache_write",
+          "state": "billed_as",
+          "as_class": "input",
+          "source_ref": "https://docs.x.ai/docs/guides/prompt-caching#usage-and-pricing",
+          "established_by": "fusiform",
+          "established_at_ms": 1791331200000,
+          "review_by_ms": 1796515200000,
+          "note": "Prompt tokens (non-cached) pay the full prompt token price. No write surcharge is stated."
+        }
+      ]
+    },
+    {
+      "provider_id": "deepseek",
+      "auth_method": "apikey",
+      "kind": "upstream",
+      "source_ref": "https://api-docs.deepseek.com/api/create-chat-completion",
+      "established_by": "fusiform",
+      "established_at_ms": 1791331200000,
+      "review_by_ms": 1796515200000,
+      "note": "The completion API splits prompt usage into cache hit and cache miss, with no write field.",
+      "rules": [
+        {
+          "class": "cache_write",
+          "state": "billed_as",
+          "as_class": "input",
+          "source_ref": "https://api-docs.deepseek.com/api/create-chat-completion",
+          "established_by": "fusiform",
+          "established_at_ms": 1791331200000,
+          "review_by_ms": 1796515200000,
+          "note": "Prompt tokens equal prompt_cache_hit_tokens plus prompt_cache_miss_tokens. A cache miss is input, not a free write."
+        }
+      ]
+    }
+  ]
+}

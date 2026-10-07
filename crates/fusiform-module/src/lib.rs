@@ -9,6 +9,7 @@
 //! exports as unused.
 
 pub mod aliases;
+pub mod billing_planes;
 pub mod creators;
 pub mod fetch;
 pub mod health;
