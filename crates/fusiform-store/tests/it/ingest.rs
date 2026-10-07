@@ -100,6 +100,104 @@ fn a_first_ingest_records_every_fact_as_new() {
     f.store.append_eras(&plan.eras).unwrap();
 }
 
+/// Plane billing claims belong only to current served views. Ingest must keep
+/// both new rate states out of every era, including superseded prices and
+/// withdrawal tombstones, so a historical read cannot invent a billing rule.
+#[test]
+fn ingested_eras_never_carry_serve_only_billing_states() {
+    let f = fixture();
+    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let first = plan_ingest(
+        &f.store,
+        &catalog,
+        Timestamp(1_000),
+        BoundaryKind::Seed,
+        None,
+    )
+    .unwrap();
+    f.store.append_eras(&first.eras).unwrap();
+    observe(&f, 2_000, ObservationOutcome::Unchanged);
+    let detecting = observe(&f, 3_000, ObservationOutcome::Changed { snapshot_seq: 1 });
+
+    let mut doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    assert!(doc["anthropic"]["models"]["claude-sonnet-4-5"]
+        .as_object_mut()
+        .unwrap()
+        .remove("cost")
+        .is_some());
+    let withdrawn = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+        .unwrap()
+        .catalog;
+    let next = plan_ingest(
+        &f.store,
+        &withdrawn,
+        Timestamp(3_000),
+        BoundaryKind::Observed,
+        Some(detecting),
+    )
+    .unwrap();
+    assert!(next
+        .eras
+        .iter()
+        .any(|era| era.fact_key.as_str().starts_with("rate.")));
+    f.store.append_eras(&next.eras).unwrap();
+
+    // Read the stored bytes, not serialized protocol values or the current
+    // serve view: both could hide a serve-only claim in a superseded era.
+    let keys: std::collections::BTreeSet<_> = first
+        .eras
+        .iter()
+        .chain(&next.eras)
+        .map(|era| (&era.provider_id, &era.model_id, &era.fact_key))
+        .collect();
+    let mut inspected = 0usize;
+    let mut states = std::collections::BTreeSet::new();
+    let mut saw_withdrawal = false;
+    for (provider_id, model_id, fact_key) in keys {
+        let history = f
+            .store
+            .fact_history(SourceId::ModelsDev, provider_id, model_id, fact_key)
+            .unwrap();
+        assert!(!history.is_empty(), "written facts must have stored eras");
+        for era in history {
+            inspected += 1;
+            let value: serde_json::Value = serde_json::from_str(&era.value_json).unwrap();
+            assert_ne!(
+                value["state"].as_str(),
+                Some("billed_as"),
+                "stored era {provider_id}/{model_id} {}: {}",
+                fact_key.as_str(),
+                era.value_json
+            );
+            assert_ne!(
+                value["reason"].as_str(),
+                Some("not_established"),
+                "stored era {provider_id}/{model_id} {}: {}",
+                fact_key.as_str(),
+                era.value_json
+            );
+            if fact_key.as_str().starts_with("rate.") {
+                states.insert(value["state"].as_str().unwrap().to_string());
+                saw_withdrawal |= value["reason"] == "missing_rate";
+            }
+        }
+    }
+    assert_eq!(
+        inspected as i64,
+        f.store.era_count(SourceId::ModelsDev).unwrap()
+    );
+    assert!(inspected > catalog.model_count());
+    assert_eq!(
+        states,
+        ["priced", "stated_zero", "unpriced"]
+            .map(str::to_string)
+            .into_iter()
+            .collect(),
+        "the scan must exercise every state ingest writes"
+    );
+    assert!(saw_withdrawal, "the scan must include withdrawn rate eras");
+}
+
 /// Re-ingesting an unchanged document produces nothing.
 ///
 /// The property that makes the era table finite: polling every 30 minutes for a

@@ -5,5 +5,6 @@
 // supplies its own main) belongs beside this directory as tests/<name>.rs.
 // Scope a run to one file with `cargo test -p fusiform-protocol --test it <file>::`.
 
+mod billing_planes;
 mod deps;
 mod refusal_kinds;

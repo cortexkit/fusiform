@@ -1231,6 +1231,8 @@ fn render(
         // Filled by the alias paths in `serve_catalog_get`, which are the only
         // callers that serve one row's facts under another id.
         aliased: Vec::new(),
+        plane: None,
+        billing_rules: Vec::new(),
     }
 }
 

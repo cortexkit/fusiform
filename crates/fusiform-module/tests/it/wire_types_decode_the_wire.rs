@@ -224,6 +224,9 @@ fn every_variant_the_producer_writes_decodes() {
             RateValue::Priced { .. } => {
                 panic!("{label} decoded as Priced, which would silently price a rate that is not")
             }
+            RateValue::BilledAs { .. } => {
+                panic!("a read without auth_method must never carry billed_as: {label}")
+            }
         }
     }
 
@@ -472,6 +475,9 @@ fn the_fixture_carries_every_rate_state() {
             Ok(RateValue::Priced { .. }) => seen_priced = true,
             Ok(RateValue::StatedZero { .. }) => seen_stated_zero = true,
             Ok(RateValue::Unpriced { .. }) => seen_unpriced = true,
+            Ok(RateValue::BilledAs { .. }) => {
+                panic!("a read without auth_method must never carry billed_as: {shape}")
+            }
             // A served rate that does not decode is the flatten defect, and the
             // fence above this one is what reports it. Ignored here so this test
             // answers its own question rather than two.
