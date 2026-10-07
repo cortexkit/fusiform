@@ -80,6 +80,28 @@ fn binary(name: &str) -> std::path::PathBuf {
     path
 }
 
+/// A link to `built` named `ckdev-<suffix>`, in a scratch directory this test owns.
+///
+/// On this machine a `ck-` process name means a production binary placed in the
+/// fleet's bin directory, so the live fleet can be told apart from test runs in
+/// a process list. Running cargo's `target/*/ck-fusiform` directly would show a
+/// second `ck-fusiform` beside the live module. A hard link keeps the same
+/// inode and bytes, so the probe still runs exactly the binary cargo built;
+/// copying is the fallback when the scratch directory is on another volume.
+fn ckdev_link(built: &std::path::Path, scratch: &std::path::Path) -> std::path::PathBuf {
+    let name = built
+        .file_name()
+        .and_then(|n| n.to_str())
+        .expect("binary file name");
+    let suffix = name.strip_prefix("ck-").expect("a ck- binary");
+    let link = scratch.join(format!("ckdev-{suffix}"));
+    if std::fs::hard_link(built, &link).is_err() {
+        std::fs::copy(built, &link)
+            .unwrap_or_else(|error| panic!("{} -> {}: {error}", built.display(), link.display()));
+    }
+    link
+}
+
 #[cfg(unix)]
 #[test]
 #[should_panic(expected = "sleep version probe exceeded its subprocess deadline")]
@@ -95,13 +117,15 @@ fn a_hung_version_probe_is_killed_at_its_deadline() {
 #[test]
 fn both_binaries_answer_version_with_no_arguments_and_no_daemon() {
     let mut checked = 0;
+    let scratch = tempfile::tempdir().expect("scratch dir for ckdev links");
     for name in ["ck-fusiform", "ck-models"] {
-        let path = binary(name);
-        if !path.exists() {
+        let built = binary(name);
+        if !built.exists() {
             eprintln!("skipping {name}: not built in this profile");
             continue;
         }
         checked += 1;
+        let path = ckdev_link(&built, scratch.path());
 
         for flag in ["--version", "-V"] {
             let out = bounded_output(

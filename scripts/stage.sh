@@ -62,6 +62,24 @@ HEAD_REV="$(git rev-parse HEAD)"
 STAGE="$HOME/ck-stage/fusiform-$(date -u +%Y%m%dT%H%M%SZ)"
 IDENTITY="$FUSIFORM_SIGNING_IDENTITY"
 
+# Run a staged binary under a `ckdev-` name.
+#
+# On this machine a running `ck-` process means a production binary placed in
+# the fleet's bin directory (or its staging directory, which ~/ck-stage is
+# not), so the live fleet can be told apart from probes in a process list.
+# Running a staged `ck-fusiform` directly would show a second one beside the
+# live module. A hard link shares the inode, so the probe runs exactly the
+# signed bytes it is checking; a copy is the fallback across volumes.
+CKDEV_DIR="$(mktemp -d)"
+trap 'rm -rf "$CKDEV_DIR"' EXIT
+ckdev_run() {
+  local built="$1"; shift
+  local link="$CKDEV_DIR/ckdev-$(basename "$built" | sed 's/^ck-//')"
+  rm -f "$link"
+  ln "$built" "$link" 2>/dev/null || cp "$built" "$link"
+  "$link" "$@"
+}
+
 # Unfiltered and unpiped: this script's own refusals must reach the terminal
 # for the same reason the release script's must.
 ./scripts/release-build.sh
@@ -91,7 +109,7 @@ for bin in ck-fusiform ck-models; do
   fi
 
   # THE GATE. Ask the signed bytes what they are.
-  reported="$("$STAGE/$bin" --version | grep -oE '\([0-9a-f]{40}\)' | tr -d '()')"
+  reported="$(ckdev_run "$STAGE/$bin" --version | grep -oE '\([0-9a-f]{40}\)' | tr -d '()')"
   if [ "$reported" != "$HEAD_REV" ]; then
     echo >&2
     echo "REFUSING TO STAGE: $bin reports rev $reported, tree is on $HEAD_REV" >&2
@@ -229,7 +247,7 @@ for dir in "$HOME"/ck-stage/fusiform-*; do
     # Identify by what the binary REPORTS, never by the directory's timestamp.
     # A name is a label someone typed; the self-reported revision is the thing
     # that decides whether this directory is the rollback target.
-    rev="$("$dir/ck-fusiform" --version 2>/dev/null | grep -oE '[0-9a-f]{40}' | head -1 || true)"
+    rev="$(ckdev_run "$dir/ck-fusiform" --version 2>/dev/null | grep -oE '[0-9a-f]{40}' | head -1 || true)"
     if [ -n "$DEPLOYED_REV" ] && [ "$rev" = "$DEPLOYED_REV" ]; then
         continue
     fi

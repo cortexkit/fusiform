@@ -151,7 +151,7 @@ fn the_design_note_names_the_tables_that_exist() {
     // content first: an extraction that stops matching would otherwise pass this
     // test in silence, which is the same asymmetry that produced seven
     // misreports in this repository's former mutation script (since replaced by
-    // `ck-mutate`) — a failure path returning the same type as the success
+    // `ckdev-mutate`) — a failure path returning the same type as the success
     // path, so failure-to-measure arrives dressed as evidence.
     //
     // The floors are measured, not guessed: the store creates five tables

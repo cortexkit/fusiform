@@ -38,8 +38,16 @@ CK_BUILD_REV="$REV" cargo build --locked --release \
   -p fusiform-module -p fusiform-cli
 
 echo
+# Probed through a `ckdev-` hard link: on the fleet's Mac a running `ck-`
+# process means a placed production binary, and a build probe must not show up
+# as a second `ck-fusiform` beside the live one. The link shares the inode, so
+# it runs exactly the bytes just built.
+probe_dir="$(mktemp -d)"
+trap 'rm -rf "$probe_dir"' EXIT
 for bin in ck-fusiform ck-models; do
-  printf '%-12s %s\n' "$bin" "$(./target/release/$bin --version)"
+  link="$probe_dir/ckdev-${bin#ck-}"
+  ln "./target/release/$bin" "$link" 2>/dev/null || cp "./target/release/$bin" "$link"
+  printf '%-12s %s\n' "$bin" "$("$link" --version)"
 done
 
 echo

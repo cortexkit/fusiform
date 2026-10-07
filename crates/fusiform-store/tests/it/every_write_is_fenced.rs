@@ -242,7 +242,7 @@ fn no_write_escapes_the_fence() {
     // detector that stops matching passes this test in total silence — an empty
     // match arriving as a pass, which is the same asymmetry that produced seven
     // separate misreports in this repository's former mutation script (since
-    // replaced by `ck-mutate`): a harness's failure path
+    // replaced by `ckdev-mutate`): a harness's failure path
     // returns the SAME TYPE as its success path, so failure-to-measure arrives
     // pre-dressed in evidence's clothes.
     //

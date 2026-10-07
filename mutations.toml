@@ -1,9 +1,9 @@
-# Mutation proofs for fusiform's standing guards, replayed by ck-mutate.
+# Mutation proofs for fusiform's standing guards, replayed by ckdev-mutate.
 #
 # Each row breaks one guarded rule (`old` replaced by `new`) and names, by full
 # libtest path, the tests that must go red. CI replays the rows a change touches
 # on every push and every row nightly; see the README's "Mutation proofs"
-# section for how to add one. Prefer `ck-mutate prove`, which appends a row only
+# section for how to add one. Prefer `ckdev-mutate prove`, which appends a row only
 # when the named tests actually fail.
 [[control]]
 id = "correction-never-creates-a-fact"

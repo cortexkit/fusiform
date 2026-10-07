@@ -271,6 +271,7 @@ dependencies = [
  "serde_json",
  "subc-client-rs",
  "subc-protocol",
+ "tempfile",
  "tokio",
 ]
 
