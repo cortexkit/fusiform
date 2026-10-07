@@ -112,6 +112,12 @@ fn every_zero_rate_on_live_data_was_stated_as_zero() {
                 }
                 RateValue::StatedZero { .. } => stated_zero += 1,
                 RateValue::Unpriced { .. } => unpriced += 1,
+                RateValue::BilledAs { .. } => {
+                    panic!(
+                        "a read without auth_method must never carry billed_as: {}",
+                        model.key
+                    )
+                }
             }
         }
     }

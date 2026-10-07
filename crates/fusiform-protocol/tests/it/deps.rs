@@ -277,6 +277,8 @@ fn every_response_type_round_trips() {
             target_model_id: "gemini-3.8-flash".into(),
             source_ref: "antigravity-auth@44eb8fa packages/core/src/model-registry.ts".into(),
         }],
+        plane: None,
+        billing_rules: vec![],
     };
     let text = serde_json::to_string(&catalog).unwrap();
     let back: CatalogGetResponse = serde_json::from_str(&text).unwrap();

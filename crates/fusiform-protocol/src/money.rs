@@ -135,6 +135,9 @@ pub enum UnpricedReason {
     /// audio keys are the live case, sitting in the same flat namespace as
     /// token rates with no unit distinguishing them.
     UnknownChargeBasis,
+    /// A serve-time billing rule cannot establish this class's rate, including
+    /// when a billed-as rule has no published target. Never produced by ingest.
+    NotEstablished,
 }
 
 /// The minimum a call is charged regardless of how little it consumes.
@@ -169,13 +172,15 @@ pub enum Floor {
     Minimum { units: i64 },
 }
 
-/// A rate's value: priced, a stated zero, or unpriced with a reason.
+/// A rate's value: priced, a stated zero, billed as another key, or unpriced.
 ///
-/// Three states because they have opposite consequences for a cap. Measured on
+/// The upstream's three states have opposite consequences for a cap. Measured on
 /// 2026-08-11: 420 models carried no cost object at all, and 1,423 cost
 /// entries were exactly `0` — some genuinely free, some certainly "not
 /// published", and the upstream cannot distinguish them. Neither can fusiform,
 /// so it reports what was said instead of resolving it.
+/// A serve-time billing rule can additionally name another rate key rather
+/// than inventing a separate amount for a class billed at that key's rate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "state")]
 pub enum RateValue {
@@ -251,6 +256,13 @@ pub enum RateValue {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         inherited_from: Option<InheritedFrom>,
     },
+    /// This class is billed at another key's rate on the selected plane.
+    /// Serve-only: this is a curated billing claim, not an upstream observation.
+    BilledAs {
+        /// The full fact key, including any context-tier suffix. An unfiltered
+        /// plane read serves this target; a filtered read may omit it.
+        key: String,
+    },
 }
 
 /// Whose price this is, when it is not the serving provider's.
@@ -273,6 +285,9 @@ pub struct InheritedFrom {
     ///   `CatalogGetResponse::aliased`). An alias is an authored identity
     ///   claim, served on current reads only, and a real row for the alias id
     ///   always wins over it.
+    /// - `quota_proxy`: the same provider's API list price is a reference for a
+    ///   subscription plane, not a per-token charge on that plane. A reader
+    ///   must not treat a `quota_proxy` price as an amount billed.
     pub basis: String,
     /// The model id of the row whose price this is, when it differs from the
     /// serving row's.

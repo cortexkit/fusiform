@@ -691,6 +691,10 @@ fn json_rate(value: &RateValue) -> String {
             r#"{{"state":"unpriced","reason":"{}"}}"#,
             unpriced_reason_str(*reason)
         ),
+        RateValue::BilledAs { .. } => unreachable!(
+            "billed_as is serve-only: normalization never constructs billing rules, \
+             and plan_ingest receives only normalized values"
+        ),
     }
 }
 
@@ -700,6 +704,10 @@ fn unpriced_reason_str(r: fusiform_core::UnpricedReason) -> &'static str {
         MissingRate => "missing_rate",
         NoCatalogCoverage => "no_catalog_coverage",
         UnknownChargeBasis => "unknown_charge_basis",
+        NotEstablished => unreachable!(
+            "not_established is serve-only: normalization never constructs billing rules, \
+             and plan_ingest receives only normalized values"
+        ),
     }
 }
 

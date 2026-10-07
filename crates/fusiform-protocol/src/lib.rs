@@ -339,6 +339,12 @@ pub struct CatalogGetRequest {
     /// Return only models from this provider.
     #[serde(default)]
     pub provider_id: Option<String>,
+
+    /// Select this provider's billing plane: `apikey`, `chatgpt`, `oauth`, or
+    /// `antigravity`. Requires `provider_id` and is current-only (no `at_ms`).
+    /// Absent means the ordinary catalog view, without plane rules or proxies.
+    #[serde(default)]
+    pub auth_method: Option<String>,
 }
 
 /// A `catalog.get` response.
@@ -609,6 +615,53 @@ pub struct CatalogGetResponse {
     /// Omitted when empty, which is every read that touched no alias.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliased: Vec<AliasedModelWire>,
+
+    /// The billing plane selected by `auth_method`. Absent on ordinary reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane: Option<PlaneWire>,
+
+    /// Curated billing rules applied to facts that survive this read's filter.
+    /// Empty on ordinary reads and when no surviving fact was set by a rule.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub billing_rules: Vec<BillingRuleWire>,
+}
+
+/// The provider and access method whose billing view this response serves.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlaneWire {
+    pub provider_id: String,
+    pub auth_method: String,
+    /// `upstream` for ordinary API rows, or `quota_proxy` for API list prices
+    /// used as reference data on a subscription plane, not as amounts billed.
+    pub kind: String,
+    /// Where the curated plane's billing claim was established. Absent for an
+    /// undeclared `apikey` plane, which serves the upstream itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_ref: Option<String>,
+    /// Review deadline in epoch milliseconds; absent on an undeclared API plane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_by_ms: Option<i64>,
+}
+
+/// One `(model, fact_key)` set by a curated billing rule at serve time.
+/// These claims are never written into the upstream's era history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BillingRuleWire {
+    /// `provider_id/model_id`, matching the identity in `models` and `withheld`.
+    pub model: String,
+    /// The full rate key, including any context-tier suffix.
+    pub fact_key: String,
+    /// The state actually served: `billed_as`, `stated_zero`, or
+    /// `not_established` when the rule cannot establish a rate.
+    pub state: String,
+    /// The target class when the rule names one. Still present when a billed-as
+    /// rule falls back to `not_established` because its target is absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub as_class: Option<String>,
+    pub source_ref: String,
+    pub established_by: String,
+    pub established_at_ms: i64,
+    pub review_by_ms: i64,
 }
 
 /// One entry in `models` whose facts are another row's, served under a curated
