@@ -830,14 +830,38 @@ fn every_read_response_field_reaches_the_fixture() {
     // Source-scanned rather than reflected, because Rust has no runtime field
     // list and a hand-written one is a second statement of the struct that can
     // drift from it. The same reasoning as the currency-policy fence next door.
+    let (checked, missing) = missing_response_fields(
+        src,
+        &present,
+        &[
+            "CatalogGetResponse",
+            "HistoryResponse",
+            "StatusResponse",
+            "PlanPricesResponse",
+        ],
+    );
+
+    assert!(
+        checked >= 25,
+        "this examined {checked} fields across four structs; they carried 29 \
+         when this was written, so a collapse means the scan broke rather than \
+         the protocol shrinking"
+    );
+
+    assert!(
+        missing.is_empty(),
+        "These served fields appear in no golden payload: {missing:?}. Add a case that produces the field."
+    );
+}
+
+fn missing_response_fields(
+    src: &str,
+    present: &std::collections::BTreeSet<String>,
+    structs: &[&str],
+) -> (usize, Vec<String>) {
     let mut checked = 0usize;
-    let mut missing: Vec<String> = Vec::new();
-    for want in [
-        "CatalogGetResponse",
-        "HistoryResponse",
-        "StatusResponse",
-        "PlanPricesResponse",
-    ] {
+    let mut missing = Vec::new();
+    for want in structs {
         let start = src
             .find(&format!("pub struct {want} {{"))
             .unwrap_or_else(|| panic!("{want} must exist in the protocol crate"));
@@ -862,23 +886,21 @@ fn every_read_response_field_reaches_the_fixture() {
         }
     }
 
-    assert!(
-        checked >= 25,
-        "this examined {checked} fields across four structs; they carried 29 \
-         when this was written, so a collapse means the scan broke rather than \
-         the protocol shrinking"
-    );
+    (checked, missing)
+}
 
-    assert!(
-        missing.is_empty(),
-        "\n\nThese served fields appear in no golden payload:\n\n  {}\n\n\
-         Consumers pin from this fixture, so a field absent here has its wire \
-         shape constrained by nothing: it can change and redden no test until a \
-         consumer's decoder meets it in production.\n\n\
-         Add a case to `cases()` that PRODUCES the field rather than a synthetic \
-         payload carrying it — the fixture's value is that it records what the \
-         serve path actually emits.\n",
-        missing.join("\n  ")
+#[test]
+fn planted_missing_response_field_is_reported() {
+    let mut present = std::collections::BTreeSet::new();
+    collect_keys(&serde_json::json!({"known": null}), &mut present);
+    assert_eq!(
+        missing_response_fields(
+            "pub struct Response {\n pub known: String,\n pub lost: String,\n}",
+            &present,
+            &["Response"]
+        )
+        .1,
+        ["Response.lost"]
     );
 }
 
@@ -947,6 +969,22 @@ fn every_served_fact_key_reaches_the_fixture() {
     // which is exactly why it would have survived: nothing would have gone
     // wrong until someone added an unrelated field, and the scan's SUBJECT
     // would have been wrong the whole time.
+    let (count, missing) = missing_served_fact_keys(src, &present);
+    assert!(
+        count >= 15,
+        "SERVED_FACTS carried 15 entries when this was written; found {count}, which \
+         means the scan broke rather than the table shrinking"
+    );
+    assert!(
+        missing.is_empty(),
+        "served fact keys absent from the fixture: {missing:?}"
+    );
+}
+
+fn missing_served_fact_keys(
+    src: &str,
+    present: &std::collections::BTreeSet<String>,
+) -> (usize, Vec<String>) {
     let table = {
         let start = src
             .find("pub const SERVED_FACTS")
@@ -963,22 +1001,17 @@ fn every_served_fact_key_reaches_the_fixture() {
         })
         .collect();
 
-    assert!(
-        keys.len() >= 15,
-        "SERVED_FACTS carried 15 entries when this was written; found {}, which \
-         means the scan broke rather than the table shrinking",
-        keys.len()
-    );
+    let missing = keys
+        .iter()
+        .filter(|k| !present.contains(**k))
+        .map(|k| (*k).to_string())
+        .collect();
+    (keys.len(), missing)
+}
 
-    let missing: Vec<&&str> = keys.iter().filter(|k| !present.contains(**k)).collect();
-    assert!(
-        missing.is_empty(),
-        "\n\nThese served fact keys appear in no golden payload:\n\n  {:?}\n\n\
-         A consumer pinning from this fixture never meets them, so their wire \
-         shape is constrained by nothing here.\n\n\
-         Add a case reading a model that PUBLISHES the key. If the excerpt has \
-         no such model, that is the finding — the fixture's upstream cut does \
-         not cover a fact fusiform serves.\n",
-        missing
-    );
+#[test]
+fn planted_missing_served_fact_key_is_reported() {
+    let mut present = std::collections::BTreeSet::new();
+    collect_keys(&serde_json::json!({"known": 1}), &mut present);
+    assert_eq!(missing_served_fact_keys("pub const SERVED_FACTS: &[Fact] = &[\n Fact { key: \"known\" },\n Fact { key: \"lost\" },\n];", &present).1, ["lost"]);
 }

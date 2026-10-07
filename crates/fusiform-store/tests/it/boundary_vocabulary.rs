@@ -126,12 +126,26 @@ fn encoder_vocabulary() -> BTreeSet<String> {
     kinds
 }
 
+// Both directions use this comparison; extraction floors alone cannot detect
+// a comparison that accidentally compares a vocabulary with itself.
+fn missing_kinds(from: &BTreeSet<String>, in_other: &BTreeSet<String>) -> Vec<String> {
+    from.difference(in_other).cloned().collect()
+}
+
+#[test]
+fn planted_vocabulary_difference_is_reported() {
+    let encoder = BTreeSet::from(["observed".to_string()]);
+    let schema = BTreeSet::from(["observed".to_string(), "invented".to_string()]);
+    assert_eq!(missing_kinds(&schema, &encoder), ["invented"]);
+    assert!(missing_kinds(&encoder, &schema).is_empty());
+}
+
 #[test]
 fn every_kind_the_encoder_produces_is_accepted_by_the_schema() {
     let schema = schema_vocabulary();
     let encoder = encoder_vocabulary();
 
-    let unaccepted: Vec<_> = encoder.difference(&schema).collect();
+    let unaccepted = missing_kinds(&encoder, &schema);
     assert!(
         unaccepted.is_empty(),
         "the encoder produces {unaccepted:?}, which the schema's CHECK will \
@@ -149,7 +163,7 @@ fn the_schema_accepts_no_kind_the_encoder_cannot_produce() {
 
     // The direction a test written FROM the CHECK would omit, and the one that
     // found four nonexistent tables in the design note.
-    let unproducible: Vec<_> = schema.difference(&encoder).collect();
+    let unproducible = missing_kinds(&schema, &encoder);
     assert!(
         unproducible.is_empty(),
         "the schema accepts {unproducible:?}, which nothing produces. Either a \

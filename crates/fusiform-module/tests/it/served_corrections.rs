@@ -1273,18 +1273,13 @@ fn only_one_currency_policy_has_ever_existed() {
 
     // Scoped to the PolicyId impl block, which is the only place a policy is
     // minted.
-    let impl_block = src
-        .split_once("impl PolicyId {")
-        .expect("PolicyId must have an impl block")
-        .1
-        .split_once("\n}")
-        .expect("the impl block must close")
-        .0;
-    let policies: Vec<&str> = impl_block
-        .lines()
-        .filter(|l| l.trim_start().starts_with("pub fn "))
-        .collect();
+    let policies = currency_policies(src);
+    let violations = extra_currency_policies(src);
 
+    assert!(
+        violations.is_empty(),
+        "the legacy currency backfill requires one policy; extra policies: {violations:?}"
+    );
     assert_eq!(
         policies.len(),
         1,
@@ -1299,4 +1294,27 @@ fn only_one_currency_policy_has_ever_existed() {
         "the detector found no constructors at all, so it would pass on an \
          empty file"
     );
+}
+
+fn currency_policies(src: &str) -> Vec<&str> {
+    let impl_block = src
+        .split_once("impl PolicyId {")
+        .expect("PolicyId must have an impl block")
+        .1
+        .split_once("\n}")
+        .expect("the impl block must close")
+        .0;
+    impl_block
+        .lines()
+        .filter(|l| l.trim_start().starts_with("pub fn "))
+        .collect()
+}
+
+fn extra_currency_policies(src: &str) -> Vec<&str> {
+    currency_policies(src).into_iter().skip(1).collect()
+}
+
+#[test]
+fn planted_second_currency_policy_is_reported() {
+    assert_eq!(extra_currency_policies("impl PolicyId {\n pub fn first() -> Self { todo!() }\n pub fn second() -> Self { todo!() }\n}"), [" pub fn second() -> Self { todo!() }"]);
 }

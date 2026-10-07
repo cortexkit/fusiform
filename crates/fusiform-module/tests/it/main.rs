@@ -12,6 +12,7 @@ mod creator_table;
 mod failure_path;
 mod golden_payload;
 mod health_detail;
+mod http_stub;
 mod live;
 mod mode_rates;
 mod reasoning_options;

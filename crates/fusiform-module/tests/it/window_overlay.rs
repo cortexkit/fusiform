@@ -15,6 +15,28 @@
 
 use std::collections::BTreeSet;
 
+// Keep the data rules and their diagnostic messages in one place. Real data
+// must have no violations; malformed examples must return the named violation.
+macro_rules! require {
+    ($violations:expr, $condition:expr, $($message:tt)+) => {
+        if !$condition {
+            $violations.push(format!($($message)+));
+        }
+    };
+}
+
+macro_rules! require_eq {
+    ($violations:expr, $left:expr, $right:expr, $($message:tt)+) => {
+        require!($violations, $left == $right, $($message)+);
+    };
+}
+
+macro_rules! require_ne {
+    ($violations:expr, $left:expr, $right:expr, $($message:tt)+) => {
+        require!($violations, $left != $right, $($message)+);
+    };
+}
+
 /// The overlay's path is a CROSS-REPO CONTRACT, not an implementation detail.
 ///
 /// Fusiform does not serve this dataset yet — no route reads it, and that is
@@ -135,6 +157,17 @@ const OBSERVED_BY: &[&str] = &["self_observed", "reported"];
 #[test]
 fn a_provenance_mark_is_in_vocabulary_and_qualifies_a_behavioural_claim() {
     let overlay = overlay();
+    let (violations, checked) = provenance_violations(&overlay);
+    assert!(violations.is_empty(), "{violations:#?}");
+    assert!(
+        checked >= 1,
+        "no provenance marks found; the field was added for ollama-cloud's \
+         third-party ceiling report and a parse finding none is reading nothing"
+    );
+}
+
+fn provenance_violations(overlay: &serde_json::Value) -> (Vec<String>, usize) {
+    let mut violations = Vec::new();
     let mut checked = 0usize;
     for cell in overlay["cells"].as_array().expect("cells is an array") {
         let id = format!(
@@ -146,12 +179,14 @@ fn a_provenance_mark_is_in_vocabulary_and_qualifies_a_behavioural_claim() {
             let Some(by) = fact.get("observed_by").and_then(|v| v.as_str()) else {
                 continue;
             };
-            assert!(
+            require!(
+                violations,
                 OBSERVED_BY.contains(&by),
                 "{id} {key}: observed_by {by:?} is outside the vocabulary"
             );
             let grade = fact["grade"].as_str().unwrap_or("");
-            assert!(
+            require!(
+                violations,
                 matches!(grade, "measured" | "provider_asserted_runtime"),
                 "{id} {key}: observed_by qualifies an OBSERVATION, and this cell \
                  is graded {grade:?}. On a doc-sourced claim the provider is the \
@@ -160,16 +195,23 @@ fn a_provenance_mark_is_in_vocabulary_and_qualifies_a_behavioural_claim() {
             checked += 1;
         }
     }
-    assert!(
-        checked >= 1,
-        "no provenance marks found; the field was added for ollama-cloud's \
-         third-party ceiling report and a parse finding none is reading nothing"
-    );
+    (violations, checked)
 }
 
 #[test]
 fn a_wall_ownership_cell_states_one_of_the_two_claims() {
     let overlay = overlay();
+    let (violations, checked) = wall_vocabulary_violations(&overlay);
+    assert!(violations.is_empty(), "{violations:#?}");
+    assert!(
+        checked >= 2,
+        "found {checked} wall-ownership cells; the deliverable is two \
+         providers and a parse finding fewer means this test is reading nothing"
+    );
+}
+
+fn wall_vocabulary_violations(overlay: &serde_json::Value) -> (Vec<String>, usize) {
+    let mut violations = Vec::new();
     let mut checked = 0usize;
     for cell in overlay["cells"].as_array().expect("cells is an array") {
         let Some(fact) = cell["facts"].get("path.wall_ownership") else {
@@ -183,14 +225,16 @@ fn a_wall_ownership_cell_states_one_of_the_two_claims() {
         let value = fact["value"]["value"]
             .as_str()
             .unwrap_or_else(|| panic!("{id}: wall ownership must be a string"));
-        assert!(
+        require!(
+            violations,
             WALL_OWNERSHIP.contains(&value),
             "{id}: wall ownership {value:?} is outside the vocabulary. The two \
              values license opposite consumer behaviour, so an unrecognised one \
              is worse than an absent cell."
         );
         // Behavioural, so it can never be graded from a document alone.
-        assert_eq!(
+        require_eq!(
+            violations,
             fact["grade"].as_str(),
             Some("measured"),
             "{id}: wall ownership is a property of what the path DOES, so it \
@@ -199,11 +243,7 @@ fn a_wall_ownership_cell_states_one_of_the_two_claims() {
         );
         checked += 1;
     }
-    assert!(
-        checked >= 2,
-        "found {checked} wall-ownership cells; the deliverable is two \
-         providers and a parse finding fewer means this test is reading nothing"
-    );
+    (violations, checked)
 }
 
 /// A wall-ownership claim agrees with the provider's other cells.
@@ -230,6 +270,17 @@ fn a_wall_ownership_cell_states_one_of_the_two_claims() {
 #[test]
 fn a_wall_ownership_claim_agrees_with_the_providers_other_cells() {
     let overlay = overlay();
+    let (violations, checked) = wall_agreement_violations(&overlay);
+    assert!(violations.is_empty(), "{violations:#?}");
+    assert!(
+        checked >= 2,
+        "checked {checked} claims; both providers must be reached or a swap \
+         goes unexamined at the one that is not"
+    );
+}
+
+fn wall_agreement_violations(overlay: &serde_json::Value) -> (Vec<String>, usize) {
+    let mut violations = Vec::new();
     let cells = overlay["cells"].as_array().expect("cells is an array");
     let mut checked = 0usize;
 
@@ -252,7 +303,8 @@ fn a_wall_ownership_claim_agrees_with_the_providers_other_cells() {
                 let refuses = siblings
                     .iter()
                     .any(|f| f["value"]["why"].as_str() == Some("not_single_valued_at_key"));
-                assert!(
+                require!(
+                    violations,
                     refuses,
                     "{provider} is marked as forwarding someone else's wall, but \
                      states no not_single_valued_at_key refusal. If its values \
@@ -277,7 +329,8 @@ fn a_wall_ownership_claim_agrees_with_the_providers_other_cells() {
                     ) && f["value"]["kind"].as_str() == Some("stated")
                         && f["value"]["value"].is_number()
                 });
-                assert!(
+                require!(
+                    violations,
                     measured,
                     "{provider} is marked as imposing its own wall, but states no \
                      behaviourally-observed numeric value. An imposed ceiling is \
@@ -286,16 +339,16 @@ fn a_wall_ownership_claim_agrees_with_the_providers_other_cells() {
                      wrong half of the pair."
                 );
             }
-            other => panic!("{provider}: unknown wall ownership {other:?}"),
+            other => require!(
+                violations,
+                false,
+                "{provider}: unknown wall ownership {other:?}"
+            ),
         }
         checked += 1;
     }
 
-    assert!(
-        checked >= 2,
-        "checked {checked} claims; both providers must be reached or a swap \
-         goes unexamined at the one that is not"
-    );
+    (violations, checked)
 }
 
 /// Every geometry class.
@@ -340,7 +393,16 @@ fn the_overlay_is_where_the_consumer_expects_it() {
 fn every_cell_joins_a_real_model_or_a_declared_mint() {
     let doc = overlay();
     let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    let (violations, checked) = join_violations(&doc, &seed);
+    assert!(violations.is_empty(), "{violations:#?}");
+    assert!(
+        checked >= 7,
+        "the overlay must carry the batch it claims; found {checked} cells"
+    );
+}
 
+fn join_violations(doc: &serde_json::Value, seed: &serde_json::Value) -> (Vec<String>, usize) {
+    let mut violations = Vec::new();
     let minted: BTreeSet<&str> = doc["minted_provider_ids"]
         .as_array()
         .expect("minted_provider_ids is required")
@@ -360,7 +422,8 @@ fn every_cell_joins_a_real_model_or_a_declared_mint() {
             // is covering a typo.
             let base = provider.split('-').next().unwrap();
             let exists = seed[base]["models"].get(model).is_some();
-            assert!(
+            require!(
+                violations,
                 exists,
                 "minted id {provider:?} carries model {model:?}, which does not \
                  exist under the base provider {base:?} either — a mint must \
@@ -370,7 +433,8 @@ fn every_cell_joins_a_real_model_or_a_declared_mint() {
             continue;
         }
 
-        assert!(
+        require!(
+            violations,
             seed[provider].is_object(),
             "cell provider {provider:?} does not exist upstream and is not \
              declared in minted_provider_ids"
@@ -391,12 +455,14 @@ fn every_cell_joins_a_real_model_or_a_declared_mint() {
                 .get("evidence")
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
-            assert!(
+            require!(
+                violations,
                 !evidence.is_empty(),
                 "{provider}/{model} claims post_seed arrival with no evidence: \
                  an unevidenced exemption is a typo escape hatch"
             );
-            assert!(
+            require!(
+                violations,
                 post_seed.get("verified_at").is_some(),
                 "{provider}/{model}: a post_seed exemption must say WHEN the \
                  existence was verified, or a future reader cannot tell a live \
@@ -417,7 +483,8 @@ fn every_cell_joins_a_real_model_or_a_declared_mint() {
             // exemptions the refresh had made unnecessary. Exactly one had:
             // `xai/grok-4.6`, exempted when it arrived six hours after the
             // 2026-08-12 snapshot. Nothing would have reported it.
-            assert!(
+            require!(
+                violations,
                 seed[provider]["models"].get(model).is_none(),
                 "{provider}/{model} carries a post_seed exemption AND appears \
                  in the current seed, so the exemption is unnecessary and is \
@@ -430,7 +497,8 @@ fn every_cell_joins_a_real_model_or_a_declared_mint() {
         }
 
         if model != "*" {
-            assert!(
+            require!(
+                violations,
                 seed[provider]["models"].get(model).is_some(),
                 "cell {provider}/{model} does not exist upstream: the cell can \
                  never join, and a consumer merging it sees no error. If the \
@@ -441,15 +509,18 @@ fn every_cell_joins_a_real_model_or_a_declared_mint() {
         checked += 1;
     }
 
-    assert!(
-        checked >= 7,
-        "the overlay must carry the batch it claims; found {checked} cells"
-    );
+    (violations, checked)
 }
 
 #[test]
 fn every_fact_is_completely_specified() {
     let doc = overlay();
+    let violations = specification_violations(&doc);
+    assert!(violations.is_empty(), "{violations:#?}");
+}
+
+fn specification_violations(doc: &serde_json::Value) -> Vec<String> {
+    let mut violations = Vec::new();
     for cell in doc["cells"].as_array().unwrap() {
         let id = format!(
             "{}/{}",
@@ -457,10 +528,15 @@ fn every_fact_is_completely_specified() {
             cell["model_id"].as_str().unwrap()
         );
         let facts = cell["facts"].as_object().expect("facts is required");
-        assert!(!facts.is_empty(), "{id}: a cell with no facts says nothing");
+        require!(
+            violations,
+            !facts.is_empty(),
+            "{id}: a cell with no facts says nothing"
+        );
 
         for (key, fact) in facts {
-            assert!(
+            require!(
+                violations,
                 FACT_KEYS.contains(&key.as_str()),
                 "{id}: {key:?} is not a fact key this schema defines"
             );
@@ -473,26 +549,30 @@ fn every_fact_is_completely_specified() {
                 "source_ref",
                 "observed_at",
             ] {
-                assert!(
+                require!(
+                    violations,
                     fact.get(required).is_some(),
                     "{id} {key}: missing required field {required:?}"
                 );
             }
 
             let grade = fact["grade"].as_str().unwrap();
-            assert!(
+            require!(
+                violations,
                 GRADES.contains(&grade),
                 "{id} {key}: grade {grade:?} is outside the vocabulary"
             );
 
             let units = fact["units"].as_str().unwrap();
-            assert!(
+            require!(
+                violations,
                 units == "provider" || units == "estimate",
                 "{id} {key}: units {units:?} is neither provider nor estimate"
             );
 
             let boundary = fact["boundary"].as_str().unwrap();
-            assert!(
+            require!(
+                violations,
                 ["Observed", "Asserted", "Corrected"].contains(&boundary),
                 "{id} {key}: boundary {boundary:?} is outside the vocabulary"
             );
@@ -508,24 +588,33 @@ fn every_fact_is_completely_specified() {
             // This catches only the mechanical half. A doc page read with no
             // date on it is `Observed` too, and whether a page states a date
             // is not checkable here.
-            assert!(
+            require!(
+                violations,
                 !(grade == "measured" && boundary == "Asserted"),
                 "{id} {key}: a measured fact is fusiform's own observation, so \
                  its boundary is Observed; Asserted claims a source stated an \
                  effective date"
             );
 
-            assert!(
+            require!(
+                violations,
                 !fact["source_ref"].as_str().unwrap().is_empty(),
                 "{id} {key}: source_ref is required and must resolve to something"
             );
         }
     }
+    violations
 }
 
 #[test]
 fn a_value_is_one_of_the_three_kinds_and_says_what_it_must() {
     let doc = overlay();
+    let violations = value_violations(&doc);
+    assert!(violations.is_empty(), "{violations:#?}");
+}
+
+fn value_violations(doc: &serde_json::Value) -> Vec<String> {
+    let mut violations = Vec::new();
     for cell in doc["cells"].as_array().unwrap() {
         let id = format!(
             "{}/{}",
@@ -536,13 +625,15 @@ fn a_value_is_one_of_the_three_kinds_and_says_what_it_must() {
             let value = &fact["value"];
             match value["kind"].as_str().expect("every value has a kind") {
                 "stated" => {
-                    assert!(
+                    require!(
+                        violations,
                         value.get("value").is_some(),
                         "{id} {key}: a stated value must carry one"
                     );
                     if key == "geometry" {
                         let g = value["value"].as_str().unwrap();
-                        assert!(
+                        require!(
+                            violations,
                             GEOMETRIES.contains(&g),
                             "{id}: geometry {g:?} is outside the vocabulary"
                         );
@@ -551,13 +642,15 @@ fn a_value_is_one_of_the_three_kinds_and_says_what_it_must() {
                 "bracket" => {
                     let at_least = value.get("at_least").and_then(|v| v.as_i64());
                     let below = value.get("below").and_then(|v| v.as_i64());
-                    assert!(
+                    require!(
+                        violations,
                         at_least.is_some() || below.is_some(),
                         "{id} {key}: a bracket with neither bound is an unknown \
                          wearing a bracket's shape"
                     );
                     if let (Some(lo), Some(hi)) = (at_least, below) {
-                        assert!(
+                        require!(
+                            violations,
                             lo < hi,
                             "{id} {key}: bracket is inverted ({lo} >= {hi}) — the \
                              witnesses contradict each other"
@@ -566,7 +659,8 @@ fn a_value_is_one_of_the_three_kinds_and_says_what_it_must() {
                 }
                 "unknown" => {
                     let why = value["why"].as_str().expect("an unknown must say why");
-                    assert!(
+                    require!(
+                        violations,
                         UNKNOWN_WHY.contains(&why),
                         "{id} {key}: unknown reason {why:?} is outside the \
                          vocabulary — a free-text reason cannot be branched on"
@@ -600,7 +694,8 @@ fn a_value_is_one_of_the_three_kinds_and_says_what_it_must() {
                             | "retracted"
                     );
                     if evidence_absence {
-                        assert_eq!(
+                        require_eq!(
+                            violations,
                             fact["grade"].as_str().unwrap(),
                             "unknown",
                             "{id} {key}: reason {why:?} asserts that nobody has \
@@ -608,7 +703,8 @@ fn a_value_is_one_of_the_three_kinds_and_says_what_it_must() {
                              or it claims evidence the value denies"
                         );
                     } else {
-                        assert_ne!(
+                        require_ne!(
+                            violations,
                             fact["grade"].as_str().unwrap(),
                             "unknown",
                             "{id} {key}: reason {why:?} is a positive claim about \
@@ -618,15 +714,27 @@ fn a_value_is_one_of_the_three_kinds_and_says_what_it_must() {
                         );
                     }
                 }
-                other => panic!("{id} {key}: unknown value kind {other:?}"),
+                other => require!(
+                    violations,
+                    false,
+                    "{id} {key}: unknown value kind {other:?}"
+                ),
             }
         }
     }
+    violations
 }
 
 #[test]
 fn a_minted_id_is_declared_and_a_declared_mint_is_used() {
     let doc = overlay();
+    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    let violations = mint_violations(&doc, &seed);
+    assert!(violations.is_empty(), "{violations:#?}");
+}
+
+fn mint_violations(doc: &serde_json::Value, seed: &serde_json::Value) -> Vec<String> {
+    let mut violations = Vec::new();
     let declared: BTreeSet<&str> = doc["minted_provider_ids"]
         .as_array()
         .unwrap()
@@ -634,13 +742,12 @@ fn a_minted_id_is_declared_and_a_declared_mint_is_used() {
         .map(|v| v.as_str().unwrap())
         .collect();
 
-    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
-
     // Every declared mint must be absent upstream. A mint that resolves is not
     // a mint, and leaving it declared tells a future audit to expect a miss
     // where there is a hit.
     for id in &declared {
-        assert!(
+        require!(
+            violations,
             !seed[*id].is_object(),
             "{id:?} is declared as minted but exists upstream — either the \
              mint is unnecessary or the upstream has adopted the name"
@@ -657,12 +764,14 @@ fn a_minted_id_is_declared_and_a_declared_mint_is_used() {
         .map(|c| c["provider_id"].as_str().unwrap())
         .collect();
     for id in &declared {
-        assert!(
+        require!(
+            violations,
             used.contains(id),
             "{id:?} is declared as minted but no cell uses it — a mint is only \
              justified by a measured divergence"
         );
     }
+    violations
 }
 
 #[test]
@@ -683,31 +792,10 @@ fn no_cell_states_something_the_consumer_can_derive() {
     // scale is reported in the design note; the cells stay reserved for what
     // only measurement can supply.
     let doc = overlay();
-    for cell in doc["cells"].as_array().unwrap() {
-        let id = format!(
-            "{}/{}",
-            cell["provider_id"].as_str().unwrap(),
-            cell["model_id"].as_str().unwrap()
-        );
-        for (key, fact) in cell["facts"].as_object().unwrap() {
-            let why = fact["value"].get("why").and_then(|v| v.as_str());
-            assert!(
-                !matches!(
-                    why,
-                    Some("placeholder_output_equals_context") | Some("placeholder_zero")
-                ),
-                "{id} {key}: this states a placeholder, which the consumer \
-                 derives itself. Shipping one makes the absence of the others \
-                 ambiguous."
-            );
-        }
-    }
+    let violations = derivable_violations(&doc);
+    assert!(violations.is_empty(), "{violations:#?}");
 
-    // And the enforced value BEHIND a harmful advertisement must survive, or
-    // this rule has quietly deleted the cells it was meant to preserve. The
-    // ollama-cloud row advertises 1,048,576 output and enforces 65,536; that
-    // number is available from nowhere else and is the reason the row leads the
-    // batch.
+    // The measured enforced value is not derivable and must survive.
     let ollama = doc["cells"]
         .as_array()
         .unwrap()
@@ -720,6 +808,32 @@ fn no_cell_states_something_the_consumer_can_derive() {
             .expect("output.enforced must still carry its measured value"),
         65536
     );
+}
+
+fn derivable_violations(doc: &serde_json::Value) -> Vec<String> {
+    let mut violations = Vec::new();
+    for cell in doc["cells"].as_array().unwrap() {
+        let id = format!(
+            "{}/{}",
+            cell["provider_id"].as_str().unwrap(),
+            cell["model_id"].as_str().unwrap()
+        );
+        for (key, fact) in cell["facts"].as_object().unwrap() {
+            let why = fact["value"].get("why").and_then(|v| v.as_str());
+            require!(
+                violations,
+                !matches!(
+                    why,
+                    Some("placeholder_output_equals_context") | Some("placeholder_zero")
+                ),
+                "{id} {key}: this states a placeholder, which the consumer \
+                 derives itself. Shipping one makes the absence of the others \
+                 ambiguous."
+            );
+        }
+    }
+
+    violations
 }
 
 /// Keys established as not-single-valued, and therefore closed to promotion.
@@ -744,6 +858,12 @@ const NOT_SINGLE_VALUED: &[(&str, &str, &str)] = &[("openrouter", "*", "geometry
 #[test]
 fn a_key_closed_to_promotion_stays_closed() {
     let doc = overlay();
+    let violations = promotion_violations(&doc);
+    assert!(violations.is_empty(), "{violations:#?}");
+}
+
+fn promotion_violations(doc: &serde_json::Value) -> Vec<String> {
+    let mut violations = Vec::new();
     for (provider, model, fact) in NOT_SINGLE_VALUED {
         let cell = doc["cells"]
             .as_array()
@@ -761,15 +881,18 @@ fn a_key_closed_to_promotion_stays_closed() {
 
         let value = &cell["facts"][fact]["value"];
         let kind = value["kind"].as_str().unwrap_or("<missing>");
-        assert_eq!(
-            kind, "unknown",
+        require_eq!(
+            violations,
+            kind,
+            "unknown",
             "{provider}/{model} {fact}: promoted to {kind:?}. This key cannot \
              hold a single fact — the wall that fires belongs to whichever \
              upstream served the request, so a measurement samples a routing \
              decision rather than settling one. A stated value is correct for \
              one route and wrong for the next."
         );
-        assert_eq!(
+        require_eq!(
+            violations,
             value["why"].as_str().unwrap_or("<missing>"),
             "not_single_valued_at_key",
             "{provider}/{model} {fact}: still unknown, but the reason no longer \
@@ -777,6 +900,7 @@ fn a_key_closed_to_promotion_stays_closed() {
              reason invites exactly the measurement this cell exists to refuse."
         );
     }
+    violations
 }
 
 /// Anthropic publishes context and output caps in fixed pairs.
@@ -806,7 +930,40 @@ fn every_self_contradicting_anthropic_row_has_a_corrective_cell() {
     // it.
     let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
     let doc = overlay();
+    let unguarded = anthropic_violations(&seed, &doc);
+    assert!(
+        unguarded.is_empty(),
+        "anthropic rows publish a context/output pairing Anthropic's own docs do \
+         not have, and no corrective cell covers them: {unguarded:?}. The row \
+         contradicts itself, so one of its two numbers is wrong. Read the \
+         context-window guide for that model and mint a cell, or record why the \
+         pairing rule no longer holds."
+    );
 
+    // Keep an independent count of known contradictions: this protects the
+    // population scan, while the planted row protects rejection of new gaps.
+    let known_failures = seed["anthropic"]["models"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(_, m)| {
+            let l = &m["limit"];
+            match (l["context"].as_i64(), l["output"].as_i64()) {
+                (Some(c), Some(o)) => ANTHROPIC_PAIRS.iter().any(|(pc, pe)| *pc == c && *pe != o),
+                _ => false,
+            }
+        })
+        .count();
+    assert_eq!(
+        known_failures, 2,
+        "the seed should contain exactly the two known self-contradicting rows; \
+         found {known_failures}. If the upstream fixed them, this number drops \
+         and the corrective cells become redundant — a judgment call, not a \
+         failure. If it rose, a new row needs a cell."
+    );
+}
+
+fn anthropic_violations(seed: &serde_json::Value, doc: &serde_json::Value) -> Vec<String> {
     let corrected: BTreeSet<String> = doc["cells"]
         .as_array()
         .unwrap()
@@ -836,35 +993,7 @@ fn every_self_contradicting_anthropic_row_has_a_corrective_cell() {
         }
     }
 
-    assert!(
-        unguarded.is_empty(),
-        "anthropic rows publish a context/output pairing Anthropic's own docs do \
-         not have, and no corrective cell covers them: {unguarded:?}. The row \
-         contradicts itself, so one of its two numbers is wrong. Read the \
-         context-window guide for that model and mint a cell, or record why the \
-         pairing rule no longer holds."
-    );
-
-    // The control: the rule must actually convict something, or a future
-    // refactor that breaks the pairing lookup would leave this test green and
-    // silent.
-    let known_failures = models
-        .iter()
-        .filter(|(_, m)| {
-            let l = &m["limit"];
-            match (l["context"].as_i64(), l["output"].as_i64()) {
-                (Some(c), Some(o)) => ANTHROPIC_PAIRS.iter().any(|(pc, pe)| *pc == c && *pe != o),
-                _ => false,
-            }
-        })
-        .count();
-    assert_eq!(
-        known_failures, 2,
-        "the seed should contain exactly the two known self-contradicting rows; \
-         found {known_failures}. If the upstream fixed them, this number drops \
-         and the corrective cells become redundant — a judgment call, not a \
-         failure. If it rose, a new row needs a cell."
-    );
+    unguarded
 }
 
 /// No served overlay fact is older than `OVERLAY_MAX_AGE_MS`.
@@ -927,6 +1056,22 @@ fn no_served_overlay_fact_has_outrun_its_review() {
         .expect("the clock is after 1970")
         .as_millis() as i64;
 
+    let (overdue, checked) = review_violations(&doc, now);
+    // A vanished population must fail separately from an overdue fact.
+    assert!(
+        checked >= 20,
+        "this examined {checked} served facts; the overlay had 22 when this was \
+         written, so a collapse to nothing means the walk broke rather than the \
+         data improving"
+    );
+    assert!(
+        overdue.is_empty(),
+        "overlay facts have not been re-checked in {} days:\n{}\nRe-read the source, then update observed_at whether or not the value moved.",
+        OVERLAY_MAX_AGE_MS / (24 * 60 * 60 * 1000), overdue.join("\n")
+    );
+}
+
+fn review_violations(doc: &serde_json::Value, now: i64) -> (Vec<String>, usize) {
     let mut overdue: Vec<String> = Vec::new();
     let mut checked = 0usize;
 
@@ -967,27 +1112,174 @@ fn no_served_overlay_fact_has_outrun_its_review() {
         }
     }
 
-    // NON-VACUITY, because every other arm here passes on an empty overlay.
-    assert!(
-        checked >= 20,
-        "this examined {checked} served facts; the overlay had 22 when this was \
-         written, so a collapse to nothing means the walk broke rather than the \
-         data improving"
-    );
+    (overdue, checked)
+}
 
+fn example_cell(key: &str, fact: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({"minted_provider_ids": [], "cells": [{
+        "provider_id": "example", "model_id": "model", "facts": {key: fact}
+    }]})
+}
+
+fn assert_one_violation(violations: Vec<String>, name: &str) {
+    assert_eq!(
+        violations.len(),
+        1,
+        "expected exactly one violation: {violations:?}"
+    );
     assert!(
-        overdue.is_empty(),
-        "\n\nNOT A BUILD FAILURE. Nothing changed; a review date passed.\n\n\
-         These overlay facts have not been re-checked in {} days:\n\n{}\n\n\
-         Each one OVERRIDES what the upstream publishes, so a stale cell serves \
-         a value fusiform asserts and nobody has confirmed lately.\n\n\
-         Re-read the source, then update observed_at — WHETHER OR NOT the value \
-         moved. Confirming a limit is a real result and the date is what records \
-         that someone looked.\n\n\
-         What this gate does NOT tell you: whether these values are correct. It \
-         knows only that nobody has looked recently.\n",
-        OVERLAY_MAX_AGE_MS / (24 * 60 * 60 * 1000),
-        overdue.join("\n")
+        violations[0].contains(name),
+        "expected {name:?}: {violations:?}"
+    );
+}
+
+#[test]
+fn planted_invalid_provenance_is_reported() {
+    let doc = example_cell(
+        "geometry",
+        serde_json::json!({"observed_by": "invented", "grade": "measured"}),
+    );
+    assert_one_violation(provenance_violations(&doc).0, "observed_by \"invented\"");
+    let doc = example_cell(
+        "geometry",
+        serde_json::json!({"observed_by": "reported", "grade": "catalog"}),
+    );
+    assert_one_violation(provenance_violations(&doc).0, "graded \"catalog\"");
+}
+
+#[test]
+fn planted_invalid_wall_ownership_is_reported() {
+    let doc = example_cell(
+        "path.wall_ownership",
+        serde_json::json!({"value": {"value": "invented"}, "grade": "measured"}),
+    );
+    assert_one_violation(
+        wall_vocabulary_violations(&doc).0,
+        "wall ownership \"invented\"",
+    );
+    let doc = example_cell(
+        "path.wall_ownership",
+        serde_json::json!({"value": {"value": "imposes"}, "grade": "catalog"}),
+    );
+    assert_one_violation(
+        wall_vocabulary_violations(&doc).0,
+        "cannot be sourced from a doc",
+    );
+}
+
+#[test]
+fn planted_unsupported_wall_claim_is_reported() {
+    for (claim, message) in [
+        ("forwards", "no not_single_valued_at_key"),
+        ("imposes", "no behaviourally-observed numeric value"),
+    ] {
+        let doc = example_cell(
+            "path.wall_ownership",
+            serde_json::json!({"value": {"value": claim}}),
+        );
+        assert_one_violation(wall_agreement_violations(&doc).0, message);
+    }
+}
+
+#[test]
+fn planted_unjoinable_cell_is_reported() {
+    let doc = example_cell("geometry", serde_json::json!({}));
+    let seed = serde_json::json!({"example": {"models": {}}});
+    assert_one_violation(
+        join_violations(&doc, &seed).0,
+        "example/model does not exist upstream",
+    );
+}
+
+#[test]
+fn planted_incomplete_fact_is_reported() {
+    let doc = example_cell(
+        "geometry",
+        serde_json::json!({"value": {}, "grade": "catalog", "units": "provider", "boundary": "Observed", "source_ref": "https://example.test"}),
+    );
+    assert_one_violation(
+        specification_violations(&doc),
+        "missing required field \"observed_at\"",
+    );
+}
+
+#[test]
+fn planted_invalid_value_is_reported() {
+    for (value, grade, message) in [
+        (
+            serde_json::json!({"kind": "invented"}),
+            "unknown",
+            "unknown value kind",
+        ),
+        (
+            serde_json::json!({"kind": "stated"}),
+            "catalog",
+            "a stated value must carry one",
+        ),
+        (
+            serde_json::json!({"kind": "bracket"}),
+            "catalog",
+            "neither bound",
+        ),
+        (
+            serde_json::json!({"kind": "unknown", "why": "never_measured"}),
+            "measured",
+            "grade must be unknown",
+        ),
+    ] {
+        let doc = example_cell(
+            "output.enforced",
+            serde_json::json!({"value": value, "grade": grade}),
+        );
+        assert_one_violation(value_violations(&doc), message);
+    }
+}
+
+#[test]
+fn planted_unused_mint_is_reported() {
+    let doc = serde_json::json!({"minted_provider_ids": ["example-fork"], "cells": []});
+    assert_one_violation(
+        mint_violations(&doc, &serde_json::json!({})),
+        "example-fork\" is declared as minted but no cell uses it",
+    );
+}
+
+#[test]
+fn planted_derivable_cell_is_reported() {
+    let doc = example_cell(
+        "output.enforced",
+        serde_json::json!({"value": {"kind": "unknown", "why": "placeholder_zero"}}),
+    );
+    assert_one_violation(derivable_violations(&doc), "example/model output.enforced");
+}
+
+#[test]
+fn planted_promoted_closed_key_is_reported() {
+    let doc = serde_json::json!({"cells": [{"provider_id": "openrouter", "model_id": "*", "facts": {"geometry": {"value": {"kind": "stated", "why": "not_single_valued_at_key"}}}}]});
+    assert_one_violation(
+        promotion_violations(&doc),
+        "openrouter/* geometry: promoted",
+    );
+}
+
+#[test]
+fn planted_uncorrected_anthropic_row_is_reported() {
+    let seed = serde_json::json!({"anthropic": {"models": {"lost": {"limit": {"context": 1_000_000, "output": 64_000}}}}});
+    assert_one_violation(
+        anthropic_violations(&seed, &serde_json::json!({"cells": []})),
+        "lost (context",
+    );
+}
+
+#[test]
+fn planted_overdue_fact_is_reported() {
+    let doc = example_cell(
+        "output.enforced",
+        serde_json::json!({"value": {"kind": "stated", "value": 1}, "observed_at": "1970-01-01T00:00:00Z"}),
+    );
+    assert_one_violation(
+        review_violations(&doc, OVERLAY_MAX_AGE_MS + 1).0,
+        "example/model  output.enforced",
     );
 }
 

@@ -190,16 +190,63 @@ fn fields_the_parser_reads() -> BTreeSet<String> {
     read
 }
 
+fn unaccounted_fields(
+    documented: &BTreeSet<String>,
+    read: &BTreeSet<String>,
+    declared: &[(&str, &str)],
+) -> Vec<String> {
+    documented
+        .iter()
+        .filter(|f| !read.contains(*f) && !declared.iter().any(|(name, _)| *name == f.as_str()))
+        .cloned()
+        .collect()
+}
+
+fn undocumented_fields(documented: &BTreeSet<String>, read: &BTreeSet<String>) -> Vec<String> {
+    read.difference(documented).cloned().collect()
+}
+
+fn falsely_unread_fields(read: &BTreeSet<String>, declared: &[(&str, &str)]) -> Vec<String> {
+    declared
+        .iter()
+        .filter(|(field, _)| read.contains(*field))
+        .map(|(field, _)| (*field).to_string())
+        .collect()
+}
+
+#[test]
+fn planted_unaccounted_field_is_reported() {
+    assert_eq!(
+        unaccounted_fields(&BTreeSet::from(["lost".into()]), &BTreeSet::new(), &[]),
+        ["lost"]
+    );
+}
+
+#[test]
+fn planted_undocumented_field_is_reported() {
+    assert_eq!(
+        undocumented_fields(&BTreeSet::new(), &BTreeSet::from(["secret".into()])),
+        ["secret"]
+    );
+}
+
+#[test]
+fn planted_false_unread_declaration_is_reported() {
+    assert_eq!(
+        falsely_unread_fields(
+            &BTreeSet::from(["secret".into()]),
+            &[("secret", "not consumed")]
+        ),
+        ["secret"]
+    );
+}
+
 #[test]
 fn every_measured_field_is_read_or_declared_unread() {
     let documented = fields_in_the_document();
     let read = fields_the_parser_reads();
 
-    let declared: BTreeSet<&str> = DECLARED_UNREAD.iter().map(|(f, _)| *f).collect();
-    let unaccounted: Vec<&String> = documented
-        .iter()
-        .filter(|f| !read.contains(*f) && !declared.contains(f.as_str()))
-        .collect();
+    let unaccounted = unaccounted_fields(&documented, &read, DECLARED_UNREAD);
 
     assert!(
         unaccounted.is_empty(),
@@ -223,7 +270,7 @@ fn the_document_names_every_field_the_parser_reads() {
     let documented = fields_in_the_document();
     let read = fields_the_parser_reads();
 
-    let undocumented: Vec<&String> = read.iter().filter(|f| !documented.contains(*f)).collect();
+    let undocumented = undocumented_fields(&documented, &read);
     assert!(
         undocumented.is_empty(),
         "the parser reads these fields and the measurement document's inventory \
@@ -250,13 +297,23 @@ fn the_document_names_every_field_the_parser_reads() {
 /// them apart because the code is exactly what its author meant to write.
 #[test]
 fn every_nested_key_the_document_records_is_read() {
+    let (checked, violations) = nested_key_violations(MEASURED, RAW);
+    assert!(violations.is_empty(), "unread nested keys: {violations:?}");
+    assert!(
+        checked >= 4,
+        "only {checked} nested keys were checked; the parse found nothing and \
+         this test would pass on any codebase"
+    );
+}
+
+fn nested_key_violations(measured: &str, raw: &str) -> (usize, Vec<String>) {
     // (documented field, the struct that must read its keys)
     let nested = [("limit", "RawLimit"), ("modalities", "RawModalities")];
 
-    let start = MEASURED
+    let start = measured
         .find("## Model object")
         .expect("the Model object section must exist");
-    let section = &MEASURED[start..];
+    let section = &measured[start..];
     let end = section[3..]
         .find("\n## ")
         .map(|i| i + 3)
@@ -264,6 +321,7 @@ fn every_nested_key_the_document_records_is_read() {
     let section = &section[..end];
 
     let mut checked = 0usize;
+    let mut violations = Vec::new();
     for (field, struct_name) in nested {
         // The Notes cell for this row, which is where the shape is recorded.
         let row = section
@@ -302,10 +360,10 @@ fn every_nested_key_the_document_records_is_read() {
         );
 
         let decl = format!("pub struct {struct_name} {{");
-        let sstart = RAW
+        let sstart = raw
             .find(&decl)
             .unwrap_or_else(|| panic!("{struct_name} must exist"));
-        let body = &RAW[sstart..];
+        let body = &raw[sstart..];
         let send = body.find("\n}").expect("a closed struct");
         let read: Vec<String> = body[..send]
             .lines()
@@ -320,22 +378,20 @@ fn every_nested_key_the_document_records_is_read() {
             .collect();
 
         for key in &keys {
-            assert!(
-                read.iter().any(|r| r == key),
-                "the document records `{field}.{key}` and {struct_name} does \
-                 not read it. This is the `limit.input` gap verbatim: measured \
-                 on day one, written down, and dropped by serde on 1,199 rows \
-                 for three days. Serde ignores unknown keys silently, so the \
-                 only signal is this test."
-            );
+            if !read.iter().any(|r| r == key) {
+                violations.push(format!("{field}.{key}"));
+            }
             checked += 1;
         }
     }
-    assert!(
-        checked >= 4,
-        "only {checked} nested keys were checked; the parse found nothing and \
-         this test would pass on any codebase"
-    );
+    (checked, violations)
+}
+
+#[test]
+fn planted_unread_nested_key_is_reported() {
+    let measured = "## Model object\n| `limit` | object | {context, lost?} |\n| `modalities` | object | {input, output} |";
+    let raw = "pub struct RawLimit {\n pub context: u64,\n}\npub struct RawModalities {\n pub input: Vec<String>,\n pub output: Vec<String>,\n}";
+    assert_eq!(nested_key_violations(measured, raw).1, ["limit.lost"]);
 }
 
 /// Keys inside one `experimental.modes.<name>` entry the parser deliberately
@@ -394,18 +450,38 @@ fn every_key_inside_a_mode_is_read_or_declared_unread() {
         })
         .collect();
 
-    for key in documented {
-        let is_read = read.iter().any(|r| r == key);
-        let is_declared = DECLARED_UNREAD_IN_A_MODE.iter().any(|(k, _)| *k == key);
-        assert!(
-            is_read != is_declared,
-            "inside a mode, `{key}` must be exactly one of read by RawMode ({is_read}) \
-             or declared unread ({is_declared})"
-        );
-    }
+    let violations = mode_key_violations(&documented, &read);
+    assert!(
+        violations.is_empty(),
+        "mode keys neither exactly read nor declared: {violations:?}"
+    );
     assert!(
         read.iter().any(|r| r == "cost"),
         "RawMode must read the mode's cost, which is what mode rates are served from"
+    );
+}
+
+fn mode_key_violations(documented: &[&str], read: &[String]) -> Vec<String> {
+    let mut violations = Vec::new();
+    for &key in documented {
+        let is_read = read.iter().any(|r| r == key);
+        let is_declared = DECLARED_UNREAD_IN_A_MODE.iter().any(|(k, _)| *k == key);
+        if is_read == is_declared {
+            violations.push(key.to_string());
+        }
+    }
+    violations
+}
+
+#[test]
+fn planted_unaccounted_mode_key_is_reported() {
+    assert_eq!(
+        mode_key_violations(&["cost", "provider", "lost"], &["cost".into()]),
+        ["lost"]
+    );
+    assert_eq!(
+        mode_key_violations(&["cost", "provider"], &["cost".into(), "provider".into()]),
+        ["provider"]
     );
 }
 
@@ -415,9 +491,10 @@ fn a_declared_unread_field_is_actually_unread() {
     // it reads as a considered decision while describing the opposite of what
     // the code does.
     let read = fields_the_parser_reads();
+    let violations = falsely_unread_fields(&read, DECLARED_UNREAD);
     for (field, reason) in DECLARED_UNREAD {
         assert!(
-            !read.contains(*field),
+            !violations.iter().any(|v| v == field),
             "{field} is declared unread with the reason {reason:?}, but \
              RawModel reads it. Remove the declaration: a stale exemption \
              passes silently and there is no signal when its justification \

@@ -22,6 +22,65 @@
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_store::CatalogStore;
 
+fn table_list(note: &str) -> String {
+    note.split("\n\n")
+        .find(|p| p.trim_start().starts_with("Tables, as shipped:"))
+        .expect("§9 states a table list beginning 'Tables, as shipped:'")
+        .replace('\n', " ")
+}
+
+fn table_names(line: &str) -> Vec<&str> {
+    line.split('`').skip(1).step_by(2).collect()
+}
+
+fn table_list_violations(note: &str, real: &[String]) -> Vec<String> {
+    let line = &table_list(note);
+    let named = table_names(line);
+    let mut violations = Vec::new();
+    for table in real {
+        if !line.contains(&format!("`{table}`")) {
+            violations.push(format!("undocumented table: {table}"));
+        }
+    }
+    for word in named {
+        if !real.iter().any(|t| t == word) {
+            violations.push(format!("phantom table: {word}"));
+        }
+    }
+    violations
+}
+
+fn missing_documented_functions(note: &str, source: &str, symbols: &[&str]) -> Vec<String> {
+    symbols
+        .iter()
+        .filter(|symbol| note.contains(**symbol) && !source.contains(&format!("fn {symbol}")))
+        .map(|symbol| (*symbol).to_string())
+        .collect()
+}
+
+#[test]
+fn planted_table_list_drift_is_reported() {
+    assert_eq!(
+        table_list_violations(
+            "Tables, as shipped: `real`.",
+            &["real".into(), "lost".into()]
+        ),
+        ["undocumented table: lost"]
+    );
+    assert_eq!(
+        table_list_violations("Tables, as shipped: `real`, `ghost`.", &["real".into()]),
+        ["phantom table: ghost"]
+    );
+}
+
+#[test]
+fn planted_nonexistent_documented_function_is_reported() {
+    assert_eq!(
+        missing_documented_functions("Use `lost`.", "fn other() {}", &["lost"]),
+        ["lost"]
+    );
+}
+
 /// Every table a store has once it has been written to.
 ///
 /// Written to, not merely opened: the store crate creates `cortexkit_fence` on
@@ -85,11 +144,7 @@ fn the_design_note_names_the_tables_that_exist() {
     // The note is hard-wrapped, so the list spans two lines and reading one of
     // them silently drops half the names — which the first version of this test
     // did, reporting a real table as missing from a note that names it.
-    let paragraph = note
-        .split("\n\n")
-        .find(|p| p.trim_start().starts_with("Tables, as shipped:"))
-        .expect("§9 states a table list beginning 'Tables, as shipped:'");
-    let line = &paragraph.replace('\n', " ");
+    let line = &table_list(&note);
 
     // Both directions below are FOR loops, and a for loop over an empty
     // collection asserts nothing at all. So both collections are checked for
@@ -112,7 +167,7 @@ fn the_design_note_names_the_tables_that_exist() {
          {real_tables:?}",
         real_tables.len()
     );
-    let named: Vec<&str> = line.split('`').skip(1).step_by(2).collect();
+    let named = table_names(line);
     assert!(
         named.len() >= 3,
         "the note extraction found {} backticked names in §9. The reverse \
@@ -122,9 +177,10 @@ fn the_design_note_names_the_tables_that_exist() {
         named.len()
     );
 
-    for table in tables_in_a_real_store() {
+    let violations = table_list_violations(&note, &real_tables);
+    for table in &real_tables {
         assert!(
-            line.contains(&format!("`{table}`")),
+            !violations.contains(&format!("undocumented table: {table}")),
             "the store creates `{table}` and the design note's §9 does not name it.\n\
              Note says: {line}\n\
              A reader takes that list for the schema, and §0.1 marks §9 as built."
@@ -137,7 +193,7 @@ fn the_design_note_names_the_tables_that_exist() {
     let real = real_tables;
     for word in named {
         assert!(
-            real.iter().any(|t| t == word),
+            !violations.contains(&format!("phantom table: {word}")),
             "the design note's §9 names `{word}`, which the store does not create.\n\
              Real tables: {real:?}"
         );
@@ -177,7 +233,7 @@ fn the_design_note_names_functions_that_exist() {
          sentence nobody wrote"
     );
     assert!(
-        ingest.contains(&format!("fn {symbol}")),
+        missing_documented_functions(note, ingest, &[symbol]).is_empty(),
         "the design note names `{symbol}` as the mechanism that keeps the diff \
          and the digest agreeing about what the upstream claimed, and no such \
          function exists. Either restore it or correct the note — a reader \

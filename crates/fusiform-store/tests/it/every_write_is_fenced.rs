@@ -146,6 +146,67 @@ fn fenced_ranges(text: &str) -> Vec<(usize, usize)> {
     ranges
 }
 
+fn unfenced_writes(text: &str) -> Vec<usize> {
+    let text = join_continuations(text);
+    let ranges = fenced_ranges(&text);
+    write_lines(&text)
+        .into_iter()
+        .filter(|line| {
+            !ranges
+                .iter()
+                .any(|(start, end)| line >= start && line <= end)
+        })
+        .collect()
+}
+
+fn missing_fence_calls(text: &str) -> Vec<&str> {
+    if text.matches("with_conn_fenced(").count() < 3 {
+        vec!["with_conn_fenced"]
+    } else {
+        vec![]
+    }
+}
+
+fn migration_handle_violations(text: &str) -> Vec<&str> {
+    let open_body = text
+        .split("pub fn open(descriptor: &StorageDescriptor)")
+        .nth(1)
+        .expect("open() exists")
+        .split("\n    }")
+        .next()
+        .expect("open() has a body");
+    let mut violations = Vec::new();
+    if !open_body.contains("inner.migrate(") {
+        violations.push("missing migration");
+    }
+    if open_body.matches("open_sqlite(").count() != 1 {
+        violations.push("connection count");
+    }
+    if open_body.contains("drop(inner)") {
+        violations.push("dropped handle");
+    }
+    violations
+}
+
+#[test]
+fn planted_unfenced_write_is_reported() {
+    assert_eq!(
+        unfenced_writes("conn.execute(\"INSERT \\\n INTO observation\");"),
+        [1]
+    );
+}
+
+#[test]
+fn planted_missing_fence_calls_are_reported() {
+    assert_eq!(missing_fence_calls("fn idle() {}"), ["with_conn_fenced"]);
+}
+
+#[test]
+fn planted_reopened_migration_handle_is_reported() {
+    let text = "pub fn open(descriptor: &StorageDescriptor) {\n open_sqlite();\n inner.migrate();\n open_sqlite();\n    }";
+    assert_eq!(migration_handle_violations(text), ["connection count"]);
+}
+
 /// No write may live outside a fenced block.
 ///
 /// The failure this prevents is not hypothetical: a sibling module has a
@@ -159,13 +220,11 @@ fn no_write_escapes_the_fence() {
 
     for file in ["lib.rs", "ingest.rs", "serve.rs", "correct.rs"] {
         let text = source(file);
-        let ranges = fenced_ranges(&text);
+        let unfenced = unfenced_writes(&text);
 
         for line in write_lines(&text) {
             writes_seen += 1;
-            let fenced = ranges
-                .iter()
-                .any(|(start, end)| line >= *start && line <= *end);
+            let fenced = !unfenced.contains(&line);
             assert!(
                 fenced,
                 "{file}:{line} issues a write outside with_conn_fenced. A write that \
@@ -248,7 +307,7 @@ fn the_fence_is_actually_called() {
     let text = source("lib.rs");
     let call_sites = text.matches("with_conn_fenced(").count();
     assert!(
-        call_sites >= 3,
+        missing_fence_calls(&text).is_empty(),
         "expected the observation, era and version writes to be fenced; found \
          {call_sites} call sites. A fence with no callers is a correct \
          implementation that never runs."
@@ -265,16 +324,10 @@ fn the_fence_is_actually_called() {
 #[test]
 fn the_store_migrates_through_the_handle_it_returns() {
     let text = source("lib.rs");
-    let open_body = text
-        .split("pub fn open(descriptor: &StorageDescriptor)")
-        .nth(1)
-        .expect("open() exists")
-        .split("\n    }")
-        .next()
-        .expect("open() has a body");
+    let violations = migration_handle_violations(&text);
 
     assert!(
-        open_body.contains("inner.migrate("),
+        !violations.contains(&"missing migration"),
         "open() must run migrations on the handle it keeps"
     );
 
@@ -290,17 +343,16 @@ fn the_store_migrates_through_the_handle_it_returns() {
     // function means the returned handle is not the one that ran migrations,
     // which is precisely the shape that releases the lease between migration
     // and first write.
-    let opens = open_body.matches("open_sqlite(").count();
-    assert_eq!(
-        opens, 1,
+    assert!(
+        !violations.contains(&"connection count"),
         "open() must acquire the lease exactly once and return that handle. \
-         Found {opens} calls to open_sqlite: a handle dropped after migration \
+          Multiple calls to open_sqlite: a handle dropped after migration \
          releases the lease before the first write, which is how a sibling \
          module ended up writing unfenced through a second connection on the \
          same path."
     );
     assert!(
-        !open_body.contains("drop(inner)"),
+        !violations.contains(&"dropped handle"),
         "open() must not drop the lease-bearing handle"
     );
 }

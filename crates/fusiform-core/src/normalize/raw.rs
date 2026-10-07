@@ -273,6 +273,22 @@ pub struct RawTierSpec {
 
 #[cfg(test)]
 mod tests {
+    fn serializable_raw_derives(source: &str) -> Vec<&str> {
+        source
+            .lines()
+            .filter(|line| line.trim_start().starts_with("#[derive("))
+            .filter(|line| line.contains("Serialize"))
+            .collect()
+    }
+
+    #[test]
+    fn planted_serializable_raw_type_is_reported() {
+        assert_eq!(
+            serializable_raw_derives("#[derive(Deserialize, Serialize)]\nstruct RawLeaf;"),
+            ["#[derive(Deserialize, Serialize)]"]
+        );
+    }
+
     /// The raw upstream layer can be read and cannot be written.
     ///
     /// # Why a negative property needs a test
@@ -335,11 +351,7 @@ mod tests {
     fn the_raw_layer_is_read_only() {
         let source = include_str!("raw.rs");
 
-        let offenders: Vec<&str> = source
-            .lines()
-            .filter(|line| line.trim_start().starts_with("#[derive("))
-            .filter(|line| line.contains("Serialize"))
-            .collect();
+        let offenders = serializable_raw_derives(source);
 
         assert!(
             offenders.is_empty(),

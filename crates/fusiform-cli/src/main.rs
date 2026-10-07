@@ -2068,25 +2068,36 @@ mod tests {
              of the file"
         );
 
+        let violations = plural_caller_violations(production);
+        assert!(
+            violations.is_empty(),
+            "plural must have exactly one production caller (count): {violations:?}. Use count(n, noun)."
+        );
+    }
+
+    fn plural_caller_violations(production: &str) -> Vec<String> {
         let callers: Vec<&str> = production
             .lines()
             .filter(|l| l.contains("plural("))
             .filter(|l| !l.trim_start().starts_with("//") && !l.trim_start().starts_with("///"))
             .filter(|l| !l.contains("fn plural("))
             .collect();
+        let mut violations = Vec::new();
+        if callers.len() != 1 {
+            violations.push(format!("caller count: {}", callers.len()));
+        }
+        if let Some(caller) = callers.first() {
+            if !caller.contains("format!(\"{n} {}\"") {
+                violations.push(format!("not count: {caller}"));
+            }
+        }
+        violations
+    }
 
-        assert_eq!(
-            callers.len(),
-            1,
-            "plural must have exactly one production caller (count). Found: {callers:#?}\n\
-             Use `count(n, noun)`, which renders the number and the noun from \
-             one argument so they cannot disagree."
-        );
-        assert!(
-            callers[0].contains("format!(\"{n} {}\""),
-            "the one caller must be `count`, got: {}",
-            callers[0]
-        );
+    #[test]
+    fn planted_extra_plural_caller_is_reported() {
+        let production = "format!(\"{n} {}\", plural(n, noun));\nplural(n, noun);";
+        assert_eq!(plural_caller_violations(production), ["caller count: 2"]);
     }
 
     /// A count and its noun cannot disagree, because there is one of them.

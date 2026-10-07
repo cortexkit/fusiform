@@ -12,7 +12,65 @@
 //! Fleet convention, from CKCRED via SUBC: name, version and build rev before
 //! any config gate.
 
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Output, Stdio};
+use std::sync::mpsc::{self, Receiver};
+use std::time::{Duration, Instant};
+
+fn read_pipe(pipe: impl Read + Send + 'static) -> Receiver<std::io::Result<Vec<u8>>> {
+    let (send, receive) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = {
+            let mut pipe = pipe;
+            pipe.read_to_end(&mut bytes).map(|_| bytes)
+        };
+        let _ = send.send(result);
+    });
+    receive
+}
+
+fn bounded_output(command: &mut Command, budget: Duration, label: &str) -> Output {
+    let deadline = Instant::now() + budget;
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|error| panic!("{label} must run: {error}"));
+    // Drain both pipes concurrently so a full stderr cannot block stdout (or
+    // vice versa). Receiving the captured bytes has the same overall deadline.
+    let stdout = read_pipe(child.stdout.take().unwrap());
+    let stderr = read_pipe(child.stderr.take().unwrap());
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .unwrap_or_else(|error| panic!("{label}: {error}"))
+        {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            child
+                .kill()
+                .unwrap_or_else(|error| panic!("{label}: kill after deadline: {error}"));
+            child
+                .wait()
+                .unwrap_or_else(|error| panic!("{label}: reap after kill: {error}"));
+            panic!("{label} exceeded its subprocess deadline");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let capture = |receiver: Receiver<std::io::Result<Vec<u8>>>| {
+        receiver
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap_or_else(|error| panic!("{label}: output deadline: {error}"))
+            .unwrap_or_else(|error| panic!("{label}: capture output: {error}"))
+    };
+    Output {
+        status,
+        stdout: capture(stdout),
+        stderr: capture(stderr),
+    }
+}
 
 fn binary(name: &str) -> std::path::PathBuf {
     let mut path = std::env::current_exe().expect("test binary path");
@@ -20,6 +78,18 @@ fn binary(name: &str) -> std::path::PathBuf {
     path.pop(); // profile dir
     path.push(name);
     path
+}
+
+#[cfg(unix)]
+#[test]
+#[should_panic(expected = "sleep version probe exceeded its subprocess deadline")]
+fn a_hung_version_probe_is_killed_at_its_deadline() {
+    // exec leaves no grandchild behind when the deadline kills the command.
+    bounded_output(
+        Command::new("sh").args(["-c", "exec sleep 60"]),
+        Duration::from_millis(100),
+        "sleep version probe",
+    );
 }
 
 #[test]
@@ -34,15 +104,17 @@ fn both_binaries_answer_version_with_no_arguments_and_no_daemon() {
         checked += 1;
 
         for flag in ["--version", "-V"] {
-            let out = Command::new(&path)
-                .arg(flag)
-                // Deliberately no SUBC_* environment and no connection
-                // argument: the bare-binary case.
-                .env_remove("SUBC_MODULE_ID")
-                .env_remove("SUBC_LAUNCH_NONCE")
-                .env_remove("XDG_RUNTIME_DIR")
-                .output()
-                .unwrap_or_else(|e| panic!("{name} {flag} must run: {e}"));
+            let out = bounded_output(
+                Command::new(&path)
+                    .arg(flag)
+                    // Deliberately no SUBC_* environment and no connection
+                    // argument: the bare-binary case.
+                    .env_remove("SUBC_MODULE_ID")
+                    .env_remove("SUBC_LAUNCH_NONCE")
+                    .env_remove("XDG_RUNTIME_DIR"),
+                Duration::from_secs(10),
+                &format!("{name} {flag}"),
+            );
 
             assert!(
                 out.status.success(),

@@ -25,6 +25,19 @@ use std::sync::{Arc, Mutex};
 
 use fusiform_module::fetch::{FetchOutcome, Fetcher, SourceEndpoint};
 
+use super::http_stub;
+
+async fn poll(fetcher: &Fetcher, endpoint: &SourceEndpoint, etag: Option<&str>) -> FetchOutcome {
+    http_stub::within_deadline(fetcher.poll(endpoint, etag)).await
+}
+
+async fn tick(
+    ctx: &fusiform_module::loop_::PollContext,
+    at: i64,
+) -> Result<fusiform_module::loop_::TickReport, fusiform_module::loop_::TickError> {
+    http_stub::within_deadline(fusiform_module::loop_::tick(ctx, at)).await
+}
+
 /// What the stub answers next.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Answer {
@@ -42,6 +55,7 @@ enum Answer {
 /// stub records a request COUNT, which cannot distinguish a conditional request
 /// from an unconditional one.
 struct Upstream {
+    _server: http_stub::StubServer,
     url: String,
     answer: Arc<Mutex<Answer>>,
     heads: Arc<Mutex<Vec<String>>>,
@@ -59,16 +73,14 @@ impl Upstream {
         let a = Arc::clone(&answer);
         let h = Arc::clone(&heads);
         let r = Arc::clone(&requests);
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(stream) = stream else { break };
-                r.fetch_add(1, Ordering::SeqCst);
-                let answer = *a.lock().unwrap_or_else(|p| p.into_inner());
-                serve_one(stream, answer, &h);
-            }
+        let server = http_stub::StubServer::start(listener, move |stream| {
+            r.fetch_add(1, Ordering::SeqCst);
+            let answer = *a.lock().unwrap_or_else(|p| p.into_inner());
+            serve_one(stream, answer, &h);
         });
 
         Self {
+            _server: server,
             url: format!("http://127.0.0.1:{port}/api.json"),
             answer,
             heads,
@@ -104,7 +116,10 @@ impl Upstream {
 /// socket to a pooling client.
 fn serve_one(mut stream: TcpStream, answer: Answer, heads: &Arc<Mutex<Vec<String>>>) {
     let mut buf = [0u8; 4096];
-    let n = stream.read(&mut buf).unwrap_or(0);
+    let n = stream
+        .read(&mut buf)
+        .expect("stub request read before its deadline");
+    assert!(n > 0, "stub client closed without a request");
     heads
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -147,7 +162,7 @@ async fn a_stored_etag_is_sent_as_if_none_match() {
     let upstream = Upstream::start(Answer::NotModified);
     let fetcher = Fetcher::new().expect("a fetcher");
 
-    let outcome = fetcher.poll(&upstream.endpoint(), Some("\"v1\"")).await;
+    let outcome = poll(&fetcher, &upstream.endpoint(), Some("\"v1\"")).await;
     assert!(
         matches!(outcome, FetchOutcome::NotModified { .. }),
         "the stub answers 304, got {outcome:?}"
@@ -181,7 +196,7 @@ async fn a_first_poll_sends_no_validator() {
     let upstream = Upstream::start(Answer::Body);
     let fetcher = Fetcher::new().expect("a fetcher");
 
-    let outcome = fetcher.poll(&upstream.endpoint(), None).await;
+    let outcome = poll(&fetcher, &upstream.endpoint(), None).await;
     assert!(
         matches!(outcome, FetchOutcome::Body { .. }),
         "a first poll must fetch a body, got {outcome:?}"
@@ -204,7 +219,7 @@ async fn a_304_carries_the_validator_forward() {
     let upstream = Upstream::start(Answer::NotModified);
     let fetcher = Fetcher::new().expect("a fetcher");
 
-    let outcome = fetcher.poll(&upstream.endpoint(), Some("\"v1\"")).await;
+    let outcome = poll(&fetcher, &upstream.endpoint(), Some("\"v1\"")).await;
     match outcome {
         FetchOutcome::NotModified { etag, .. } => assert_eq!(
             etag.as_deref(),
@@ -229,7 +244,7 @@ async fn a_304_without_an_etag_header_does_not_lose_the_validator() {
     let upstream = Upstream::start(Answer::NotModifiedBare);
     let fetcher = Fetcher::new().expect("a fetcher");
 
-    let outcome = fetcher.poll(&upstream.endpoint(), Some("\"v1\"")).await;
+    let outcome = poll(&fetcher, &upstream.endpoint(), Some("\"v1\"")).await;
     match outcome {
         FetchOutcome::NotModified { etag, .. } => assert!(
             etag.is_none(),
@@ -252,9 +267,7 @@ async fn the_validator_is_sent_verbatim_including_a_weak_prefix() {
     let upstream = Upstream::start(Answer::NotModified);
     let fetcher = Fetcher::new().expect("a fetcher");
 
-    let _ = fetcher
-        .poll(&upstream.endpoint(), Some("W/\"abc123\""))
-        .await;
+    let _ = poll(&fetcher, &upstream.endpoint(), Some("W/\"abc123\"")).await;
 
     let head = &upstream.heads()[0];
     let sent = header_line(head, "if-none-match").expect("the header must be present");
@@ -285,7 +298,7 @@ async fn the_validator_is_sent_verbatim_including_a_weak_prefix() {
 #[tokio::test]
 async fn the_stored_validator_reaches_the_next_request() {
     use fusiform_core::SourceId;
-    use fusiform_module::loop_::{tick, PollContext};
+    use fusiform_module::loop_::PollContext;
     use fusiform_module::signals::Signals;
     use fusiform_store::CatalogStore;
 
@@ -354,7 +367,7 @@ async fn the_stored_validator_reaches_the_next_request() {
 #[tokio::test]
 async fn a_new_process_reads_the_document_before_trusting_a_stored_validator() {
     use fusiform_core::SourceId;
-    use fusiform_module::loop_::{tick, PollContext};
+    use fusiform_module::loop_::PollContext;
     use fusiform_module::signals::Signals;
     use fusiform_store::CatalogStore;
 

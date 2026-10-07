@@ -12,6 +12,8 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+
+use super::http_stub;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -19,9 +21,16 @@ use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::{FailureClass, SourceId};
 use fusiform_module::fetch::{Fetcher, SourceEndpoint};
 use fusiform_module::health::{self, FAILURE_STREAK_DEGRADED};
-use fusiform_module::loop_::{tick, PollContext, TickOutcome};
+use fusiform_module::loop_::{PollContext, TickOutcome};
 use fusiform_module::signals::Signals;
 use fusiform_store::CatalogStore;
+
+async fn tick(
+    ctx: &PollContext,
+    at: i64,
+) -> Result<fusiform_module::loop_::TickReport, fusiform_module::loop_::TickError> {
+    http_stub::within_deadline(fusiform_module::loop_::tick(ctx, at)).await
+}
 use subc_protocol::session::HealthStatus;
 
 /// How a stub responds to one request.
@@ -39,6 +48,7 @@ enum Behaviour {
 
 /// A local HTTP server whose behaviour the test drives.
 struct Upstream {
+    _server: http_stub::StubServer,
     url: String,
     behaviour: Arc<std::sync::Mutex<Behaviour>>,
     requests: Arc<AtomicUsize>,
@@ -53,16 +63,14 @@ impl Upstream {
 
         let b = Arc::clone(&behaviour);
         let r = Arc::clone(&requests);
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(stream) = stream else { break };
-                r.fetch_add(1, Ordering::SeqCst);
-                let behaviour = *b.lock().unwrap_or_else(|p| p.into_inner());
-                serve_one(stream, behaviour);
-            }
+        let server = http_stub::StubServer::start(listener, move |stream| {
+            r.fetch_add(1, Ordering::SeqCst);
+            let behaviour = *b.lock().unwrap_or_else(|p| p.into_inner());
+            serve_one(stream, behaviour);
         });
 
         Self {
+            _server: server,
             url: format!("http://127.0.0.1:{port}/api.json"),
             behaviour,
             requests,
@@ -100,7 +108,10 @@ impl Upstream {
 fn serve_one(mut stream: TcpStream, behaviour: Behaviour) {
     // Read the request head so the client sees a complete exchange.
     let mut buf = [0u8; 2048];
-    let _ = stream.read(&mut buf);
+    let n = stream
+        .read(&mut buf)
+        .expect("stub request read before its deadline");
+    assert!(n > 0, "stub client closed without a request");
 
     let body: &[u8] = match behaviour {
         Behaviour::ServeCatalog => CATALOG,
@@ -565,7 +576,17 @@ async fn a_tick_stamps_the_attempt_on_every_outcome() {
 fn the_failure_signal_is_stamped_before_the_store_write() {
     const SOURCE: &str = include_str!("../../src/loop_.rs");
 
-    let body = SOURCE
+    assert!(
+        failure_stamp_violations(SOURCE).is_empty(),
+        "`signals.failed` must be stamped BEFORE `record_observation`. It is \
+         the signal that survives a store outage, and writing it behind the \
+         store means a broken disk hides every simultaneous upstream failure — \
+         measured at consecutive_failures: 0 through a three-hour network outage."
+    );
+}
+
+fn failure_stamp_violations(source: &str) -> Vec<&str> {
+    let body = source
         .split_once("fn record_failure(")
         .expect("record_failure must exist")
         .1;
@@ -577,11 +598,19 @@ fn the_failure_signal_is_stamped_before_the_store_write() {
         .find(".record_observation(")
         .expect("record_failure must write an observation row");
 
-    assert!(
-        stamp < write,
-        "`signals.failed` must be stamped BEFORE `record_observation`. It is \
-         the signal that survives a store outage, and writing it behind the \
-         store means a broken disk hides every simultaneous upstream failure — \
-         measured at consecutive_failures: 0 through a three-hour network outage."
+    if stamp < write {
+        vec![]
+    } else {
+        vec!["signals.failed"]
+    }
+}
+
+#[test]
+fn planted_late_failure_stamp_is_reported() {
+    assert_eq!(
+        failure_stamp_violations(
+            "fn record_failure() { store.record_observation()?; ctx.signals.failed(class); }"
+        ),
+        ["signals.failed"]
     );
 }

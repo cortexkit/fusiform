@@ -16,29 +16,101 @@
 //! helper from a crate that happens to pull it, the build still works, and the
 //! coupling is only discovered by the consumer who then refuses the dependency.
 
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Output, Stdio};
+use std::sync::mpsc::{self, Receiver};
+use std::time::{Duration, Instant};
+
+fn read_pipe(pipe: impl Read + Send + 'static) -> Receiver<std::io::Result<Vec<u8>>> {
+    let (send, receive) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = {
+            let mut pipe = pipe;
+            pipe.read_to_end(&mut bytes).map(|_| bytes)
+        };
+        let _ = send.send(result);
+    });
+    receive
+}
+
+fn bounded_output(command: &mut Command, budget: Duration, label: &str) -> Output {
+    let deadline = Instant::now() + budget;
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|error| panic!("{label} must run: {error}"));
+    // Drain both pipes concurrently so a full stderr cannot block stdout (or
+    // vice versa). Receiving the captured bytes has the same overall deadline.
+    let stdout = read_pipe(child.stdout.take().unwrap());
+    let stderr = read_pipe(child.stderr.take().unwrap());
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .unwrap_or_else(|error| panic!("{label}: {error}"))
+        {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            child
+                .kill()
+                .unwrap_or_else(|error| panic!("{label}: kill after deadline: {error}"));
+            child
+                .wait()
+                .unwrap_or_else(|error| panic!("{label}: reap after kill: {error}"));
+            panic!("{label} exceeded its subprocess deadline");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let capture = |receiver: Receiver<std::io::Result<Vec<u8>>>| {
+        receiver
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap_or_else(|error| panic!("{label}: output deadline: {error}"))
+            .unwrap_or_else(|error| panic!("{label}: capture output: {error}"))
+    };
+    Output {
+        status,
+        stdout: capture(stdout),
+        stderr: capture(stderr),
+    }
+}
 
 /// Every crate this one pulls in, transitively.
 fn dependency_tree() -> String {
-    let out = Command::new("cargo")
-        .args([
-            "tree",
-            "-p",
-            "fusiform-protocol",
-            "--edges",
-            "normal",
-            "--prefix",
-            "none",
-        ])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-        .expect("cargo tree runs");
+    let out = bounded_output(
+        Command::new("cargo")
+            .args([
+                "tree",
+                "-p",
+                "fusiform-protocol",
+                "--edges",
+                "normal",
+                "--prefix",
+                "none",
+            ])
+            .current_dir(env!("CARGO_MANIFEST_DIR")),
+        Duration::from_secs(300),
+        "cargo tree -p fusiform-protocol",
+    );
     assert!(
         out.status.success(),
         "cargo tree failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8(out.stdout).expect("cargo tree emits utf8")
+}
+
+#[cfg(unix)]
+#[test]
+#[should_panic(expected = "sleep dependency probe exceeded its subprocess deadline")]
+fn a_hung_dependency_probe_is_killed_at_its_deadline() {
+    // exec leaves no grandchild behind when the deadline kills the command.
+    bounded_output(
+        Command::new("sh").args(["-c", "exec sleep 60"]),
+        Duration::from_millis(100),
+        "sleep dependency probe",
+    );
 }
 
 /// No runtime, no client, no database, no fusiform internals.

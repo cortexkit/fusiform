@@ -195,18 +195,33 @@ fn limit_output_is_byte_affecting_because_broca_renders_it_as_the_default_cap() 
 #[test]
 fn the_design_notes_serve_row_lists_every_served_tool() {
     const NOTE: &str = include_str!("../../../../docs/design/schema-and-store.md");
+    let missing = undocumented_tools(NOTE, fusiform_protocol::TOOLS);
+    assert!(
+        missing.is_empty(),
+        "served tools absent from §10 Serve: {missing:?}"
+    );
+}
 
-    let row = NOTE
+fn undocumented_tools<'a>(note: &str, tools: &'a [&str]) -> Vec<&'a str> {
+    let row = note
         .lines()
         .find(|l| l.starts_with("| §10 Serve"))
         .expect("the status table must have a §10 Serve row");
 
-    for tool in fusiform_protocol::TOOLS {
-        assert!(
-            row.contains(tool),
-            "the module serves {tool} and the design note's §10 Serve row does \
-             not mention it. A reader citing that row would get a wrong picture \
-             of the served surface.\n\nrow: {row}"
-        );
-    }
+    tools
+        .iter()
+        .copied()
+        .filter(|tool| !row.contains(tool))
+        .collect()
+}
+
+#[test]
+fn planted_undocumented_tool_is_reported() {
+    assert_eq!(
+        undocumented_tools(
+            "| §10 Serve | catalog.get |",
+            &["catalog.get", "catalog.lost"]
+        ),
+        ["catalog.lost"]
+    );
 }
