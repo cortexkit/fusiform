@@ -236,23 +236,23 @@ jobs:
       - name: Install ck-mutate
         run: >-
           cargo install --locked --git https://github.com/cortexkit/commons
-          --rev 695c97b6c4d74042011ec0aeeebe966f377353be cortexkit-mutate
+          --rev 7d08e73722fa3e79bbcc2607753978ab768f1c6b cortexkit-mutate
 
       # Validates every row's anchor, files and expected test names before any
       # source is touched, so a stale row fails here by name.
       - name: Check the catalogue
         run: ck-mutate check
 
-      # One step for every event, choosing the base in shell, so each event
-      # runs the same steps. A master push diffs against the commit it replaced.
-      # When that commit is not in the clone (the all-zeros `before` of a new
-      # branch, or a force-push's discarded tip) it falls back to the
-      # merge-base, as a train/** push always does.
+      # One step for every event, choosing the selection in shell, so each event
+      # runs the same steps. A push to master replays the whole catalogue: a
+      # change can weaken a test that guards a row it never touched, and a
+      # diff-selected replay only re-proves the rows whose files changed. The
+      # nightly does the same with --broad. Pull requests and train/** pushes
+      # replay the rows their diff touches, against the merge-base.
       - name: Replay mutation proofs
         env:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
-          BEFORE: ${{ github.event.before }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
@@ -268,9 +268,8 @@ jobs:
             pull_request)
               selection=(--diff "$PR_BASE") ;;
             push)
-              if [ "$REF" = refs/heads/master ] \
-                && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-                selection=(--diff "$BEFORE")
+              if [ "$REF" = refs/heads/master ]; then
+                selection=(--all)
               else
                 selection=(--diff "$(merge_base)")
               fi ;;

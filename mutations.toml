@@ -506,6 +506,7 @@ expect_red = ["route::inheritance_tests::a_published_rate_is_left_exactly_as_pub
 only = false
 timeout_s = 600
 equivalent = "Dead under the gate above it: inherit_rate_for returns early when the row carries any rate.* key, and every key this loop considers starts with rate., so facts.contains_key(&key) is always false when it runs. Proved SURVIVED across the whole fusiform-module package. Drop this marker if the publishes_a_rate gate is ever narrowed, because this check then becomes the only thing keeping a published rate from being overwritten."
+equivalent_guard = "crates/fusiform-module/src/route.rs::inherit_rate_for: `if publishes_a_rate { return; }`, where publishes_a_rate is any key starting with prefix::RATE, runs before the loop, and the loop only considers keys starting with prefix::RATE"
 
 [[control]]
 id = "inherit-point-in-time-never-inherits"

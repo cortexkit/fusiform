@@ -48,8 +48,11 @@ crate, so a test in `crates/fusiform-store/tests/it/serve.rs` is
 
 `ck-mutate` (the `cortexkit-mutate` crate in cortexkit/commons, installed at
 the commit pinned in `.github/workflows/ci.yml`) replays the rows. CI's
-`mutations` job replays the rows a change touches on every push and pull
-request, and every row on the nightly schedule.
+`mutations` job replays every row on each push to `master`, the rows a change
+touches on pull requests and `train/**` pushes, and every row with `--broad` on
+the nightly schedule. `--broad` runs all of a package's test targets and grades
+a catch outside the expected target as `CAUGHT_BROADLY`, unless the row is
+marked `hub` with the shared property it guards as the reason.
 
 A new guard gets a row, not a proof written into a commit message. Prove it
 and let the runner append the row; it appends only when the named tests go red:
