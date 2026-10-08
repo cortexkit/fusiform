@@ -3,10 +3,12 @@
 # green. Operator tooling runs through the real GitHub CLI (gh) via watch-ci.sh;
 # the shim is only for AI agent commands.
 #
-# Lifting this into another repository: carry four files together —
-# scripts/train-push.sh, scripts/watch-ci.sh, scripts/lib/operator-gh.sh,
-# scripts/lib/workflow-gates.py — plus `python3`, `git`, and the real `gh` on
-# PATH. Nothing else here assumes this repository's layout: the default branch
+# Lifting this into another repository: carry five files together —
+# scripts/train-push.sh, scripts/watch-ci.sh, scripts/check-path-deps.py,
+# scripts/lib/operator-gh.sh, scripts/lib/workflow-gates.py — plus `python3`,
+# `git`, and the real `gh` on PATH. check-path-deps.py may be replaced by the
+# repository's own check under the same name. Nothing else here assumes this
+# repository's layout: the default branch
 # is read from origin/HEAD, and repo-local preflights run only when their
 # scripts exist (see "Repo-local preflights" below), with the header line
 # naming which ones ran.
@@ -141,13 +143,55 @@ repo_slug="$repo_slug_override"
 # real budget.
 probe_attempts="${TRAIN_PUSH_PROBE_ATTEMPTS:-12}"
 probe_sleep="${TRAIN_PUSH_PROBE_SLEEP:-10}"
-# Failing job names that mean the red is dependency skew rather than a broken
-# change: in this repo those are the Cargo.lock and manifest checks. Extend it
-# when a repo names such a job something else.
+# Failing job or step names that mean the red is dependency skew rather than
+# a broken change: in this repo those are the Cargo.lock and manifest checks.
+# Steps are matched too because a seat with single-job CI names its jobs after
+# the platform, and the lock check is a step inside it. Extend the pattern
+# when a repo names such a job or step something else.
 skew_pattern="${TRAIN_PUSH_SKEW_PATTERN:-}"
 if [ -z "$skew_pattern" ]; then
   skew_pattern='lock|version|pin|sibling'
 fi
+
+# A lockfile name next to a drift word in the TAIL of a failing job's log.
+# A lock check that is one phase inside a larger step ends in such a line
+# ("Cargo.lock drifted", "bun.lock is out of date"), and the tail is the only
+# part of a failing log that can still name skew once the step name is
+# generic. Only the tail is judged, so a Cargo.lock mention in an early build
+# line cannot call a later test failure skew; and unlike the name arms this
+# one stays narrower than skew_pattern on purpose, because matching real
+# output is easier to keep conservative than matching prose.
+skew_log_tail() {
+  tail -40 | grep -Ei 'Cargo\.lock|bun\.lock' | grep -Eqi 'drift|stale|out of date|out-of-date|changed|would change|differs|mismatch'
+}
+
+# The whole skew verdict, from the failing jobs' name|job-id lines as the
+# stubbed or real gh reports them. Job names are judged first (cheap, no extra
+# queries); step names come from the jobs API and cover single-job CI, whose
+# job names say only the platform. Advisory jobs are already excluded from the
+# watch log the pairs are parsed from, the same exclusion watch-ci.sh applies,
+# so a lock-flavoured step in a non-gating job cannot call a real red skew.
+red_is_skew() {
+  local run_id="$1"
+  local failing_pairs="$2"
+  local line job_id job_steps
+  if printf '%s\n' "$failing_pairs" | grep -Eqi "$skew_pattern"; then
+    return 0
+  fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    job_id="${line##*|}"
+    job_steps="$("$OPERATOR_GH" api "repos/$repo_slug/actions/jobs/$job_id" \
+      --jq '.steps[] | select(.conclusion=="failure") | .name' 2>/dev/null || true)"
+    if printf '%s\n' "$job_steps" | grep -Eqi "$skew_pattern"; then
+      return 0
+    fi
+    if "$OPERATOR_GH" run view --repo "$repo_slug" --job "$job_id" --log 2>/dev/null | skew_log_tail; then
+      return 0
+    fi
+  done <<< "$failing_pairs"
+  return 1
+}
 
 say() { printf 'train-push: %s\n' "$1"; }
 refuse() {
@@ -251,14 +295,25 @@ train_lock_held="$train_lock_dir/held"
 # a process mid-acquisition gives two live trains, the thing this guard exists
 # to prevent; refusing costs one `rm -rf` the message names. Fail closed.
 train_lock_attempts=0
+# A pid alone cannot prove the owner is still the train: macOS recycles pids,
+# and an unrelated process reusing the recorded pid made a finished train's
+# leftover lock look live. The owner records its process start time too, and a
+# pid whose start time differs is a different process.
+train_lock_process_start() {
+  ps -p "$1" -o lstart= 2>/dev/null | awk '{$1=$1; print}' || true
+}
+# Computed before taking the lock so the owner write right after mkdir stays a
+# single write, keeping the window where the lock has no readable owner short.
+train_lock_my_start="$(train_lock_process_start "$$")"
 while true; do
   if mkdir "$train_lock_held" 2>/dev/null; then
-    printf '%s %s\n' "$$" "$train_name" > "$train_lock_held/owner"
+    printf '%s %s\n%s\n' "$$" "$train_name" "$train_lock_my_start" > "$train_lock_held/owner"
     break
   fi
 
   owner_pid="$(awk 'NR==1{print $1}' "$train_lock_held/owner" 2>/dev/null || true)"
   owner_name="$(awk 'NR==1{print $2}' "$train_lock_held/owner" 2>/dev/null || true)"
+  owner_start="$(awk 'NR==2' "$train_lock_held/owner" 2>/dev/null || true)"
 
   if [ -z "$owner_pid" ]; then
     printf 'train-push: the train lock is held with no readable owner.\n' >&2
@@ -267,19 +322,52 @@ while true; do
     refuse "train lock held by an unidentified owner; refusing rather than dispossessing it"
   fi
 
+  owner_live=0
   if kill -0 "$owner_pid" 2>/dev/null; then
+    if [ -n "$owner_start" ]; then
+      [ "$(train_lock_process_start "$owner_pid")" = "$owner_start" ] && owner_live=1
+    else
+      # A lock written before start times were recorded: live only if the pid
+      # is still running this script.
+      ps -p "$owner_pid" -o command= 2>/dev/null | grep -q 'train-push' && owner_live=1
+    fi
+  fi
+
+  if [ "$owner_live" = 1 ]; then
     printf 'train-push: train %s is RUNNING as pid %s\n' "${owner_name:-?}" "$owner_pid" >&2
     printf '  wait for it, or kill it if you know it is wedged.\n' >&2
     refuse "a train is already running on this machine; wait for it"
   fi
 
-  # Stale owner. Claim the removal with a rename, not an rm: two processes
-  # finding the same stale owner would both delete and both acquire, and the
-  # second delete would take the first one's fresh lock. rename(2) of the
-  # directory to an unused name fails ENOENT for whoever arrives second, so
-  # exactly one recovers; the loser loops and meets the winner's live lock.
-  if mv "$train_lock_held" "$train_lock_held.stale.$$" 2>/dev/null; then
-    rm -rf "$train_lock_held.stale.$$" 2>/dev/null || true
+  # Stale owner. Recovery is serialized by a second mkdir lock, `reap`. A
+  # rename alone was not enough: two trains reading the same stale owner both
+  # renamed `held`, and the second rename took the first one's FRESH lock
+  # (created by its mkdir after its own rename), so both trains proceeded.
+  # Inside `reap`, `held` cannot change hands: a fresh mkdir fails while it
+  # exists and every other remover is waiting on `reap`. So re-reading the
+  # owner there and finding the same stale record proves the removal is safe.
+  train_lock_reap="$train_lock_dir/reap"
+  if [ -n "${TRAIN_PUSH_TEST_LOCK_RACE_HOOK:-}" ]; then
+    "$TRAIN_PUSH_TEST_LOCK_RACE_HOOK"
+  fi
+  if mkdir "$train_lock_reap" 2>/dev/null; then
+    printf '%s\n%s\n' "$$" "$train_lock_my_start" > "$train_lock_reap/owner"
+    if [ "$(awk 'NR==1{print $1}' "$train_lock_held/owner" 2>/dev/null || true)" = "$owner_pid" ] &&
+      [ "$(awk 'NR==2' "$train_lock_held/owner" 2>/dev/null || true)" = "$owner_start" ]; then
+      rm -rf "$train_lock_held" 2>/dev/null || true
+    fi
+    rm -rf "$train_lock_reap" 2>/dev/null || true
+  else
+    reaper_pid="$(awk 'NR==1' "$train_lock_reap/owner" 2>/dev/null || true)"
+    reaper_start="$(awk 'NR==2' "$train_lock_reap/owner" 2>/dev/null || true)"
+    if [ -z "$reaper_pid" ] || ! kill -0 "$reaper_pid" 2>/dev/null ||
+      [ "$(train_lock_process_start "$reaper_pid")" != "$reaper_start" ]; then
+      # A reaper holds `reap` for a few milliseconds. One that is gone left
+      # it behind; removing it here would reopen the race, so fail closed.
+      printf 'train-push: a stale-lock recovery was interrupted.\n' >&2
+      printf '  if you are sure no train is running:  rm -rf %s %s\n' "$train_lock_reap" "$train_lock_held" >&2
+      refuse "train lock recovery left behind; refusing rather than racing it"
+    fi
   fi
 
   train_lock_attempts=$((train_lock_attempts + 1))
@@ -335,8 +423,103 @@ resolve_default_branch() {
 resolve_ci_run() {
   local sha="$1"
   "$OPERATOR_GH" run list --repo "$repo_slug" --workflow "$tests_workflow_name" \
-    --event "${WATCH_CI_EVENT:-push}" --limit 40 --json databaseId,headSha \
-    --jq ".[] | select(.headSha==\"$sha\") | .databaseId" 2>/dev/null | head -1
+    --event "${WATCH_CI_EVENT:-push}" --limit 40 --json databaseId,headSha,headBranch \
+    --jq ".[] | select(.headSha==\"$sha\" and .headBranch==\"$train_ref\") | .databaseId" 2>/dev/null | head -1
+}
+
+ci_run_attempt() {
+  "$OPERATOR_GH" run view "$1" --repo "$repo_slug" --json attempt --jq '.attempt' 2>/dev/null
+}
+
+wait_for_new_run_attempt() {
+  local run_id="$1"
+  local previous_attempt="$2"
+  local attempts="${TRAIN_PUSH_RERUN_ATTEMPTS:-30}"
+  local wait_seconds="${TRAIN_PUSH_RERUN_SLEEP:-2}"
+  local current_attempt
+  for _ in $(seq 1 "$attempts"); do
+    current_attempt="$(ci_run_attempt "$run_id" || true)"
+    if [[ "$current_attempt" =~ ^[0-9]+$ ]] && [ "$current_attempt" -gt "$previous_attempt" ]; then
+      printf '%s\n' "$current_attempt"
+      return 0
+    fi
+    sleep "$wait_seconds"
+  done
+  printf 'train-push: rerun request for %s did not advance its attempt beyond %s\n' \
+    "$run_id" "$previous_attempt" >&2
+  return 1
+}
+
+wait_for_run_attempt_completion() {
+  local run_id="$1"
+  local attempt="$2"
+  local attempts="${TRAIN_PUSH_RERUN_WAIT_ATTEMPTS:-360}"
+  local wait_seconds="${TRAIN_PUSH_RERUN_WAIT_SLEEP:-10}"
+  local status
+  for _ in $(seq 1 "$attempts"); do
+    status="$("$OPERATOR_GH" run view "$run_id" --repo "$repo_slug" --attempt "$attempt" \
+      --json status --jq '.status' 2>/dev/null || true)"
+    [ "$status" = "completed" ] && return 0
+    sleep "$wait_seconds"
+  done
+  printf 'train-push: rerun attempt %s for run %s did not complete before the wait limit\n' \
+    "$attempt" "$run_id" >&2
+  return 1
+}
+
+rerun_existing_run() {
+  local run_id="$1"
+  local old_attempt="$2"
+  local bad_jobs line conclusion job_id
+  local current_attempt="$old_attempt"
+  local remaining_actions
+  local -a failed_job_ids=() cancelled_job_ids=()
+
+  bad_jobs="$("$OPERATOR_GH" run view "$run_id" --repo "$repo_slug" --json jobs \
+    --jq '[.jobs[] | select(.conclusion=="failure" or .conclusion=="cancelled") | .conclusion + "|" + (.databaseId|tostring)] | .[]' 2>/dev/null || true)"
+  while IFS='|' read -r conclusion job_id; do
+    [ -n "$job_id" ] || continue
+    case "$job_id" in *[!0-9]*) continue ;; esac
+    case "$conclusion" in
+      failure) failed_job_ids+=("$job_id") ;;
+      cancelled) cancelled_job_ids+=("$job_id") ;;
+    esac
+  done <<< "$bad_jobs"
+
+  if [ "${#failed_job_ids[@]}" -eq 0 ] && [ "${#cancelled_job_ids[@]}" -eq 0 ]; then
+    printf 'train-push: completed run %s has no failed or cancelled jobs to rerun; refusing to treat its old conclusion as this push result\n' \
+      "$run_id" >&2
+    return 1
+  fi
+  remaining_actions=$(( ${#failed_job_ids[@]} > 0 ? 1 : 0 ))
+  remaining_actions=$((remaining_actions + ${#cancelled_job_ids[@]}))
+
+  if [ "${#failed_job_ids[@]}" -gt 0 ]; then
+    GH_SHIM_BYPASS=operator "$OPERATOR_GH" run rerun "$run_id" --failed >&2 || {
+      printf 'train-push: could not rerun failed jobs for run %s\n' "$run_id" >&2
+      return 1
+    }
+    current_attempt="$(wait_for_new_run_attempt "$run_id" "$current_attempt")" || return 1
+    remaining_actions=$((remaining_actions - 1))
+    if [ "$remaining_actions" -gt 0 ]; then
+      wait_for_run_attempt_completion "$run_id" "$current_attempt" || return 1
+    fi
+  fi
+  if [ "${#cancelled_job_ids[@]}" -gt 0 ]; then
+    for job_id in "${cancelled_job_ids[@]}"; do
+      # `--failed` does not include cancelled jobs, so each is rerun explicitly.
+      GH_SHIM_BYPASS=operator "$OPERATOR_GH" run rerun "$run_id" --job "$job_id" >&2 || {
+        printf 'train-push: could not rerun cancelled job %s for run %s\n' "$job_id" "$run_id" >&2
+        return 1
+      }
+      current_attempt="$(wait_for_new_run_attempt "$run_id" "$current_attempt")" || return 1
+      remaining_actions=$((remaining_actions - 1))
+      if [ "$remaining_actions" -gt 0 ]; then
+        wait_for_run_attempt_completion "$run_id" "$current_attempt" || return 1
+      fi
+    done
+  fi
+  printf '%s\n' "$current_attempt"
 }
 
 ci_run_url() {
@@ -478,6 +661,7 @@ if [ "$recover_existing" -eq 1 ]; then
   run_url=""
   run_status=""
   run_conclusion=""
+  rerun_attempt=""
 
   if [ -n "$run_id" ]; then
     verdict="$("$OPERATOR_GH" run view "$run_id" --repo "$repo_slug" \
@@ -487,15 +671,22 @@ if [ "$recover_existing" -eq 1 ]; then
   fi
 
   if [ "$run_status" = "completed" ] && [ "$run_conclusion" != "success" ]; then
-    report_existing_red "$verified_sha" "$run_url"
-    exit 1
+    old_attempt="$(ci_run_attempt "$run_id" || true)"
+    if ! [[ "$old_attempt" =~ ^[0-9]+$ ]]; then
+      refuse "could not read the current attempt for completed run $run_id"
+    fi
+    rerun_attempt="$(rerun_existing_run "$run_id" "$old_attempt")" || exit 1
+    say "sha already ran in ${run_url:-run $run_id} ($run_conclusion); rerunning its failed and cancelled jobs (attempt $rerun_attempt)"
   fi
 
-  if [ "$run_status" != "completed" ]; then
+  if [ "$run_status" != "completed" ] || [ -n "$rerun_attempt" ]; then
     watch_target="${run_id:-$verified_sha}"
-    say "attaching to CI for existing $remote/$train_ref at $verified_sha"
+    if [ -z "$rerun_attempt" ]; then
+      say "attaching to CI for existing $remote/$train_ref at $verified_sha"
+    fi
     set +e
-    (cd "$REPO" && REPO="$repo_slug" WATCH_CI_HEARTBEAT="$watch_heartbeat" \
+    (cd "$REPO" && REPO="$repo_slug" WATCH_CI_BRANCH="$train_ref" WATCH_CI_HEARTBEAT="$watch_heartbeat" \
+      WATCH_CI_ATTEMPT="$rerun_attempt" \
       "$script_dir/watch-ci.sh" "$watch_target") 2>&1 | tee "$watch_log"
     watch_rc="${PIPESTATUS[0]}"
     set -e
@@ -631,8 +822,11 @@ warn_repo_local_pre_push() {
       # AFT's managed dispatcher is not a gate: it chains to the repo-local
       # hook, which is already a candidate above. Its presence alone says
       # nothing about whether a gate runs. Matched by path shape rather than an
-      # absolute location because the data directory moves with XDG settings.
+      # absolute location because the data and cache directories move with XDG
+      # settings. The first pair is the older per-storage-root location; newer
+      # releases share one content-addressed set under the AFT cache directory.
       */cortexkit/aft/git-hooks | */cortexkit/aft/git-hooks/*) : ;;
+      */aft/git-hooks/*) : ;;
       *)
         if [ "$configured/pre-push" != "$repo_local" ]; then
           candidates+=("$configured/pre-push")
@@ -749,7 +943,21 @@ if drifted="$(sibling_lock_drift_packages)"; then
   say "restored Cargo.lock: sibling path-dependency drift in $(printf '%s' "$drifted" | paste -sd, -) (an editor's cargo run without --locked; the committed lock is what CI tests)"
 fi
 if [ -n "$(git -C "$REPO" status --porcelain)" ]; then
+  # Name the paths: a tree that is dirty only for a moment (a tool writing
+  # into the checkout) is otherwise invisible by the time anyone looks.
+  git -C "$REPO" status --porcelain | head -20 >&2
   refuse "working tree is not clean (commit or stash before pushing a train)"
+fi
+
+# A train must not add local dependency paths that escape the repository. CI
+# runs the same check, and this catches the problem before spending a push run.
+# The checker ships beside this script; a repository that copied only
+# train-push.sh and watch-ci.sh must be told that, not shown a path verdict.
+if [ ! -f "$REPO/scripts/check-path-deps.py" ]; then
+  refuse "scripts/check-path-deps.py not found: lift it from aft with train-push.sh, or provide your own check under that name"
+fi
+if ! python3 "$REPO/scripts/check-path-deps.py"; then
+  refuse "dependency path resolves outside the repository"
 fi
 
 # A local main behind origin/main means the train was built on a stale base:
@@ -773,7 +981,7 @@ fi
 # has never been exercised is a claim, so once per repository push a throwaway
 # commit to a probe branch and wait for a run to START on it. If the two
 # disagree, it is always the platform that is right.
-probe_marker="$git_dir/train-push-proven"
+probe_marker="$git_common_dir/train-push-proven"
 
 run_trigger_probe() {
   local probe_ref="train/trigger-probe"
@@ -982,7 +1190,7 @@ while true; do
   verified_sha=""
   say "watching CI for $head_sha on $train_ref in $repo_slug (round $round of $max_rounds)"
   set +e
-  (cd "$REPO" && REPO="$repo_slug" WATCH_CI_HEARTBEAT="$watch_heartbeat" \
+  (cd "$REPO" && REPO="$repo_slug" WATCH_CI_BRANCH="$train_ref" WATCH_CI_HEARTBEAT="$watch_heartbeat" \
     "$script_dir/watch-ci.sh" "$head_sha") 2>&1 | tee "$watch_log"
   watch_rc="${PIPESTATUS[0]}"
   set -e
@@ -994,8 +1202,17 @@ while true; do
     if [ "$watch_rc" -eq 1 ]; then
       # Report the jobs by name: with three platforms in parallel, "CI failed"
       # is not enough to know whether this needs a local reproduction or a
-      # platform-specific fix.
-      failing="$(grep -o "job='[^']*'" "$watch_log" 2>/dev/null | sed "s/job='//; s/'$//" | sort -u || true)"
+      # platform-specific fix. The watch's early-fail line carries only the
+      # name, so the job id is read back from the run's jobs listing: the skew
+      # check needs it for the failing step names and the log tail.
+      run_id="$(grep -o 'run=[0-9]\+' "$watch_log" 2>/dev/null | head -1 | sed 's/^run=//' || true)"
+      [ -n "$run_id" ] || run_id="$(resolve_ci_run "$head_sha")"
+      failing_pairs=""
+      if [ -n "$run_id" ]; then
+        failing_pairs="$("$OPERATOR_GH" run view "$run_id" --repo "$repo_slug" --json jobs \
+          --jq '[.jobs[] | select(.conclusion=="failure") | .name + "|" + (.databaseId|tostring)] | .[]' 2>/dev/null || true)"
+      fi
+      failing="$(printf '%s\n' "$failing_pairs" | sed 's/|.*//' | sed '/^$/d' || true)"
       if [ -n "$failing" ]; then
         printf 'train-push: CI red — failing job(s):\n' >&2
         # One name per line, not word-split: job names contain spaces.
@@ -1010,7 +1227,7 @@ while true; do
       # because it looks like a flake from the outside: the commit did not
       # change, CI resolved sibling repositories to different versions, and no
       # amount of retrying moves a lockfile - the fix is a bump commit.
-      if [ -n "$failing" ] && printf '%s\n' "$failing" | grep -Eqi "$skew_pattern"; then
+      if red_is_skew "$run_id" "$failing_pairs"; then
         printf 'red is a version/lock skew, not contention: this terminates in a lockfile bump commit, not a retry\n' >&2
       fi
       printf 'train-push: run %s\n' "$run_url" >&2
