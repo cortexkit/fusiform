@@ -125,7 +125,8 @@ const INHERITANCE_PAIR: &str = r#"{
 }"#;
 const GOLDEN: &str = include_str!("../../fixtures/served-payloads.json");
 
-/// The embedded models.dev seed, read only to cut real rows out of it.
+/// The embedded models.dev seed. The plane cases copy real xAI and DeepSeek rows
+/// out of it, because the fixture excerpt has neither provider.
 const SEED: &str = include_str!("../../data/models-dev-seed.json");
 
 /// The target of the shipped alias the fixture pins.

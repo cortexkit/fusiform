@@ -135,8 +135,9 @@ pub enum UnpricedReason {
     /// audio keys are the live case, sitting in the same flat namespace as
     /// token rates with no unit distinguishing them.
     UnknownChargeBasis,
-    /// A serve-time billing rule cannot establish this class's rate, including
-    /// when a billed-as rule has no published target. Never produced by ingest.
+    /// On a billing-plane read, nobody has established what this token class
+    /// costs, including a billed-as rule whose target price is not published.
+    /// Only plane reads produce it; stored history never carries it.
     NotEstablished,
 }
 
@@ -260,7 +261,8 @@ pub enum RateValue {
     /// Serve-only: this is a curated billing claim, not an upstream observation.
     BilledAs {
         /// The full fact key, including any context-tier suffix. An unfiltered
-        /// plane read serves this target; a filtered read may omit it.
+        /// plane read also serves that key; a read limited by `fact_prefixes`
+        /// (for example to `rate.cache_write`) may leave it out.
         key: String,
     },
 }

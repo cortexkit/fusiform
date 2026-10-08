@@ -13,7 +13,8 @@ use fusiform_core::TokenClass;
 
 const BILLING_PLANES: &str = include_str!("../data/billing-planes.json");
 
-/// The closed authentication vocabulary used to select a billing plane.
+/// The login methods a caller may name to select a billing plane. The set is
+/// closed: an unlisted method is refused, never treated as an API key.
 pub const AUTH_METHODS: &[&str] = &["apikey", "chatgpt", "oauth", "antigravity"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
@@ -50,7 +51,8 @@ impl RuleState {
     }
 }
 
-/// A plane's claim about how a provider bills this authentication method.
+/// How one provider bills calls made with one login method, as curated in
+/// `data/billing-planes.json` with the source the claim rests on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plane {
     pub provider_id: String,
@@ -63,7 +65,9 @@ pub struct Plane {
     pub rules: Vec<BillingRule>,
 }
 
-/// A per-class claim, with provenance independent of the plane's claim.
+/// How one token class (cache writes, say) is billed on a plane. It carries
+/// its own source and review date, because a plane can be right about its
+/// prices while one class rule rests on a different page.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct BillingRule {
     pub class: TokenClass,
@@ -254,7 +258,8 @@ pub fn load_reporting_rejects(doc: &str) -> (Planes, Vec<String>) {
     (table, rejects)
 }
 
-/// A plane or rule past its own review date, with enough detail to re-read it.
+/// A plane or rule whose review date has passed, carrying the identity and
+/// source a reviewer needs to find the claim and check it again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Overdue {
     pub provider_id: String,
@@ -762,8 +767,8 @@ mod tests {
         }
     }
 
-    /// An unignored lib test: the scheduled CI workspace suite runs this even
-    /// when there has been no push during the review window.
+    /// Kept as an ordinary, never-ignored test so the nightly CI run catches a
+    /// review date that lapses during a quiet week, when no push would run it.
     #[test]
     fn no_plane_or_rule_is_past_its_review_date() {
         let now = std::time::SystemTime::now()

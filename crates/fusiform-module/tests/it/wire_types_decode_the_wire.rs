@@ -26,9 +26,10 @@ use fusiform_protocol::CatalogGetResponse;
 
 const SERVED: &str = include_str!("../../fixtures/served-payloads.json");
 
-/// Serve-only states and disclosures are minted by route::serve_tool_call,
-/// specifically finish_plane_view/apply_billing_plane in route.rs, not by
-/// fusiform-store's json_rate: writing these states into history is forbidden.
+/// The plane states and disclosures exist only in served responses: the route
+/// adds them per request (finish_plane_view and apply_billing_plane in route.rs)
+/// and the store never writes them, because they describe one login method
+/// rather than what the upstream published. So they decode from served bytes.
 #[test]
 fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
     let fixture: serde_json::Value = serde_json::from_str(SERVED).unwrap();
@@ -271,8 +272,9 @@ fn collect_priced<'a>(node: &'a serde_json::Value, out: &mut Vec<&'a serde_json:
 /// runtime list would simply not mention it.
 #[test]
 fn every_variant_the_producer_writes_decodes() {
-    // Stored literals come from json_rate in fusiform-store/src/ingest.rs.
-    // billed_as and not_established instead come from the real serve path:
+    // Stored rate literals come from json_rate in fusiform-store/src/ingest.rs.
+    // billed_as and not_established are never stored, since they belong to a
+    // plane read, so they come from the serve path instead:
     // route::serve_tool_call -> finish_plane_view -> apply_billing_plane.
     let cases: &[(&str, &str)] = &[
         ("stated_zero", r#"{"state":"stated_zero"}"#),
@@ -601,9 +603,9 @@ fn the_fixture_carries_every_rate_state() {
     let doc: serde_json::Value = serde_json::from_str(SERVED).expect("the fixture parses");
     let mut shapes: Vec<String> = Vec::new();
     collect_rate_shapes(&doc, &mut shapes);
-    // Ordinary reads must never produce the serve-only pointer. Keep their
-    // exhaustive match separate so new plane coverage cannot hide a leak into
-    // the legacy wire contract.
+    // A read without a login method must never serve billed_as, which only a
+    // plane read can produce. Matching those cases separately means the plane
+    // cases in the same fixture cannot mask a billed_as leaking into them.
     let mut non_plane_shapes = Vec::new();
     for case in doc.as_object().unwrap().values() {
         if case["request"]["arguments"].get("auth_method").is_none() {

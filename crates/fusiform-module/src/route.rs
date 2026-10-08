@@ -953,10 +953,10 @@ fn select_billing_plane(request: &CatalogGetRequest) -> Result<Option<SelectedPl
     let Some(auth_method) = request.auth_method.as_deref() else {
         return Ok(None);
     };
-    // This closed vocabulary mirrors claustrum's ListAuthMethod as recorded in
-    // docs/design/billing-planes.md at fusiform c42a15d8674767f7509c402207a9e474e3d17b23.
-    // There is no vault dependency here; adding a login method needs review of
-    // its billing claims rather than silently borrowing the API price card.
+    // The accepted methods are apikey, chatgpt, oauth and antigravity: the login
+    // methods the credential vault records (docs/design/billing-planes.md).
+    // The set is closed so that a new login method is refused until someone
+    // reviews how it bills, instead of quietly receiving the API price card.
     if !billing_planes::AUTH_METHODS.contains(&auth_method) {
         return Err(RouteError::bad_request(format!(
             "unknown auth_method {auth_method:?}; expected apikey, chatgpt, oauth or antigravity"
@@ -992,8 +992,10 @@ fn select_billing_plane(request: &CatalogGetRequest) -> Result<Option<SelectedPl
     }))
 }
 
-/// Apply a present billing claim only after the ordinary served view is built.
-/// This owns no store handle: proxies and rule states cannot enter era history.
+/// Apply the selected plane only after the ordinary served view is built.
+/// It takes no store handle on purpose: plane prices and rule states describe
+/// one login method today, so they must never be written into the stored
+/// history that point-in-time reads replay as what the upstream published.
 fn finish_plane_view(
     mut response: CatalogGetResponse,
     plane: Option<SelectedPlane>,
@@ -1050,7 +1052,8 @@ fn apply_billing_plane(
                 continue;
             };
             if obj.contains_key("inherited_from") {
-                // The first hop identifies whose rate this actually is.
+                // Already borrowed (inherited or aliased): keep the original
+                // marker, which names the row the price really comes from.
                 continue;
             }
             obj.insert("inherited_from".to_string(), marker.clone());
@@ -2847,9 +2850,10 @@ mod alias_tests {
     }
 }
 
-/// Billing claims are exercised through the real tool route and shipped table.
-/// Synthetic upstream rows keep each refusal and per-key gate independently
-/// observable without changing the ordinary golden store's model counts.
+/// Billing-plane reads, driven through the real tool route and the shipped
+/// planes file. These tests use their own synthetic upstream rows, so each
+/// refusal and each never-overwrite-a-published-price check can be seen on its
+/// own without adding models to the golden store, whose counts other tests pin.
 #[cfg(test)]
 mod billing_plane_tests {
     use super::*;
@@ -3380,8 +3384,9 @@ mod billing_plane_tests {
                 args["model_id"] = json!(model);
             }
             let mut response = get(&store, args).unwrap();
-            // Only the response clock and store version vary between runs; the
-            // remaining bytes are the old served contract, not a second render.
+            // The response clock and store version differ on every run, so pin
+            // them. Everything else must equal the bytes a read without a login
+            // method served before billing planes existed.
             response.resolved_at_ms = 1_000;
             response.catalog_version = 1;
             assert_eq!(
@@ -3426,9 +3431,9 @@ mod billing_plane_tests {
 
     #[test]
     fn every_rule_state_uses_class_tiers_and_exact_model_scopes() {
-        // These states and model scopes are supported by the loader but do not
-        // ship in the present file. Test their evaluation without inventing a
-        // plane in the tool route's compiled-in table.
+        // Rule states and exact-model scopes the loader accepts but no shipped
+        // plane uses yet. Test them on a cloned plane rather than adding an
+        // invented plane to the compiled-in file, which would then be served.
         let mut plane = billing_planes::planes()[&("openai".into(), "chatgpt".into())].clone();
         plane.rules = vec![
             billing_planes::BillingRule {
@@ -3468,8 +3473,9 @@ mod billing_plane_tests {
 
     #[test]
     fn billed_as_targets_are_resolved_before_any_rule_outputs() {
-        // The loader rejects overlapping chains. Even a constructed table must
-        // not turn a preceding rule's output into a supposedly published target.
+        // A billed-as rule points at a price the upstream published. The loader
+        // already refuses a rule pointing at another rule's output; this checks
+        // that evaluation also reads targets from published prices only.
         let mut plane = billing_planes::planes()[&("openai".into(), "chatgpt".into())].clone();
         let write = plane.rules[0].clone();
         plane.rules.insert(

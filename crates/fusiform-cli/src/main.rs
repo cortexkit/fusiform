@@ -4,8 +4,7 @@
 //!
 //! `ck` resolves an unknown domain by running `ck-<domain>` from PATH with the
 //! tail passed verbatim and the exit code propagated, so this binary needs no
-//! registration and `ck` needs no change. Confirmed with SUBC rather than
-//! inferred from reading their dispatcher.
+//! registration and `ck` needs no change.
 //!
 //! # Why this talks to the daemon instead of opening the database
 //!
@@ -766,8 +765,9 @@ fn render_billing_plane(response: &serde_json::Value) -> String {
 fn render_fact_value(value: &serde_json::Value) -> String {
     if value.get("state").and_then(|v| v.as_str()) == Some("billed_as") {
         if let Some(key) = value.get("key").and_then(|v| v.as_str()) {
-            // The pointer's suffix selects the same context tier on the target
-            // class. Keeping it prevents a tiered rule reading as a base rate.
+            // Keep any `.above_context.<size>` suffix: a tiered rule bills at
+            // the target's price for the same context size, and dropping the
+            // suffix would point at the target's cheaper base rate instead.
             return format!("billed as {}", key.strip_prefix("rate.").unwrap_or(key));
         }
     }
