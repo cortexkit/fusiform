@@ -7,7 +7,7 @@
 //!
 //! Nothing here touches the network. That is the point.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp, TokenClass};
@@ -31,13 +31,71 @@ fn fresh_store(dir: &tempfile::TempDir) -> CatalogStore {
     .unwrap()
 }
 
+struct SeededStore {
+    store: CatalogStore,
+    outcome: SeedOutcome,
+    dir: tempfile::TempDir,
+}
+
+/// Only read-only tests may borrow this store. Keeping its directory and live
+/// handle together retains the database and its writer lease for every reader.
+/// OnceLock requires the handle to be Send + Sync and seeds an empty store once,
+/// even when several test threads request it at the same time.
+fn shared_seed() -> &'static SeededStore {
+    static SEEDED: OnceLock<SeededStore> = OnceLock::new();
+    SEEDED.get_or_init(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let store = fresh_store(&dir);
+        let outcome = seed::seed_if_empty(&store).expect("seeding must succeed");
+        SeededStore {
+            store,
+            outcome,
+            dir,
+        }
+    })
+}
+
+/// A test that writes must own a separate database and lease. VACUUM INTO reads
+/// a consistent SQLite snapshot, including committed WAL frames that a raw file
+/// copy would lose. The template is never written after seeding.
+fn copied_seeded_store(dir: &tempfile::TempDir) -> CatalogStore {
+    let template = shared_seed();
+    let source = rusqlite::Connection::open_with_flags(
+        template.dir.path().join("store.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    source
+        .execute(
+            "VACUUM INTO ?1",
+            [dir.path().join("store.db").to_string_lossy().as_ref()],
+        )
+        .unwrap();
+    // Use the same migrated, lease-acquiring open path as an empty installation;
+    // the source's separate lease file is not part of the SQLite snapshot.
+    let store = fresh_store(dir);
+    assert_eq!(
+        store.era_count(SourceId::ModelsDev).unwrap(),
+        template.store.era_count(SourceId::ModelsDev).unwrap(),
+        "the copy must retain every seeded era"
+    );
+    assert_eq!(
+        store.catalog_version().unwrap(),
+        template.store.catalog_version().unwrap(),
+        "the copy must retain the snapshot's version"
+    );
+    store
+}
+
 /// A fresh install serves a real catalog with no network.
 #[test]
 fn a_fresh_install_with_no_network_answers_a_read() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = fresh_store(&dir);
+    let seeded = shared_seed();
+    let store = &seeded.store;
 
-    match seed::seed_if_empty(&store).expect("seeding must succeed") {
+    // This is the actual outcome of seeding the empty shared store, not an
+    // outcome reconstructed from a populated copy.
+    match seeded.outcome.clone() {
         SeedOutcome::Seeded {
             eras_written,
             model_count,
@@ -53,7 +111,7 @@ fn a_fresh_install_with_no_network_answers_a_read() {
     }
 
     // The read a consumer actually makes.
-    let response = match serve_tool_call(&store, br#"{"name": "catalog.get", "arguments": {}}"#)
+    let response = match serve_tool_call(store, br#"{"name": "catalog.get", "arguments": {}}"#)
         .expect("the catalog must be readable")
     {
         ToolResponse::Catalog(c) => c,
@@ -84,9 +142,7 @@ fn a_fresh_install_with_no_network_answers_a_read() {
 /// A fresh install reports Ok, and its health says why.
 #[test]
 fn a_fresh_install_reports_ok_with_an_honest_reason() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = fresh_store(&dir);
-    seed::seed_if_empty(&store).unwrap();
+    let store = &shared_seed().store;
 
     let signals = Arc::new(Signals::new());
     signals.store_opened();
@@ -152,9 +208,7 @@ fn seeding_twice_does_not_rewrite_history() {
 /// the installer, and would make a year-old snapshot report as fresh.
 #[test]
 fn the_seeded_observation_is_stamped_when_the_snapshot_was_fetched() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = fresh_store(&dir);
-    seed::seed_if_empty(&store).unwrap();
+    let store = &shared_seed().store;
 
     let meta = seed_mod::meta().unwrap();
     let recorded = store
@@ -182,9 +236,9 @@ fn the_seeded_observation_is_stamped_when_the_snapshot_was_fetched() {
 /// A first fetch that AGREES with the seed writes nothing.
 #[test]
 fn a_first_fetch_agreeing_with_the_snapshot_opens_no_era() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = fresh_store(&dir);
-    seed::seed_if_empty(&store).unwrap();
+    // This test only compares the poll's digests and reads the era count; it
+    // does not record a poll or append eras, so it can borrow the template.
+    let store = &shared_seed().store;
 
     let before = store.era_count(SourceId::ModelsDev).unwrap();
     let catalog = seed_mod::catalog().unwrap();
@@ -219,8 +273,7 @@ fn a_first_fetch_agreeing_with_the_snapshot_opens_no_era() {
 #[test]
 fn a_disagreeing_first_fetch_gets_an_observed_boundary() {
     let dir = tempfile::tempdir().unwrap();
-    let store = fresh_store(&dir);
-    seed::seed_if_empty(&store).unwrap();
+    let store = copied_seeded_store(&dir);
 
     let meta = seed_mod::meta().unwrap();
     let poll_at = meta.fetched_at_ms + 30 * 60 * 1_000;
