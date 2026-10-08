@@ -33,7 +33,7 @@
 //! ```text
 //! ck models status [--polls N]
 //! ck models get [--provider P] [--model M] [--at MS] [--rates|--capabilities]
-//!               [--include-retired]
+//!               [--include-retired] [--auth-method M]
 //! ck models history --provider P --model M --fact rate.input
 //! ck models correct --provider P --model M --field rate.input
 //!                   --from MS --until MS --reason docs/findings/... [--commit]
@@ -80,6 +80,8 @@ commands:
 options:
   --provider <id>           narrow to one provider
   --model <id>              narrow to one model (requires --provider)
+  --auth-method <method>    select a billing plane (get only; requires --provider)
+                            apikey, chatgpt, oauth, antigravity
   --fact <key>              which fact, for history
                             (rate.input, limit.context, existence, ...)
   --at <epoch-ms>           resolve the catalog at a past instant (get only:
@@ -211,6 +213,7 @@ fn disown_inherited_module_identity() {
 struct Args {
     command: String,
     provider: Option<String>,
+    auth_method: Option<String>,
     model: Option<String>,
     fact: Option<String>,
     at_ms: Option<i64>,
@@ -270,6 +273,21 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
         ));
     }
 
+    // A billing plane is scoped to a provider and only catalog.get can serve
+    // it. Dropping the flag elsewhere would make API prices look like the
+    // subscription view the operator asked for.
+    if args.auth_method.is_some() {
+        if args.command != "get" {
+            return Err(format!(
+                "--auth-method applies to `get` only; `{}` does not serve a billing plane.",
+                args.command
+            ));
+        }
+        if args.provider.is_none() {
+            return Err("--auth-method requires --provider".to_string());
+        }
+    }
+
     match args.command.as_str() {
         "status" => {
             let mut a = serde_json::Map::new();
@@ -285,6 +303,9 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
             let mut a = serde_json::Map::new();
             if let Some(p) = &args.provider {
                 a.insert("provider_id".into(), serde_json::json!(p));
+            }
+            if let Some(method) = &args.auth_method {
+                a.insert("auth_method".into(), serde_json::json!(method));
             }
             if let Some(m) = &args.model {
                 a.insert("model_id".into(), serde_json::json!(m));
@@ -640,6 +661,13 @@ fn print_catalog(response: &serde_json::Value) {
             .unwrap_or(-1)
     );
 
+    print!("{}", render_catalog_models(response, models));
+}
+
+fn render_catalog_models(
+    response: &serde_json::Value,
+    models: &serde_json::Map<String, serde_json::Value>,
+) -> String {
     // A single model prints its facts; a whole catalog prints one line each,
     // because 6,253 models times eleven facts is not something to read.
     //
@@ -652,18 +680,98 @@ fn print_catalog(response: &serde_json::Value) {
     // added to one path and not the other is missing rather than doubled, and
     // missing is the failure that shows up the first time someone looks.
     if models.len() == 1 {
-        print!("{}", render_single_model(response, models));
-        return;
+        return render_single_model(response, models);
     }
 
-    let mut out = String::from("\n");
+    let mut out = render_billing_plane(response);
+    out.push('\n');
     for identity in models.keys() {
         let _ = writeln!(out, "  {identity}");
     }
     out.push_str(&render_withheld(response));
     out.push_str(&render_uncertain(response));
     out.push_str(&render_overridden(response));
-    print!("{out}");
+    out
+}
+
+/// Disclose the billing claims beside the catalog they qualify, even when a
+/// bulk read only lists model identities. A quota proxy is not a billed price,
+/// and a rule's source is what lets an operator inspect that distinction.
+fn render_billing_plane(response: &serde_json::Value) -> String {
+    let mut out = String::new();
+    if let Some(plane) = response.get("plane").and_then(|v| v.as_object()) {
+        let _ = writeln!(
+            out,
+            "\nbilling plane: {}/{} ({})",
+            plane
+                .get("provider_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?"),
+            plane
+                .get("auth_method")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?"),
+            plane.get("kind").and_then(|v| v.as_str()).unwrap_or("?"),
+        );
+        if plane.get("kind").and_then(|v| v.as_str()) == Some("quota_proxy") {
+            out.push_str("  API rates are quota proxies, not amounts billed.\n");
+        }
+        // An undeclared API-key plane is the upstream itself and has no
+        // curated provenance. Do not invent a source or a review date for it.
+        if let Some(source) = plane.get("source_ref").and_then(|v| v.as_str()) {
+            let _ = writeln!(out, "  source {source}");
+        }
+        if let Some(review) = plane.get("review_by_ms").and_then(|v| v.as_i64()) {
+            let _ = writeln!(out, "  review by {}", format_instant(review));
+        }
+    }
+
+    if let Some(rules) = response.get("billing_rules").and_then(|v| v.as_array()) {
+        if !rules.is_empty() {
+            out.push_str("\nbilling rules:\n");
+        }
+        for rule in rules {
+            let fact = rule["fact_key"].as_str().unwrap_or("?");
+            let suffix = fact
+                .strip_prefix("rate.")
+                .and_then(|key| key.split_once('.'))
+                .map(|(_, suffix)| format!(".{suffix}"))
+                .unwrap_or_default();
+            let target = rule["as_class"]
+                .as_str()
+                .map(|class| format!("{class}{suffix}"));
+            let state = match rule["state"].as_str().unwrap_or("?") {
+                "billed_as" => format!("billed as {}", target.as_deref().unwrap_or("?")),
+                "stated_zero" => "stated zero".to_string(),
+                "not_established" => match target {
+                    Some(target) => format!("not established (would be billed as {target})"),
+                    None => "not established".to_string(),
+                },
+                other => other.to_string(),
+            };
+            let _ = writeln!(
+                out,
+                "  {}  {fact}  {state}\n      established by {} on {}, review by {}\n      source {}",
+                rule["model"].as_str().unwrap_or("?"),
+                rule["established_by"].as_str().unwrap_or("?"),
+                format_instant(rule["established_at_ms"].as_i64().unwrap_or(0)),
+                format_instant(rule["review_by_ms"].as_i64().unwrap_or(0)),
+                rule["source_ref"].as_str().unwrap_or("?"),
+            );
+        }
+    }
+    out
+}
+
+fn render_fact_value(value: &serde_json::Value) -> String {
+    if value.get("state").and_then(|v| v.as_str()) == Some("billed_as") {
+        if let Some(key) = value.get("key").and_then(|v| v.as_str()) {
+            // The pointer's suffix selects the same context tier on the target
+            // class. Keeping it prevents a tiered rule reading as a base rate.
+            return format!("billed as {}", key.strip_prefix("rate.").unwrap_or(key));
+        }
+    }
+    value.to_string()
 }
 
 /// Report facts whose served value differs from what the upstream published.
@@ -807,7 +915,7 @@ fn render_single_model(
     response: &serde_json::Value,
     models: &serde_json::Map<String, serde_json::Value>,
 ) -> String {
-    let mut out = String::new();
+    let mut out = render_billing_plane(response);
     for (identity, facts) in models {
         out.push_str(&format!("\n{identity}\n"));
         let facts: BTreeMap<_, _> = facts
@@ -815,6 +923,7 @@ fn render_single_model(
             .map(|o| o.iter().collect())
             .unwrap_or_default();
         for (key, value) in facts {
+            let value = render_fact_value(value);
             out.push_str(&format!("  {key:<34}  {value}\n"));
         }
     }
@@ -1310,6 +1419,7 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
     let mut args = Args {
         command,
         provider: None,
+        auth_method: None,
         model: None,
         fact: None,
         at_ms: None,
@@ -1335,6 +1445,7 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         };
         match flag.as_str() {
             "--provider" => args.provider = Some(value()?),
+            "--auth-method" => args.auth_method = Some(value()?),
             "--model" => args.model = Some(value()?),
             "--fact" => args.fact = Some(value()?),
             "--at" => {
@@ -2128,6 +2239,8 @@ mod tests {
     /// - `--include-retired` dropped silently hides models the upstream
     ///   stopped publishing, which is the difference between "retired" and
     ///   "never existed" — the distinction this whole store is built to keep.
+    /// - `--auth-method` dropped answers with API rates instead of the requested
+    ///   billing plane, so plausible numbers conceal the wrong billing claim.
     #[test]
     fn flags_that_fail_silently_reach_the_request() {
         let body = |argv: &[&str]| -> serde_json::Value {
@@ -2155,6 +2268,22 @@ mod tests {
             now.get("at_ms").is_none(),
             "without --at the field must be ABSENT, not zero: {now}"
         );
+
+        for method in ["apikey", "chatgpt", "oauth", "antigravity"] {
+            let plane = body(&["get", "--provider", "openai", "--auth-method", method]);
+            assert_eq!(
+                plane["auth_method"],
+                serde_json::json!(method),
+                "--auth-method must reach the request, not silently serve API rates"
+            );
+            assert_eq!(plane["provider_id"], "openai");
+        }
+        for current in [now, body(&["get", "--provider", "openai"])] {
+            assert!(
+                current.get("auth_method").is_none(),
+                "without --auth-method the field must be absent: {current}"
+            );
+        }
 
         // The plane filters must arrive, and must differ from each other.
         let rates = body(&["get", "--rates"]);
@@ -2210,6 +2339,49 @@ mod tests {
             request_for(&args).expect_err("this must be refused")
         };
 
+        assert!(
+            refused(&["get", "--auth-method", "chatgpt"])
+                .contains("--auth-method requires --provider"),
+            "a billing plane cannot be selected without its provider"
+        );
+        for command in [
+            "status",
+            "history",
+            "correct",
+            "plan-prices",
+            "mark-artifact",
+            "retract-artifact",
+        ] {
+            // Supply every verb's required fields so the refusal cannot pass
+            // merely because an unrelated argument is missing.
+            let mut argv = vec![
+                command,
+                "--provider",
+                "openai",
+                "--model",
+                "gpt-5.6-luna",
+                "--fact",
+                "rate.input",
+                "--field",
+                "rate.input",
+                "--from",
+                "1",
+                "--until",
+                "2",
+                "--reason",
+                "docs/findings/example.md",
+                "--observation",
+                "1",
+            ];
+            let _ = body(&argv);
+            argv.extend(["--auth-method", "chatgpt"]);
+            let msg = refused(&argv);
+            assert!(
+                msg.contains("--auth-method applies to `get` only"),
+                "{command} must refuse a billing plane rather than ignore it: {msg}"
+            );
+        }
+
         for argv in [
             vec![
                 "history",
@@ -2239,6 +2411,128 @@ mod tests {
             serde_json::json!(1_786_000_000_000i64),
             "control: get must still carry --at"
         );
+    }
+
+    #[test]
+    fn billed_as_rates_name_the_target_class_and_tier() {
+        let response = serde_json::json!({
+            "models": {"openai/gpt-5.6-luna": {
+                "rate.cache_write": {"state": "billed_as", "key": "rate.input"},
+                "rate.cache_write.above_context.272000": {
+                    "state": "billed_as", "key": "rate.input.above_context.272000"
+                },
+                "rate.input": {"state": "stated_zero", "reason": "explicit_zero"}
+            }}
+        });
+        let out = render_catalog_models(&response, response["models"].as_object().unwrap());
+        assert!(out.contains("billed as input\n"), "{out}");
+        assert!(
+            out.contains("billed as input.above_context.272000\n"),
+            "{out}"
+        );
+        assert!(!out.contains("\"billed_as\""), "{out}");
+        assert!(
+            out.contains("\"state\":\"stated_zero\""),
+            "other values retain their JSON: {out}"
+        );
+    }
+
+    #[test]
+    fn the_plane_and_each_rule_source_render_on_named_and_bulk_reads() {
+        let response = serde_json::json!({
+            "models": {"openai/gpt-5.6-luna": {"limit.context": 272000}},
+            "plane": {
+                "provider_id": "openai", "auth_method": "chatgpt", "kind": "quota_proxy",
+                "source_ref": "https://example.com/plane", "review_by_ms": 1_767_225_600_000_i64
+            },
+            "billing_rules": [{
+                "model": "openai/gpt-5.6-luna", "fact_key": "rate.cache_write",
+                "state": "billed_as", "as_class": "input", "source_ref": "https://example.com/base-rule",
+                "established_by": "base-reviewer", "established_at_ms": 1_735_689_600_000_i64,
+                "review_by_ms": 1_767_225_600_000_i64
+            }, {
+                "model": "openai/gpt-5.6-luna", "fact_key": "rate.cache_write.above_context.272000",
+                "state": "billed_as", "as_class": "input", "source_ref": "https://example.com/tier-rule",
+                "established_by": "tier-reviewer", "established_at_ms": 1_735_689_600_000_i64,
+                "review_by_ms": 1_767_225_600_000_i64
+            }, {
+                "model": "openai/gpt-image-1", "fact_key": "rate.cache_write",
+                "state": "not_established", "as_class": "input", "source_ref": "https://example.com/unknown-rule",
+                "established_by": "unknown-reviewer", "established_at_ms": 1_735_689_600_000_i64,
+                "review_by_ms": 1_767_225_600_000_i64
+            }, {
+                "model": "openai/gpt-image-1", "fact_key": "rate.reasoning",
+                "state": "stated_zero", "source_ref": "https://example.com/zero-rule",
+                "established_by": "zero-reviewer", "established_at_ms": 1_735_689_600_000_i64,
+                "review_by_ms": 1_767_225_600_000_i64
+            }]
+        });
+        for bulk in [false, true] {
+            let mut response = response.clone();
+            if bulk {
+                response["models"]["openai/gpt-image-1"] =
+                    serde_json::json!({"model.name": "GPT Image 1"});
+            } else {
+                response["billing_rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .truncate(2);
+            }
+            let out = render_catalog_models(&response, response["models"].as_object().unwrap());
+            for expected in [
+                "billing plane: openai/chatgpt (quota_proxy)",
+                "quota proxies, not amounts billed",
+                "source https://example.com/plane",
+                "review by 2026-01-01 00:00:00Z",
+                "openai/gpt-5.6-luna  rate.cache_write  billed as input\n",
+                "rate.cache_write.above_context.272000  billed as input.above_context.272000\n",
+                "source https://example.com/base-rule",
+                "source https://example.com/tier-rule",
+                "established by base-reviewer on 2025-01-01 00:00:00Z",
+                "established by tier-reviewer on 2025-01-01 00:00:00Z",
+            ] {
+                assert!(
+                    out.contains(expected),
+                    "bulk={bulk} must render {expected:?}: {out}"
+                );
+            }
+            if bulk {
+                for expected in [
+                    "rate.cache_write  not established (would be billed as input)",
+                    "rate.reasoning  stated zero",
+                    "source https://example.com/unknown-rule",
+                    "source https://example.com/zero-rule",
+                ] {
+                    assert!(out.contains(expected), "{out}");
+                }
+            }
+            assert_eq!(out.matches("billing plane:").count(), 1, "{out}");
+            assert_eq!(out.matches("billing rules:").count(), 1, "{out}");
+        }
+    }
+
+    #[test]
+    fn ordinary_reads_have_no_billing_block_and_upstream_planes_invent_no_source() {
+        let ordinary = serde_json::json!({
+            "models": {"openai/gpt-5.6-luna": {"limit.context": 272000}}
+        });
+        assert_eq!(render_billing_plane(&ordinary), "");
+        assert_eq!(
+            render_billing_plane(&serde_json::json!({"plane": null, "billing_rules": []})),
+            ""
+        );
+        let out = render_catalog_models(&ordinary, ordinary["models"].as_object().unwrap());
+        assert_eq!(
+            out,
+            "\nopenai/gpt-5.6-luna\n  limit.context                       272000\n"
+        );
+
+        let upstream = serde_json::json!({
+            "models": {},
+            "plane": {"provider_id": "openai", "auth_method": "apikey", "kind": "upstream"}
+        });
+        let out = render_catalog_models(&upstream, upstream["models"].as_object().unwrap());
+        assert_eq!(out, "\nbilling plane: openai/apikey (upstream)\n\n");
     }
 
     /// `--commit` and the wire's `dry_run` are OPPOSITE polarities, asserted
