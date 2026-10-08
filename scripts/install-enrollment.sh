@@ -64,7 +64,12 @@ assert d['entries'], 'an enrollment with no entries captures nothing'
 
 if [ -f "$target_file" ] && [ "$force" != "--force" ]; then
     if cmp -s "$source_file" "$target_file"; then
-        echo "already installed and identical: $target_file"
+        # Identical bytes say nothing about the modes. A descriptor placed by
+        # hand, or restored from a backup, can match the repository and still
+        # be world-readable, so the identical path tightens it too.
+        chmod 600 "$target_file"
+        chmod 700 "$target_dir"
+        echo "already installed and identical: $target_file (0600, dir 0700)"
         exit 0
     fi
     echo "error: installed descriptor differs from the repository's" >&2

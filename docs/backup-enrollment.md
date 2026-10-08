@@ -96,9 +96,11 @@ knows about. A descriptor that lives only in a data directory is one `rm -rf`
 away from silently un-enrolling a module, and the symptom is that backups keep
 reporting success while covering less.
 
-`the_repository_descriptor_is_valid` parses this file with engram's own
-`catalog::plan`, so a typo fails a test here rather than showing up as a
-`NotEnrolled` line an operator has to notice.
+`scripts/install-enrollment.sh` checks the schema version, the module id and
+that there is at least one entry before it installs anything. It does not run
+engram's own parser: fusiform no longer depends on engram, so a descriptor
+engram rejects shows up as an `Invalid` or `NotEnrolled` line in engram's
+fleet capture, not as a failing test here.
 
 ## Why these values
 
