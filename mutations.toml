@@ -592,3 +592,170 @@ only = false
 timeout_s = 600
 build_timeout_s = 1800
 
+
+[[control]]
+id = "plane-undeclared-subscription-never-falls-back"
+guards = "an undeclared non-apikey plane is refused before any API rows can be served"
+file = "crates/fusiform-module/src/route.rs"
+old = 'if declared.is_none() && auth_method != "apikey" {'
+new = "if false { // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::billing_plane_tests::undeclared_subscription_planes_never_fall_back_to_api_rows"]
+only = true
+timeout_s = 600
+build_timeout_s = 5400
+
+
+[[control]]
+id = "plane-upstream-never-overwrites-published-key"
+guards = "an upstream plane rule leaves every published price zero or tombstone exactly as published while filling missing tiers"
+file = "crates/fusiform-module/src/route.rs"
+old = "if plane.kind == PlaneKind::Upstream && before_rules.contains_key(&fact_key) {"
+new = "if false { // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::billing_plane_tests::upstream_rules_never_overwrite_a_published_key_but_fill_each_missing_tier"]
+only = true
+timeout_s = 600
+build_timeout_s = 5400
+
+
+[[control]]
+id = "plane-point-in-time-is-refused"
+guards = "a billing plane read carrying at_ms is refused before historical rows are read"
+file = "crates/fusiform-module/src/route.rs"
+old = "if request.at_ms.is_some() {"
+new = "if false { // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::billing_plane_tests::plane_views_refuse_every_point_in_time_read"]
+only = true
+timeout_s = 600
+build_timeout_s = 5400
+
+
+[[control]]
+id = "plane-quota-proxy-marker-is-set"
+guards = "every unmarked quota-proxy rate is marked with the real provider family and quota_proxy basis"
+file = "crates/fusiform-module/src/route.rs"
+old = """
+            obj.insert("inherited_from".to_string(), marker.clone());
+        }
+    }
+
+    // Targets and tier suffixes come from the pre-rule view."""
+new = """
+            let _ = &marker; // NON-VACUITY BREAK
+        }
+    }
+
+    // Targets and tier suffixes come from the pre-rule view."""
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::billing_plane_tests::quota_proxies_mark_each_unmarked_rate_with_its_real_family"]
+only = true
+timeout_s = 600
+build_timeout_s = 5400
+
+
+[[control]]
+id = "plane-already-marked-rate-keeps-first-hop"
+guards = "a quota proxy preserves the first hop already recorded on a borrowed rate"
+file = "crates/fusiform-module/src/route.rs"
+old = """
+if obj.contains_key("inherited_from") {
+                // The first hop identifies whose rate this actually is."""
+new = """
+if false { // NON-VACUITY BREAK
+                // The first hop identifies whose rate this actually is."""
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::billing_plane_tests::quota_proxies_preserve_the_first_hop_of_inherited_rates", "route::billing_plane_tests::quota_proxies_do_not_erase_alias_markers"]
+only = true
+timeout_s = 600
+build_timeout_s = 5400
+
+
+[[control]]
+id = "plane-quota-proxy-drops-mode-rates"
+guards = "quota-proxy planes drop mode rates rather than imply that an API mode is available on a subscription"
+file = "crates/fusiform-module/src/route.rs"
+old = "facts.retain(|key, _| !fusiform_store::rate_key::is_mode_rate(key));"
+new = "facts.retain(|_, _| true); // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::billing_plane_tests::quota_proxies_drop_all_mode_rates"]
+only = true
+timeout_s = 600
+build_timeout_s = 5400
+
+
+[[control]]
+id = "plane-absent-auth-method-keeps-wire-bytes"
+guards = "an absent auth_method leaves the pre-plane served bytes unchanged rather than selecting an implicit plane"
+file = "crates/fusiform-module/src/route.rs"
+old = "let Some(auth_method) = request.auth_method.as_deref() else {"
+new = 'let Some(auth_method) = request.auth_method.as_deref().or(Some("apikey")) else { // NON-VACUITY BREAK'
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::billing_plane_tests::a_read_without_auth_method_keeps_the_pre_plane_wire_bytes", "route::alias_tests::a_bulk_read_includes_the_alias", "route::alias_tests::a_point_in_time_read_never_aliases", "route::inheritance_tests::a_point_in_time_read_does_not_inherit"]
+only = true
+timeout_s = 600
+build_timeout_s = 5400
+
+
+[[control]]
+id = "stored-rate-never-carries-not-established"
+guards = "ingest never writes the serve-only not_established reason into an era including withdrawal tombstones"
+file = "crates/fusiform-store/src/ingest.rs"
+old = 'MissingRate => "missing_rate",'
+new = 'MissingRate => "not_established", // NON-VACUITY BREAK'
+edits = []
+test_file = "crates/fusiform-store/tests/it/ingest.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["ingest::a_withdrawn_rate_is_tombstoned_rather_than_left_current", "ingest::ingested_eras_never_carry_serve_only_billing_states", "serve::a_withdrawn_rate_does_not_stay_current"]
+only = true
+timeout_s = 600
+build_timeout_s = 5400
+
+
+[[control]]
+id = "stored-rate-never-carries-billed-as"
+guards = "ingest never replaces a published zero with a serve-only billed_as pointer in stored history"
+file = "crates/fusiform-store/src/ingest.rs"
+old = 'RateValue::StatedZero { inherited_from: _ } => r#"{"state":"stated_zero"}"#.to_string(),'
+new = 'RateValue::StatedZero { inherited_from: _ } => r#"{"state":"billed_as","key":"rate.input"}"#.to_string(), // NON-VACUITY BREAK'
+edits = []
+test_file = "crates/fusiform-store/tests/it/ingest.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["ingest::a_withdrawn_rate_is_tombstoned_rather_than_left_current", "ingest::ingested_eras_never_carry_serve_only_billing_states", "mode_rates::a_moded_model_stores_its_mode_rates_beside_its_base_rates"]
+only = true
+timeout_s = 600
+build_timeout_s = 5400
+

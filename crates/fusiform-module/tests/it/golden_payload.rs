@@ -125,7 +125,7 @@ const INHERITANCE_PAIR: &str = r#"{
 }"#;
 const GOLDEN: &str = include_str!("../../fixtures/served-payloads.json");
 
-/// The embedded models.dev seed, read only to cut ONE real row out of it.
+/// The embedded models.dev seed, read only to cut real rows out of it.
 const SEED: &str = include_str!("../../data/models-dev-seed.json");
 
 /// The target of the shipped alias the fixture pins.
@@ -171,6 +171,516 @@ fn merged_upstream() -> String {
         "the excerpt already carries the alias target; drop the splice"
     );
     serde_json::to_string(&doc).unwrap()
+}
+
+/// Keep plane-only provider splices out of the ordinary store: even an unused
+/// model changes the counts published by catalog.status.
+fn plane_store() -> (CatalogStore, tempfile::TempDir, Vec<(String, String)>) {
+    let mut doc: serde_json::Value = serde_json::from_str(&merged_upstream()).unwrap();
+    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    let mut cuts = Vec::new();
+    for (provider, id) in [
+        ("xai", "grok-4.20-0309-non-reasoning"),
+        ("deepseek", "deepseek-flash"),
+    ] {
+        // Pin the cut, rather than picking the first matching id: a seed update
+        // must not silently replace the tiered row this fixture exists to serve.
+        let row = &seed[provider]["models"][id];
+        assert!(row.is_object(), "the seed must carry {provider}/{id}");
+        assert!(
+            row["cost"]["input"].is_number(),
+            "{provider}/{id} must publish input"
+        );
+        assert!(
+            !row["cost"].to_string().contains("cache_write"),
+            "{provider}/{id} must not publish cache_write, including tiers"
+        );
+        let mut cut = seed[provider].clone();
+        cut["models"] = serde_json::json!({id: row});
+        assert!(
+            doc.as_object_mut()
+                .unwrap()
+                .insert(provider.into(), cut)
+                .is_none(),
+            "the excerpt already carries {provider}; drop the splice"
+        );
+        // A splice must never replace the row the ordinary alias fixture pins.
+        assert_ne!((provider, id), ALIAS_TARGET);
+        cuts.push((provider.to_string(), id.to_string()));
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().to_string(),
+        },
+    })
+    .unwrap();
+    let catalog = normalize_models_dev(serde_json::to_string(&doc).unwrap().as_bytes())
+        .unwrap()
+        .catalog;
+    let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
+    store.append_eras(&plan.eras).unwrap();
+    (store, dir, cuts)
+}
+
+/// Both dispatch paths must apply a plane before filtering. Bulk cases carry
+/// every provider row, not an artificial one-model store that hides neighbours.
+fn plane_cases(cuts: &[(String, String)]) -> Vec<(String, serde_json::Value)> {
+    let mut cases = Vec::new();
+    for (filter, prefixes) in [
+        ("unfiltered", None),
+        ("rates", Some(vec!["rate."])),
+        ("cache-write", Some(vec!["rate.cache_write"])),
+        ("capabilities", Some(vec!["capability."])),
+    ] {
+        for path in ["named", "bulk"] {
+            let mut args = serde_json::json!({"provider_id":"openai", "auth_method":"chatgpt"});
+            if path == "named" {
+                args["model_id"] = "gpt-5.6-luna".into();
+            }
+            if let Some(ref prefixes) = prefixes {
+                args["fact_prefixes"] = serde_json::json!(prefixes);
+            }
+            cases.push((format!("chatgpt luna — {path}, {filter}"), args));
+        }
+    }
+    cases.push((
+        "chatgpt image — missing input target".into(),
+        serde_json::json!({
+            "provider_id":"openai", "model_id":"gpt-image-1", "auth_method":"chatgpt"
+        }),
+    ));
+    cases.push((
+        "apikey luna — published cache-write".into(),
+        serde_json::json!({
+            "provider_id":"openai", "model_id":"gpt-5.6-luna", "auth_method":"apikey"
+        }),
+    ));
+    for (provider, id) in cuts {
+        cases.push((
+            format!("apikey {provider} — cache-write fill"),
+            serde_json::json!({
+                "provider_id":provider, "model_id":id, "auth_method":"apikey"
+            }),
+        ));
+    }
+    cases.push((
+        "oauth anthropic — quota weights".into(),
+        serde_json::json!({
+            "provider_id":"anthropic", "auth_method":"oauth"
+        }),
+    ));
+    for (label, args) in [
+        (
+            "refused — undeclared openai oauth",
+            serde_json::json!({"provider_id":"openai", "auth_method":"oauth"}),
+        ),
+        (
+            "refused — undeclared google antigravity",
+            serde_json::json!({"provider_id":"google", "auth_method":"antigravity"}),
+        ),
+        (
+            "refused — unknown auth",
+            serde_json::json!({"provider_id":"openai", "auth_method":"bogus"}),
+        ),
+        (
+            "refused — missing provider",
+            serde_json::json!({"auth_method":"chatgpt"}),
+        ),
+        (
+            "refused — historical plane",
+            serde_json::json!({"provider_id":"openai", "auth_method":"chatgpt", "at_ms":1000}),
+        ),
+    ] {
+        cases.push((label.into(), args));
+    }
+    cases
+}
+
+fn render_planes() -> String {
+    let (store, _dir, cuts) = plane_store();
+    let mut doc = serde_json::Map::new();
+    for (label, args) in plane_cases(&cuts) {
+        let request = serde_json::json!({"name":"catalog.get", "arguments":args});
+        let body = serde_json::to_vec(&request).unwrap();
+        let payload = match serve_tool_call(&store, &body) {
+            Ok(response) => {
+                assert!(
+                    !label.starts_with("refused"),
+                    "{label} unexpectedly served rows"
+                );
+                let mut value = serde_json::to_value(response).unwrap();
+                value["resolved_at_ms"] = NOW_PLACEHOLDER.into();
+                serde_json::json!({"request":request, "response":value})
+            }
+            Err(error) => {
+                assert!(
+                    label.starts_with("refused"),
+                    "{label} must serve: {error:?}"
+                );
+                serde_json::json!({"request":request, "error":{"code":error.code, "message":error.message}})
+            }
+        };
+        doc.insert(label, payload);
+    }
+    let mut text = serde_json::to_string_pretty(&doc).unwrap();
+    text.push('\n');
+    text
+}
+
+/// Consumers pin one document, while the two producers retain isolated stores.
+fn render_all() -> String {
+    let mut ordinary: serde_json::Value = serde_json::from_str(&render()).unwrap();
+    let planes: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
+    for (label, case) in planes.as_object().unwrap() {
+        assert!(
+            ordinary
+                .as_object_mut()
+                .unwrap()
+                .insert(label.clone(), case.clone())
+                .is_none(),
+            "plane labels must not replace an ordinary golden case: {label}"
+        );
+    }
+    let mut text = serde_json::to_string_pretty(&ordinary).unwrap();
+    text.push('\n');
+    text
+}
+
+fn non_plane_leaks(doc: &serde_json::Value) -> (usize, Vec<String>) {
+    let mut checked = 0;
+    let mut leaks = Vec::new();
+    for (label, case) in doc.as_object().expect("golden cases are an object") {
+        if case["request"]["arguments"].get("auth_method").is_some() {
+            continue;
+        }
+        checked += 1;
+        let response = &case["response"];
+        let mut keys = std::collections::BTreeSet::new();
+        collect_keys(response, &mut keys);
+        let bytes = response.to_string();
+        for forbidden in ["plane", "billing_rules"] {
+            if keys.contains(forbidden) {
+                leaks.push(format!("{label}: {forbidden}"));
+            }
+        }
+        for forbidden in [r#""state":"billed_as""#, "not_established", "quota_proxy"] {
+            if bytes.contains(forbidden) {
+                leaks.push(format!("{label}: {forbidden}"));
+            }
+        }
+    }
+    (checked, leaks)
+}
+
+#[test]
+fn every_non_plane_golden_case_has_no_plane_bytes() {
+    // Check both saved bytes and live responses. A saved-only scan cannot see
+    // plane logic accidentally applied to ordinary reads before regeneration.
+    for text in [GOLDEN.to_string(), render()] {
+        let doc = serde_json::from_str(&text).unwrap();
+        let (checked, leaks) = non_plane_leaks(&doc);
+        assert_eq!(checked, cases().len());
+        assert!(
+            leaks.is_empty(),
+            "non-plane payload leaked plane-only bytes: {leaks:?}"
+        );
+    }
+}
+
+#[test]
+fn planted_plane_bytes_in_an_ordinary_case_are_reported() {
+    for response in [
+        serde_json::json!({"plane":null}),
+        serde_json::json!({"billing_rules":[]}),
+        serde_json::json!({"rate":{"state":"billed_as", "key":"rate.input"}}),
+        serde_json::json!({"rate":{"state":"unpriced", "reason":"not_established"}}),
+        serde_json::json!({"rate":{"inherited_from":{"basis":"quota_proxy"}}}),
+    ] {
+        let doc = serde_json::json!({"ordinary":{"request":{"arguments":{}}, "response":response}});
+        let (checked, leaks) = non_plane_leaks(&doc);
+        assert_eq!(checked, 1);
+        assert_eq!(
+            leaks.len(),
+            1,
+            "the scan must catch each forbidden shape independently"
+        );
+    }
+}
+
+fn assert_rule(response: &serde_json::Value, model: &str, key: &str, state: &str, source: &str) {
+    let rules = response["billing_rules"]
+        .as_array()
+        .expect("rules are disclosed");
+    let matching: Vec<_> = rules
+        .iter()
+        .filter(|rule| rule["model"] == model && rule["fact_key"] == key)
+        .collect();
+    assert_eq!(
+        matching.len(),
+        1,
+        "exactly one disclosure for {model}/{key}"
+    );
+    assert_eq!(
+        *matching[0],
+        serde_json::json!({
+            "model":model, "fact_key":key, "state":state, "as_class":"input",
+            "source_ref":source, "established_by":"fusiform",
+            "established_at_ms":1791331200000_i64, "review_by_ms":1796515200000_i64
+        })
+    );
+}
+
+#[test]
+fn chatgpt_named_and_bulk_cases_apply_the_plane_before_each_filter() {
+    let doc: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
+    let source = "https://help.openai.com/en/articles/20001106";
+    for path in ["named", "bulk"] {
+        for filter in ["unfiltered", "rates", "cache-write", "capabilities"] {
+            let label = format!("chatgpt luna — {path}, {filter}");
+            let response = &doc[&label]["response"];
+            assert_eq!(
+                response["plane"],
+                serde_json::json!({
+                    "provider_id":"openai", "auth_method":"chatgpt", "kind":"quota_proxy",
+                    "source_ref":source, "review_by_ms":1796515200000_i64
+                }),
+                "{label}"
+            );
+            let models = response["models"].as_object().unwrap();
+            assert_eq!(models.len(), if path == "named" { 1 } else { 2 });
+            let row = models["openai/gpt-5.6-luna"].as_object().unwrap();
+            assert!(!row.is_empty(), "{label} must serve the requested plane");
+            assert!(!row.keys().any(|key| key.contains(".mode.")), "{label}");
+            if filter == "capabilities" {
+                assert!(
+                    row.keys().all(|key| key.starts_with("capability.")),
+                    "{label}"
+                );
+                assert!(
+                    !response.as_object().unwrap().contains_key("billing_rules"),
+                    "{label}"
+                );
+                continue;
+            }
+            if filter == "rates" {
+                assert!(row.keys().all(|key| key.starts_with("rate.")), "{label}");
+            }
+            if filter == "cache-write" {
+                assert!(
+                    row.keys().all(|key| key.starts_with("rate.cache_write")),
+                    "{label}"
+                );
+            }
+            for suffix in ["", ".above_context.272000"] {
+                let key = format!("rate.cache_write{suffix}");
+                assert_eq!(
+                    row[&key],
+                    serde_json::json!({"state":"billed_as", "key":format!("rate.input{suffix}")}),
+                    "{label}"
+                );
+                assert_rule(response, "openai/gpt-5.6-luna", &key, "billed_as", source);
+                if filter != "cache-write" {
+                    for class in ["input", "cache_read", "output"] {
+                        let rate = &row[&format!("rate.{class}{suffix}")];
+                        assert_eq!(rate["state"], "priced", "{label}");
+                        assert_eq!(
+                            rate["inherited_from"],
+                            serde_json::json!({
+                                "provider_id":"openai", "family":"gpt-luna", "basis":"quota_proxy"
+                            }),
+                            "{label}: a rate-only filter must retain the real family"
+                        );
+                    }
+                }
+            }
+            let rate_count = row.keys().filter(|key| key.starts_with("rate.")).count();
+            assert_eq!(
+                rate_count,
+                if filter == "cache-write" { 2 } else { 8 },
+                "{label}"
+            );
+            let rules = response["billing_rules"].as_array().unwrap();
+            assert_eq!(rules.len(), if path == "named" { 2 } else { 3 });
+            for rule in rules {
+                let served = &models[rule["model"].as_str().unwrap()];
+                assert!(
+                    served.get(rule["fact_key"].as_str().unwrap()).is_some(),
+                    "a narrowed-away fact must not disclose a rule: {label}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn plane_cases_pin_missing_targets_published_api_prices_and_upstream_fills() {
+    let doc: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
+    let response = &doc["chatgpt image — missing input target"]["response"];
+    assert_eq!(
+        response["models"]["openai/gpt-image-1"]["rate.cache_write"],
+        serde_json::json!({"state":"unpriced", "reason":"not_established"})
+    );
+    assert_eq!(response["billing_rules"].as_array().unwrap().len(), 1);
+    assert_rule(
+        response,
+        "openai/gpt-image-1",
+        "rate.cache_write",
+        "not_established",
+        "https://help.openai.com/en/articles/20001106",
+    );
+
+    let response = &doc["apikey luna — published cache-write"]["response"];
+    assert_eq!(
+        response["plane"],
+        serde_json::json!({"provider_id":"openai", "auth_method":"apikey", "kind":"upstream"})
+    );
+    assert!(response.get("billing_rules").is_none());
+    let row = response["models"]["openai/gpt-5.6-luna"]
+        .as_object()
+        .unwrap();
+    for (key, units) in [
+        ("rate.cache_write", 250000000),
+        ("rate.cache_write.above_context.272000", 500000000),
+    ] {
+        assert_eq!(row[key]["state"], "priced");
+        assert_eq!(row[key]["units"], units);
+    }
+    assert!(
+        row.keys().any(|key| key.contains(".mode.")),
+        "API mode prices stay served"
+    );
+    for (key, value) in row.iter().filter(|(key, _)| key.starts_with("rate.")) {
+        assert!(
+            value.get("inherited_from").is_none(),
+            "API rate must not be marked: {key}"
+        );
+    }
+
+    for (provider, source) in [
+        (
+            "xai",
+            "https://docs.x.ai/developers/advanced-api-usage/prompt-caching/usage-and-pricing",
+        ),
+        (
+            "deepseek",
+            "https://api-docs.deepseek.com/api/create-chat-completion",
+        ),
+    ] {
+        let response = &doc[format!("apikey {provider} — cache-write fill")]["response"];
+        assert_eq!(
+            response["plane"],
+            serde_json::json!({
+                "provider_id":provider, "auth_method":"apikey", "kind":"upstream",
+                "source_ref":source, "review_by_ms":1796515200000_i64
+            })
+        );
+        let models = response["models"].as_object().unwrap();
+        assert_eq!(models.len(), 1);
+        let (model, row) = models.iter().next().unwrap();
+        let row = row.as_object().unwrap();
+        let inputs: Vec<_> = row
+            .keys()
+            .filter(|key| *key == "rate.input" || key.starts_with("rate.input.above_context."))
+            .collect();
+        assert!(
+            !inputs.is_empty(),
+            "the fill must have a published input target"
+        );
+        // The real xAI cut publishes a tier; DeepSeek's cut publishes only a
+        // base price. Requiring the measured counts keeps the suffix assertion
+        // from becoming vacuous if a future cut loses its tier.
+        assert_eq!(inputs.len(), if provider == "xai" { 2 } else { 1 });
+        assert_eq!(
+            response["billing_rules"].as_array().unwrap().len(),
+            inputs.len()
+        );
+        for input in inputs {
+            let key = input.replacen("rate.input", "rate.cache_write", 1);
+            assert_eq!(
+                row[&key],
+                serde_json::json!({"state":"billed_as", "key":input})
+            );
+            assert_rule(response, model, &key, "billed_as", source);
+        }
+    }
+}
+
+#[test]
+fn anthropic_oauth_marks_every_served_rate_and_drops_modes() {
+    let doc: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
+    let response = &doc["oauth anthropic — quota weights"]["response"];
+    assert_eq!(
+        response["plane"],
+        serde_json::json!({
+            "provider_id":"anthropic", "auth_method":"oauth", "kind":"quota_proxy",
+            "source_ref":"https://support.anthropic.com/en/articles/9797557", "review_by_ms":1796515200000_i64
+        })
+    );
+    assert!(response.get("billing_rules").is_none());
+    let mut rates = 0;
+    for row in response["models"].as_object().unwrap().values() {
+        for (key, value) in row
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter(|(key, _)| key.starts_with("rate."))
+        {
+            rates += 1;
+            assert!(!key.contains(".mode."));
+            assert_eq!(value["inherited_from"]["basis"], "quota_proxy");
+        }
+    }
+    assert!(rates > 0, "oauth must serve real quota weights");
+}
+
+#[test]
+fn plane_refusal_cases_never_fall_back_to_api_rows() {
+    let doc: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
+    for (label, code, needles) in [
+        (
+            "refused — undeclared openai oauth",
+            "no_coverage",
+            vec!["openai", "oauth"],
+        ),
+        (
+            "refused — undeclared google antigravity",
+            "no_coverage",
+            vec!["google", "antigravity"],
+        ),
+        (
+            "refused — unknown auth",
+            "bad_request",
+            vec!["bogus", "apikey", "chatgpt", "oauth", "antigravity"],
+        ),
+        (
+            "refused — missing provider",
+            "bad_request",
+            vec!["provider_id"],
+        ),
+        (
+            "refused — historical plane",
+            "no_coverage",
+            vec!["current-only", "at_ms"],
+        ),
+    ] {
+        let case = &doc[label];
+        assert!(
+            case.get("response").is_none(),
+            "{label} must not serve rows"
+        );
+        assert_eq!(case["error"]["code"], code, "{label}");
+        let message = case["error"]["message"].as_str().unwrap();
+        for needle in needles {
+            assert!(
+                message.contains(needle),
+                "{label}: {message} must name {needle}"
+            );
+        }
+    }
 }
 
 /// A store whose contents are fixed, so the payload is reproducible.
@@ -695,7 +1205,7 @@ fn a_current_read_resolves_to_an_instant_near_now() {
 /// The served payloads have not changed.
 #[test]
 fn the_served_payloads_match_the_golden_fixture() {
-    let rendered = render();
+    let rendered = render_all();
 
     if std::env::var("UPDATE_GOLDEN").is_ok() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/served-payloads.json");
@@ -758,6 +1268,12 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
         // A curated alias and the marker on a price borrowed through it.
         r#""aliased""#,
         r#""basis": "alias""#,
+        // Current-only plane variants and both provenance disclosures.
+        r#""plane""#,
+        r#""billing_rules""#,
+        r#""state": "billed_as""#,
+        r#""reason": "not_established""#,
+        r#""basis": "quota_proxy""#,
     ] {
         assert!(
             GOLDEN.contains(needle),
@@ -835,6 +1351,8 @@ fn every_read_response_field_reaches_the_fixture() {
         &present,
         &[
             "CatalogGetResponse",
+            "PlaneWire",
+            "BillingRuleWire",
             "HistoryResponse",
             "StatusResponse",
             "PlanPricesResponse",
@@ -842,10 +1360,9 @@ fn every_read_response_field_reaches_the_fixture() {
     );
 
     assert!(
-        checked >= 25,
-        "this examined {checked} fields across four structs; they carried 29 \
-         when this was written, so a collapse means the scan broke rather than \
-         the protocol shrinking"
+        checked >= 40,
+        "this examined {checked} fields across six structs; fewer than 40 means \
+         the scan broke rather than the protocol shrinking"
     );
 
     assert!(

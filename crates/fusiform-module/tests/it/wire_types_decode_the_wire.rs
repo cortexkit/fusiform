@@ -21,9 +21,121 @@
 //! So this fence is the missing comparison: take the fixture the producer
 //! generates, and decode it with the types a consumer compiles against.
 
-use fusiform_protocol::money::{Floor, RateValue};
+use fusiform_protocol::money::{Floor, RateValue, UnpricedReason};
+use fusiform_protocol::CatalogGetResponse;
 
 const SERVED: &str = include_str!("../../fixtures/served-payloads.json");
+
+/// Serve-only states and disclosures are minted by route::serve_tool_call,
+/// specifically finish_plane_view/apply_billing_plane in route.rs, not by
+/// fusiform-store's json_rate: writing these states into history is forbidden.
+#[test]
+fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
+    let fixture: serde_json::Value = serde_json::from_str(SERVED).unwrap();
+    let mut responses = 0;
+    let mut billed_base = 0;
+    let mut billed_tier = 0;
+    let mut not_established = 0;
+    let mut proxy = 0;
+    let mut disclosed = 0;
+    for (label, case) in fixture.as_object().unwrap() {
+        if case["request"]["arguments"].get("auth_method").is_none() {
+            continue;
+        }
+        let Some(raw) = case.get("response") else {
+            continue;
+        };
+        let decoded: CatalogGetResponse = serde_json::from_value(raw.clone())
+            .unwrap_or_else(|e| panic!("{label}: served catalog response must decode: {e}"));
+        responses += 1;
+        let plane = decoded
+            .plane
+            .as_ref()
+            .expect("a plane request must decode its plane");
+        assert_eq!(
+            serde_json::to_value(plane).unwrap(),
+            raw["plane"],
+            "{label}"
+        );
+        if let Some(rules) = raw.get("billing_rules") {
+            disclosed += decoded.billing_rules.len();
+            assert_eq!(
+                serde_json::to_value(&decoded.billing_rules).unwrap(),
+                *rules,
+                "{label}"
+            );
+        } else {
+            assert!(decoded.billing_rules.is_empty(), "{label}");
+        }
+        for row in decoded.models.values() {
+            for (key, value) in row.iter().filter(|(key, _)| key.starts_with("rate.")) {
+                let rate: RateValue = serde_json::from_value(value.clone())
+                    .unwrap_or_else(|e| panic!("{label}/{key}: served rate must decode: {e}"));
+                match &rate {
+                    RateValue::BilledAs { key: target } => {
+                        assert_eq!(target, value["key"].as_str().unwrap());
+                        if key.contains(".above_context.") {
+                            billed_tier += 1;
+                        } else {
+                            billed_base += 1;
+                        }
+                        assert_eq!(
+                            serde_json::to_value(&rate).unwrap(),
+                            *value,
+                            "{label}/{key}"
+                        );
+                    }
+                    RateValue::Unpriced {
+                        reason: UnpricedReason::NotEstablished,
+                        inherited_from,
+                    } => {
+                        not_established += 1;
+                        assert!(inherited_from.is_none());
+                        assert_eq!(
+                            serde_json::to_value(&rate).unwrap(),
+                            *value,
+                            "{label}/{key}"
+                        );
+                    }
+                    RateValue::Priced { inherited_from, .. }
+                    | RateValue::StatedZero { inherited_from }
+                    | RateValue::Unpriced { inherited_from, .. } => {
+                        if value["inherited_from"]["basis"] == "quota_proxy" {
+                            proxy += 1;
+                            let marker = inherited_from
+                                .as_ref()
+                                .expect("the proxy marker must decode");
+                            assert_eq!(marker.basis, "quota_proxy");
+                            assert_eq!(
+                                serde_json::to_value(marker).unwrap(),
+                                value["inherited_from"]
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(responses, 13, "every successful plane case must decode");
+    assert!(
+        billed_base > 0 && billed_tier > 0 && not_established > 0 && proxy > 0 && disclosed > 0,
+        "the fixture must exercise base/tier pointers, unknown targets, proxy markers and rules"
+    );
+}
+
+#[test]
+fn an_unchanged_non_plane_fixture_decodes_with_absent_plane_and_empty_rules() {
+    let fixture: serde_json::Value = serde_json::from_str(SERVED).unwrap();
+    let raw = &fixture["catalog.get — one model, current"]["response"];
+    assert!(raw.get("plane").is_none() && raw.get("billing_rules").is_none());
+    let decoded: CatalogGetResponse = serde_json::from_value(raw.clone()).unwrap();
+    assert!(decoded.plane.is_none());
+    assert!(decoded.billing_rules.is_empty());
+    assert!(
+        !decoded.models.is_empty(),
+        "the legacy decode must reach a real response"
+    );
+}
 
 /// Every priced rate in the served fixture decodes with the protocol type.
 ///
@@ -159,8 +271,9 @@ fn collect_priced<'a>(node: &'a serde_json::Value, out: &mut Vec<&'a serde_json:
 /// runtime list would simply not mention it.
 #[test]
 fn every_variant_the_producer_writes_decodes() {
-    // Verbatim from `json_rate` in fusiform-store/src/ingest.rs, which is the
-    // authority for what reaches the store and therefore the wire.
+    // Stored literals come from json_rate in fusiform-store/src/ingest.rs.
+    // billed_as and not_established instead come from the real serve path:
+    // route::serve_tool_call -> finish_plane_view -> apply_billing_plane.
     let cases: &[(&str, &str)] = &[
         ("stated_zero", r#"{"state":"stated_zero"}"#),
         (
@@ -174,6 +287,11 @@ fn every_variant_the_producer_writes_decodes() {
         (
             "unpriced/unknown_charge_basis",
             r#"{"state":"unpriced","reason":"unknown_charge_basis"}"#,
+        ),
+        ("billed_as", r#"{"state":"billed_as","key":"rate.input"}"#),
+        (
+            "unpriced/not_established",
+            r#"{"state":"unpriced","reason":"not_established"}"#,
         ),
     ];
 
@@ -205,12 +323,18 @@ fn every_variant_the_producer_writes_decodes() {
             .iter()
             .filter(|p| decoded_state(p) == state && decoded_reason(p) == decoded_reason(served))
             .collect();
+        if *label == "billed_as" || *label == "unpriced/not_established" {
+            assert!(
+                !same_kind.is_empty(),
+                "{label} must be emitted by the real serve path"
+            );
+        }
         if !same_kind.is_empty() {
             assert!(
                 same_kind.iter().any(|p| p.as_str() == literal),
                 "{label}: this literal is not what the producer writes.\n  \
                  literal:  {served}\n  fixture:  {:?}\n\
-                 Either json_rate changed and this literal is stale, or the \
+                  Either the producer changed and this literal is stale, or the \
                  literal was wrong from the start — and a stale literal keeps \
                  this fence green while testing bytes nobody serves.",
                 same_kind
@@ -224,9 +348,7 @@ fn every_variant_the_producer_writes_decodes() {
             RateValue::Priced { .. } => {
                 panic!("{label} decoded as Priced, which would silently price a rate that is not")
             }
-            RateValue::BilledAs { .. } => {
-                panic!("a read without auth_method must never carry billed_as: {label}")
-            }
+            RateValue::BilledAs { .. } => assert_eq!(*label, "billed_as"),
         }
     }
 
@@ -383,10 +505,10 @@ fn decoded_state(served: &str) -> String {
 fn collect_rate_shapes(value: &serde_json::Value, out: &mut Vec<String>) {
     match value {
         serde_json::Value::Object(map) => {
-            // A rate object is the one carrying `state`. Serialised with the
-            // same compact form the literals use so the comparison is on
-            // content rather than on whitespace.
-            if map.contains_key("state") {
+            // Rule disclosures have state too, but their fact_key identifies
+            // them as claims about rates, not RateValue bytes. Keep walking
+            // other objects so history's era values are still included.
+            if map.contains_key("state") && !map.contains_key("fact_key") {
                 out.push(canonical(value));
             }
             for v in map.values() {
@@ -400,6 +522,24 @@ fn collect_rate_shapes(value: &serde_json::Value, out: &mut Vec<String>) {
         }
         _ => {}
     }
+}
+
+#[test]
+fn rate_shape_collection_keeps_history_values_but_not_rule_disclosures() {
+    let doc = serde_json::json!({
+        "models":{"openai/example":{"rate.cache_write":{"state":"billed_as", "key":"rate.input"}}},
+        "eras":[{"value":{"state":"unpriced", "reason":"not_established"}}],
+        "billing_rules":[{"model":"openai/example", "fact_key":"rate.cache_write", "state":"billed_as", "as_class":"input"}]
+    });
+    let mut shapes = Vec::new();
+    collect_rate_shapes(&doc, &mut shapes);
+    assert_eq!(shapes.len(), 2);
+    assert!(shapes.contains(&canonical_str(
+        r#"{"state":"billed_as","key":"rate.input"}"#
+    )));
+    assert!(shapes.contains(&canonical_str(
+        r#"{"state":"unpriced","reason":"not_established"}"#
+    )));
 }
 
 /// A rate object serialised with its keys SORTED.
@@ -461,6 +601,27 @@ fn the_fixture_carries_every_rate_state() {
     let doc: serde_json::Value = serde_json::from_str(SERVED).expect("the fixture parses");
     let mut shapes: Vec<String> = Vec::new();
     collect_rate_shapes(&doc, &mut shapes);
+    // Ordinary reads must never produce the serve-only pointer. Keep their
+    // exhaustive match separate so new plane coverage cannot hide a leak into
+    // the legacy wire contract.
+    let mut non_plane_shapes = Vec::new();
+    for case in doc.as_object().unwrap().values() {
+        if case["request"]["arguments"].get("auth_method").is_none() {
+            collect_rate_shapes(&case["response"], &mut non_plane_shapes);
+        }
+    }
+    assert!(!non_plane_shapes.is_empty());
+    for shape in &non_plane_shapes {
+        match serde_json::from_str::<RateValue>(shape) {
+            Ok(RateValue::BilledAs { .. }) => panic!("never on a read without auth_method"),
+            Ok(
+                RateValue::Priced { .. }
+                | RateValue::StatedZero { .. }
+                | RateValue::Unpriced { .. },
+            )
+            | Err(_) => {}
+        }
+    }
     assert!(
         !shapes.is_empty(),
         "no served rates found at all, so every assertion below would pass \
@@ -470,14 +631,13 @@ fn the_fixture_carries_every_rate_state() {
     let mut seen_priced = false;
     let mut seen_stated_zero = false;
     let mut seen_unpriced = false;
+    let mut seen_billed_as = false;
     for shape in &shapes {
         match serde_json::from_str::<RateValue>(shape) {
             Ok(RateValue::Priced { .. }) => seen_priced = true,
             Ok(RateValue::StatedZero { .. }) => seen_stated_zero = true,
             Ok(RateValue::Unpriced { .. }) => seen_unpriced = true,
-            Ok(RateValue::BilledAs { .. }) => {
-                panic!("a read without auth_method must never carry billed_as: {shape}")
-            }
+            Ok(RateValue::BilledAs { .. }) => seen_billed_as = true,
             // A served rate that does not decode is the flatten defect, and the
             // fence above this one is what reports it. Ignored here so this test
             // answers its own question rather than two.
@@ -489,6 +649,7 @@ fn the_fixture_carries_every_rate_state() {
         ("priced", seen_priced),
         ("stated_zero", seen_stated_zero),
         ("unpriced", seen_unpriced),
+        ("billed_as", seen_billed_as),
     ]
     .iter()
     .filter(|(_, seen)| !seen)
