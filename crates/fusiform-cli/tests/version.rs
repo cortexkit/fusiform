@@ -72,11 +72,14 @@ fn bounded_output(command: &mut Command, budget: Duration, label: &str) -> Outpu
     }
 }
 
+/// Where cargo put the binary `name` for this test profile, with the platform's
+/// executable suffix (`.exe` on Windows, where a bare name finds nothing and
+/// the probe below would skip both binaries).
 fn binary(name: &str) -> std::path::PathBuf {
     let mut path = std::env::current_exe().expect("test binary path");
     path.pop(); // deps/
     path.pop(); // profile dir
-    path.push(name);
+    path.push(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     path
 }
 
