@@ -17,8 +17,9 @@
 //! wrong, never a default read. A consumer that asked for the catalog at an
 //! instant and received the current catalog would have no way to notice.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use crate::billing_planes::{self, Plane, PlaneKind, RuleState};
 use crate::overlay;
 use fusiform_core::{FieldId, SourceId, Timestamp};
 use fusiform_store::correct::{apply_correction, plan_correction};
@@ -31,13 +32,13 @@ use serde::Deserialize;
 // here because this file is where the contract is USED, and a reader following
 // a route should not have to know which crate the type is declared in.
 pub use fusiform_protocol::{
-    CatalogGetRequest, CatalogGetResponse, CorrectRequest, CorrectResponse, CorrectedFact,
-    CorrectionDetail, HistoryEra, HistoryRequest, HistoryResponse, MarkArtifactRequest,
-    MarkArtifactResponse, OverriddenFactWire, PlanAmount, PlanPriceWire, PlanPricesRequest,
-    PlanPricesResponse, PollChanges, RetractArtifactRequest, RetractArtifactResponse, StatusPoll,
-    StatusRequest, StatusResponse, ToolResponse, UncertainFactWire, WithheldFactWire, TOOLS,
-    TOOL_CORRECT, TOOL_GET, TOOL_HISTORY, TOOL_MARK_ARTIFACT, TOOL_PLAN_PRICES,
-    TOOL_RETRACT_ARTIFACT, TOOL_STATUS,
+    BillingRuleWire, CatalogGetRequest, CatalogGetResponse, CorrectRequest, CorrectResponse,
+    CorrectedFact, CorrectionDetail, HistoryEra, HistoryRequest, HistoryResponse,
+    MarkArtifactRequest, MarkArtifactResponse, OverriddenFactWire, PlanAmount, PlanPriceWire,
+    PlanPricesRequest, PlanPricesResponse, PlaneWire, PollChanges, RetractArtifactRequest,
+    RetractArtifactResponse, StatusPoll, StatusRequest, StatusResponse, ToolResponse,
+    UncertainFactWire, WithheldFactWire, TOOLS, TOOL_CORRECT, TOOL_GET, TOOL_HISTORY,
+    TOOL_MARK_ARTIFACT, TOOL_PLAN_PRICES, TOOL_RETRACT_ARTIFACT, TOOL_STATUS,
 };
 
 /// Why a request could not be served.
@@ -768,7 +769,7 @@ pub fn serve_catalog_get(
 ) -> Result<CatalogGetResponse, RouteError> {
     // An empty body is a request for everything. A consumer calling a read with
     // no arguments should not have to know that `{}` is the incantation.
-    let request: CatalogGetRequest = if body.is_empty() {
+    let mut request: CatalogGetRequest = if body.is_empty() {
         CatalogGetRequest::default()
     } else {
         serde_json::from_slice(body)
@@ -776,6 +777,26 @@ pub fn serve_catalog_get(
     };
 
     let source = parse_source(request.source.as_deref())?;
+
+    // Select the plane before reading rows. A subscription with no declared
+    // billing claim must never receive the API card, even if its provider or
+    // model would otherwise produce a different no-coverage refusal.
+    let plane = select_billing_plane(&request)?;
+    let requested_prefixes = request.fact_prefixes.clone();
+    if plane.is_some() {
+        // Carry every rate and the real family through the existing named,
+        // bulk and alias paths. Their intermediate filters now retain these
+        // inputs; only the final plane view narrows to the caller's filter.
+        request.fact_prefixes = request.fact_prefixes.as_ref().map(|prefixes| {
+            let mut wide = widened_for_inheritance(prefixes);
+            for prefix in [fusiform_store::prefix::RATE, fusiform_store::prefix::MODEL] {
+                if !wide.iter().any(|p| p == prefix) {
+                    wide.push(prefix.to_string());
+                }
+            }
+            wide
+        });
+    }
 
     if request.model_id.is_some() && request.provider_id.is_none() {
         // A bare model id is ambiguous by construction, and answering with the
@@ -803,7 +824,7 @@ pub fn serve_catalog_get(
         (request.provider_id.as_deref(), request.model_id.as_deref())
     {
         if let Some(alias) = alias_in_effect(store, source, aliases, provider_id, model_id)? {
-            return serve_named_alias(
+            let response = serve_named_alias(
                 store,
                 source,
                 provider_id,
@@ -811,7 +832,12 @@ pub fn serve_catalog_get(
                 alias,
                 at,
                 request.fact_prefixes.as_ref(),
-            );
+            )?;
+            return Ok(finish_plane_view(
+                response,
+                plane,
+                requested_prefixes.as_ref(),
+            ));
         }
     }
 
@@ -911,7 +937,208 @@ pub fn serve_catalog_get(
             request.fact_prefixes.as_ref(),
         )?;
     }
-    Ok(response)
+    Ok(finish_plane_view(
+        response,
+        plane,
+        requested_prefixes.as_ref(),
+    ))
+}
+
+struct SelectedPlane {
+    wire: PlaneWire,
+    declared: Option<&'static Plane>,
+}
+
+fn select_billing_plane(request: &CatalogGetRequest) -> Result<Option<SelectedPlane>, RouteError> {
+    let Some(auth_method) = request.auth_method.as_deref() else {
+        return Ok(None);
+    };
+    // This closed vocabulary mirrors claustrum's ListAuthMethod as recorded in
+    // docs/design/billing-planes.md at fusiform c42a15d8674767f7509c402207a9e474e3d17b23.
+    // There is no vault dependency here; adding a login method needs review of
+    // its billing claims rather than silently borrowing the API price card.
+    if !billing_planes::AUTH_METHODS.contains(&auth_method) {
+        return Err(RouteError::bad_request(format!(
+            "unknown auth_method {auth_method:?}; expected apikey, chatgpt, oauth or antigravity"
+        )));
+    }
+    let Some(provider_id) = request.provider_id.as_deref() else {
+        return Err(RouteError::bad_request("auth_method requires provider_id"));
+    };
+    if request.at_ms.is_some() {
+        return Err(RouteError::no_coverage(
+            "billing plane views are current-only: auth_method cannot be used with at_ms",
+        ));
+    }
+    let declared =
+        billing_planes::planes().get(&(provider_id.to_string(), auth_method.to_string()));
+    if declared.is_none() && auth_method != "apikey" {
+        return Err(RouteError::no_coverage(format!(
+            "no billing plane declared for ({provider_id}, {auth_method}); API rows cannot establish subscription billing"
+        )));
+    }
+    Ok(Some(SelectedPlane {
+        wire: PlaneWire {
+            provider_id: provider_id.to_string(),
+            auth_method: auth_method.to_string(),
+            kind: declared
+                .map_or(PlaneKind::Upstream, |p| p.kind)
+                .as_str()
+                .to_string(),
+            source_ref: declared.map(|p| p.source_ref.clone()),
+            review_by_ms: declared.map(|p| p.review_by_ms),
+        },
+        declared,
+    }))
+}
+
+/// Apply a present billing claim only after the ordinary served view is built.
+/// This owns no store handle: proxies and rule states cannot enter era history.
+fn finish_plane_view(
+    mut response: CatalogGetResponse,
+    plane: Option<SelectedPlane>,
+    requested_prefixes: Option<&Vec<String>>,
+) -> CatalogGetResponse {
+    let Some(plane) = plane else {
+        // Leave even the ordinary filter/override ordering untouched. Existing
+        // callers did not ask for a billing claim and must receive the old bytes.
+        return response;
+    };
+    response.plane = Some(plane.wire);
+    for (identity, facts) in &mut response.models {
+        if let Some(declared) = plane.declared {
+            response
+                .billing_rules
+                .extend(apply_billing_plane(identity, facts, declared));
+        }
+        narrow_to_requested(facts, requested_prefixes);
+    }
+    response.billing_rules.retain(|rule| {
+        response
+            .models
+            .get(&rule.model)
+            .is_some_and(|facts| facts.contains_key(&rule.fact_key))
+    });
+    response
+}
+
+fn apply_billing_plane(
+    identity: &str,
+    facts: &mut BTreeMap<String, serde_json::Value>,
+    plane: &Plane,
+) -> Vec<BillingRuleWire> {
+    if plane.kind == PlaneKind::QuotaProxy {
+        // A subscription may not offer an API service mode. Keeping its price
+        // would claim a charge for a mode whose availability is not established.
+        facts.retain(|key, _| !fusiform_store::rate_key::is_mode_rate(key));
+        let marker = serde_json::to_value(fusiform_protocol::money::InheritedFrom {
+            provider_id: plane.provider_id.clone(),
+            family: facts
+                .get("model.family")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            basis: "quota_proxy".to_string(),
+            model_id: None,
+        })
+        .expect("a struct of strings serialises");
+        for (key, value) in facts.iter_mut() {
+            if !key.starts_with(fusiform_store::prefix::RATE) {
+                continue;
+            }
+            let Some(obj) = value.as_object_mut() else {
+                continue;
+            };
+            if obj.contains_key("inherited_from") {
+                // The first hop identifies whose rate this actually is.
+                continue;
+            }
+            obj.insert("inherited_from".to_string(), marker.clone());
+        }
+    }
+
+    // Targets and tier suffixes come from the pre-rule view. Resolving against
+    // a progressively modified map would make rule order invent billing chains.
+    let before_rules = facts.clone();
+    let model_id = identity
+        .split_once('/')
+        .map_or(identity, |(_, model)| model);
+    let mut applied = Vec::new();
+    for rule in plane.rules.iter().filter(|rule| rule.applies_to(model_id)) {
+        let class_key = format!("rate.{}", billing_planes::class_name(rule.class));
+        let target_key = rule
+            .as_class
+            .map(|class| format!("rate.{}", billing_planes::class_name(class)));
+        let mut suffixes = BTreeSet::from([String::new()]);
+        for key in before_rules.keys() {
+            for base in std::iter::once(&class_key).chain(
+                target_key
+                    .as_ref()
+                    .filter(|_| rule.state == RuleState::BilledAs),
+            ) {
+                if let Some(suffix) = key.strip_prefix(base) {
+                    if suffix
+                        .strip_prefix(".above_context.")
+                        .is_some_and(|n| n.parse::<u64>().is_ok())
+                    {
+                        suffixes.insert(suffix.to_string());
+                    }
+                }
+            }
+        }
+        for suffix in suffixes {
+            let fact_key = format!("{class_key}{suffix}");
+            if plane.kind == PlaneKind::Upstream && before_rules.contains_key(&fact_key) {
+                // A published price, zero or tombstone is authoritative for this
+                // key, not a row-level veto of rules for other missing tiers.
+                continue;
+            }
+            let mut state = rule.state;
+            let value = match rule.state {
+                RuleState::BilledAs => {
+                    let key = format!(
+                        "{}{suffix}",
+                        target_key
+                            .as_ref()
+                            .expect("loaded billed_as rules have a target")
+                    );
+                    if before_rules.contains_key(&key) {
+                        fusiform_protocol::RateValue::BilledAs { key }
+                    } else {
+                        state = RuleState::NotEstablished;
+                        fusiform_protocol::RateValue::Unpriced {
+                            reason: fusiform_protocol::UnpricedReason::NotEstablished,
+                            inherited_from: None,
+                        }
+                    }
+                }
+                RuleState::StatedZero => fusiform_protocol::RateValue::StatedZero {
+                    inherited_from: None,
+                },
+                RuleState::NotEstablished => fusiform_protocol::RateValue::Unpriced {
+                    reason: fusiform_protocol::UnpricedReason::NotEstablished,
+                    inherited_from: None,
+                },
+            };
+            facts.insert(
+                fact_key.clone(),
+                serde_json::to_value(value).expect("a rate value serialises"),
+            );
+            applied.push(BillingRuleWire {
+                model: identity.to_string(),
+                fact_key,
+                state: state.as_str().to_string(),
+                as_class: rule
+                    .as_class
+                    .map(|class| billing_planes::class_name(class).to_string()),
+                source_ref: rule.source_ref.clone(),
+                established_by: rule.established_by.clone(),
+                established_at_ms: rule.established_at_ms,
+                review_by_ms: rule.review_by_ms,
+            });
+        }
+    }
+    applied
 }
 
 fn single_model_snapshot(
@@ -2616,6 +2843,680 @@ mod alias_tests {
         assert!(
             facts["model.family"].get("inherited_from").is_none(),
             "only rates are marked"
+        );
+    }
+}
+
+/// Billing claims are exercised through the real tool route and shipped table.
+/// Synthetic upstream rows keep each refusal and per-key gate independently
+/// observable without changing the ordinary golden store's model counts.
+#[cfg(test)]
+mod billing_plane_tests {
+    use super::*;
+    use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+    use fusiform_core::{BoundaryKind, TokenClass};
+    use fusiform_store::NewEra;
+    use serde_json::{json, Value};
+
+    fn store() -> (CatalogStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().to_string(),
+            },
+        })
+        .unwrap();
+        (store, dir)
+    }
+
+    fn seed(store: &CatalogStore, provider: &str, model: &str, extra: Vec<(&str, Value)>) {
+        let mut facts = BTreeMap::from([
+            ("existence", json!("present")),
+            ("model.family", json!("real-family")),
+            ("model.open_weights", json!(false)),
+            ("capability.reasoning", json!(true)),
+        ]);
+        facts.extend(extra);
+        let eras: Vec<_> = facts
+            .into_iter()
+            .map(|(key, value)| NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: provider.into(),
+                model_id: model.into(),
+                fact_key: FactKey::from_stored(key.into()),
+                value_json: value.to_string(),
+                boundary_at: Timestamp(1_000),
+                boundary_kind: BoundaryKind::Seed,
+                observation_id: None,
+            })
+            .collect();
+        store.append_eras(&eras).unwrap();
+    }
+
+    fn priced(units: i64) -> Value {
+        json!({"state":"priced", "units":units, "exponent":9, "currency":"USD", "unit_provenance":"source"})
+    }
+
+    fn card() -> Vec<(&'static str, Value)> {
+        vec![
+            ("rate.input", priced(100)),
+            ("rate.input.above_context.272000", priced(200)),
+            ("rate.output", priced(300)),
+            ("rate.output.above_context.272000", priced(400)),
+            ("rate.cache_read", json!({"state":"stated_zero"})),
+            (
+                "rate.reasoning",
+                json!({"state":"unpriced", "reason":"missing_rate"}),
+            ),
+            ("rate.cache_write", priced(500)),
+            ("rate.cache_write.above_context.272000", priced(600)),
+            ("rate.input.mode.fast", priced(700)),
+            ("rate.output.mode.fast.above_context.272000", priced(800)),
+        ]
+    }
+
+    fn get(store: &CatalogStore, args: Value) -> Result<CatalogGetResponse, RouteError> {
+        let body = json!({"name":"catalog.get", "arguments":args}).to_string();
+        match serve_tool_call(store, body.as_bytes())? {
+            ToolResponse::Catalog(response) => Ok(response),
+            other => panic!("catalog.get must return a catalog, got {other:?}"),
+        }
+    }
+
+    fn request(provider: &str, model: Option<&str>, method: &str, prefix: Option<&str>) -> Value {
+        let mut args = json!({"provider_id":provider, "auth_method":method});
+        if let Some(model) = model {
+            args["model_id"] = json!(model);
+        }
+        if let Some(prefix) = prefix {
+            args["fact_prefixes"] = json!([prefix]);
+        }
+        args
+    }
+
+    #[test]
+    fn auth_method_accepts_exactly_the_four_pinned_strings() {
+        assert_eq!(
+            billing_planes::AUTH_METHODS,
+            &["apikey", "chatgpt", "oauth", "antigravity"]
+        );
+        let (store, _dir) = store();
+        seed(&store, "openai", "test-model", card());
+        for method in ["apikey", "chatgpt", "oauth", "antigravity"] {
+            let result = get(&store, request("openai", None, method, None));
+            assert!(
+                result.is_ok() || result.unwrap_err().code == "no_coverage",
+                "{method} must parse"
+            );
+        }
+        for method in ["bogus", "", "APIKEY", "ChatGPT", "api_key"] {
+            let error = get(&store, request("openai", None, method, None)).unwrap_err();
+            assert_eq!(error.code, "bad_request");
+            assert_eq!(error.message, format!("unknown auth_method {method:?}; expected apikey, chatgpt, oauth or antigravity"));
+        }
+    }
+
+    #[test]
+    fn auth_method_requires_a_provider() {
+        let (store, _dir) = store();
+        for model in [None, Some("test-model")] {
+            let mut args = json!({"auth_method":"chatgpt"});
+            if let Some(model) = model {
+                args["model_id"] = json!(model);
+            }
+            let error = get(&store, args).unwrap_err();
+            assert_eq!(error.code, "bad_request");
+            assert_eq!(error.message, "auth_method requires provider_id");
+        }
+    }
+
+    #[test]
+    fn plane_views_refuse_every_point_in_time_read() {
+        let (store, _dir) = store();
+        seed(&store, "openai", "test-model", card());
+        for model in [None, Some("test-model")] {
+            for method in ["chatgpt", "apikey"] {
+                for at_ms in [0, 1_000, i64::MAX] {
+                    let mut args = request("openai", model, method, None);
+                    args["at_ms"] = json!(at_ms);
+                    let error = get(&store, args).unwrap_err();
+                    assert_eq!(error.code, "no_coverage");
+                    assert_eq!(error.message, "billing plane views are current-only: auth_method cannot be used with at_ms");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn undeclared_subscription_planes_never_fall_back_to_api_rows() {
+        let (store, _dir) = store();
+        for provider in ["openai", "google"] {
+            seed(&store, provider, "test-model", card());
+        }
+        for (provider, method) in [
+            ("openai", "oauth"),
+            ("google", "antigravity"),
+            ("unknown", "chatgpt"),
+        ] {
+            for model in [None, Some("test-model"), Some("unknown-model")] {
+                let error = get(&store, request(provider, model, method, None)).unwrap_err();
+                assert_eq!(error.code, "no_coverage");
+                assert_eq!(error.message, format!("no billing plane declared for ({provider}, {method}); API rows cannot establish subscription billing"));
+            }
+        }
+    }
+
+    #[test]
+    fn an_undeclared_api_plane_serves_the_unmodified_published_card_without_provenance() {
+        let (store, _dir) = store();
+        seed(&store, "openai", "test-model", card());
+        for model in [None, Some("test-model")] {
+            let response = get(&store, request("openai", model, "apikey", None)).unwrap();
+            let plane = serde_json::to_value(response.plane.unwrap()).unwrap();
+            assert_eq!(
+                plane,
+                json!({"provider_id":"openai", "auth_method":"apikey", "kind":"upstream"})
+            );
+            assert!(response.billing_rules.is_empty());
+            for (key, value) in card() {
+                assert_eq!(response.models["openai/test-model"][key], value);
+            }
+        }
+    }
+
+    #[test]
+    fn quota_proxies_mark_each_unmarked_rate_with_its_real_family() {
+        let (store, _dir) = store();
+        for (provider, method) in [("openai", "chatgpt"), ("anthropic", "oauth")] {
+            seed(&store, provider, "test-model", card());
+            for model in [None, Some("test-model")] {
+                let response =
+                    get(&store, request(provider, model, method, Some("rate."))).unwrap();
+                let facts = &response.models[&format!("{provider}/test-model")];
+                assert!(facts.keys().all(|key| key.starts_with("rate.")));
+                for key in [
+                    "rate.input",
+                    "rate.input.above_context.272000",
+                    "rate.output",
+                    "rate.output.above_context.272000",
+                    "rate.cache_read",
+                    "rate.reasoning",
+                ] {
+                    assert_eq!(
+                        facts[key]["inherited_from"],
+                        json!({"provider_id":provider, "family":"real-family", "basis":"quota_proxy"}),
+                        "{provider}/{key}"
+                    );
+                }
+                let plane = response.plane.unwrap();
+                assert_eq!(plane.kind, "quota_proxy");
+                assert_eq!(
+                    plane.source_ref.as_deref(),
+                    Some(if provider == "openai" {
+                        "https://help.openai.com/en/articles/20001106"
+                    } else {
+                        "https://support.anthropic.com/en/articles/9797557"
+                    })
+                );
+                assert_eq!(plane.review_by_ms, Some(1796515200000));
+            }
+        }
+    }
+
+    #[test]
+    fn quota_proxies_drop_all_mode_rates() {
+        let (store, _dir) = store();
+        seed(&store, "anthropic", "test-model", card());
+        for model in [None, Some("test-model")] {
+            let response = get(&store, request("anthropic", model, "oauth", None)).unwrap();
+            assert!(response.models["anthropic/test-model"]
+                .keys()
+                .all(|key| !key.contains(".mode.")));
+            assert_eq!(
+                response.models["anthropic/test-model"]["rate.input"]["units"],
+                100
+            );
+        }
+        let control = get(
+            &store,
+            json!({"provider_id":"anthropic", "model_id":"test-model"}),
+        )
+        .unwrap();
+        assert_eq!(
+            control.models["anthropic/test-model"]["rate.input.mode.fast"]["units"],
+            700
+        );
+    }
+
+    #[test]
+    fn quota_proxies_preserve_the_first_hop_of_inherited_rates() {
+        let (store, _dir) = store();
+        seed(
+            &store,
+            "zai",
+            "test-model",
+            vec![
+                ("rate.input", priced(100)),
+                ("rate.input.above_context.272000", priced(200)),
+            ],
+        );
+        seed(
+            &store,
+            "openai",
+            "test-model",
+            vec![
+                ("model.family", json!("glm")),
+                ("model.open_weights", json!(true)),
+            ],
+        );
+        for model in [None, Some("test-model")] {
+            let response = get(
+                &store,
+                request("openai", model, "chatgpt", Some("rate.cache_write")),
+            )
+            .unwrap();
+            assert_eq!(
+                response.models["openai/test-model"]["rate.cache_write"],
+                json!({"state":"billed_as", "key":"rate.input"})
+            );
+            assert_eq!(
+                response.models["openai/test-model"]["rate.cache_write.above_context.272000"],
+                json!({"state":"billed_as", "key":"rate.input.above_context.272000"})
+            );
+            let response = get(
+                &store,
+                request("openai", model, "chatgpt", Some("rate.input")),
+            )
+            .unwrap();
+            for key in ["rate.input", "rate.input.above_context.272000"] {
+                assert_eq!(
+                    response.models["openai/test-model"][key]["inherited_from"],
+                    json!({"provider_id":"zai", "family":"glm", "basis":"open_weights"})
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn quota_rules_replace_published_prices_and_narrow_disclosures_last() {
+        let (store, _dir) = store();
+        seed(&store, "openai", "test-model", card());
+        for model in [None, Some("test-model")] {
+            for prefix in [
+                None,
+                Some("rate."),
+                Some("rate.cache_write"),
+                Some("rate.cache_write.above_context."),
+            ] {
+                let response = get(&store, request("openai", model, "chatgpt", prefix)).unwrap();
+                let facts = &response.models["openai/test-model"];
+                let expected_keys: Vec<_> = if prefix == Some("rate.cache_write.above_context.") {
+                    vec!["rate.cache_write.above_context.272000"]
+                } else {
+                    vec!["rate.cache_write", "rate.cache_write.above_context.272000"]
+                };
+                assert_eq!(
+                    response
+                        .billing_rules
+                        .iter()
+                        .map(|r| r.fact_key.as_str())
+                        .collect::<Vec<_>>(),
+                    expected_keys
+                );
+                for rule in &response.billing_rules {
+                    let target = if rule.fact_key == "rate.cache_write" {
+                        "rate.input"
+                    } else {
+                        "rate.input.above_context.272000"
+                    };
+                    assert_eq!(
+                        facts[&rule.fact_key],
+                        json!({"state":"billed_as", "key":target})
+                    );
+                    assert_eq!(
+                        serde_json::to_value(rule).unwrap(),
+                        json!({"model":"openai/test-model", "fact_key":rule.fact_key, "state":"billed_as", "as_class":"input", "source_ref":"https://help.openai.com/en/articles/20001106", "established_by":"fusiform", "established_at_ms":1791331200000_i64, "review_by_ms":1796515200000_i64})
+                    );
+                }
+                if let Some(prefix) = prefix {
+                    assert!(facts.keys().all(|key| key.starts_with(prefix)));
+                }
+            }
+            for prefix in ["capability.", "no_such_fact."] {
+                let response =
+                    get(&store, request("openai", model, "chatgpt", Some(prefix))).unwrap();
+                assert!(response.billing_rules.is_empty());
+                let wire = serde_json::to_value(&response).unwrap();
+                assert!(wire.get("billing_rules").is_none());
+                assert!(response
+                    .models
+                    .values()
+                    .all(|facts| facts.keys().all(|key| key.starts_with(prefix))));
+            }
+        }
+    }
+
+    #[test]
+    fn missing_billed_as_targets_are_disclosed_as_not_established() {
+        let (store, _dir) = store();
+        seed(
+            &store,
+            "openai",
+            "unpriced-model",
+            vec![("rate.cache_write.above_context.42", priced(500))],
+        );
+        for model in [None, Some("unpriced-model")] {
+            let response = get(
+                &store,
+                request("openai", model, "chatgpt", Some("rate.cache_write")),
+            )
+            .unwrap();
+            assert_eq!(response.billing_rules.len(), 2);
+            for key in ["rate.cache_write", "rate.cache_write.above_context.42"] {
+                assert_eq!(
+                    response.models["openai/unpriced-model"][key],
+                    json!({"state":"unpriced", "reason":"not_established"})
+                );
+                let rule = response
+                    .billing_rules
+                    .iter()
+                    .find(|r| r.fact_key == key)
+                    .unwrap();
+                assert_eq!(rule.state, "not_established");
+                assert_eq!(rule.as_class.as_deref(), Some("input"));
+            }
+        }
+    }
+
+    #[test]
+    fn upstream_rules_never_overwrite_a_published_key_but_fill_each_missing_tier() {
+        let (store, _dir) = store();
+        for provider in ["xai", "deepseek"] {
+            let published = [
+                priced(500),
+                json!({"state":"stated_zero"}),
+                json!({"state":"unpriced", "reason":"missing_rate"}),
+            ];
+            for (index, value) in published.into_iter().enumerate() {
+                let model_id = format!("test-{index}");
+                seed(
+                    &store,
+                    provider,
+                    &model_id,
+                    vec![
+                        ("rate.input", priced(100)),
+                        ("rate.input.above_context.1", priced(200)),
+                        ("rate.input.above_context.2", priced(300)),
+                        ("rate.cache_write", value.clone()),
+                        ("rate.cache_write.above_context.1", value.clone()),
+                        ("rate.cache_write.above_context.3", value.clone()),
+                    ],
+                );
+                for model in [None, Some(model_id.as_str())] {
+                    let response = get(
+                        &store,
+                        request(provider, model, "apikey", Some("rate.cache_write")),
+                    )
+                    .unwrap();
+                    let identity = format!("{provider}/{model_id}");
+                    let facts = &response.models[&identity];
+                    for key in [
+                        "rate.cache_write",
+                        "rate.cache_write.above_context.1",
+                        "rate.cache_write.above_context.3",
+                    ] {
+                        assert_eq!(facts[key], value);
+                    }
+                    assert_eq!(
+                        facts["rate.cache_write.above_context.2"],
+                        json!({"state":"billed_as", "key":"rate.input.above_context.2"})
+                    );
+                    let applied: Vec<_> = response
+                        .billing_rules
+                        .iter()
+                        .filter(|r| r.model == identity)
+                        .collect();
+                    assert_eq!(applied.len(), 1);
+                    assert_eq!(applied[0].fact_key, "rate.cache_write.above_context.2");
+                    assert!(response.plane.unwrap().source_ref.is_some());
+                }
+            }
+            seed(
+                &store,
+                provider,
+                "no-write",
+                vec![
+                    ("rate.input", priced(100)),
+                    ("rate.input.above_context.272000", priced(200)),
+                ],
+            );
+            let response = get(
+                &store,
+                request(
+                    provider,
+                    Some("no-write"),
+                    "apikey",
+                    Some("rate.cache_write"),
+                ),
+            )
+            .unwrap();
+            assert_eq!(
+                response.models[&format!("{provider}/no-write")]["rate.cache_write"],
+                json!({"state":"billed_as", "key":"rate.input"})
+            );
+            assert_eq!(response.billing_rules.len(), 2);
+        }
+    }
+
+    #[test]
+    fn named_and_bulk_alias_plane_reads_keep_the_family_and_filter_last() {
+        let (store, _dir) = store();
+        seed(&store, "google", "gemini-3.8-flash", card());
+        for model in [None, Some("antigravity-gemini-3.8-flash")] {
+            for prefix in [
+                None,
+                Some("rate."),
+                Some("rate.input.above_context."),
+                Some("capability."),
+            ] {
+                let response = get(&store, request("google", model, "apikey", prefix)).unwrap();
+                let facts = &response.models["google/antigravity-gemini-3.8-flash"];
+                assert_eq!(response.plane.unwrap().kind, "upstream");
+                assert!(response.billing_rules.is_empty());
+                if let Some(prefix) = prefix {
+                    assert!(facts.keys().all(|key| key.starts_with(prefix)));
+                }
+                for (key, value) in facts.iter().filter(|(key, _)| key.starts_with("rate.")) {
+                    assert_eq!(
+                        value["inherited_from"],
+                        json!({"provider_id":"google", "model_id":"gemini-3.8-flash", "family":"real-family", "basis":"alias"}),
+                        "{key}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn plane_views_run_after_ordinary_overrides() {
+        let (store, _dir) = store();
+        seed(
+            &store,
+            "anthropic",
+            "claude-sonnet-4-5",
+            vec![
+                ("limit.context", json!(1_000_000)),
+                ("rate.input", priced(100)),
+            ],
+        );
+        for model in [None, Some("claude-sonnet-4-5")] {
+            let response =
+                get(&store, request("anthropic", model, "oauth", Some("limit."))).unwrap();
+            assert_eq!(
+                response.models["anthropic/claude-sonnet-4-5"]["limit.context"],
+                200_000
+            );
+            assert_eq!(response.overridden.len(), 1);
+            assert_eq!(response.overridden[0].fact_key, "limit.context");
+            assert!(response.billing_rules.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_read_without_auth_method_keeps_the_pre_plane_wire_bytes() {
+        let (store, _dir) = store();
+        seed(
+            &store,
+            "openai",
+            "test-model",
+            vec![("rate.input", priced(100))],
+        );
+        for model in [None, Some("test-model")] {
+            let mut args = json!({"provider_id":"openai"});
+            if let Some(model) = model {
+                args["model_id"] = json!(model);
+            }
+            let mut response = get(&store, args).unwrap();
+            // Only the response clock and store version vary between runs; the
+            // remaining bytes are the old served contract, not a second render.
+            response.resolved_at_ms = 1_000;
+            response.catalog_version = 1;
+            assert_eq!(
+                serde_json::to_string(&response).unwrap(),
+                r#"{"source":"models.dev","resolved_at_ms":1000,"catalog_version":1,"models":{"openai/test-model":{"capability.reasoning":true,"existence":"present","model.family":"real-family","model.open_weights":false,"rate.input":{"currency":"USD","exponent":9,"state":"priced","unit_provenance":"source","units":100}}}}"#
+            );
+        }
+    }
+
+    #[test]
+    fn plane_views_never_change_stored_rows_or_catalog_version() {
+        let (store, _dir) = store();
+        seed(&store, "openai", "test-model", card());
+        let stored_before = store
+            .read_model(SourceId::ModelsDev, "openai", "test-model", None)
+            .unwrap()
+            .0
+            .unwrap()
+            .facts;
+        let version = store.catalog_version().unwrap();
+        for model in [None, Some("test-model")] {
+            let response = get(&store, request("openai", model, "chatgpt", None)).unwrap();
+            assert_eq!(
+                response.models["openai/test-model"]["rate.cache_write"]["state"],
+                "billed_as"
+            );
+        }
+        let stored_after = store
+            .read_model(SourceId::ModelsDev, "openai", "test-model", None)
+            .unwrap()
+            .0
+            .unwrap()
+            .facts;
+        assert_eq!(stored_before, stored_after);
+        assert_eq!(store.catalog_version().unwrap(), version);
+        assert!(stored_after
+            .values()
+            .all(|value| !value.contains("billed_as")
+                && !value.contains("not_established")
+                && !value.contains("quota_proxy")));
+    }
+
+    #[test]
+    fn every_rule_state_uses_class_tiers_and_exact_model_scopes() {
+        // These states and model scopes are supported by the loader but do not
+        // ship in the present file. Test their evaluation without inventing a
+        // plane in the tool route's compiled-in table.
+        let mut plane = billing_planes::planes()[&("openai".into(), "chatgpt".into())].clone();
+        plane.rules = vec![
+            billing_planes::BillingRule {
+                class: TokenClass::Output,
+                state: RuleState::StatedZero,
+                as_class: None,
+                model_ids: Some(vec!["scoped/model".into()]),
+                ..plane.rules[0].clone()
+            },
+            billing_planes::BillingRule {
+                class: TokenClass::Reasoning,
+                state: RuleState::NotEstablished,
+                as_class: None,
+                model_ids: None,
+                ..plane.rules[0].clone()
+            },
+        ];
+        for (model, expected) in [("scoped/model", "stated_zero"), ("other", "priced")] {
+            let mut facts = BTreeMap::from([
+                ("rate.output".into(), priced(100)),
+                ("rate.output.above_context.42".into(), priced(200)),
+                ("rate.reasoning.above_context.43".into(), priced(300)),
+            ]);
+            let rules = apply_billing_plane(&format!("openai/{model}"), &mut facts, &plane);
+            for key in ["rate.output", "rate.output.above_context.42"] {
+                assert_eq!(facts[key]["state"], expected);
+            }
+            for key in ["rate.reasoning", "rate.reasoning.above_context.43"] {
+                assert_eq!(
+                    facts[key],
+                    json!({"state":"unpriced", "reason":"not_established"})
+                );
+            }
+            assert_eq!(rules.len(), if model == "scoped/model" { 4 } else { 2 });
+        }
+    }
+
+    #[test]
+    fn billed_as_targets_are_resolved_before_any_rule_outputs() {
+        // The loader rejects overlapping chains. Even a constructed table must
+        // not turn a preceding rule's output into a supposedly published target.
+        let mut plane = billing_planes::planes()[&("openai".into(), "chatgpt".into())].clone();
+        let write = plane.rules[0].clone();
+        plane.rules.insert(
+            0,
+            billing_planes::BillingRule {
+                class: TokenClass::Input,
+                state: RuleState::StatedZero,
+                as_class: None,
+                ..write
+            },
+        );
+        let mut facts = BTreeMap::from([("rate.cache_write.above_context.42".into(), priced(100))]);
+        let rules = apply_billing_plane("openai/test-model", &mut facts, &plane);
+        assert_eq!(facts["rate.input"], json!({"state":"stated_zero"}));
+        assert_eq!(
+            facts["rate.cache_write"],
+            json!({"state":"unpriced", "reason":"not_established"})
+        );
+        assert_eq!(
+            facts["rate.cache_write.above_context.42"],
+            json!({"state":"unpriced", "reason":"not_established"})
+        );
+        assert_eq!(rules[1].state, "not_established");
+    }
+
+    #[test]
+    fn quota_proxies_do_not_erase_alias_markers() {
+        let plane = &billing_planes::planes()[&("openai".into(), "chatgpt".into())];
+        let alias = crate::aliases::Alias {
+            target_provider_id: "other-provider".into(),
+            target_model_id: "target-model".into(),
+            basis: "same backend model".into(),
+            source_ref: "routing code".into(),
+            established_at_ms: 1_000,
+            review_by_ms: i64::MAX,
+        };
+        let mut facts = BTreeMap::from([
+            ("rate.input".into(), priced(100)),
+            ("model.family".into(), json!("real-family")),
+        ]);
+        mark_rates_borrowed_through_alias(&mut facts, &alias);
+        let before = facts["rate.input"].clone();
+        apply_billing_plane("openai/alias-model", &mut facts, plane);
+        assert_eq!(facts["rate.input"], before);
+        assert_eq!(
+            facts["rate.cache_write"],
+            json!({"state":"billed_as", "key":"rate.input"})
         );
     }
 }
