@@ -232,7 +232,7 @@ jobs:
       - name: Install ckdev-mutate
         run: >-
           cargo install --locked --git https://github.com/cortexkit/commons
-          --rev 46cc166b0df2edcfd14b3eb54ed6eeac588fed69 cortexkit-mutate
+          --rev 73c7e66145e131eadffdd874c82d93548868b668 cortexkit-mutate
 
       # Validates every row's anchor, files and expected test names before any
       # source is touched, so a stale row fails here by name.
