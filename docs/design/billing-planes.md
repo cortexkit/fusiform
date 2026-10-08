@@ -107,7 +107,7 @@ its row has a quote and URL.
 | Plane | Class | State | Source |
 | --- | --- | --- | --- |
 | `(openai, apikey)` | cache write | `priced`, 1.25× input for GPT-5.6 and later | "For GPT-5.6 and later, cache writes cost 1.25× the standard, uncached input-token rate." Usage reports `input_tokens_details.cache_write_tokens`. platform.openai.com/docs/guides/prompt-caching |
-| `(openai, apikey)` | cache write, models before GPT-5.6 | `billed_as(input)` | The guide's comparison table lists GPT-5.5 and earlier models as "No additional cache-write charge". models.dev publishes a write rate on 10 of 53 OpenAI models; a rule that fills only absent classes covers the rest. platform.openai.com/docs/guides/prompt-caching |
+| `(openai, apikey)` | cache write, models before GPT-5.6 | sourced, not shipped | The guide's comparison table lists GPT-5.5 and earlier models as "No additional cache-write charge". platform.openai.com/docs/guides/prompt-caching. Not shipped because no reader needs it: across 87,688 OpenAI usage rows in routing's last 14 days, none reported cache-write tokens, so those tokens arrive as plain input and a per-class basket never asks for the rate |
 | `(openai, chatgpt)` | cache write | `billed_as(input)` | Rate card meters "input tokens, cached input tokens, and output tokens"; no write class. help.openai.com/en/articles/20001106. A Codex run's usage reports `cache_write_tokens` 0 |
 | `(openai, chatgpt)` | input, cached input, output | `priced`, `quota_proxy` from `(openai, apikey)` | Same rate card: usage "is priced based on API token usage". The card's own credits per class are a candidate source for the subscription multiplier, which stays operator policy |
 | `(anthropic, apikey)` | cache write, 5-minute | `priced`, 1.25× input | "5-minute cache write tokens are 1.25 times the base input tokens price." docs.anthropic.com prompt caching |
@@ -126,9 +126,11 @@ its row has a quote and URL.
 
 Whether reasoning sits inside or outside the reported output count is a usage-reporting fact, not a rate. A basket that subtracts reasoning from output is right for OpenAI and Anthropic and wrong for xAI and Gemini. The catalog states the rate; the usage normalizer at the consumer handles the count.
 
+None of the reasoning rows ship. Routing already prices reasoning at the model's reasoning rate and falls back to its output rate when none is published, so a `billed_as(output)` rule would change no number. A reasoning row earns a place only for a model whose reasoning rate differs from its output rate, and models.dev already publishes those. Never mark reasoning `unknown` on a plane: that would replace the output-rate fallback with an unpriced class and make every reasoning route rank as maximum cost.
+
 ## 5. Where it lives
 
-- A compiled-in curated file, `crates/fusiform-module/data/billing-rules.json`,
+- A compiled-in curated file, `crates/fusiform-module/data/billing-planes.json`,
   loaded like the plan-price and creator tables: parsed once, malformed rows
   counted as rejects, reviewed by date.
 - Applied at serve time and never written into era history, by the same rule
@@ -147,11 +149,15 @@ and is told before it ships.
 
 ## 7. Open
 
-1. Whether rates use the four states in section 3 (`priced`, `stated_zero`,
-   `billed_as`, `unknown`), as opposed to three without `billed_as`. This is the
-   operator's decision, and nothing is built until it is made.
-2. Reasoning: subset of output or additive, per vendor. Needed before any
-   reasoning cell ships.
-3. Anthropic's 1-hour cache write: a second write class. Kept open so the
+Settled: the operator chose the four states, and planes shipped at fusiform
+7d604d1 with the openai/chatgpt and anthropic/oauth planes and the xAI and
+DeepSeek cache-write rules. Reasoning rules and the pre-GPT-5.6 OpenAI
+cache-write rule are sourced but deliberately not shipped (section 4).
+
+Still open:
+
+1. Anthropic's 1-hour cache write: a second write class. Kept open so the
    underpricing of 1-hour writes stays visible.
-4. Pre-GPT-5.6 OpenAI models and Google implicit caching: sources.
+2. Google implicit caching: how the first request's tokens bill. No reader
+   needs it yet; routing sees no Google cache-write tokens.
+3. DeepSeek reasoning: the docs imply output pricing without stating it.
