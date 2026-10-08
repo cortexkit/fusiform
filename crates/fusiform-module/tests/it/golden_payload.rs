@@ -124,7 +124,6 @@ const INHERITANCE_PAIR: &str = r#"{
   }
 }"#;
 const GOLDEN: &str = include_str!("../../fixtures/served-payloads.json");
-const PLANE_GOLDEN: &str = include_str!("../fixtures/served-plane-payloads.json");
 
 /// The embedded models.dev seed, read only to cut real rows out of it.
 const SEED: &str = include_str!("../../data/models-dev-seed.json");
@@ -180,13 +179,14 @@ fn plane_store() -> (CatalogStore, tempfile::TempDir, Vec<(String, String)>) {
     let mut doc: serde_json::Value = serde_json::from_str(&merged_upstream()).unwrap();
     let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
     let mut cuts = Vec::new();
-    for (provider, prefix) in [("xai", "grok"), ("deepseek", "deepseek")] {
-        let (id, row) = seed[provider]["models"]
-            .as_object()
-            .expect("the seed carries the provider")
-            .iter()
-            .find(|(id, _)| id.starts_with(prefix))
-            .expect("the seed carries a real model for the plane");
+    for (provider, id) in [
+        ("xai", "grok-4.20-0309-non-reasoning"),
+        ("deepseek", "deepseek-flash"),
+    ] {
+        // Pin the cut, rather than picking the first matching id: a seed update
+        // must not silently replace the tiered row this fixture exists to serve.
+        let row = &seed[provider]["models"][id];
+        assert!(row.is_object(), "the seed must carry {provider}/{id}");
         assert!(
             row["cost"]["input"].is_number(),
             "{provider}/{id} must publish input"
@@ -205,8 +205,8 @@ fn plane_store() -> (CatalogStore, tempfile::TempDir, Vec<(String, String)>) {
             "the excerpt already carries {provider}; drop the splice"
         );
         // A splice must never replace the row the ordinary alias fixture pins.
-        assert_ne!((provider, id.as_str()), ALIAS_TARGET);
-        cuts.push((provider.to_string(), id.clone()));
+        assert_ne!((provider, id), ALIAS_TARGET);
+        cuts.push((provider.to_string(), id.to_string()));
     }
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
@@ -331,22 +331,23 @@ fn render_planes() -> String {
     text
 }
 
-#[test]
-fn the_served_plane_payloads_match_the_golden_fixture() {
-    let rendered = render_planes();
-    if std::env::var("UPDATE_GOLDEN").is_ok() {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/served-plane-payloads.json"
+/// Consumers pin one document, while the two producers retain isolated stores.
+fn render_all() -> String {
+    let mut ordinary: serde_json::Value = serde_json::from_str(&render()).unwrap();
+    let planes: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
+    for (label, case) in planes.as_object().unwrap() {
+        assert!(
+            ordinary
+                .as_object_mut()
+                .unwrap()
+                .insert(label.clone(), case.clone())
+                .is_none(),
+            "plane labels must not replace an ordinary golden case: {label}"
         );
-        std::fs::write(path, rendered).unwrap();
-        eprintln!("plane golden fixture regenerated at {path} — review the diff");
-        return;
     }
-    assert_eq!(
-        rendered, PLANE_GOLDEN,
-        "plane payload changed; regenerate with UPDATE_GOLDEN=1 and review the diff"
-    );
+    let mut text = serde_json::to_string_pretty(&ordinary).unwrap();
+    text.push('\n');
+    text
 }
 
 fn non_plane_leaks(doc: &serde_json::Value) -> (usize, Vec<String>) {
@@ -379,12 +380,10 @@ fn non_plane_leaks(doc: &serde_json::Value) -> (usize, Vec<String>) {
 fn every_non_plane_golden_case_has_no_plane_bytes() {
     // Check both saved bytes and live responses. A saved-only scan cannot see
     // plane logic accidentally applied to ordinary reads before regeneration.
-    for text in [GOLDEN.to_string(), PLANE_GOLDEN.to_string(), render()] {
+    for text in [GOLDEN.to_string(), render()] {
         let doc = serde_json::from_str(&text).unwrap();
         let (checked, leaks) = non_plane_leaks(&doc);
-        if text != PLANE_GOLDEN {
-            assert_eq!(checked, cases().len());
-        }
+        assert_eq!(checked, cases().len());
         assert!(
             leaks.is_empty(),
             "non-plane payload leaked plane-only bytes: {leaks:?}"
@@ -591,6 +590,10 @@ fn plane_cases_pin_missing_targets_published_api_prices_and_upstream_fills() {
             !inputs.is_empty(),
             "the fill must have a published input target"
         );
+        // The real xAI cut publishes a tier; DeepSeek's cut publishes only a
+        // base price. Requiring the measured counts keeps the suffix assertion
+        // from becoming vacuous if a future cut loses its tier.
+        assert_eq!(inputs.len(), if provider == "xai" { 2 } else { 1 });
         assert_eq!(
             response["billing_rules"].as_array().unwrap().len(),
             inputs.len()
@@ -1202,7 +1205,7 @@ fn a_current_read_resolves_to_an_instant_near_now() {
 /// The served payloads have not changed.
 #[test]
 fn the_served_payloads_match_the_golden_fixture() {
-    let rendered = render();
+    let rendered = render_all();
 
     if std::env::var("UPDATE_GOLDEN").is_ok() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/served-payloads.json");
@@ -1265,6 +1268,12 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
         // A curated alias and the marker on a price borrowed through it.
         r#""aliased""#,
         r#""basis": "alias""#,
+        // Current-only plane variants and both provenance disclosures.
+        r#""plane""#,
+        r#""billing_rules""#,
+        r#""state": "billed_as""#,
+        r#""reason": "not_established""#,
+        r#""basis": "quota_proxy""#,
     ] {
         assert!(
             GOLDEN.contains(needle),
@@ -1327,9 +1336,6 @@ fn every_read_response_field_reaches_the_fixture() {
 
     let mut present: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     collect_keys(&golden, &mut present);
-    let planes: serde_json::Value =
-        serde_json::from_str(PLANE_GOLDEN).expect("the plane fixture parses");
-    collect_keys(&planes, &mut present);
     assert!(
         present.len() > 40,
         "the fixture must carry a substantial key set, or the absence checks \
@@ -1345,6 +1351,8 @@ fn every_read_response_field_reaches_the_fixture() {
         &present,
         &[
             "CatalogGetResponse",
+            "PlaneWire",
+            "BillingRuleWire",
             "HistoryResponse",
             "StatusResponse",
             "PlanPricesResponse",
@@ -1352,10 +1360,9 @@ fn every_read_response_field_reaches_the_fixture() {
     );
 
     assert!(
-        checked >= 25,
-        "this examined {checked} fields across four structs; they carried 29 \
-         when this was written, so a collapse means the scan broke rather than \
-         the protocol shrinking"
+        checked >= 40,
+        "this examined {checked} fields across six structs; fewer than 40 means \
+         the scan broke rather than the protocol shrinking"
     );
 
     assert!(

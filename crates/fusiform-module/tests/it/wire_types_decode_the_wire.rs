@@ -25,14 +25,13 @@ use fusiform_protocol::money::{Floor, RateValue, UnpricedReason};
 use fusiform_protocol::CatalogGetResponse;
 
 const SERVED: &str = include_str!("../../fixtures/served-payloads.json");
-const PLANE_SERVED: &str = include_str!("../fixtures/served-plane-payloads.json");
 
 /// Serve-only states and disclosures are minted by route::serve_tool_call,
 /// specifically finish_plane_view/apply_billing_plane in route.rs, not by
 /// fusiform-store's json_rate: writing these states into history is forbidden.
 #[test]
 fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
-    let fixture: serde_json::Value = serde_json::from_str(PLANE_SERVED).unwrap();
+    let fixture: serde_json::Value = serde_json::from_str(SERVED).unwrap();
     let mut responses = 0;
     let mut billed_base = 0;
     let mut billed_tier = 0;
@@ -40,6 +39,9 @@ fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
     let mut proxy = 0;
     let mut disclosed = 0;
     for (label, case) in fixture.as_object().unwrap() {
+        if case["request"]["arguments"].get("auth_method").is_none() {
+            continue;
+        }
         let Some(raw) = case.get("response") else {
             continue;
         };
@@ -298,8 +300,6 @@ fn every_variant_the_producer_writes_decodes() {
     let fixture: serde_json::Value = serde_json::from_str(SERVED).expect("the fixture parses");
     let mut produced: Vec<String> = Vec::new();
     collect_rate_shapes(&fixture, &mut produced);
-    let planes: serde_json::Value = serde_json::from_str(PLANE_SERVED).unwrap();
-    collect_rate_shapes(&planes, &mut produced);
     assert!(
         !produced.is_empty(),
         "the fixture must contain served rates, or the cross-check below passes \
@@ -534,8 +534,12 @@ fn rate_shape_collection_keeps_history_values_but_not_rule_disclosures() {
     let mut shapes = Vec::new();
     collect_rate_shapes(&doc, &mut shapes);
     assert_eq!(shapes.len(), 2);
-    assert!(shapes.contains(&canonical_str(r#"{"state":"billed_as","key":"rate.input"}"#)));
-    assert!(shapes.contains(&canonical_str(r#"{"state":"unpriced","reason":"not_established"}"#)));
+    assert!(shapes.contains(&canonical_str(
+        r#"{"state":"billed_as","key":"rate.input"}"#
+    )));
+    assert!(shapes.contains(&canonical_str(
+        r#"{"state":"unpriced","reason":"not_established"}"#
+    )));
 }
 
 /// A rate object serialised with its keys SORTED.
@@ -597,8 +601,27 @@ fn the_fixture_carries_every_rate_state() {
     let doc: serde_json::Value = serde_json::from_str(SERVED).expect("the fixture parses");
     let mut shapes: Vec<String> = Vec::new();
     collect_rate_shapes(&doc, &mut shapes);
-    let planes: serde_json::Value = serde_json::from_str(PLANE_SERVED).unwrap();
-    collect_rate_shapes(&planes, &mut shapes);
+    // Ordinary reads must never produce the serve-only pointer. Keep their
+    // exhaustive match separate so new plane coverage cannot hide a leak into
+    // the legacy wire contract.
+    let mut non_plane_shapes = Vec::new();
+    for case in doc.as_object().unwrap().values() {
+        if case["request"]["arguments"].get("auth_method").is_none() {
+            collect_rate_shapes(&case["response"], &mut non_plane_shapes);
+        }
+    }
+    assert!(!non_plane_shapes.is_empty());
+    for shape in &non_plane_shapes {
+        match serde_json::from_str::<RateValue>(shape) {
+            Ok(RateValue::BilledAs { .. }) => panic!("never on a read without auth_method"),
+            Ok(
+                RateValue::Priced { .. }
+                | RateValue::StatedZero { .. }
+                | RateValue::Unpriced { .. },
+            )
+            | Err(_) => {}
+        }
+    }
     assert!(
         !shapes.is_empty(),
         "no served rates found at all, so every assertion below would pass \
