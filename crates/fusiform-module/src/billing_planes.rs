@@ -414,7 +414,7 @@ mod tests {
                 "xai",
                 "apikey",
                 PlaneKind::Upstream,
-                "https://docs.x.ai/docs/guides/prompt-caching#usage-and-pricing",
+                "https://docs.x.ai/developers/advanced-api-usage/prompt-caching/usage-and-pricing",
                 1,
             ),
             (
