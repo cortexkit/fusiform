@@ -677,10 +677,10 @@ guards = "a quota proxy preserves the first hop already recorded on a borrowed r
 file = "crates/fusiform-module/src/route.rs"
 old = """
 if obj.contains_key("inherited_from") {
-                // The first hop identifies whose rate this actually is."""
+                // Already borrowed (inherited or aliased): keep the original"""
 new = """
 if false { // NON-VACUITY BREAK
-                // The first hop identifies whose rate this actually is."""
+                // Already borrowed (inherited or aliased): keep the original"""
 edits = []
 test_file = "crates/fusiform-module/src/route.rs"
 runner = "cargo"
