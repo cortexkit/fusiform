@@ -2425,12 +2425,12 @@ fn plan_prices_joins_quota_values_and_omits_them_for_tombstones() {
         find("openai", "pro_200").quota_value,
         Some(QuotaValueWire::Measured {
             low: QuotaDecimal {
-                units: 29,
-                exponent: 0
+                units: 228,
+                exponent: 1
             },
             high: QuotaDecimal {
-                units: 41,
-                exponent: 0
+                units: 409,
+                exponent: 1
             },
             ..
         })

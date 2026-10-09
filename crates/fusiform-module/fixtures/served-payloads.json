@@ -2755,18 +2755,18 @@
           "provider_id": "openai",
           "quota_value": {
             "as_of_ms": 1791504000000,
-            "basis": "List-price value of in-scope tokens divided by (weekly-window quota points used x fee per point), fee per point = monthly price x 7/30 / 100. Codex weekly ('primary') window, 2 accounts on $200 Pro, recorded by astrocyte under the old key name pro_20x. Rows 2026-09-25..10-06, trending down from about 40x to about 29x. Excludes 10-07..09, when a third account's quota (tier unconfirmed) was not counted while its tokens were. Hand-checked over two weeks to within 2%.",
+            "basis": "List-price value of in-scope tokens divided by (weekly-window quota points used x fee per point), fee per point = monthly price x 7/30 / 100, each account's points weighted by its own fee. Codex weekly ('primary') window, daily rows 2026-09-25..10-09, each covering the trailing 7 days, recorded by astrocyte under the old key name pro_20x until 10-09. Rows 09-25..10-06 pool 2 accounts on $200 Pro 200 and read 28.8-40.9x. From 10-07 a third account on $100 Pro 100 is counted too, so those rows are a pooled Pro 200 + Pro 100 figure rather than a pure Pro 200 one, and read 25.1, 23.1 and 22.8x. The series is falling, from about 40x in late September to about 23x on 10-09, so the low end is the current reading. Per-account values cannot be separated, because harness tokens carry no account. Hand-checked over two weeks to within 2%; reads 1-2% high, because usage between the last reading and a reset is lost.",
             "established_by": "ASTRO (astrocyte multiplier_observation, head rows)",
             "high": {
-              "exponent": 0,
-              "units": 41
+              "exponent": 1,
+              "units": 409
             },
             "low": {
-              "exponent": 0,
-              "units": 29
+              "exponent": 1,
+              "units": 228
             },
             "review_by_ms": 1794182400000,
-            "source_ref": "astrocyte multiplier_observation, read 2026-10-09",
+            "source_ref": "astrocyte multiplier_observation, recomputed through spend.multiplier.recompute, read 2026-10-09",
             "state": "measured",
             "token_mix": "Agentic coding, 96.2% cache read, 3.3% input, 0.23% reasoning, 0.22% output, about 0% cache write, over 26.0B tokens."
           },
