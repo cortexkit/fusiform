@@ -11,7 +11,7 @@ the design and, more importantly, the reasoning that survived being wrong twice.
 ## What it is
 
     (anthropic, max_20x)  ->  200 USD / month
-    (openai,    pro)      ->  200 USD / month
+    (openai,    pro_200)  ->  200 USD / month
 
 US list prices, deliberately. Prices vary by country and the output is a
 multiplier rather than an accounting figure, so a consistent denominator matters
@@ -119,6 +119,36 @@ CREATE TABLE plan_price_era (
 
 Money as minor units with an explicit exponent, matching `Amount` — a price is
 money and must not become a float here for the same reason it must not there.
+
+## Quota value: a curated fallback, not a price era
+
+`quota_value` on a priced `(provider_id, tier)` row measures **list-price USD of
+usage per USD of subscription capacity consumed**. Routing measures this live
+on installs with astrocyte; elsewhere this optional value is a static fallback.
+Absence means not curated, hence unknown, **never zero**. `not_established` is a
+positive refusal with a reason and review date, not an omitted measurement.
+
+Only two sources are allowed: a **dated astrocyte measurement** or a **figure
+the operator states**. Fusiform never estimates one. A measured value records
+its basis, token mix, establisher, source, as-of date and review date. The mix
+matters: agentic coding with heavy cache reads need not buy the same list-price
+usage as chat. A range preserves observed variation rather than pretending one
+account or day established a universal constant. A consumer needing one number
+takes **`low`**, because undervaluing the subscription is the conservative
+failure direction. Endpoints are exact integer decimals, not floating point.
+
+The compiled file is joined onto current store rows **per request**, like the
+billing planes. Quota values are not stored in `plan_price_era`, nor included in
+the claim `append_plan_prices` diffs: changing only a multiplier must write zero
+price eras. A retired key has no multiplier, even if the compiled file still
+names it; without a subscription price there is no dollar to divide by.
+
+Measured values have a **30-day review** policy: capacity, usage mix and the
+measurement series can drift without a price change. The shipped first review
+is the next month's same date (2026-10-09 to 2026-11-09). The time-triggered gate
+checks quota-value deadlines as well as price deadlines, including refusals,
+and names `quota_value` when it fires. A refusal's review asks whether a
+measurement or operator statement has now become available.
 
 ## Rules this plane inherits, and one it adds
 

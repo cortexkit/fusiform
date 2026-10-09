@@ -1521,6 +1521,11 @@ fn serve_plan_prices(store: &CatalogStore, args: &[u8]) -> Result<PlanPricesResp
         prices: rows
             .into_iter()
             .map(|r| PlanPriceWire {
+                quota_value: crate::plan_prices::rows()
+                    .iter()
+                    .find(|curated| curated.provider_id == r.provider_id && curated.tier == r.tier)
+                    .filter(|_| r.minor_units.is_some())
+                    .and_then(|curated| curated.quota_value.clone()),
                 provider_id: r.provider_id,
                 tier: r.tier,
                 price: match (r.minor_units, r.exponent, r.currency, r.period) {

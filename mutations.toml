@@ -759,3 +759,84 @@ only = true
 timeout_s = 600
 build_timeout_s = 5400
 
+
+[[control]]
+id = "plan-quota-malformed-keeps-price"
+guards = "a malformed quota value is rejected without discarding its independently sourced price"
+file = "crates/fusiform-module/src/plan_prices.rs"
+old = """
+                    rejects.push(at(&format!("quota_value: {reason}")));
+                    None"""
+new = """
+                    rejects.push(at(&format!("quota_value: {reason}")));
+                    if price.is_some() { continue; }
+                    None"""
+edits = []
+test_file = "crates/fusiform-module/src/plan_prices.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["plan_prices::tests::malformed_quota_is_rejected_without_losing_the_price"]
+only = true
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "plan-quota-excluded-from-price-claim"
+guards = "the claim passed to append_plan_prices excludes quota value so a multiplier-only edit writes zero price eras"
+file = "crates/fusiform-module/src/plan_prices.rs"
+old = "            minor_units: r.price.map(|a| a.minor_units),"
+new = "            minor_units: r.price.map(|a| a.minor_units + match &r.quota_value { Some(fusiform_protocol::QuotaValueWire::Measured { low, .. }) => low.units, _ => 0 }),"
+edits = []
+test_file = "crates/fusiform-module/src/plan_prices.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+select = "expected"
+expect_red = ["plan_prices::tests::changing_only_quota_value_writes_no_plan_price_era"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "plan-quota-review-date"
+guards = "the time-triggered plan-price gate also covers measured and refused quota value deadlines"
+file = "crates/fusiform-module/src/plan_prices.rs"
+old = "                if review_by_ms < now_ms {"
+new = "                if false && review_by_ms < now_ms {"
+edits = []
+test_file = "crates/fusiform-module/src/plan_prices.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+select = "expected"
+expect_red = ["plan_prices::tests::overdue_quota_values_fire_for_both_shapes"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "plan-quota-served-join"
+guards = "plan.prices joins the compiled quota value onto current store keys at request time"
+file = "crates/fusiform-module/src/route.rs"
+old = """
+                quota_value: crate::plan_prices::rows()
+                    .iter()
+                    .find(|curated| curated.provider_id == r.provider_id && curated.tier == r.tier)
+                    .filter(|_| r.minor_units.is_some())
+                    .and_then(|curated| curated.quota_value.clone()),"""
+new = "                quota_value: None,"
+edits = []
+test_file = "crates/fusiform-module/tests/it/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+select = "expected"
+expect_red = ["route::plan_prices_joins_quota_values_and_omits_them_for_tombstones"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+

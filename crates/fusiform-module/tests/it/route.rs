@@ -2375,6 +2375,105 @@ fn a_named_read_of_a_retired_model_says_so() {
     );
 }
 
+#[test]
+fn plan_prices_joins_quota_values_and_omits_them_for_tombstones() {
+    use fusiform_protocol::{QuotaDecimal, QuotaValueWire};
+    let f = fixture();
+    let curated = fusiform_module::plan_prices::store_rows(fusiform_module::plan_prices::rows());
+    f.store.append_plan_prices(&curated).unwrap();
+    let call = serde_json::json!({"name":"plan.prices", "arguments":{}});
+    let ToolResponse::PlanPrices(response) =
+        serve_tool_call(&f.store, &serde_json::to_vec(&call).unwrap()).unwrap()
+    else {
+        panic!("wrong response arm");
+    };
+    let find = |provider: &str, tier: &str| {
+        response
+            .prices
+            .iter()
+            .find(|r| r.provider_id == provider && r.tier == tier)
+            .unwrap()
+    };
+    let Some(QuotaValueWire::Measured {
+        low,
+        high,
+        source_ref,
+        ..
+    }) = &find("anthropic", "max_20x").quota_value
+    else {
+        panic!("the compiled measurement must reach the route");
+    };
+    assert_eq!(
+        *low,
+        QuotaDecimal {
+            units: 574,
+            exponent: 1
+        }
+    );
+    assert_eq!(
+        *high,
+        QuotaDecimal {
+            units: 608,
+            exponent: 1
+        }
+    );
+    assert_eq!(
+        source_ref,
+        "astrocyte multiplier_observation, read 2026-10-09"
+    );
+    assert!(matches!(
+        find("openai", "pro_200").quota_value,
+        Some(QuotaValueWire::Measured {
+            low: QuotaDecimal {
+                units: 29,
+                exponent: 0
+            },
+            high: QuotaDecimal {
+                units: 41,
+                exponent: 0
+            },
+            ..
+        })
+    ));
+    assert!(
+        matches!(&find("anthropic", "max_5x").quota_value, Some(QuotaValueWire::NotEstablished { refusal_reason, .. }) if refusal_reason.contains("No Max 5x account"))
+    );
+    assert!(find("openai", "pro").quota_value.is_none());
+    assert!(serde_json::to_value(find("openai", "pro"))
+        .unwrap()
+        .get("quota_value")
+        .is_none());
+
+    // Remove the subscription price from the store while the compiled file
+    // still has a quota measurement for the key. A quota value divides usage
+    // by subscription dollars, so serving a retired price must omit its value.
+    let remaining: Vec<_> = curated
+        .into_iter()
+        .filter(|r| !(r.provider_id == "anthropic" && r.tier == "max_20x"))
+        .collect();
+    assert_eq!(f.store.append_plan_prices(&remaining).unwrap(), 1);
+    let ToolResponse::PlanPrices(response) =
+        serve_tool_call(&f.store, &serde_json::to_vec(&call).unwrap()).unwrap()
+    else {
+        panic!("wrong response arm");
+    };
+    let retired = response
+        .prices
+        .iter()
+        .find(|r| r.provider_id == "anthropic" && r.tier == "max_20x")
+        .unwrap();
+    assert!(retired.price.is_none());
+    assert!(retired
+        .refusal_reason
+        .as_deref()
+        .unwrap()
+        .contains("no longer carried"));
+    assert!(
+        retired.quota_value.is_none(),
+        "a tombstone has no subscription dollar"
+    );
+}
+
 /// `plan.prices` serves a curated row, its refusal twin, and the unit policy.
 ///
 /// Driven through `serve_tool_call` — the real envelope, the real dispatch —

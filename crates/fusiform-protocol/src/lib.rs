@@ -146,6 +146,10 @@ pub struct PlanPriceWire {
     /// Absent when `refusal_reason` is set, and the two are exclusive.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price: Option<PlanAmount>,
+    /// Absent means not curated: unknown, never zero. A consumer needing one
+    /// number takes `low`, the conservative end that undervalues the subscription.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota_value: Option<QuotaValueWire>,
     /// Why there is no price, when there is none.
     ///
     /// A POSITIVE claim rather than a gap. "Tier not observed" and "tier
@@ -181,6 +185,37 @@ pub struct PlanAmount {
     pub period: String,
 }
 
+/// List-price USD of usage per USD of subscription capacity consumed.
+///
+/// A dated measurement or an operator-stated figure, never an estimate made by
+/// fusiform. A refusal records that nobody has established the value.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum QuotaValueWire {
+    Measured {
+        low: QuotaDecimal,
+        high: QuotaDecimal,
+        basis: String,
+        token_mix: String,
+        established_by: String,
+        source_ref: String,
+        as_of_ms: i64,
+        review_by_ms: i64,
+    },
+    NotEstablished {
+        refusal_reason: String,
+        review_by_ms: i64,
+    },
+}
+
+/// An exact decimal: `units / 10^exponent` (57.4 is 574 with exponent 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuotaDecimal {
+    pub units: i64,
+    pub exponent: u32,
+}
+
 /// Curated subscription prices.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PlanPricesResponse {
@@ -189,19 +224,20 @@ pub struct PlanPricesResponse {
     /// The instant this answer describes, for round-tripping with a later
     /// read. Same contract as `CatalogGetResponse::resolved_at_ms`.
     pub resolved_at_ms: i64,
-    /// What the `tier` field IS, stated rather than left to be assumed.
+    /// A policy statement: `tier` contains the vendor's tier name, not an API
+    /// plan string, and mapping an account's API string is the consumer's job.
     ///
-    /// A consumer decoding this response sees `tier: "pro_20x"` and has no way
+    /// A consumer decoding this response sees `tier: "pro_200"` and has no way
     /// to know whether that is the vendor's own tier name or the string its API
     /// reports for the account. They are different vocabularies and do not
-    /// correspond one-to-one — OpenAI publishes Pro 5x and Pro 20x while its API
-    /// says `plan_type: "pro"` for both — so a consumer matching an API string
-    /// against this column gets nothing, or worse, gets a wrong match silently.
+    /// correspond one-to-one — OpenAI publishes Pro 100, Pro 200 and Pro 500,
+    /// but an API string `pro` does not establish which an account holds — so
+    /// matching that string against this column gets nothing, or worse, gets
+    /// a wrong match silently.
     ///
-    /// Served for the same reason `unit_policy` is: the failure this prevents is
-    /// a consumer ASSUMING the answer, and an assumption is invisible until it
-    /// is wrong. The concrete case arrives on the refusal row for the API string
-    /// itself, which is where a reader meets it at the moment it applies.
+    /// Stated on the response so consumers do not have to guess. When an API
+    /// string could name several vendor tiers (such as OpenAI's `pro`), its
+    /// response row refuses a price and names the tiers it cannot distinguish.
     pub tier_vocabulary: String,
     /// What this plane's prices are quoted on, stated rather than assumed.
     ///

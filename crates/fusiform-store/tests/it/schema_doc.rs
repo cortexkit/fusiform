@@ -707,3 +707,85 @@ fn a_key_dropped_from_the_file_is_tombstoned() {
         .expect("third apply");
     assert_eq!(third, 0, "re-application must stay a no-op");
 }
+
+#[test]
+fn the_shipped_file_retires_openais_old_pro_tier_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let descriptor = cortexkit_store_types::StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: cortexkit_store_types::Isolation::Module,
+        backend: cortexkit_store_types::StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into_owned(),
+        },
+    };
+    let store = fusiform_store::CatalogStore::open(&descriptor).unwrap();
+    let doc: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../fusiform-module/data/plan-prices.json"
+    ))
+    .unwrap();
+    let curated: Vec<_> = doc["cells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|cell| {
+            let price = &cell["price"];
+            fusiform_store::NewPlanPrice {
+                provider_id: cell["provider_id"].as_str().unwrap().into(),
+                tier: cell["tier"].as_str().unwrap().into(),
+                minor_units: price["minor_units"].as_i64(),
+                exponent: price["exponent"].as_i64().map(|e| e as i32),
+                currency: price["currency"].as_str().map(str::to_string),
+                period: price["period"].as_str().map(str::to_string),
+                boundary_at_ms: cell["boundary_at_ms"].as_i64().unwrap(),
+                established_by: cell["established_by"].as_str().unwrap().into(),
+                established_at_ms: cell["established_at_ms"].as_i64().unwrap(),
+                review_by_ms: cell["review_by_ms"].as_i64().unwrap(),
+                source_ref: cell["source_ref"].as_str().unwrap().into(),
+                refusal_reason: cell["refusal_reason"].as_str().map(str::to_string),
+            }
+        })
+        .collect();
+    let old: Vec<_> = [("pro_200", "pro_20x"), ("pro_100", "pro_5x")]
+        .into_iter()
+        .map(|(new, old)| {
+            let mut row = curated
+                .iter()
+                .find(|r| r.provider_id == "openai" && r.tier == new)
+                .unwrap()
+                .clone();
+            row.tier = old.into();
+            row.boundary_at_ms = 1789785600000;
+            row
+        })
+        .collect();
+    assert_eq!(store.append_plan_prices(&old).unwrap(), 2);
+    assert_eq!(
+        store.append_plan_prices(&curated).unwrap(),
+        curated.len() + 2
+    );
+    let served = store.plan_prices_at(1791504000001, Some("openai")).unwrap();
+    for tier in ["pro_20x", "pro_5x"] {
+        let row = served.iter().find(|r| r.tier == tier).unwrap();
+        assert!(
+            row.minor_units.is_none(),
+            "{tier} must not serve a stale price"
+        );
+        assert!(row
+            .refusal_reason
+            .as_deref()
+            .unwrap()
+            .contains("no longer carried"));
+    }
+    for (tier, units) in [
+        ("pro_200", 20000),
+        ("pro_100", 10000),
+        ("pro_500", 50000),
+        ("plus", 2000),
+    ] {
+        let row = served.iter().find(|r| r.tier == tier).unwrap();
+        assert_eq!(row.minor_units, Some(units), "{tier}");
+        assert_eq!(row.period.as_deref(), Some("month"));
+    }
+    assert_eq!(store.append_plan_prices(&curated).unwrap(), 0);
+}

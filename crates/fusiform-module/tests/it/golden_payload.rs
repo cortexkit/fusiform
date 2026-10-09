@@ -362,7 +362,24 @@ fn non_plane_leaks(doc: &serde_json::Value) -> (usize, Vec<String>) {
         let response = &case["response"];
         let mut keys = std::collections::BTreeSet::new();
         collect_keys(response, &mut keys);
-        let bytes = response.to_string();
+        let mut scanned = response.clone();
+        // plan.prices legitimately uses state "not_established" for quota
+        // values nobody has measured. Exempt only that state field from this
+        // billing-data leak check, not a rate's reason "not_established" or the
+        // forbidden plane and billing_rules keys anywhere in the response.
+        if case["request"]["name"] == "plan.prices" {
+            if let Some(prices) = scanned["prices"].as_array_mut() {
+                for price in prices {
+                    if price["quota_value"]["state"] == "not_established" {
+                        price["quota_value"]
+                            .as_object_mut()
+                            .unwrap()
+                            .remove("state");
+                    }
+                }
+            }
+        }
+        let bytes = scanned.to_string();
         for forbidden in ["plane", "billing_rules"] {
             if keys.contains(forbidden) {
                 leaks.push(format!("{label}: {forbidden}"));
@@ -410,6 +427,27 @@ fn planted_plane_bytes_in_an_ordinary_case_are_reported() {
             "the scan must catch each forbidden shape independently"
         );
     }
+}
+
+#[test]
+fn quota_refusals_do_not_exempt_plan_prices_from_the_plane_fence() {
+    let mut doc = serde_json::json!({"plans": {
+        "request":{"name":"plan.prices", "arguments":{}},
+        "response":{"prices":[{"quota_value":{"state":"not_established", "refusal_reason":"no measured account", "review_by_ms":1000}}]}
+    }});
+    let (checked, leaks) = non_plane_leaks(&doc);
+    assert_eq!(checked, 1);
+    assert!(
+        leaks.is_empty(),
+        "a legitimate quota refusal is not a billing-plane leak: {leaks:?}"
+    );
+    doc["plans"]["response"]["rate"] =
+        serde_json::json!({"state":"unpriced", "reason":"not_established"});
+    assert_eq!(non_plane_leaks(&doc).1, ["plans: not_established"]);
+    doc["plans"]["response"]["prices"][0]["quota_value"]["plane"] = serde_json::Value::Null;
+    assert!(non_plane_leaks(&doc)
+        .1
+        .contains(&"plans: plane".to_string()));
 }
 
 fn assert_rule(response: &serde_json::Value, model: &str, key: &str, state: &str, source: &str) {
@@ -1357,12 +1395,13 @@ fn every_read_response_field_reaches_the_fixture() {
             "HistoryResponse",
             "StatusResponse",
             "PlanPricesResponse",
+            "PlanPriceWire",
         ],
     );
 
     assert!(
         checked >= 40,
-        "this examined {checked} fields across six structs; fewer than 40 means \
+        "this examined {checked} fields across seven structs; fewer than 40 means \
          the scan broke rather than the protocol shrinking"
     );
 

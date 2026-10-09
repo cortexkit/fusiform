@@ -38,6 +38,8 @@ pub struct PlanPrice {
     /// `source_ref`. That is a claim rather than a gap, which is why
     /// `refusal_reason` is required alongside it.
     pub price: Option<Amount>,
+    /// Joined onto served rows, never part of the stored price claim.
+    pub quota_value: Option<fusiform_protocol::QuotaValueWire>,
     pub refusal_reason: Option<String>,
     /// When the price took effect, as best the source allows.
     ///
@@ -231,10 +233,23 @@ pub fn load_reporting_rejects(doc: &str) -> (Vec<PlanPrice>, Vec<String>) {
             continue;
         }
 
+        // A bad multiplier must not erase an independently sourced price.
+        let quota_value = match cell.get("quota_value") {
+            None => None,
+            Some(value) => match parse_quota_value(value, price.is_some()) {
+                Ok(value) => Some(value),
+                Err(reason) => {
+                    rejects.push(at(&format!("quota_value: {reason}")));
+                    None
+                }
+            },
+        };
+
         rows.push(PlanPrice {
             provider_id: provider_id.to_string(),
             tier: tier.to_string(),
             price,
+            quota_value,
             refusal_reason: refusal.map(str::to_string),
             boundary_at_ms,
             established_by: established_by.to_string(),
@@ -245,6 +260,55 @@ pub fn load_reporting_rejects(doc: &str) -> (Vec<PlanPrice>, Vec<String>) {
     }
 
     (rows, rejects)
+}
+
+fn parse_quota_value(
+    value: &serde_json::Value,
+    has_price: bool,
+) -> Result<fusiform_protocol::QuotaValueWire, String> {
+    use fusiform_protocol::QuotaValueWire;
+    if !has_price {
+        return Err("a refusal row has no subscription dollar to divide by".to_string());
+    }
+    let value: QuotaValueWire = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+    match &value {
+        QuotaValueWire::Measured {
+            low,
+            high,
+            basis,
+            token_mix,
+            established_by,
+            source_ref,
+            as_of_ms,
+            review_by_ms,
+        } => {
+            if low.units <= 0 || high.units <= 0 || low.exponent > 6 || high.exponent > 6 {
+                return Err("endpoints must be positive exact decimals with exponent <= 6".into());
+            }
+            // Scale in integers, including differently scaled endpoints. i128
+            // holds every i64 endpoint multiplied by at most a million.
+            if i128::from(low.units) * 10i128.pow(6 - low.exponent)
+                > i128::from(high.units) * 10i128.pow(6 - high.exponent)
+            {
+                return Err("low is greater than high".into());
+            }
+            if [basis, token_mix, established_by, source_ref]
+                .iter()
+                .any(|s| s.trim().is_empty())
+            {
+                return Err("required strings must not be empty".into());
+            }
+            if review_by_ms <= as_of_ms {
+                return Err("review_by_ms must be after as_of_ms".into());
+            }
+        }
+        QuotaValueWire::NotEstablished { refusal_reason, .. } => {
+            if refusal_reason.trim().is_empty() {
+                return Err("refusal_reason must not be empty".into());
+            }
+        }
+    }
+    Ok(value)
 }
 
 /// The curated rows as the store records them.
@@ -279,25 +343,55 @@ pub fn store_rows(rows: &[PlanPrice]) -> Vec<fusiform_store::NewPlanPrice> {
 /// A row whose review date has passed, with everything needed to act on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Overdue {
+    pub subject: &'static str,
     pub provider_id: String,
     pub tier: String,
     pub days_overdue: i64,
     pub source_ref: String,
 }
 
-/// Which rows are past their review date at `now_ms`.
+/// Which prices and quota values are past their own review dates at `now_ms`.
 ///
 /// Takes the instant rather than reading the clock, so the gate can be driven
 /// in both directions. A check that can only ever be run against the real
 /// present can only be tested on data that is currently fine.
 pub fn overdue_at(rows: &[PlanPrice], now_ms: i64) -> Vec<Overdue> {
     rows.iter()
-        .filter(|r| r.review_by_ms < now_ms)
-        .map(|r| Overdue {
-            provider_id: r.provider_id.clone(),
-            tier: r.tier.clone(),
-            days_overdue: (now_ms - r.review_by_ms) / 86_400_000,
-            source_ref: r.source_ref.clone(),
+        .flat_map(|r| {
+            let mut overdue = Vec::new();
+            if r.review_by_ms < now_ms {
+                overdue.push(Overdue {
+                    subject: "price",
+                    provider_id: r.provider_id.clone(),
+                    tier: r.tier.clone(),
+                    days_overdue: (now_ms - r.review_by_ms) / 86_400_000,
+                    source_ref: r.source_ref.clone(),
+                });
+            }
+            if let Some(value) = &r.quota_value {
+                use fusiform_protocol::QuotaValueWire;
+                let (review_by_ms, source) = match value {
+                    QuotaValueWire::Measured {
+                        review_by_ms,
+                        source_ref,
+                        ..
+                    } => (*review_by_ms, source_ref.clone()),
+                    QuotaValueWire::NotEstablished {
+                        review_by_ms,
+                        refusal_reason,
+                    } => (*review_by_ms, format!("not established: {refusal_reason}")),
+                };
+                if review_by_ms < now_ms {
+                    overdue.push(Overdue {
+                        subject: "quota_value",
+                        provider_id: r.provider_id.clone(),
+                        tier: r.tier.clone(),
+                        days_overdue: (now_ms - review_by_ms) / 86_400_000,
+                        source_ref: source,
+                    });
+                }
+            }
+            overdue
         })
         .collect()
 }
@@ -313,7 +407,7 @@ pub fn overdue_at(rows: &[PlanPrice], now_ms: i64) -> Vec<Overdue> {
 pub fn overdue_report(overdue: &[Overdue]) -> String {
     let mut out = String::from(
         "NOT A BUILD FAILURE. Nothing changed; a review date passed.\n\n\
-         These curated subscription prices are past their review date. Nothing \
+         These curated subscription prices or quota values are past their review date. Nothing \
          reveals a plan reprice — no fetch, no diff, no contradiction — so this \
          date is the only signal that a price may have moved, and the damage is \
          retroactive: every window priced in the stale period used the old \
@@ -321,14 +415,17 @@ pub fn overdue_report(overdue: &[Overdue]) -> String {
     );
     for o in overdue {
         out.push_str(&format!(
-            "  {}/{} — {} day(s) overdue\n    read: {}\n",
-            o.provider_id, o.tier, o.days_overdue, o.source_ref
+            "  {}/{} {} — {} day(s) overdue\n    read: {}\n",
+            o.provider_id, o.tier, o.subject, o.days_overdue, o.source_ref
         ));
     }
     out.push_str(
         "\nOpen each source, read the number, and commit:\n\
          \x20 - the price, IF it moved\n\
          \x20 - a new established_by, established_at_ms and review_by_ms, ALWAYS\n\n\
+         For quota_value, revisit the measurement or operator statement (or the \
+         refusal reason). Update its figure and provenance, including as_of_ms \
+         for a measured value, and its review_by_ms.\n\n\
          Confirming a price unchanged is a real result and the commit should \
          look like one. If it did not move, the only edit is the provenance.\n\n\
          What this gate CANNOT tell you: whether a price is still correct. It \
@@ -340,6 +437,211 @@ pub fn overdue_report(overdue: &[Overdue]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn measured_quota() -> serde_json::Value {
+        serde_json::json!({
+            "state": "measured",
+            "low": {"units": 574, "exponent": 1},
+            "high": {"units": 608, "exponent": 1},
+            "basis": "weekly usage divided by consumed capacity",
+            "token_mix": "agentic coding",
+            "established_by": "ASTRO",
+            "source_ref": "daily rows",
+            "as_of_ms": 1,
+            "review_by_ms": 1000
+        })
+    }
+
+    fn quota_document(quota: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"cells": [{
+            "provider_id": "acme", "tier": "pro",
+            "price": {"minor_units": 2000, "exponent": 2, "currency": "USD", "period": "month"},
+            "quota_value": quota,
+            "boundary_at_ms": 1, "established_by": "reader", "established_at_ms": 2,
+            "review_by_ms": 9_000_000_000_000i64, "source_ref": "price page"
+        }]})
+    }
+
+    #[test]
+    fn well_formed_quota_values_load() {
+        let mut differently_scaled = measured_quota();
+        differently_scaled["high"] = serde_json::json!({"units": 61, "exponent": 0});
+        for quota in [
+            measured_quota(),
+            differently_scaled,
+            serde_json::json!({"state":"not_established", "refusal_reason":"no measured account", "review_by_ms":1000}),
+        ] {
+            let (rows, rejects) =
+                load_reporting_rejects(&quota_document(quota.clone()).to_string());
+            assert!(rejects.is_empty(), "{rejects:?}");
+            assert_eq!(rows.len(), 1);
+            assert_eq!(
+                serde_json::to_value(rows[0].quota_value.as_ref().unwrap()).unwrap(),
+                quota
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_quota_is_rejected_without_losing_the_price() {
+        let mut cases = Vec::new();
+        let mut both = measured_quota();
+        both["refusal_reason"] = "also refused".into();
+        cases.push(("both shapes".to_string(), both));
+        cases.push((
+            "neither shape".into(),
+            serde_json::json!({"review_by_ms":1000}),
+        ));
+        cases.push(("null".into(), serde_json::Value::Null));
+        let mut reversed = measured_quota();
+        reversed["low"] = serde_json::json!({"units": 61, "exponent": 0});
+        cases.push(("low exceeds high across scales".into(), reversed));
+        for endpoint in ["low", "high"] {
+            for units in [0, -1] {
+                let mut quota = measured_quota();
+                quota[endpoint]["units"] = units.into();
+                cases.push((format!("{endpoint} units {units}"), quota));
+            }
+            for exponent in [7, -1] {
+                let mut quota = measured_quota();
+                quota[endpoint]["exponent"] = exponent.into();
+                cases.push((format!("{endpoint} exponent {exponent}"), quota));
+            }
+        }
+        for field in ["basis", "token_mix", "established_by", "source_ref"] {
+            let mut missing = measured_quota();
+            missing.as_object_mut().unwrap().remove(field);
+            cases.push((format!("missing {field}"), missing));
+            for empty in ["", "  "] {
+                let mut quota = measured_quota();
+                quota[field] = empty.into();
+                cases.push((format!("empty {field}"), quota));
+            }
+        }
+        for review in [0, 1] {
+            let mut quota = measured_quota();
+            quota["review_by_ms"] = review.into();
+            cases.push((format!("review not after as-of: {review}"), quota));
+        }
+        for field in ["as_of_ms", "review_by_ms", "low", "high"] {
+            let mut quota = measured_quota();
+            quota.as_object_mut().unwrap().remove(field);
+            cases.push((format!("missing {field}"), quota));
+        }
+        for reason in [None, Some(""), Some(" ")] {
+            let mut quota = serde_json::json!({"state":"not_established", "review_by_ms":1000});
+            if let Some(reason) = reason {
+                quota["refusal_reason"] = reason.into();
+            }
+            cases.push((format!("refusal reason {reason:?}"), quota));
+        }
+        let mut both_refused = serde_json::json!({"state":"not_established", "refusal_reason":"none", "review_by_ms":1000});
+        both_refused["low"] = measured_quota()["low"].clone();
+        both_refused["high"] = measured_quota()["high"].clone();
+        cases.push(("refusal with measured endpoints".into(), both_refused));
+        for (case, quota) in cases {
+            let (rows, rejects) = load_reporting_rejects(&quota_document(quota).to_string());
+            assert_eq!(rejects.len(), 1, "{case}: {rejects:?}");
+            assert!(
+                rejects[0].contains("cell 0: quota_value"),
+                "{case}: {rejects:?}"
+            );
+            assert_eq!(rows.len(), 1, "{case}: the price must survive");
+            assert_eq!(rows[0].price.unwrap().minor_units, 2000, "{case}");
+            assert!(
+                rows[0].quota_value.is_none(),
+                "{case}: invalid quota must not load"
+            );
+        }
+    }
+
+    #[test]
+    fn a_price_refusal_cannot_carry_a_quota_value() {
+        for quota in [
+            measured_quota(),
+            serde_json::json!({"state":"not_established", "refusal_reason":"no measured account", "review_by_ms":1000}),
+        ] {
+            let mut doc = quota_document(quota);
+            doc["cells"][0]["price"] = serde_json::Value::Null;
+            doc["cells"][0]["refusal_reason"] = "tier is ambiguous".into();
+            let (rows, rejects) = load_reporting_rejects(&doc.to_string());
+            assert_eq!(rejects.len(), 1);
+            assert_eq!(rows.len(), 1);
+            assert!(rows[0].price.is_none());
+            assert!(rows[0].quota_value.is_none());
+            assert_eq!(rows[0].refusal_reason.as_deref(), Some("tier is ambiguous"));
+        }
+    }
+
+    #[test]
+    fn changing_only_quota_value_writes_no_plan_price_era() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.db");
+        let store = fusiform_store::CatalogStore::open(&cortexkit_store_types::StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: cortexkit_store_types::Isolation::Module,
+            backend: cortexkit_store_types::StorageBackend::Sqlite {
+                path: path.to_string_lossy().into_owned(),
+            },
+        })
+        .unwrap();
+        let mut doc: serde_json::Value = serde_json::from_str(PLAN_PRICES).unwrap();
+        let (rows, rejects) = load_reporting_rejects(&doc.to_string());
+        assert!(rejects.is_empty());
+        assert_eq!(
+            store.append_plan_prices(&store_rows(&rows)).unwrap(),
+            rows.len()
+        );
+        // Change the quota value, its observation time and review date, without
+        // changing the price claim that append_plan_prices compares.
+        doc["cells"][0]["quota_value"]["low"]["units"] = 580.into();
+        doc["cells"][0]["quota_value"]["as_of_ms"] = 1791590400000i64.into();
+        doc["cells"][0]["quota_value"]["review_by_ms"] = 1794268800000i64.into();
+        let (changed, rejects) = load_reporting_rejects(&doc.to_string());
+        assert!(rejects.is_empty());
+        assert_ne!(rows[0].quota_value, changed[0].quota_value);
+        assert_eq!(store.append_plan_prices(&store_rows(&changed)).unwrap(), 0);
+        let conn = rusqlite::Connection::open(path).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM plan_price_era", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            count,
+            rows.len() as i64,
+            "quota changes must not enter the price history"
+        );
+    }
+
+    #[test]
+    fn overdue_quota_values_fire_for_both_shapes() {
+        for quota in [
+            measured_quota(),
+            serde_json::json!({"state":"not_established", "refusal_reason":"no measured account", "review_by_ms":1000}),
+        ] {
+            let (rows, rejects) = load_reporting_rejects(&quota_document(quota).to_string());
+            assert!(rejects.is_empty(), "{rejects:?}");
+            let overdue = overdue_at(&rows, 1000 + 3 * 86_400_000);
+            assert_eq!(
+                overdue.len(),
+                1,
+                "the quota expires independently of its price"
+            );
+            let message = overdue_report(&overdue);
+            assert!(
+                message.contains("acme/pro quota_value") && message.contains("3 day(s)"),
+                "{message}"
+            );
+            assert!(
+                message.contains("daily rows") || message.contains("no measured account"),
+                "{message}"
+            );
+            assert!(
+                overdue_at(&rows, 999).is_empty(),
+                "an in-date quota must not fire"
+            );
+        }
+    }
 
     /// One priced row and one refusal, so a mapping test can assert BOTH
     /// directions. A fixture with only one kind lets a mapping that handles
@@ -464,22 +766,13 @@ mod tests {
         assert_eq!(rows[0].price.expect("priced").minor_units, 2000);
     }
 
-    /// No curated price is past its review date.
+    /// No curated price or quota value is past its review date.
     ///
-    /// # This is the repo's only TIME-TRIGGERED gate
-    ///
-    /// Every other fence here fails because data or code changed. This one
-    /// fires because a date passed with nothing touched — which is the point
-    /// rather than a defect: the facts it guards rot untouched, so the gate
-    /// that guards them must fire untouched.
-    ///
-    /// It runs on push AND on the 06:00 schedule, and the schedule is what
-    /// makes it work. A push-only gate is silent for exactly the period a
-    /// review date exists to bound, because dates lapse during quiet weeks and
-    /// a quiet week has no pushes.
-    ///
-    /// Reads the real clock, deliberately. A fixed instant would make this a
-    /// test about arithmetic.
+    /// CI runs this test on pushes and on its daily 06:00 schedule. The daily
+    /// run catches a review date passing even when no edit triggers a push:
+    /// curated facts can go stale without anyone changing the repository.
+    /// It reads the real clock because a fixed instant would test only the
+    /// comparison, not whether the shipped facts are still within review.
     #[test]
     fn no_curated_price_is_past_its_review_date() {
         let (rows, rejects) = load_reporting_rejects(PLAN_PRICES);
@@ -633,17 +926,11 @@ mod tests {
         );
     }
 
-    /// The tier vocabulary reaches the WIRE, not just the file.
-    ///
-    /// It was file-only for an hour after I wrote it, which made it invisible
-    /// to the one party it exists for. A consumer decoding this response sees
-    /// `tier: "pro_20x"` and cannot tell a vendor tier name from the string
-    /// their own API reports — the exact confusion that produced the defect
-    /// this contract was written to settle.
-    ///
-    /// Same split as `unit_policy`: the STATEMENT is served, the worked example
-    /// stays in `why_tier_vocabulary` for whoever edits the file. The concrete
-    /// case reaches a consumer anyway, on the refusal row for the API string.
+    /// The file carries a concise tier-vocabulary statement for consumers.
+    /// `tier` names a vendor tier, not an account's API plan string; leaving
+    /// that distinction implicit would invite consumers to make a wrong join.
+    /// The response serves the statement, while the longer worked example
+    /// stays in `why_tier_vocabulary` for whoever curates the file.
     #[test]
     fn the_tier_vocabulary_is_a_served_statement() {
         let doc: serde_json::Value =

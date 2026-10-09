@@ -1622,12 +1622,65 @@ fn render_plan_prices(response: &serde_json::Value) -> String {
             },
             row["source_ref"].as_str().unwrap_or("?"),
         ));
+        match row.get("quota_value").filter(|v| !v.is_null()) {
+            Some(value) => match serde_json::from_value(value.clone()) {
+                Ok(value) => out.push_str(&render_quota_value(&value)),
+                Err(_) => out.push_str("      quota value unknown (malformed response)\n"),
+            },
+            None => out.push_str("      quota value unknown (not curated)\n"),
+        }
     }
 
     if let Some(policy) = response["unit_policy"].as_str() {
         out.push_str(&format!("\n{policy}\n"));
     }
     out
+}
+
+fn render_quota_value(value: &fusiform_protocol::QuotaValueWire) -> String {
+    use fusiform_protocol::QuotaValueWire;
+    match value {
+        QuotaValueWire::Measured {
+            low,
+            high,
+            basis,
+            token_mix,
+            established_by,
+            source_ref,
+            as_of_ms,
+            review_by_ms,
+        } => format!(
+            "      quota value {}–{}x (list-price USD / subscription capacity USD)\n\
+             \x20     basis {basis}\n      token mix {token_mix}\n\
+             \x20     established by {established_by}\n      source {source_ref}\n\
+             \x20     as of {}, review by {}\n",
+            render_quota_decimal(low),
+            render_quota_decimal(high),
+            format_instant(*as_of_ms),
+            format_instant(*review_by_ms),
+        ),
+        QuotaValueWire::NotEstablished {
+            refusal_reason,
+            review_by_ms,
+        } => format!(
+            "      quota value not established — {refusal_reason}\n      review by {}\n",
+            format_instant(*review_by_ms),
+        ),
+    }
+}
+
+fn render_quota_decimal(value: &fusiform_protocol::QuotaDecimal) -> String {
+    // Format the integer digits directly: a float can round a curated endpoint.
+    let digits = value.units.to_string();
+    let exponent = value.exponent as usize;
+    if exponent == 0 {
+        digits
+    } else if digits.len() > exponent {
+        let split = digits.len() - exponent;
+        format!("{}.{}", &digits[..split], &digits[split..])
+    } else {
+        format!("0.{}{}", "0".repeat(exponent - digits.len()), digits)
+    }
 }
 
 fn print_mark(response: &serde_json::Value) {
@@ -2025,6 +2078,71 @@ mod tests {
         assert!(
             warn_line.unwrap() - price_line.unwrap() <= 2,
             "the warning must sit with the price it is about: {out}"
+        );
+    }
+
+    #[test]
+    fn quota_value_renders_its_range_and_provenance() {
+        let response = serde_json::json!({"prices":[{
+            "provider_id":"anthropic", "tier":"max_20x",
+            "price":{"minor_units":20000,"exponent":2,"currency":"USD","period":"month"},
+            "quota_value": {
+                "state":"measured", "low":{"units":574,"exponent":1},
+                "high":{"units":608,"exponent":1}, "basis":"weekly capacity consumed",
+                "token_mix":"cache-heavy coding", "established_by":"ASTRO",
+                "source_ref":"daily observations", "as_of_ms":1791504000000i64,
+                "review_by_ms":1794182400000i64
+            }
+        }]});
+        let out = render_plan_prices(&response);
+        for term in [
+            "quota value 57.4–60.8x",
+            "list-price USD / subscription capacity USD",
+            "basis weekly capacity consumed",
+            "token mix cache-heavy coding",
+            "established by ASTRO",
+            "source daily observations",
+            "as of 2026-10-09",
+            "review by 2026-11-09",
+        ] {
+            assert!(out.contains(term), "missing {term:?}: {out}");
+        }
+        assert_eq!(
+            render_quota_decimal(&fusiform_protocol::QuotaDecimal {
+                units: 1,
+                exponent: 6
+            }),
+            "0.000001"
+        );
+        assert_eq!(
+            render_quota_decimal(&fusiform_protocol::QuotaDecimal {
+                units: i64::MAX,
+                exponent: 0
+            }),
+            "9223372036854775807"
+        );
+    }
+
+    #[test]
+    fn quota_value_renders_refusal_and_uncurated_rows_distinctly() {
+        let response = serde_json::json!({"prices":[{
+            "provider_id":"openai", "tier":"pro_100",
+            "quota_value":{"state":"not_established", "refusal_reason":"no confirmed account", "review_by_ms":1797552000000i64}
+        }, {"provider_id":"openai", "tier":"pro"}]});
+        let out = render_plan_prices(&response);
+        assert!(
+            out.contains("quota value not established — no confirmed account"),
+            "{out}"
+        );
+        assert!(out.contains("review by 2026-12-18"), "{out}");
+        assert_eq!(
+            out.matches("quota value unknown (not curated)").count(),
+            1,
+            "{out}"
+        );
+        assert!(
+            !out.contains("quota value 0"),
+            "absence must not invent zero: {out}"
         );
     }
 

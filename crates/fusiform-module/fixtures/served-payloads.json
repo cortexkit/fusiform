@@ -2631,6 +2631,23 @@
             "period": "month"
           },
           "provider_id": "anthropic",
+          "quota_value": {
+            "as_of_ms": 1791504000000,
+            "basis": "List-price value of in-scope tokens divided by (weekly-window quota points used x fee per point), fee per point = monthly price x 7/30 / 100. Pooled across 5 accounts. Daily rows 2026-10-01..10-09, each covering the trailing 7 days. Excludes the 09-25/26 rows (85-88x), recorded before the series settled. Reads 1-2% high, because usage between the last reading and a reset is lost.",
+            "established_by": "ASTRO (astrocyte multiplier_observation, head rows)",
+            "high": {
+              "exponent": 1,
+              "units": 608
+            },
+            "low": {
+              "exponent": 1,
+              "units": 574
+            },
+            "review_by_ms": 1794182400000,
+            "source_ref": "astrocyte multiplier_observation, read 2026-10-09",
+            "state": "measured",
+            "token_mix": "Agentic coding, 98.5% cache read, 1.3% cache write, 0.13% output, 0.07% reasoning, 0.01% input, over 44.9B tokens. A chat-heavy mix would read differently."
+          },
           "review_by_ms": 1797552000000,
           "source_ref": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan",
           "tier": "max_20x"
@@ -2646,6 +2663,11 @@
             "period": "month"
           },
           "provider_id": "anthropic",
+          "quota_value": {
+            "refusal_reason": "No Max 5x account is held, so astrocyte has measured none; the operator can state a figure.",
+            "review_by_ms": 1797552000000,
+            "state": "not_established"
+          },
           "review_by_ms": 1797552000000,
           "source_ref": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan",
           "tier": "max_5x"
@@ -2661,38 +2683,48 @@
             "period": "month"
           },
           "provider_id": "anthropic",
+          "quota_value": {
+            "refusal_reason": "No Pro account is measured.",
+            "review_by_ms": 1797552000000,
+            "state": "not_established"
+          },
           "review_by_ms": 1797552000000,
           "source_ref": "https://www.anthropic.com/pricing",
           "tier": "pro"
         },
         {
-          "boundary_at_ms": 1789785600000,
-          "established_at_ms": 1789785600000,
-          "established_by": "fusiform",
-          "provider_id": "openai",
-          "refusal_reason": "\"pro\" is an API plan string, not a vendor tier name. OpenAI publishes Pro 5x ($100) and Pro 20x ($200) and its API reports plan_type \"pro\" for both, so this key cannot carry one price. The tier rows are openai/pro_5x and openai/pro_20x; which one an account holds is not published on any surface and is a fact about the account.",
-          "review_by_ms": 1797552000000,
-          "source_ref": "https://help.openai.com/en/articles/9793128",
-          "tier": "pro"
-        },
-        {
-          "boundary_at_ms": 1789785600000,
-          "established_at_ms": 1789785600000,
+          "boundary_at_ms": 1791504000000,
+          "established_at_ms": 1791504000000,
           "established_by": "fusiform",
           "price": {
             "currency": "USD",
             "exponent": 2,
-            "minor_units": 20000,
+            "minor_units": 2000,
             "period": "month"
           },
           "provider_id": "openai",
+          "quota_value": {
+            "refusal_reason": "No Plus account is measured.",
+            "review_by_ms": 1797552000000,
+            "state": "not_established"
+          },
           "review_by_ms": 1797552000000,
-          "source_ref": "https://help.openai.com/en/articles/9793128",
-          "tier": "pro_20x"
+          "source_ref": "https://help.openai.com/en/articles/6950777-what-is-chatgpt-plus",
+          "tier": "plus"
         },
         {
-          "boundary_at_ms": 1789785600000,
-          "established_at_ms": 1789785600000,
+          "boundary_at_ms": 1791504000000,
+          "established_at_ms": 1791504000000,
+          "established_by": "fusiform",
+          "provider_id": "openai",
+          "refusal_reason": "\"pro\" is an API plan string, not a vendor tier name. OpenAI publishes Pro 100 ($100), Pro 200 ($200) and Pro 500 ($500); the API plan string does not establish which an account holds, so this key cannot carry one price. The tier rows are openai/pro_100, openai/pro_200 and openai/pro_500; the account's tier is a fact about the account.",
+          "review_by_ms": 1797552000000,
+          "source_ref": "https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers",
+          "tier": "pro"
+        },
+        {
+          "boundary_at_ms": 1791504000000,
+          "established_at_ms": 1791504000000,
           "established_by": "fusiform",
           "price": {
             "currency": "USD",
@@ -2701,13 +2733,70 @@
             "period": "month"
           },
           "provider_id": "openai",
+          "quota_value": {
+            "refusal_reason": "Pro 100 is unmeasured: the one account possibly on it is not configured in astrocyte and its tier is unconfirmed.",
+            "review_by_ms": 1797552000000,
+            "state": "not_established"
+          },
           "review_by_ms": 1797552000000,
-          "source_ref": "https://help.openai.com/en/articles/9793128",
-          "tier": "pro_5x"
+          "source_ref": "https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers",
+          "tier": "pro_100"
+        },
+        {
+          "boundary_at_ms": 1791504000000,
+          "established_at_ms": 1791504000000,
+          "established_by": "fusiform",
+          "price": {
+            "currency": "USD",
+            "exponent": 2,
+            "minor_units": 20000,
+            "period": "month"
+          },
+          "provider_id": "openai",
+          "quota_value": {
+            "as_of_ms": 1791504000000,
+            "basis": "List-price value of in-scope tokens divided by (weekly-window quota points used x fee per point), fee per point = monthly price x 7/30 / 100. Codex weekly ('primary') window, 2 accounts on $200 Pro, recorded by astrocyte under the old key name pro_20x. Rows 2026-09-25..10-06, trending down from about 40x to about 29x. Excludes 10-07..09, when a third account's quota (tier unconfirmed) was not counted while its tokens were. Hand-checked over two weeks to within 2%.",
+            "established_by": "ASTRO (astrocyte multiplier_observation, head rows)",
+            "high": {
+              "exponent": 0,
+              "units": 41
+            },
+            "low": {
+              "exponent": 0,
+              "units": 29
+            },
+            "review_by_ms": 1794182400000,
+            "source_ref": "astrocyte multiplier_observation, read 2026-10-09",
+            "state": "measured",
+            "token_mix": "Agentic coding, 96.2% cache read, 3.3% input, 0.23% reasoning, 0.22% output, about 0% cache write, over 26.0B tokens."
+          },
+          "review_by_ms": 1797552000000,
+          "source_ref": "https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers",
+          "tier": "pro_200"
+        },
+        {
+          "boundary_at_ms": 1791504000000,
+          "established_at_ms": 1791504000000,
+          "established_by": "fusiform",
+          "price": {
+            "currency": "USD",
+            "exponent": 2,
+            "minor_units": 50000,
+            "period": "month"
+          },
+          "provider_id": "openai",
+          "quota_value": {
+            "refusal_reason": "No Pro 500 account is measured.",
+            "review_by_ms": 1797552000000,
+            "state": "not_established"
+          },
+          "review_by_ms": 1797552000000,
+          "source_ref": "https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers",
+          "tier": "pro_500"
         }
       ],
       "resolved_at_ms": -1,
-      "tier_vocabulary": "The tier is the VENDOR'S OWN TIER NAME, never an API plan string. Those are different vocabularies and do not correspond one-to-one, so a consumer holding an API string must map it to a tier itself, with knowledge of the account.",
+      "tier_vocabulary": "The tier is the VENDOR'S OWN TIER NAME, never an API plan string. OpenAI's Pro 100, Pro 200 and Pro 500 are pro_100, pro_200 and pro_500 here. A consumer holding an API string must map it to a tier itself, with knowledge of the account.",
       "unit_policy": "US list price, monthly-billed, web subscription. An operator on an annual term, in another country, or subscribed through an app store pays something else, and this plane cannot see which."
     }
   },
