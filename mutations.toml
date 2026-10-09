@@ -605,7 +605,9 @@ runner = "cargo"
 package = "fusiform-module"
 target = "--lib"
 expect_red = ["route::billing_plane_tests::undeclared_subscription_planes_never_fall_back_to_api_rows"]
-only = true
+only = false
+hub = "The golden payload fixture in the it suite pins an undeclared-plane refusal (openai with oauth), and the golden plane tests serve the whole fixture through one helper, so a plane that falls back to API rows reddens each of them as well as the lib test."
+hub_targets = ["it"]
 timeout_s = 600
 build_timeout_s = 5400
 
@@ -639,7 +641,9 @@ runner = "cargo"
 package = "fusiform-module"
 target = "--lib"
 expect_red = ["route::billing_plane_tests::plane_views_refuse_every_point_in_time_read"]
-only = true
+only = false
+hub = "The golden payload fixture in the it suite pins a point-in-time plane read as a refusal, and the golden plane tests serve the whole fixture through one helper, so serving that read reddens each of them as well as the lib test."
+hub_targets = ["it"]
 timeout_s = 600
 build_timeout_s = 5400
 
@@ -666,7 +670,9 @@ runner = "cargo"
 package = "fusiform-module"
 target = "--lib"
 expect_red = ["route::billing_plane_tests::quota_proxies_mark_each_unmarked_rate_with_its_real_family"]
-only = true
+only = false
+hub = "The golden payload fixture in the it suite pins the anthropic oauth and chatgpt plane cases with every quota-proxy rate marked, so dropping the marker changes those served bytes as well as failing the lib test."
+hub_targets = ["it"]
 timeout_s = 600
 build_timeout_s = 5400
 
@@ -704,7 +710,9 @@ runner = "cargo"
 package = "fusiform-module"
 target = "--lib"
 expect_red = ["route::billing_plane_tests::quota_proxies_drop_all_mode_rates"]
-only = true
+only = false
+hub = "The golden payload fixture in the it suite pins the chatgpt plane case without mode rates, so keeping them changes those served bytes as well as failing the lib test."
+hub_targets = ["it"]
 timeout_s = 600
 build_timeout_s = 5400
 
@@ -721,7 +729,9 @@ runner = "cargo"
 package = "fusiform-module"
 target = "--lib"
 expect_red = ["route::billing_plane_tests::a_read_without_auth_method_keeps_the_pre_plane_wire_bytes", "route::alias_tests::a_bulk_read_includes_the_alias", "route::alias_tests::a_point_in_time_read_never_aliases", "route::inheritance_tests::a_point_in_time_read_does_not_inherit"]
-only = true
+only = false
+hub = "Every ordinary catalog read in the it suite (route, bootstrap and the golden fixture) sends no auth_method and asserts the pre-plane bytes, so defaulting it to a plane changes every one of those reads as well as the lib tests."
+hub_targets = ["it"]
 timeout_s = 600
 build_timeout_s = 5400
 
