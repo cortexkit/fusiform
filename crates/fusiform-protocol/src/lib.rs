@@ -224,20 +224,17 @@ pub struct PlanPricesResponse {
     /// The instant this answer describes, for round-tripping with a later
     /// read. Same contract as `CatalogGetResponse::resolved_at_ms`.
     pub resolved_at_ms: i64,
-    /// A policy statement: `tier` contains the vendor's tier name, not an API
-    /// plan string, and mapping an account's API string is the consumer's job.
+    /// What the `tier` field names, stated so a consumer doesn't have to guess.
     ///
-    /// A consumer decoding this response sees `tier: "pro_200"` and has no way
-    /// to know whether that is the vendor's own tier name or the string its API
-    /// reports for the account. They are different vocabularies and do not
-    /// correspond one-to-one — OpenAI publishes Pro 100, Pro 200 and Pro 500,
-    /// but an API string `pro` does not establish which an account holds — so
-    /// matching that string against this column gets nothing, or worse, gets
-    /// a wrong match silently.
-    ///
-    /// Stated on the response so consumers do not have to guess. When an API
-    /// string could name several vendor tiers (such as OpenAI's `pro`), its
-    /// response row refuses a price and names the tiers it cannot distinguish.
+    /// `tier` is the vendor's own name for a subscription tier, as written on
+    /// its pricing page, such as `pro_200` for OpenAI's "Pro 200". It is not the
+    /// plan string a vendor's API reports for an account. Those are two
+    /// different vocabularies, and they don't map one to one: OpenAI's API
+    /// reports `pro` for an account on Pro 100, Pro 200 or Pro 500 alike. So
+    /// matching an API string against this column finds nothing, or silently
+    /// finds the wrong tier. Mapping an account to its tier is the consumer's
+    /// job. Where an API string could name several tiers, such as OpenAI's
+    /// `pro`, this plane serves a refusal row for it that names those tiers.
     pub tier_vocabulary: String,
     /// What this plane's prices are quoted on, stated rather than assumed.
     ///
