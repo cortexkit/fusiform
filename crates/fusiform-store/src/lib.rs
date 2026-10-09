@@ -1976,14 +1976,16 @@ impl CatalogStore {
     }
 }
 
-/// The reason a tombstone carries, matched on to keep re-application a no-op.
+/// The reason a tombstone carries.
 ///
-/// A constant rather than a literal at both sites: the writer and the
-/// already-tombstoned check must agree exactly, and two copies of a sentence
-/// are two things that can drift into writing a fresh tombstone on every boot.
-pub const UNCURATED: &str =
-    "no longer carried by fusiform's curated plan-price file; the last price \
-     above is what it cost when curation stopped, not what it costs now";
+/// It is read on a current answer with no price history beside it, so it must
+/// not point at a price "above": in a listing, the row above is a different
+/// tier. The already-tombstoned check matches this exact text, so a constant
+/// keeps the writer and the check from drifting apart. Rewording it writes one
+/// new tombstone per retired key on the next boot, carrying the new wording,
+/// and after that re-application is a no-op again.
+pub const UNCURATED: &str = "no longer carried by fusiform's curated plan-price file, so fusiform \
+     serves no current price for this tier";
 
 /// What a tombstone cites, since there is no vendor page behind an absence.
 ///
