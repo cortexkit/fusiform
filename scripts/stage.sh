@@ -262,37 +262,35 @@ if [ "$pruned" -gt 0 ]; then
     echo "pruned    $pruned superseded stage(s); kept this one and the deployed revision"
 fi
 
-# Warn when the PATH copy of ck-models no longer matches what was just built.
+# Warn when the placed ck-models no longer matches what was just built.
 #
-# ck-models lives in my custody at ~/.local/bin and is placed BY HAND after a
-# stage. That hand step is the one that goes missing, and it went missing here
-# in the worst possible way: the prune above deleted the stage directory the
-# placed CLI came from, so the operator copy was pinned to a revision with no
-# artifact left on disk, and nothing said so.
+# The operator reaches the CLI as `ck models`, which runs the copy in the
+# CortexKit bin folder. Subcommands are not on PATH as `ck-<name>`, so this looks
+# at that file directly rather than through `command -v`, which would find
+# nothing and stay silent.
 #
-# It was found by SUBC running a `which` check, not by me. The acceptance arms
-# I ran an hour earlier went through that stale CLI while I reported them as
-# verification of the new revision. They held -- the facts come from the module,
-# and the two CLI builds differed only in comments -- but I had established
-# neither of those things at the time.
+# The CLI is placed with the module, by the placing seat, from the stage this
+# script writes. That step is the one that goes missing: once a prune deleted
+# the stage directory the placed CLI came from, so the operator copy was pinned
+# to a revision with no artifact left on disk, and nothing said so. Acceptance
+# checks run through that stale CLI were reported as verification of the new
+# revision.
 #
-# A WARNING RATHER THAN A PLACEMENT. Copying into PATH from a build script would
-# make every stage a deployment, and staging exists precisely to separate the
-# two. The script knows something the operator is about to forget; saying so is
-# the whole job.
+# A WARNING RATHER THAN A PLACEMENT. Copying into the bin folder from a build
+# script would make every stage a deployment, and staging exists precisely to
+# separate the two.
 #
 # Compared by SELF-REPORTED revision rather than by file hash: the two binaries
 # differ in signature and timestamp even when built from the same source, so a
 # hash comparison would cry on every run.
-path_cli="$(command -v ck-models 2>/dev/null || true)"
-if [ -n "$path_cli" ]; then
-    path_rev="$("$path_cli" --version 2>/dev/null \
+placed_cli="$HOME/.local/share/cortexkit/bin/ck-models"
+if [ -x "$placed_cli" ]; then
+    placed_rev="$("$placed_cli" --version 2>/dev/null \
         | grep -oE '[0-9a-f]{40}' | head -1 || true)"
-    if [ -n "$path_rev" ] && [ "$path_rev" != "$HEAD_REV" ]; then
+    if [ -n "$placed_rev" ] && [ "$placed_rev" != "$HEAD_REV" ]; then
         echo
-        echo "NOTE: $path_cli reports ${path_rev:0:7}, this stage is ${HEAD_REV:0:7}"
-        echo "      the operator CLI is stale; place it with:"
-        echo "      cp $STAGE/ck-models $path_cli"
+        echo "NOTE: $placed_cli reports ${placed_rev:0:7}, this stage is ${HEAD_REV:0:7}"
+        echo "      the operator CLI is stale until the card places ck-models with the module"
     fi
 fi
 
