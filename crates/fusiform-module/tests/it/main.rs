@@ -14,6 +14,7 @@ mod golden_payload;
 mod health_detail;
 mod http_stub;
 mod live;
+mod manifest_probe;
 mod mode_rates;
 mod reasoning_options;
 mod restart_adoption;

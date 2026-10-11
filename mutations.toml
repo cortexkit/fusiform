@@ -850,3 +850,18 @@ only = false
 timeout_s = 600
 build_timeout_s = 1800
 
+
+[[control]]
+id = "manifest-probe-answers-offline"
+guards = "ck-fusiform --manifest prints the registration manifest on a bare binary, so the placement gate can read its commit provenance"
+file = "crates/fusiform-module/src/main.rs"
+old = "    if std::env::args().nth(1).as_deref() == Some(\"--manifest\") {"
+new = "    if std::env::args().nth(1).as_deref() == Some(\"--manifest-never\") {"
+edits = []
+test_file = "crates/fusiform-module/tests/it/manifest_probe.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["manifest_probe::the_daemon_binary_prints_its_registration_manifest_with_no_daemon"]
+only = false
+timeout_s = 600

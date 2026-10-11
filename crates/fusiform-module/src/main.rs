@@ -59,6 +59,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Ok(());
     }
 
+    // `--manifest` also answers before any connection argument is required:
+    // deployment tooling runs it on a staged binary, with no daemon running,
+    // to read which commit the build was made from before installing it.
+    if std::env::args().nth(1).as_deref() == Some("--manifest") {
+        println!("{}", fusiform_module::manifest_json());
+        return Ok(());
+    }
+
     let handler = Fusiform::new();
     subc_client_rs::serve(fusiform_module::manifest(), handler).await?;
     Ok(())

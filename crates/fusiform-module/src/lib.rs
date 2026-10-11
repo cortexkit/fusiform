@@ -28,6 +28,27 @@ use subc_protocol::PROTOCOL_VERSION;
 /// The module id fusiform registers under.
 pub const MODULE_ID: &str = "fusiform";
 
+/// The manifest as `ck-fusiform --manifest` prints it: the same value the
+/// module registers with, plus the empty top-level `runtime_computed` array the
+/// offline manifest format carries.
+///
+/// Deployment tooling reads this from a staged binary, with no daemon running,
+/// and compares `provenance` (the commit the build was made from) with the
+/// commit the deployment request names, refusing a build that differs. An
+/// empty `runtime_computed` says that nothing in the manifest varies at
+/// runtime, which is true here: every field is fixed at compile time.
+pub fn manifest_json() -> serde_json::Value {
+    let mut value = serde_json::to_value(manifest()).expect("the module manifest serializes");
+    value
+        .as_object_mut()
+        .expect("a serialized manifest is a JSON object")
+        .insert(
+            "runtime_computed".to_string(),
+            serde_json::Value::Array(Vec::new()),
+        );
+    value
+}
+
 /// The module's manifest: identity, the tools it serves, and its bindings.
 ///
 /// Lives in the library rather than the binary so a test can assert the
