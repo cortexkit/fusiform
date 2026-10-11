@@ -179,7 +179,8 @@ done
 # nobody can reconstruct from memory. A missing locator is recoverable; a
 # fabricated one that happens to resolve is not.
 
-# Prune superseded stages, keeping this one and the DEPLOYED revision.
+# Prune superseded stages, keeping this one, the previously declared one and
+# the DEPLOYED revision.
 #
 # Thirty of these accumulated over a month, 429 MB, every one a signed and
 # runnable ck-fusiform of a revision nobody wants any more. That is the same
@@ -225,6 +226,18 @@ done
 DEPLOYED_REV="$("$HOME/.local/share/cortexkit/bin/ck-fusiform" --version 2>/dev/null \
     | grep -oE '[0-9a-f]{40}' | head -1 || true)"
 
+# The stage named by the previous `fusiform.current` is kept too, until the
+# next run.
+#
+# A deployment request (a "card") names a stage directory, and the seat that
+# installs builds checks and installs from that directory later, sometimes
+# hours later. If a new stage is built in between, deleting the previous one
+# leaves that queued request pointing at a directory that no longer exists;
+# that happened twice. Keeping one superseded stage keeps the queued request
+# valid until it is withdrawn or replaced. Read here, before the declaration
+# further down is overwritten with this stage.
+PREVIOUS_STAGE="$(sed -n 's/^stage=//p' "$HOME/ck-stage/fusiform.current" 2>/dev/null || true)"
+
 pruned=0
 for dir in "$HOME"/ck-stage/fusiform-*; do
     # `if` rather than `[ cond ] && continue`.
@@ -243,6 +256,9 @@ for dir in "$HOME"/ck-stage/fusiform-*; do
     if [ "$dir" = "$STAGE" ]; then
         continue
     fi
+    if [ -n "$PREVIOUS_STAGE" ] && [ "$dir" = "$PREVIOUS_STAGE" ]; then
+        continue
+    fi
 
     # Identify by what the binary REPORTS, never by the directory's timestamp.
     # A name is a label someone typed; the self-reported revision is the thing
@@ -259,7 +275,7 @@ for dir in "$HOME"/ck-stage/fusiform-*; do
 done
 
 if [ "$pruned" -gt 0 ]; then
-    echo "pruned    $pruned superseded stage(s); kept this one and the deployed revision"
+    echo "pruned    $pruned superseded stage(s); kept this one, the previously declared one and the deployed revision"
 fi
 
 # Warn when the placed ck-models no longer matches what was just built.
