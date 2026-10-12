@@ -268,6 +268,18 @@ fn plane_cases(cuts: &[(String, String)]) -> Vec<(String, serde_json::Value)> {
             }),
         ));
     }
+    // A paid Anthropic API key is priced from the read astrocyte makes, which
+    // names no login method. These two cases pin that the plain read and the
+    // (anthropic, apikey) read serve the same card, so the plain read can't
+    // quietly start depending on a plane.
+    cases.push((
+        "apikey anthropic — API card".into(),
+        serde_json::json!({"provider_id":"anthropic", "auth_method":"apikey"}),
+    ));
+    cases.push((
+        "default anthropic — no auth method".into(),
+        serde_json::json!({"provider_id":"anthropic"}),
+    ));
     cases.push((
         "oauth anthropic — quota weights".into(),
         serde_json::json!({
@@ -398,10 +410,22 @@ fn non_plane_leaks(doc: &serde_json::Value) -> (usize, Vec<String>) {
 fn every_non_plane_golden_case_has_no_plane_bytes() {
     // Check both saved bytes and live responses. A saved-only scan cannot see
     // plane logic accidentally applied to ordinary reads before regeneration.
-    for text in [GOLDEN.to_string(), render()] {
+    // The saved document also holds the plane document's own no-method control
+    // read (the plain anthropic case), which must be scanned like any ordinary
+    // read, so it is counted here too.
+    let (_store, _dir, cuts) = plane_store();
+    let plain_plane_cases = plane_cases(&cuts)
+        .iter()
+        .filter(|(_, args)| args.get("auth_method").is_none())
+        .count();
+    assert_eq!(plain_plane_cases, 1);
+    for (text, expected) in [
+        (GOLDEN.to_string(), cases().len() + plain_plane_cases),
+        (render(), cases().len()),
+    ] {
         let doc = serde_json::from_str(&text).unwrap();
         let (checked, leaks) = non_plane_leaks(&doc);
-        assert_eq!(checked, cases().len());
+        assert_eq!(checked, expected);
         assert!(
             leaks.is_empty(),
             "non-plane payload leaked plane-only bytes: {leaks:?}"
@@ -646,6 +670,46 @@ fn plane_cases_pin_missing_targets_published_api_prices_and_upstream_fills() {
             assert_rule(response, model, &key, "billed_as", source);
         }
     }
+}
+
+/// A paid Anthropic API key is priced by a read that names no login method.
+/// That read must serve exactly the (anthropic, apikey) card: the same model
+/// rows and rates, none marked as borrowed. If the plain read ever comes to
+/// depend on a billing plane, consumers that send no method would price these
+/// calls wrongly, and this test fails first.
+#[test]
+fn the_plain_anthropic_read_serves_the_apikey_card() {
+    let doc: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
+    let apikey = &doc["apikey anthropic — API card"]["response"];
+    let plain = &doc["default anthropic — no auth method"]["response"];
+
+    assert_eq!(
+        apikey["plane"],
+        serde_json::json!({"provider_id":"anthropic", "auth_method":"apikey", "kind":"upstream"})
+    );
+    assert!(apikey.get("billing_rules").is_none());
+    assert!(plain.get("plane").is_none());
+
+    // Control: the fixture must hold priced Anthropic rates, or the equality
+    // below would pass on two empty maps.
+    let models = apikey["models"].as_object().unwrap();
+    let mut priced = 0;
+    for row in models.values() {
+        for (key, value) in row.as_object().unwrap() {
+            if key.starts_with("rate.") {
+                assert!(
+                    value.get("inherited_from").is_none(),
+                    "{key} must not be borrowed"
+                );
+                if value["state"] == "priced" {
+                    priced += 1;
+                }
+            }
+        }
+    }
+    assert!(priced > 0, "the fixture must hold priced anthropic rates");
+
+    assert_eq!(apikey["models"], plain["models"]);
 }
 
 #[test]

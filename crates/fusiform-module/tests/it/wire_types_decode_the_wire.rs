@@ -117,7 +117,7 @@ fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
             }
         }
     }
-    assert_eq!(responses, 13, "every successful plane case must decode");
+    assert_eq!(responses, 14, "every successful plane case must decode");
     assert!(
         billed_base > 0 && billed_tier > 0 && not_established > 0 && proxy > 0 && disclosed > 0,
         "the fixture must exercise base/tier pointers, unknown targets, proxy markers and rules"
