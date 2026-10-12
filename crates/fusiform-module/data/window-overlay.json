@@ -7,82 +7,6 @@
   "cells": [
     {
       "provider_id": "anthropic",
-      "model_id": "claude-opus-5",
-      "facts": {
-        "window.advertised": {
-          "value": {
-            "kind": "stated",
-            "value": 1000000
-          },
-          "grade": "provider_asserted_doc",
-          "units": "provider",
-          "boundary": "Observed",
-          "source_ref": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-10-12) \u2014 'Claude Fable 5.1, Claude Mythos 5.1, Claude Fable 5, Claude Mythos 5, Claude Opus 5.5, Claude Opus 5, Claude Opus 4.8, \u2026 have a 1M-token context window.'",
-          "observed_at": "2026-10-12T16:30:00Z"
-        },
-        "output.advertised": {
-          "value": {
-            "kind": "stated",
-            "value": 128000
-          },
-          "grade": "provider_asserted_doc",
-          "units": "provider",
-          "boundary": "Observed",
-          "source_ref": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-10-12) \u2014 on the 1M-window models listed: 'A single request to any of them can generate up to 128k output tokens (max_tokens).'",
-          "observed_at": "2026-10-12T16:30:00Z"
-        },
-        "geometry": {
-          "value": {
-            "kind": "stated",
-            "value": "shared_truncating"
-          },
-          "grade": "provider_asserted_doc",
-          "units": "provider",
-          "boundary": "Observed",
-          "source_ref": "https://docs.claude.com/en/docs/build-with-claude/context-windows (read 2026-10-12), 'Context window overflow behavior' \u2014 'If the input alone already exceeds the model's context window, the API returns a 400 invalid_request_error (\"prompt is too long\") on every model.' / 'On Claude 4.5 models and newer, if input tokens plus max_tokens exceeds the context window size, the API accepts the request. If generation then reaches the context window limit, it stops with stop_reason: \"model_context_window_exceeded\".'",
-          "observed_at": "2026-10-12T16:30:00Z"
-        }
-      },
-      "note": "VERIFIED AGAINST THE PRIMARY SOURCE 2026-08-13 and RE-READ 2026-10-12 (values unchanged; the page now lists the 1M models in one sentence rather than naming the platforms), replacing the seed spec as source_ref. The doc names Opus 5 explicitly in a list of 1M-window models, and states the 128k output cap as a property of any 1M-window model rather than of this model. NO access-path id minted: the window holds on the Claude API, Bedrock, Google Cloud and Microsoft Foundry alike, so by mint-on-divergence there is nothing to fork. GEOMETRY IS THE INTERESTING PART AND IT SPLITS. The prompt-only wall is universal: 'if the input alone already exceeds the model's context window, the API returns a 400 invalid_request_error (prompt is too long) ON EVERY MODEL'. What happens to over-window OUTPUT is version-gated AND header-controlled: 4.5+ accepts the request and stops with stop_reason model_context_window_exceeded, earlier models return a validation error, and earlier models can OPT IN to the newer behaviour with the model-context-window-exceeded-2025-08-26 beta header. So a pre-4.5 model's geometry depends on a request header \u2014 the second instance of the request-dependence recorded in the design note's section 12, and the first with a named mechanism. shared_truncating is correct for Opus 5 and must not be inherited by an older Claude."
-    },
-    {
-      "provider_id": "deepseek",
-      "model_id": "*",
-      "facts": {
-        "geometry": {
-          "value": {
-            "kind": "unknown",
-            "why": "never_measured"
-          },
-          "grade": "unknown",
-          "units": "provider",
-          "boundary": "Observed",
-          "source_ref": "magic-context@5ac4408d:packages/plugin/src/features/magic-context/overflow-detection.ts:68 \u2014 pattern tagged `combined`, attribution confirmed by MC 2026-08-13 as observed-emitting-the-string only. Re-checked by MC 2026-10-12: the pattern is still tagged `combined` collectively for OpenAI, OpenRouter, DeepSeek and vLLM, a parsing assumption never measured against DeepSeek.",
-          "observed_at": "2026-10-12T16:30:00Z"
-        }
-      },
-      "note": "AN EXPLICIT REFUSAL, minted because a specific wrong inference is available. DeepSeek appears in MC's overflow table under the pattern `maximum context length is (N) tokens`, tagged `combined`. MC confirmed 2026-08-13 that the tag was assigned ONCE for the pattern, reasoned from OpenAI's documented semantics, and inherited by every provider observed emitting that string \u2014 so the per-provider evidence establishes that DeepSeek EMITS the text, not that its wall counts combined. Without this cell a future transcriber mining that table would mint `combined` for DeepSeek with an honest-looking source_ref, which is the inference this dataset exists to refuse. Wildcard because the claim is about the provider's wall and nothing model-specific is known."
-    },
-    {
-      "provider_id": "openrouter",
-      "model_id": "*",
-      "facts": {
-        "geometry": {
-          "value": {
-            "kind": "unknown",
-            "why": "not_single_valued_at_key"
-          },
-          "grade": "measured",
-          "units": "provider",
-          "boundary": "Observed",
-          "source_ref": "models.dev via fusiform's live catalog, 2026-10-12: openrouter carries 379 models spanning 61 vendor prefixes (348 across 59 on 2026-08-13); MC confirmed 2026-08-13, and again 2026-10-12, that the wall which fires belongs to whichever upstream served the request",
-          "observed_at": "2026-10-12T16:30:00Z"
-        }
-      },
-      "note": "NOT AN ABSENCE OF EVIDENCE \u2014 a positive, evidenced claim that this KEY cannot hold a single geometry. OpenRouter routes to heterogeneous backends, so the wall that fires belongs to whichever upstream served the request; measuring once yields a value correct for that routing decision and wrong for the next. GRADE IS `measured`, NOT `unknown`: the claim rests on evidence (the catalog shows 379 models spanning 61 vendors' offerings as of 2026-10-12; MC confirmed the routing behaviour), and a grade of unknown would say nobody has established it, which is false. This is the first cell where kind=unknown and grade!=unknown, and the two fields are doing different jobs exactly as designed: the VALUE is unknown, the CLAIM ABOUT WHY is measured. The reason value forbids promoting any measured report into a stated or bracket cell at this key without a routing discriminant \u2014 that clause is what makes it load-bearing rather than decorative."
-    },
-    {
-      "provider_id": "anthropic",
       "model_id": "claude-sonnet-4-5",
       "facts": {
         "window.advertised": {
@@ -116,26 +40,9 @@
         }
       },
       "note": "THE DATED VARIANT OF THE SAME DEFECT, and arguably the more dangerous row: a consumer pinning a dated model id is doing so FOR REPRODUCIBILITY, which is exactly the caller least likely to re-check a limit. FOUND BY A MECHANICAL TEST RATHER THAN BY READING. The claude-sonnet-4-5 cell was found by reading a documentation passage; this one was found by running the pairing rule that cell's reasoning established (1M context pairs with 128k output, 200k with 64k) across all 13 anthropic rows. Two rows fail, both sonnet-4.5 spellings, both with the same 1M/64k self-contradiction. THE SWEEP ALSO CLEARED A ROW A CONSUMER HAD FLAGGED. BROCA reported claude-opus-5 as carrying a suspect 1M; it passes the pairing test at 1M/128k and Anthropic's doc names it explicitly in the 1M list, so the catalog is right there and the alarm was the inverse error. A test that only convicts is worth less than one that also acquits. UPDATE 2026-10-12: models.dev itself changed this row to 200,000 on 2026-10-07 (fusiform's era history), so on a store that has polled since, this correction matches the upstream and serves no override. It still applies on a store seeded from an older bootstrap snapshot until its first poll."
-    },
-    {
-      "provider_id": "openrouter",
-      "model_id": "*",
-      "facts": {
-        "path.wall_ownership": {
-          "value": {
-            "kind": "stated",
-            "value": "forwards"
-          },
-          "grade": "measured",
-          "boundary": "Observed",
-          "units": "provider",
-          "observed_at": "2026-10-12T16:30:00Z",
-          "source_ref": "Measured across the live catalog: openrouter serves 379 model ids spanning 61 distinct vendor prefixes (re-counted 2026-10-12; 348 across 59 on 2026-08-14), and routes a request to whichever backend it selects. The wall a request hits therefore belongs to that backend, not to openrouter \u2014 which is why window.advertised at this provider carries not_single_valued_at_key rather than a number."
-        }
-      }
     }
   ],
   "source_revision_note": "Cells transcribed from mc-geometry-spec were read at c6a85d85 and their source_ref names 06a0e5ac, the current revision. The bump is verified rather than assumed: every row transcribed here is byte-identical between the two revisions (checked per row with git show). The Codex row DID change between them, and no cell here cites the spec for Codex \u2014 those cells cite codex-rs directly. Pointing at the newer revision matters because c6a85d85 carried a misattributed Codex number, and a reader resolving a source_ref should land on a document without a known bad row in it.",
   "additive_note": "The reason value `not_single_valued_at_key` was added 2026-08-13 WITHOUT a schema version bump, deliberately. Bumping would trigger the file-level refusal rule and cost a consumer all 9 cells over one additive value affecting 1. Unbumped, a consumer that does not know the value skips that single cell and merges the other 8 \u2014 which is the correct degradation for an addition.",
-  "review_note": "2026-10-12, at the first 60-day review: cells for models nothing still routes to were RETIRED rather than re-dated, because a curated cell with no consumer only adds review work, and re-dating it without a fresh observation would claim a check that did not happen. Retired: openai-chatgpt-oauth/gpt-5.6 and openai/gpt-5.6 (gpt-5.6 is now an alias of gpt-5.6-sol and the fleet routes to gpt-6.1-sol), xai/grok-4.6 (no traffic), moonshotai/kimi-k3 (no traffic), google/gemini-3.5-flash (deprecated, routed to gemini-3.6-flash), ollama-cloud/deepseek-v4-flash (Ollama retired it on 2026-08-27), ollama-cloud/* path.wall_ownership (its only behavioural evidence was the 65,536 output cap on that retired model, from a still-open third-party issue, and the fleet's ollama-cloud account can no longer reach a paid model to re-test it). Traffic figures: MC's context.db session counts, 2026-10-12. Each retired cell is still in this file's git history. KEPT and re-dated: anthropic/claude-opus-5 (live traffic), the two claude-sonnet-4-5 cells, deepseek/* and both openrouter/* cells. Sonnet 4.5 has no traffic, but models.dev only corrected it to 200,000 on 2026-10-07, and the embedded bootstrap seed still carries 1,000,000, so the correction still applies on any store seeded before its first poll; retire it once the seed carries 200,000."
+  "review_note": "2026-10-12, at the first 60-day review: cells for models nothing still routes to were RETIRED rather than re-dated, because a curated cell with no consumer only adds review work, and re-dating it without a fresh observation would claim a check that did not happen. Retired: openai-chatgpt-oauth/gpt-5.6 and openai/gpt-5.6 (gpt-5.6 is now an alias of gpt-5.6-sol and the fleet routes to gpt-6.1-sol), xai/grok-4.6 (no traffic), moonshotai/kimi-k3 (no traffic), google/gemini-3.5-flash (deprecated, routed to gemini-3.6-flash), ollama-cloud/deepseek-v4-flash (Ollama retired it on 2026-08-27), ollama-cloud/* path.wall_ownership (its only behavioural evidence was the 65,536 output cap on that retired model, from a still-open third-party issue, and the fleet's ollama-cloud account can no longer reach a paid model to re-test it). Traffic figures: MC's context.db session counts, 2026-10-12. Each retired cell is still in this file's git history. KEPT and re-dated: anthropic/claude-opus-5 (live traffic), the two claude-sonnet-4-5 cells, deepseek/* and both openrouter/* cells. Sonnet 4.5 has no traffic, but models.dev only corrected it to 200,000 on 2026-10-07, and the embedded bootstrap seed still carries 1,000,000, so the correction still applies on any store seeded before its first poll; retire it once the seed carries 200,000. SECOND DECISION, same day: Magic Context, the consumer this dataset was built for, reported that production reads no overlay at all (nothing delivers the file to the path its reader checks), and that none of the four kept cells would change what it does: it already defaults Anthropic to truncating geometry and takes Opus 5's 1M window from the catalog, and an unknown DeepSeek or OpenRouter geometry falls through to the same conservative default. So anthropic/claude-opus-5, deepseek/* and both openrouter/* cells were removed too. What remains is the one correction fusiform itself serves: the two claude-sonnet-4-5 cells. A future cell belongs here only for a measured fact a consumer would act on, such as an enforced window below the catalog's figure, and should then be served over subc rather than read from this file."
 }

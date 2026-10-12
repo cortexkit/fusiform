@@ -1,10 +1,24 @@
 # Measured window truth: the overlay schema
 
-**Status: PINNED 2026-08-13.** Interim format, designed to become the served
-shape unchanged. Agreed in `#model-window-truth` with MC and SUBC.
+**Status: PINNED 2026-08-13; reduced 2026-10-12.** Interim format, designed to
+become the served shape unchanged. Agreed in `#model-window-truth` with MC and
+SUBC.
 
-MC merges this file plugin-side today. When fusiform serves it over subc, the
-cell shape does not change — only the transport.
+**What the file holds now (2026-10-12).** The first 60-day review found that
+production Magic Context reads no overlay: nothing delivers the file to the path
+its reader checks. MC also confirmed that none of the cells still current would
+change what it does, since its own defaults already cover them. So the overlay
+was reduced to the one correction fusiform serves itself: the two
+`claude-sonnet-4-5` cells (`limit.context` 200,000, served through `overridden`).
+The file's `review_note` lists every removal and its reason. Everything below
+describes the schema, which is unchanged and still validated. A new cell belongs
+here only for a measured fact a consumer would act on, such as an enforced window
+below the catalog's figure, and it should then be served over subc rather than
+read from this file.
+
+The design assumed MC would merge this file plugin-side. As of 2026-10-12 it
+does not. When fusiform serves it over subc, the cell shape does not change,
+only the transport.
 
 **The file lives at `crates/fusiform-module/data/window-overlay.json`, and until
 fusiform serves it, THAT PATH IS THE DELIVERY MECHANISM.** A consumer in another

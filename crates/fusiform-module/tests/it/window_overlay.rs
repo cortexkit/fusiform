@@ -202,15 +202,13 @@ fn provenance_violations(overlay: &serde_json::Value) -> (Vec<String>, usize) {
 #[test]
 fn a_wall_ownership_cell_states_one_of_the_two_claims() {
     let overlay = overlay();
-    let (violations, checked) = wall_vocabulary_violations(&overlay);
+    let (violations, _checked) = wall_vocabulary_violations(&overlay);
     assert!(violations.is_empty(), "{violations:#?}");
-    // Real data holds one claim, openrouter's `forwards`; ollama-cloud's was
-    // removed when its only supporting observation went out of date. So a
-    // parse finding none means this test is reading nothing.
-    assert!(
-        checked >= 1,
-        "found {checked} wall-ownership cells; openrouter's must be read"
-    );
+    // No minimum count is asserted on the shipped file, because it currently
+    // holds no wall-ownership cell. ollama-cloud's was removed when the model
+    // behind its only observation was retired, and openrouter's because no
+    // consumer acts on it. Both vocabulary branches stay covered by
+    // `planted_invalid_wall_ownership_is_reported`.
 }
 
 fn wall_vocabulary_violations(overlay: &serde_json::Value) -> (Vec<String>, usize) {
@@ -273,17 +271,13 @@ fn wall_vocabulary_violations(overlay: &serde_json::Value) -> (Vec<String>, usiz
 #[test]
 fn a_wall_ownership_claim_agrees_with_the_providers_other_cells() {
     let overlay = overlay();
-    let (violations, checked) = wall_agreement_violations(&overlay);
+    let (violations, _checked) = wall_agreement_violations(&overlay);
     assert!(violations.is_empty(), "{violations:#?}");
-    // Real data now holds only openrouter's `forwards` claim. ollama-cloud's
-    // `imposes` was removed: its one behavioural observation was a 65,536
-    // output cap on a model Ollama has since retired, and it could no longer
-    // be re-tested. The `imposes` branch stays covered by
-    // `planted_unsupported_wall_claim_is_reported`.
-    assert!(
-        checked >= 1,
-        "checked {checked} claims; openrouter's must be reached"
-    );
+    // No minimum count is asserted on the shipped file, because it currently
+    // holds no wall-ownership claim: ollama-cloud's was removed when the model
+    // behind its only observation was retired, and openrouter's because no
+    // consumer acts on it. Both the `forwards` and `imposes` branches stay
+    // covered by `planted_unsupported_wall_claim_is_reported`.
 }
 
 fn wall_agreement_violations(overlay: &serde_json::Value) -> (Vec<String>, usize) {
@@ -851,18 +845,25 @@ fn derivable_violations(doc: &serde_json::Value) -> Vec<String> {
 ///
 /// Removing an entry here is the decision point, and it must be a deliberate
 /// edit rather than a side effect of adding a cell.
-const NOT_SINGLE_VALUED: &[(&str, &str, &str)] = &[("openrouter", "*", "geometry")];
+///
+/// The list is empty today. Its one entry was OpenRouter's geometry, and that
+/// cell was removed because no consumer acts on it: Magic Context, the reader
+/// the overlay was built for, already treats an unknown OpenRouter geometry
+/// conservatively. The check stays, proven by
+/// `planted_promoted_closed_key_is_reported`, for the next key whose value
+/// depends on routing and so can't be a single number.
+const NOT_SINGLE_VALUED: &[(&str, &str, &str)] = &[];
 
 #[test]
 fn a_key_closed_to_promotion_stays_closed() {
     let doc = overlay();
-    let violations = promotion_violations(&doc);
+    let violations = promotion_violations(&doc, NOT_SINGLE_VALUED);
     assert!(violations.is_empty(), "{violations:#?}");
 }
 
-fn promotion_violations(doc: &serde_json::Value) -> Vec<String> {
+fn promotion_violations(doc: &serde_json::Value, closed: &[(&str, &str, &str)]) -> Vec<String> {
     let mut violations = Vec::new();
-    for (provider, model, fact) in NOT_SINGLE_VALUED {
+    for (provider, model, fact) in closed {
         let cell = doc["cells"]
             .as_array()
             .unwrap()
@@ -1257,7 +1258,7 @@ fn planted_derivable_cell_is_reported() {
 fn planted_promoted_closed_key_is_reported() {
     let doc = serde_json::json!({"cells": [{"provider_id": "openrouter", "model_id": "*", "facts": {"geometry": {"value": {"kind": "stated", "why": "not_single_valued_at_key"}}}}]});
     assert_one_violation(
-        promotion_violations(&doc),
+        promotion_violations(&doc, &[("openrouter", "*", "geometry")]),
         "openrouter/* geometry: promoted",
     );
 }
