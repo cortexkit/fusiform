@@ -157,13 +157,14 @@ const OBSERVED_BY: &[&str] = &["self_observed", "reported"];
 #[test]
 fn a_provenance_mark_is_in_vocabulary_and_qualifies_a_behavioural_claim() {
     let overlay = overlay();
-    let (violations, checked) = provenance_violations(&overlay);
+    let (violations, _checked) = provenance_violations(&overlay);
     assert!(violations.is_empty(), "{violations:#?}");
-    assert!(
-        checked >= 1,
-        "no provenance marks found; the field was added for ollama-cloud's \
-         third-party ceiling report and a parse finding none is reading nothing"
-    );
+    // No floor on real data. The only cells that carried `observed_by` were
+    // ollama-cloud's, and they were removed because their model was retired
+    // and the ceiling could no longer be re-tested (the overlay's
+    // `review_note` lists each removal). So zero marks is the true count
+    // today. Both branches of the check stay covered by
+    // `planted_invalid_provenance_is_reported`.
 }
 
 fn provenance_violations(overlay: &serde_json::Value) -> (Vec<String>, usize) {
@@ -203,10 +204,12 @@ fn a_wall_ownership_cell_states_one_of_the_two_claims() {
     let overlay = overlay();
     let (violations, checked) = wall_vocabulary_violations(&overlay);
     assert!(violations.is_empty(), "{violations:#?}");
+    // Real data holds one claim, openrouter's `forwards`; ollama-cloud's was
+    // removed when its only supporting observation went out of date. So a
+    // parse finding none means this test is reading nothing.
     assert!(
-        checked >= 2,
-        "found {checked} wall-ownership cells; the deliverable is two \
-         providers and a parse finding fewer means this test is reading nothing"
+        checked >= 1,
+        "found {checked} wall-ownership cells; openrouter's must be read"
     );
 }
 
@@ -272,10 +275,14 @@ fn a_wall_ownership_claim_agrees_with_the_providers_other_cells() {
     let overlay = overlay();
     let (violations, checked) = wall_agreement_violations(&overlay);
     assert!(violations.is_empty(), "{violations:#?}");
+    // Real data now holds only openrouter's `forwards` claim. ollama-cloud's
+    // `imposes` was removed: its one behavioural observation was a 65,536
+    // output cap on a model Ollama has since retired, and it could no longer
+    // be re-tested. The `imposes` branch stays covered by
+    // `planted_unsupported_wall_claim_is_reported`.
     assert!(
-        checked >= 2,
-        "checked {checked} claims; both providers must be reached or a swap \
-         goes unexamined at the one that is not"
+        checked >= 1,
+        "checked {checked} claims; openrouter's must be reached"
     );
 }
 
@@ -395,9 +402,10 @@ fn every_cell_joins_a_real_model_or_a_declared_mint() {
     let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
     let (violations, checked) = join_violations(&doc, &seed);
     assert!(violations.is_empty(), "{violations:#?}");
+    let cells = doc["cells"].as_array().expect("cells is an array").len();
     assert!(
-        checked >= 7,
-        "the overlay must carry the batch it claims; found {checked} cells"
+        checked == cells && checked > 0,
+        "the join walk checked {checked} of {cells} cells; it must visit every one"
     );
 }
 
@@ -794,20 +802,10 @@ fn no_cell_states_something_the_consumer_can_derive() {
     let doc = overlay();
     let violations = derivable_violations(&doc);
     assert!(violations.is_empty(), "{violations:#?}");
-
-    // The measured enforced value is not derivable and must survive.
-    let ollama = doc["cells"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|c| c["provider_id"] == "ollama-cloud")
-        .expect("the ollama-cloud cell must survive the placeholder drop");
-    assert_eq!(
-        ollama["facts"]["output.enforced"]["value"]["value"]
-            .as_i64()
-            .expect("output.enforced must still carry its measured value"),
-        65536
-    );
+    // This test also used to require ollama-cloud's measured 65,536 output cap
+    // to survive the placeholder drop. That cell was removed because Ollama
+    // retired the model it described, so the check left is the rule itself,
+    // which `planted_derivable_cell_is_reported` proves can fire.
 }
 
 fn derivable_violations(doc: &serde_json::Value) -> Vec<String> {
@@ -1058,11 +1056,13 @@ fn no_served_overlay_fact_has_outrun_its_review() {
 
     let (overdue, checked) = review_violations(&doc, now);
     // A vanished population must fail separately from an overdue fact.
+    // Cells for models nothing routes to any more are removed at review rather
+    // than re-dated, so the number of facts shrinks over time and a fixed size
+    // here would rot. The floor is therefore "read something". The overdue
+    // branch stays covered by `planted_overdue_fact_is_reported`.
     assert!(
-        checked >= 20,
-        "this examined {checked} served facts; the overlay had 22 when this was \
-         written, so a collapse to nothing means the walk broke rather than the \
-         data improving"
+        checked >= 1,
+        "this examined {checked} served facts; a walk finding none is broken"
     );
     assert!(
         overdue.is_empty(),
