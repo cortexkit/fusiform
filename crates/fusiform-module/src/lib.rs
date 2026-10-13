@@ -21,10 +21,53 @@ pub mod route;
 pub mod seed;
 pub mod signals;
 
+use std::sync::Arc;
+
+use fusiform_store::CatalogStore;
+use subc_client_rs::HandlerOutcome;
 use subc_protocol::manifest::{
     Concurrency, ExecutionMode, ModuleManifest, ProviderRole, Tool, TrustTier,
 };
 use subc_protocol::PROTOCOL_VERSION;
+
+/// Run synchronous request work without blocking the runtime's connection reader.
+///
+/// Catalog reads and JSON rendering can be slow; keeping them on the blocking
+/// pool lets binds, health replies and other connections continue to progress.
+pub async fn run_off_reader<F>(work: F) -> HandlerOutcome
+where
+    F: FnOnce() -> HandlerOutcome + Send + 'static,
+{
+    match tokio::task::spawn_blocking(work).await {
+        Ok(outcome) => outcome,
+        Err(error) => HandlerOutcome::Error {
+            code: "internal".to_string(),
+            message: if error.is_panic() {
+                format!("catalog request panicked: {error}")
+            } else {
+                format!("catalog request task did not complete: {error}")
+            },
+        },
+    }
+}
+
+/// Serve and serialize a tool call on the blocking pool, not the reader runtime.
+pub async fn serve_request(store: Arc<CatalogStore>, body: Vec<u8>) -> HandlerOutcome {
+    run_off_reader(move || match route::serve_tool_call(&store, &body) {
+        Ok(response) => match serde_json::to_vec(&response) {
+            Ok(bytes) => HandlerOutcome::Response(bytes),
+            Err(e) => HandlerOutcome::Error {
+                code: "internal".to_string(),
+                message: format!("catalog response did not serialize: {e}"),
+            },
+        },
+        Err(e) => HandlerOutcome::Error {
+            code: e.code.to_string(),
+            message: e.message,
+        },
+    })
+    .await
+}
 
 /// The module id fusiform registers under.
 pub const MODULE_ID: &str = "fusiform";

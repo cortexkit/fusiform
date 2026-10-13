@@ -30,8 +30,8 @@ use fusiform_module::fetch::{Fetcher, SourceEndpoint};
 use fusiform_module::health;
 use fusiform_module::loop_::{tick, PollContext, POLL_INTERVAL_MS};
 use fusiform_module::plan_prices;
-use fusiform_module::route;
 use fusiform_module::seed;
+use fusiform_module::serve_request;
 use fusiform_module::signals::Signals;
 
 #[tokio::main]
@@ -94,10 +94,10 @@ impl Fusiform {
 #[async_trait]
 impl ModuleHandler for Fusiform {
     async fn handle(&self, _ctx: RequestCtx, body: Vec<u8>) -> HandlerOutcome {
-        // Clone the handle rather than holding the mutex across the read. The
-        // lock guards the Option, not the store: holding it for the duration of
-        // a multi-megabyte render would serialize every concurrent request
-        // behind the slowest one, and the store has its own connection
+        // Clone the handle rather than holding the mutex across the off-thread
+        // read and render. The lock guards the Option, not the store: holding it
+        // while awaiting a multi-megabyte render would serialize every concurrent
+        // request behind the slowest one, and the store has its own connection
         // serialization.
         let store = {
             let guard = self.store.lock().unwrap_or_else(|p| p.into_inner());
@@ -115,19 +115,7 @@ impl ModuleHandler for Fusiform {
             };
         };
 
-        match route::serve_tool_call(&store, &body) {
-            Ok(response) => match serde_json::to_vec(&response) {
-                Ok(bytes) => HandlerOutcome::Response(bytes),
-                Err(e) => HandlerOutcome::Error {
-                    code: "internal".to_string(),
-                    message: format!("catalog response did not serialize: {e}"),
-                },
-            },
-            Err(e) => HandlerOutcome::Error {
-                code: e.code.to_string(),
-                message: e.message,
-            },
-        }
+        serve_request(store, body).await
     }
 
     async fn on_hello_ack(&self, ack: &ModuleHelloAckBody) {

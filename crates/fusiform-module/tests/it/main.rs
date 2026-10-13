@@ -17,6 +17,7 @@ mod live;
 mod manifest_probe;
 mod mode_rates;
 mod reasoning_options;
+mod request_serving;
 mod restart_adoption;
 mod restart_health;
 mod route;
