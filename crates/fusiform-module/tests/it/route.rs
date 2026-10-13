@@ -1084,6 +1084,12 @@ fn every_field_id() -> Vec<fusiform_core::FieldId> {
         FieldId::Model {
             attribute: fusiform_core::ModelAttributeId::OpenWeights,
         },
+        FieldId::Model {
+            attribute: fusiform_core::ModelAttributeId::CanonicalId,
+        },
+        FieldId::Model {
+            attribute: fusiform_core::ModelAttributeId::Status,
+        },
     ]
 }
 

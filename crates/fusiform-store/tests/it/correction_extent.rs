@@ -196,6 +196,12 @@ fn every_served_fact_has_a_field_id() {
         FieldId::Model {
             attribute: ModelAttributeId::OpenWeights,
         },
+        FieldId::Model {
+            attribute: ModelAttributeId::CanonicalId,
+        },
+        FieldId::Model {
+            attribute: ModelAttributeId::Status,
+        },
     ]
     .into_iter()
     .filter_map(FactKey::for_field)
@@ -351,4 +357,22 @@ fn a_backwards_correction_interval_is_refused() {
         )])
         .expect_err("a backwards interval must be refused");
     assert!(format!("{err}").contains("backwards"));
+}
+
+#[test]
+fn canonical_id_and_status_have_exact_correctable_field_names() {
+    for (attribute, suffix) in [
+        (ModelAttributeId::CanonicalId, "canonical_id"),
+        (ModelAttributeId::Status, "status"),
+    ] {
+        let field = FieldId::Model { attribute };
+        assert_eq!(
+            FactKey::for_field(field.clone()),
+            Some(FactKey::model(suffix))
+        );
+        assert_eq!(
+            serde_json::to_value(field).unwrap(),
+            serde_json::json!({"field":"model", "attribute":suffix})
+        );
+    }
 }

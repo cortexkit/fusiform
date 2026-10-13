@@ -904,11 +904,10 @@ fn promotion_violations(doc: &serde_json::Value, closed: &[(&str, &str, &str)]) 
 
 /// Anthropic publishes context and output caps in fixed pairs.
 ///
-/// From their model comparison table and the context-window guide, read
-/// 2026-08-13: a 1M-token context window carries a 128k output cap, a 200k
-/// window carries 64k. Every anthropic row in the catalog obeys this except the
-/// two sonnet-4.5 spellings, which publish 1M context with 64k output — a
-/// pairing that appears nowhere in Anthropic's documentation.
+/// Anthropic's documented context classes pair a 1M-token window with a 128k
+/// output cap and a 200k window with 64k. A row combining 1M context with 64k
+/// output disagrees with those classes and needs a curated overlay entry
+/// supplying the corrected advertised window until upstream fixes it.
 ///
 /// The row disagrees with ITSELF, which is what makes this checkable without a
 /// network call: the output side says 200k-class, the context side says
@@ -939,26 +938,22 @@ fn every_self_contradicting_anthropic_row_has_a_corrective_cell() {
          pairing rule no longer holds."
     );
 
-    // Keep an independent count of known contradictions: this protects the
-    // population scan, while the planted row protects rejection of new gaps.
-    let known_failures = seed["anthropic"]["models"]
+    // Count the scanned population, not its defects: upstream can fix every
+    // contradiction while the test still examines real rows. The planted row below
+    // independently proves that an uncorrected contradiction is still rejected.
+    let known_classes = seed["anthropic"]["models"]
         .as_object()
         .unwrap()
-        .iter()
-        .filter(|(_, m)| {
-            let l = &m["limit"];
-            match (l["context"].as_i64(), l["output"].as_i64()) {
-                (Some(c), Some(o)) => ANTHROPIC_PAIRS.iter().any(|(pc, pe)| *pc == c && *pe != o),
-                _ => false,
-            }
+        .values()
+        .filter(|m| {
+            m["limit"]["context"]
+                .as_i64()
+                .is_some_and(|context| ANTHROPIC_PAIRS.iter().any(|(c, _)| *c == context))
         })
         .count();
-    assert_eq!(
-        known_failures, 2,
-        "the seed should contain exactly the two known self-contradicting rows; \
-         found {known_failures}. If the upstream fixed them, this number drops \
-         and the corrective cells become redundant — a judgment call, not a \
-         failure. If it rose, a new row needs a cell."
+    assert!(
+        known_classes > 0,
+        "the seed must exercise a documented Anthropic context class"
     );
 }
 

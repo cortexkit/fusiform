@@ -261,7 +261,7 @@ pub enum FieldId {
     /// wrong `attachment` flag are unrelated defects with unrelated blast
     /// radii.
     Capability { capability: CapabilityId },
-    /// A fact about the model ARTEFACT that fusiform misread.
+    /// An upstream model claim that fusiform misread.
     ///
     /// Per attribute, for the same reason as limits and capabilities: a wrong
     /// `family` and a wrong `open_weights` have unrelated blast radii. A wrong
@@ -275,12 +275,14 @@ pub enum FieldId {
     Model { attribute: ModelAttributeId },
 }
 
-/// Which artefact attribute a [`FieldId::Model`] names.
+/// Which upstream model attribute a [`FieldId::Model`] names.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelAttributeId {
     Family,
     OpenWeights,
+    CanonicalId,
+    Status,
 }
 
 /// Which capacity limit a correction names.

@@ -11,11 +11,14 @@
 //!
 //! Upstream publishes `family` — identical across every provider serving the
 //! same weights — and `open_weights`, which together relate the rows and mark
-//! the population. It publishes nothing naming the ORIGINATOR.
+//! the population. It also publishes `canonical_model_id`, now served as an
+//! upstream claim linking provider rows. That string is not a typed
+//! `creator_provider_id`, and this inheritance policy does not infer a price
+//! source from its spelling.
 //!
 //! Measured 2026-09-06: `release_date` is the MODEL's release date and is
 //! byte-identical across providers, so "whoever listed it first" cannot
-//! distinguish a creator from a reseller. There is no other candidate signal.
+//! distinguish a creator from a reseller.
 //! So each row is a human claim with a named basis, and the value it produces
 //! is disclosed on the wire rather than blended into the published rates.
 

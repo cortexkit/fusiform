@@ -175,6 +175,8 @@ impl FactKey {
             FieldId::Model { attribute } => FactKey::model(match attribute {
                 fusiform_core::ModelAttributeId::Family => "family",
                 fusiform_core::ModelAttributeId::OpenWeights => "open_weights",
+                fusiform_core::ModelAttributeId::CanonicalId => "canonical_id",
+                fusiform_core::ModelAttributeId::Status => "status",
             }),
             // A tiered rate's fact key carries a threshold that the FieldId
             // does not know, so these two cannot be mapped to a single key.

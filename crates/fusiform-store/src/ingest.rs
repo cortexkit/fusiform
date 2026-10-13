@@ -325,6 +325,10 @@ pub const SERVED_FACT_NAMESPACE: &[&str] = &[
     // which is what makes them the join a consumer needs to relate rows.
     "model.family",
     "model.open_weights",
+    "model.canonical_id",
+    // A lifecycle label is upstream's claim about this row, not proof that
+    // sibling providers have the same availability or lifecycle.
+    "model.status",
     "limit.context",
     "limit.output",
     "capability.reasoning",
@@ -370,6 +374,14 @@ fn facts_of(model: &NormalizedModel) -> Vec<(FactKey, String)> {
         (
             FactKey::model("open_weights"),
             json_opt_bool(model.open_weights),
+        ),
+        (
+            FactKey::model("canonical_id"),
+            json_opt_str(model.canonical_id.as_deref()),
+        ),
+        (
+            FactKey::model("status"),
+            json_opt_str(model.status.as_deref()),
         ),
         // Limits. `null` is a real value here: a limit that stops being
         // published is a change, and encoding it as absence would make the era

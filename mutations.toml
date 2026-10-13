@@ -353,16 +353,16 @@ build_timeout_s = 1800
 
 [[control]]
 id = "scan-floor-measured-document-extractor"
-guards = "the measurement-document field extractor fails loudly when it reads nothing"
+guards = "the real seed inventory fails loudly when it reads nothing"
 file = "crates/fusiform-core/tests/it/measured_fields_are_read_or_declared.rs"
-old = "        if !first.starts_with('`') {"
-new = "        if first.starts_with('`') {"
+old = "    let keys = payload_keys(SEED);"
+new = '    let keys = payload_keys(b"{}"); // NON-VACUITY BREAK'
 edits = []
 test_file = "crates/fusiform-core/tests/it/measured_fields_are_read_or_declared.rs"
 runner = "cargo"
 package = "fusiform-core"
 target = "--test it"
-expect_red = ["measured_fields_are_read_or_declared::every_measured_field_is_read_or_declared_unread", "measured_fields_are_read_or_declared::the_document_names_every_field_the_parser_reads"]
+expect_red = ["measured_fields_are_read_or_declared::every_seed_key_is_read_or_declared_unread"]
 only = false
 timeout_s = 600
 build_timeout_s = 1800
@@ -370,16 +370,16 @@ build_timeout_s = 1800
 
 [[control]]
 id = "scan-floor-measured-parser-extractor"
-guards = "the RawModel field extractor fails loudly when it reads nothing"
+guards = "the raw struct field extractor fails loudly when it reads nothing"
 file = "crates/fusiform-core/tests/it/measured_fields_are_read_or_declared.rs"
-old = "    let read: BTreeSet<String> = body[..end]"
-new = "    let read: BTreeSet<String> = body[..0]"
+old = "    let body = &body[..end];"
+new = "    let body = &body[..0]; // NON-VACUITY BREAK"
 edits = []
 test_file = "crates/fusiform-core/tests/it/measured_fields_are_read_or_declared.rs"
 runner = "cargo"
 package = "fusiform-core"
 target = "--test it"
-expect_red = ["measured_fields_are_read_or_declared::every_measured_field_is_read_or_declared_unread", "measured_fields_are_read_or_declared::the_document_names_every_field_the_parser_reads", "measured_fields_are_read_or_declared::a_declared_unread_field_is_actually_unread"]
+expect_red = ["measured_fields_are_read_or_declared::every_seed_key_is_read_or_declared_unread", "measured_fields_are_read_or_declared::planted_unknown_payload_key_is_reported", "measured_fields_are_read_or_declared::planted_unknown_nested_payload_keys_are_reported", "measured_fields_are_read_or_declared::opaque_and_quarantined_values_are_not_closed_vocabularies", "measured_fields_are_read_or_declared::unread_values_do_not_acquire_typed_parser_fields"]
 only = false
 timeout_s = 600
 build_timeout_s = 1800
@@ -880,3 +880,37 @@ target = "--test it"
 expect_red = ["served_corrections::status_reports_the_bound_the_pre_history_refusal_enforces"]
 only = false
 timeout_s = 600
+
+
+[[control]]
+id = "canonical-model-id-raw-to-domain"
+guards = "upstream canonical identities survive normalization without substituting provider/model row ids"
+file = "crates/fusiform-core/src/normalize/mod.rs"
+old = "        canonical_id: raw.canonical_model_id.clone(),"
+new = "        canonical_id: None, // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-core/tests/it/models_dev_normalization.rs"
+runner = "cargo"
+package = "fusiform-core"
+target = "--test it"
+expect_red = ["models_dev_normalization::canonical_identity_is_upstream_text_not_a_row_id"]
+only = true
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "seed-payload-unlisted-provider-key"
+guards = "a key planted in actual embedded api.json bytes must be parsed or explicitly declared unread"
+file = "crates/fusiform-module/data/models-dev-seed.json"
+old = '{"deepinfra":{"id":"deepinfra",'
+new = '{"deepinfra":{"NON-VACUITY BREAK":true,"id":"deepinfra",'
+edits = []
+test_file = "crates/fusiform-core/tests/it/measured_fields_are_read_or_declared.rs"
+runner = "cargo"
+package = "fusiform-core"
+target = "--test it"
+expect_red = ["measured_fields_are_read_or_declared::every_seed_key_is_read_or_declared_unread"]
+only = true
+timeout_s = 600
+build_timeout_s = 1800

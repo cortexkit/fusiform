@@ -31,8 +31,10 @@
           "existence": "present",
           "limit.context": 200000,
           "limit.output": 64000,
+          "model.canonical_id": null,
           "model.family": "claude-sonnet",
           "model.open_weights": false,
+          "model.status": null,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -145,8 +147,10 @@
           "existence": "present",
           "limit.context": 1000000,
           "limit.output": 393216,
+          "model.canonical_id": "deepseek/deepseek-v4.1-flash",
           "model.family": "deepseek-flash",
           "model.open_weights": true,
+          "model.status": null,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -244,8 +248,10 @@
           "existence": "present",
           "limit.context": 1050000,
           "limit.output": 128000,
+          "model.canonical_id": null,
           "model.family": "gpt-luna",
           "model.open_weights": false,
+          "model.status": null,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -427,8 +433,10 @@
           "existence": "present",
           "limit.context": 1000000,
           "limit.output": 30000,
+          "model.canonical_id": null,
           "model.family": "grok",
           "model.open_weights": false,
+          "model.status": null,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -556,8 +564,10 @@
           "existence": "present",
           "limit.context": 1048576,
           "limit.output": 65536,
+          "model.canonical_id": "google/gemini-3.8-flash",
           "model.family": "gemini-flash",
           "model.open_weights": false,
+          "model.status": null,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -656,8 +666,10 @@
           "existence": "present",
           "limit.context": 1000000,
           "limit.output": 128000,
+          "model.canonical_id": null,
           "model.family": "claude-opus",
           "model.open_weights": false,
+          "model.status": null,
           "rate.cache_read.mode.fast": {
             "currency": "USD",
             "exponent": 9,
@@ -827,8 +839,10 @@
           "existence": "present",
           "limit.context": 128000,
           "limit.output": 8192,
+          "model.canonical_id": null,
           "model.family": null,
-          "model.open_weights": null
+          "model.open_weights": null,
+          "model.status": null
         }
       },
       "resolved_at_ms": -1,
@@ -1000,8 +1014,10 @@
           "existence": "present",
           "limit.context": 1000000,
           "limit.output": 64000,
+          "model.canonical_id": null,
           "model.family": "claude-sonnet",
           "model.open_weights": false,
+          "model.status": null,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -1230,8 +1246,10 @@
           "existence": "present",
           "limit.context": 200000,
           "limit.output": 64000,
+          "model.canonical_id": null,
           "model.family": "claude-sonnet",
           "model.open_weights": false,
+          "model.status": null,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -1378,7 +1396,7 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 281,
+      "era_count": 321,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
@@ -1435,6 +1453,8 @@
         "capability.output_modalities",
         "model.family",
         "model.open_weights",
+        "model.canonical_id",
+        "model.status",
         "rate.input",
         "rate.output",
         "rate.cache_read",
@@ -1483,8 +1503,10 @@
           "existence": "present",
           "limit.context": null,
           "limit.output": null,
+          "model.canonical_id": null,
           "model.family": "gpt-image",
           "model.open_weights": false,
+          "model.status": "deprecated",
           "rate.cache_write": {
             "reason": "not_established",
             "state": "unpriced"
@@ -1876,8 +1898,10 @@
           "existence": "present",
           "limit.context": 1050000,
           "limit.output": 128000,
+          "model.canonical_id": null,
           "model.family": "gpt-luna",
           "model.open_weights": false,
+          "model.status": null,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -1992,8 +2016,10 @@
           "existence": "present",
           "limit.context": null,
           "limit.output": null,
+          "model.canonical_id": null,
           "model.family": "gpt-image",
           "model.open_weights": false,
+          "model.status": "deprecated",
           "rate.cache_write": {
             "reason": "not_established",
             "state": "unpriced"
@@ -2334,8 +2360,10 @@
           "existence": "present",
           "limit.context": 1050000,
           "limit.output": 128000,
+          "model.canonical_id": null,
           "model.family": "gpt-luna",
           "model.open_weights": false,
+          "model.status": null,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -2468,8 +2496,10 @@
           "existence": "present",
           "limit.context": 128000,
           "limit.output": 8192,
+          "model.canonical_id": "zai/synthetic-glm-1.0",
           "model.family": "glm",
           "model.open_weights": true,
+          "model.status": "future-preview",
           "rate.input": {
             "currency": "USD",
             "exponent": 9,
@@ -2527,8 +2557,10 @@
           "existence": "present",
           "limit.context": 200000,
           "limit.output": 64000,
+          "model.canonical_id": null,
           "model.family": "claude-sonnet",
           "model.open_weights": false,
+          "model.status": null,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -2606,8 +2638,10 @@
           "existence": "present",
           "limit.context": 128000,
           "limit.output": 8192,
+          "model.canonical_id": "zai/synthetic-glm-1.0",
           "model.family": "glm",
           "model.open_weights": true,
+          "model.status": "beta",
           "rate.input": {
             "currency": "USD",
             "exponent": 9,
@@ -2713,8 +2747,10 @@
           "existence": "present",
           "limit.context": 200000,
           "limit.output": 64000,
+          "model.canonical_id": null,
           "model.family": "claude-sonnet",
           "model.open_weights": false,
+          "model.status": null,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,

@@ -46,6 +46,8 @@ pub struct RawModel {
     pub id: Option<String>,
     pub name: Option<String>,
     pub family: Option<String>,
+    pub canonical_model_id: Option<String>,
+    pub status: Option<String>,
     pub release_date: Option<String>,
     pub last_updated: Option<String>,
     pub knowledge: Option<String>,

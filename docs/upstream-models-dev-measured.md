@@ -148,6 +148,54 @@ Seven fields, all present on all 183 providers except `api`:
 
 ## Model object
 
+### Current seed inventory and disposition
+
+The embedded snapshot refreshed with `scripts/refresh-seed.sh` on
+2026-10-13T16:40:24Z contains 8,795 model rows under 228 providers
+(SHA-256 `15b85944d05ae409dbd3af33be44455dfa8f559cd1b0c1efbfa39b7d7c23ef13`).
+The `every_seed_key_is_read_or_declared_unread` integration test inventories
+these payload bytes, including nested objects and array entries, rather than
+treating this document as its subject.
+The test's `DECLARED_UNREAD` table lists intentionally ignored field paths and a
+reason for each. An unparsed key outside that table fails with its object path,
+such as `model.limit.new_key`, rather than only its leaf name.
+Provider ids, model ids and mode names are map entries, not schema fields.
+Advisory is the wire's classification for informational facts rather than
+request-byte or money facts; consumers decide how to use these upstream claims.
+
+| Field | Present rows | Disposition |
+| --- | --- | --- |
+| `canonical_model_id` | 5,934 | Served verbatim as Advisory `model.canonical_id`: upstream's lab-level identity linking provider rows, not a synthesized or verified equivalence. |
+| `status` | 362 | Served verbatim as Advisory `model.status`: deprecated (284), beta (77), alpha (1); future strings are preserved too. |
+| `description` | 8,795 | Declared unread: human-facing prose with no served capacity, price or capability contract. |
+| `type` | 6 | Declared unread: sparse model-kind labels (embedding 4, reranking 2) with no consumer contract. |
+| `provider` | 399 | Declared unread values: SDK adapter and endpoint overrides select rendering and destination. The parser quarantines presence only; no contents are served. |
+| `interleaved` | 1,347 | Declared unread: bool or field-selector object with unestablished request-shaping meaning. |
+| `knowledge` | 4,624 | Already parsed into `knowledge_cutoff`; intentionally not served as a capacity, price or capability. |
+
+The two new model facts use the same `null` representation as `model.family`
+when unpublished. No canonical identity is inferred from a provider/model id,
+and an unpublished status does not mean active. Withdrawal records a `null` era
+instead of keeping an old upstream claim current. Both can be corrected through
+`FieldId::Model` (`canonical_id` and `status`). They do not change rate
+inheritance or routing policies: those remain consumer decisions.
+
+The provider key set remains `api`, `doc`, `env`, `id`, `models`, `name`, `npm`.
+The model key set is `attachment`, `canonical_model_id`, `cost`, `description`,
+`experimental`, `family`, `id`, `interleaved`, `knowledge`, `last_updated`,
+`limit`, `modalities`, `name`, `open_weights`, `provider`, `reasoning`,
+`reasoning_options`, `release_date`, `status`, `structured_output`, `temperature`,
+`tool_call`, `type`. Only `type` is new relative to the preceding embedded
+snapshot; that snapshot already contained silently dropped canonical identities
+and status labels. `limit` contains `context`, `input`, `output`; `modalities`
+contains `input`, `output`; `cost` contains `cache_read`, `cache_write`,
+`context_over_200k`, `input`, `input_audio`, `output`, `output_audio`, `reasoning`,
+`tiers`. The same inventory test visits tier specifications and experimental modes.
+Opaque reasoning options and mode costs preserve arbitrary JSON, and quarantined
+subtrees remain unread; neither is narrowed to a closed vocabulary by the check.
+
+### Original measurement
+
 Field frequency out of 6,253 rows:
 
 | Field | Count | Notes |

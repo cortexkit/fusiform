@@ -63,8 +63,8 @@ const UNKNOWN_REASONING: &str = r#"{
 /// price for the same model id under a curated family. The real excerpt happens
 /// to hold no such pair.
 ///
-/// That absence matters because consumers PIN FROM THESE BYTES. ALF said so
-/// explicitly, and a fixture that omits a served shape lets a wire change to it
+/// That absence matters because consumers pin their decoders from these bytes.
+/// A fixture that omits a served shape lets a wire change to it
 /// land without reddening anything here — which is the entire job of a golden
 /// payload.
 ///
@@ -79,6 +79,9 @@ const UNKNOWN_REASONING: &str = r#"{
 /// The reseller publishes NO rate at all, which is the population inheritance
 /// serves after the stated_zero correction: a provider that publishes any rate
 /// has a price card and is left alone.
+/// The pair also publishes a shared canonical identity and differing lifecycle
+/// labels, including an unknown value, so these upstream strings reach the wire
+/// without being confused with the row ids or a closed status vocabulary.
 const INHERITANCE_PAIR: &str = r#"{
   "zai": {
     "id": "zai",
@@ -87,6 +90,8 @@ const INHERITANCE_PAIR: &str = r#"{
       "synthetic-glm": {
         "id": "synthetic-glm",
         "name": "A model whose weights the creator publishes and prices",
+        "canonical_model_id": "zai/synthetic-glm-1.0",
+        "status": "future-preview",
         "family": "glm",
         "open_weights": true,
         "limit": { "context": 128000, "output": 8192 },
@@ -109,6 +114,8 @@ const INHERITANCE_PAIR: &str = r#"{
       "synthetic-glm": {
         "id": "synthetic-glm",
         "name": "The same weights served by someone who publishes no rate",
+        "canonical_model_id": "zai/synthetic-glm-1.0",
+        "status": "beta",
         "family": "glm",
         "open_weights": true,
         "limit": { "context": 128000, "output": 8192 }
@@ -839,18 +846,17 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
     // A model whose reasoning capability is UNKNOWN, from a document that is
     // deliberately synthetic and labelled as such.
     //
-    // Every other row in this fixture comes from a real upstream cut, which is
-    // this repository's rule: a hand-written fixture encodes its author's
-    // understanding of the format. This one cannot, and the reason is worth
+    // The ordinary rows come from a real upstream cut: a hand-written fixture
+    // encodes its author's understanding of the format. Synthetic rows also
+    // exercise inheritance and open-ended model labels. The unknown-reasoning
+    // row cannot be cut from that payload, and the reason is worth
     // stating rather than hiding. Measured on the live document today: all
     // 6,291 models publish the `reasoning` key, so ABSENT does not occur
     // upstream and cannot be cut from it.
     //
-    // It is pinned anyway because the null is the whole point of BROCA's
-    // parser fix — `as_bool()` returns None on a JSON null, so absent, false
-    // and null all collapse to false, and a capable model silently stops
-    // reasoning. Their deny-drift test vendors THIS fixture, so without a null
-    // row their check cannot cover the case it exists for.
+    // It is pinned because a consumer calling `as_bool().unwrap_or(false)`
+    // would collapse unknown to false and silently disable reasoning. A null
+    // row lets consumer decoder tests distinguish unknown from explicit false.
     //
     // The alternative was to leave the wire shape unpinned until the upstream
     // produces one, which means the first real occurrence is also the first
@@ -1635,4 +1641,37 @@ fn planted_missing_served_fact_key_is_reported() {
     let mut present = std::collections::BTreeSet::new();
     collect_keys(&serde_json::json!({"known": 1}), &mut present);
     assert_eq!(missing_served_fact_keys("pub const SERVED_FACTS: &[Fact] = &[\n Fact { key: \"known\" },\n Fact { key: \"lost\" },\n];", &present).1, ["lost"]);
+}
+
+#[test]
+fn model_identity_and_open_status_are_served_with_unpublished_nulls() {
+    let (store, _dir) = store();
+    for (provider, model, canonical, status) in [
+        (
+            "zai",
+            "synthetic-glm",
+            serde_json::json!("zai/synthetic-glm-1.0"),
+            serde_json::json!("future-preview"),
+        ),
+        (
+            "synthetic",
+            "unknown-reasoning",
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        ),
+    ] {
+        let request = serde_json::json!({"name":"catalog.get", "arguments":{
+            "provider_id":provider, "model_id":model, "at_ms":1000
+        }});
+        let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+        let response = serde_json::to_value(response).unwrap();
+        let facts = &response["models"][format!("{provider}/{model}")];
+        assert!(facts
+            .as_object()
+            .unwrap()
+            .contains_key("model.canonical_id"));
+        assert!(facts.as_object().unwrap().contains_key("model.status"));
+        assert_eq!(facts["model.canonical_id"], canonical);
+        assert_eq!(facts["model.status"], status);
+    }
 }

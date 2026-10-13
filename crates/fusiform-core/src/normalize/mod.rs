@@ -101,6 +101,10 @@ pub struct NormalizedModel {
     pub key: ModelKey,
     pub display_name: Option<String>,
     pub family: Option<String>,
+    /// The upstream's cross-provider model identity, never inferred from row ids.
+    pub canonical_id: Option<String>,
+    /// The upstream's lifecycle label, including values fusiform has not seen.
+    pub status: Option<String>,
     pub release_date: Option<String>,
     pub last_updated: Option<String>,
     pub knowledge_cutoff: Option<String>,
@@ -498,6 +502,8 @@ fn normalize_model(
         key,
         display_name: raw.name.clone(),
         family: raw.family.clone(),
+        canonical_id: raw.canonical_model_id.clone(),
+        status: raw.status.clone(),
         release_date: raw.release_date.clone(),
         last_updated: raw.last_updated.clone(),
         knowledge_cutoff: raw.knowledge.clone(),

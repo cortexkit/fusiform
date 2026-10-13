@@ -5,8 +5,9 @@
 //! author as the parser in the same sitting encodes one belief twice, and a
 //! non-vacuous assertion over it certifies whatever that belief got wrong —
 //! which is exactly how the shared catalog crate's tier defect shipped with a
-//! passing test. Every model kept here was selected because it exercises a
-//! shape the real document actually contains.
+//! passing test. Every model kept in that excerpt was selected because it
+//! exercises a shape the real document actually contains. Inline synthetic
+//! payloads separately exercise unpublished fields and future string values.
 
 use fusiform_core::normalize::{normalize_models_dev, NormalizedModel};
 use fusiform_core::{
@@ -744,4 +745,50 @@ fn a_tier_that_is_not_a_context_tier_is_refused() {
         1,
         "control: the context-tier payload must produce the model"
     );
+}
+
+#[test]
+fn canonical_identity_is_upstream_text_not_a_row_id() {
+    let outcome = normalize_models_dev(
+        br#"{
+        "lab": {"models": {"original": {"canonical_model_id": "lab/weights-1.0"}}},
+        "reseller": {"models": {
+            "alias": {"canonical_model_id": "lab/weights-1.0"},
+            "unpublished": {}
+        }}
+    }"#,
+    )
+    .unwrap();
+    assert_eq!(
+        model(&outcome, "lab/original").canonical_id.as_deref(),
+        Some("lab/weights-1.0")
+    );
+    assert_eq!(
+        model(&outcome, "reseller/alias").canonical_id.as_deref(),
+        Some("lab/weights-1.0")
+    );
+    assert_eq!(model(&outcome, "reseller/unpublished").canonical_id, None);
+}
+
+#[test]
+fn status_preserves_unknown_and_empty_strings_and_absence() {
+    let outcome = normalize_models_dev(
+        br#"{"p":{"models":{
+        "deprecated":{"status":"deprecated"},
+        "future":{"status":"future-preview"},
+        "empty":{"status":""},
+        "unpublished":{}
+    }}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        model(&outcome, "p/deprecated").status.as_deref(),
+        Some("deprecated")
+    );
+    assert_eq!(
+        model(&outcome, "p/future").status.as_deref(),
+        Some("future-preview")
+    );
+    assert_eq!(model(&outcome, "p/empty").status.as_deref(), Some(""));
+    assert_eq!(model(&outcome, "p/unpublished").status, None);
 }

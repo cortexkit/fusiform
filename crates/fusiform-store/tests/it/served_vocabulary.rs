@@ -49,6 +49,8 @@ const SERVED_FACT_KEYS: &[&str] = &[
     // another's row. A consumer relates rows across providers with them.
     "model.family",
     "model.open_weights",
+    "model.canonical_id",
+    "model.status",
 ];
 
 /// Fields the normalizer parses that must NEVER become facts.
@@ -741,7 +743,13 @@ fn every_limit_field_reaches_a_fact() {
 /// arms below — the same mechanism `Capabilities` and `Limits` already use.
 #[test]
 fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
-    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
+    // Synthetic claims exercise optional fields that the older excerpt lacks.
+    let mut fixture: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
+    let row = &mut fixture["anthropic"]["models"]["claude-sonnet-4-5"];
+    row["canonical_model_id"] = serde_json::json!("anthropic/claude-sonnet-4-5");
+    row["status"] = serde_json::json!("future-preview");
+    let outcome =
+        normalize_models_dev(&serde_json::to_vec(&fixture).unwrap()).expect("fixture normalizes");
     let model = outcome
         .catalog
         .models()
@@ -755,6 +763,8 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
         key: _,
         family,
         open_weights,
+        canonical_id,
+        status,
         capabilities: _,
         limits: _,
         rates: _,
@@ -795,6 +805,8 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
     for (present, key) in [
         (family.is_some(), "model.family"),
         (open_weights.is_some(), "model.open_weights"),
+        (canonical_id.is_some(), "model.canonical_id"),
+        (status.is_some(), "model.status"),
     ] {
         assert!(
             !present || keys.iter().any(|k| k == key),
@@ -807,9 +819,46 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
     }
 
     assert!(
+        canonical_id.is_some() && status.is_some(),
+        "fixture must exercise both new model claims"
+    );
+    assert!(
         family.is_some() || open_weights.is_some(),
         "control: the fixture must carry at least one of these, or the loop \
          above asserts nothing and passes against a build that emits no model \
          facts at all"
     );
+}
+
+#[test]
+fn canonical_identity_and_open_status_reach_stored_facts() {
+    use fusiform_store::ingest::facts_with_values;
+    let outcome = normalize_models_dev(
+        br#"{"p":{"models":{
+        "published":{"canonical_model_id":"lab/weights-1.0","status":"future-preview"},
+        "unpublished":{}
+    }}}"#,
+    )
+    .unwrap();
+    for model in outcome.catalog.models() {
+        let values: std::collections::BTreeMap<_, _> =
+            facts_with_values(model).into_iter().collect();
+        let (canonical, status) = if model.key.model_id == "published" {
+            (
+                serde_json::json!("lab/weights-1.0"),
+                serde_json::json!("future-preview"),
+            )
+        } else {
+            (serde_json::Value::Null, serde_json::Value::Null)
+        };
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&values[&FactKey::model("canonical_id")])
+                .unwrap(),
+            canonical
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&values[&FactKey::model("status")]).unwrap(),
+            status
+        );
+    }
 }

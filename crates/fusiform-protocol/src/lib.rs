@@ -1112,6 +1112,22 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                offerings. null when unpublished, which is not false",
     },
     ServedFact {
+        key: "model.canonical_id",
+        class: FactClass::Advisory,
+        note: "verbatim models.dev canonical_model_id: the lab-level model identity \
+               linking provider rows. null means upstream published nothing; \
+               never synthesized from the provider or model id. This is an \
+               upstream claim, not fusiform's verification that rows are equivalent.",
+    },
+    ServedFact {
+        key: "model.status",
+        class: FactClass::Advisory,
+        note: "verbatim upstream lifecycle label, such as deprecated, beta or alpha. \
+               Unknown future strings are served unchanged. null means upstream \
+               published nothing, not active or available; a label does not \
+               establish whether the provider still serves the model.",
+    },
+    ServedFact {
         key: "rate.input",
         class: FactClass::Money,
         note: "per million input tokens",
