@@ -764,7 +764,11 @@ fn the_shipped_file_retires_openais_old_pro_tier_keys() {
         store.append_plan_prices(&curated).unwrap(),
         curated.len() + 2
     );
-    let served = store.plan_prices_at(1791504000001, Some("openai")).unwrap();
+    // Read at the file's vintage, its newest boundary. Tombstones for keys the
+    // file dropped are dated at that vintage, so reading at a fixed earlier
+    // instant stops seeing them as soon as any later row is added to the file.
+    let vintage = curated.iter().map(|r| r.boundary_at_ms).max().unwrap();
+    let served = store.plan_prices_at(vintage, Some("openai")).unwrap();
     for tier in ["pro_20x", "pro_5x"] {
         let row = served.iter().find(|r| r.tier == tier).unwrap();
         assert!(
