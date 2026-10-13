@@ -218,7 +218,13 @@ fn no_write_escapes_the_fence() {
     // deliberately and checked separately below.
     let mut writes_seen = 0usize;
 
-    for file in ["lib.rs", "ingest.rs", "serve.rs", "correct.rs"] {
+    for file in [
+        "lib.rs",
+        "ingest.rs",
+        "serve.rs",
+        "correct.rs",
+        "readers.rs",
+    ] {
         let text = source(file);
         let unfenced = unfenced_writes(&text);
 
@@ -331,7 +337,8 @@ fn the_store_migrates_through_the_handle_it_returns() {
         "open() must run migrations on the handle it keeps"
     );
 
-    // Exactly one connection is opened, and it is the one returned.
+    // Exactly one lease-bearing writer is opened, and it is the one returned.
+    // Read-only connections do not acquire a lease or run migrations.
     //
     // Checking for `Ok(Self { inner })` alone is not enough and the mutation
     // proved it: dropping the handle and reopening a fresh one under the same

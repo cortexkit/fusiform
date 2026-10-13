@@ -988,3 +988,20 @@ expect_red = ["route::curated_tests::every_served_curated_row_discloses_its_allo
 only = false
 timeout_s = 600
 build_timeout_s = 1800
+
+[[control]]
+id = "catalog-reads-never-wait-for-writer-connection"
+guards = "a catalog read returns the last committed WAL snapshot while the fenced writer transaction is open, then sees its commit"
+file = "crates/fusiform-store/src/lib.rs"
+old = "        Ok(self.readers.with_conn(f)?)"
+new = "        Ok(self.inner.with_conn(f)?) /* NON-VACUITY BREAK */"
+edits = []
+test_file = "crates/fusiform-store/src/tests/read_connections.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--lib"
+select = "expected"
+expect_red = ["read_connections::catalog_read_completes_during_writer_transaction_and_sees_commit"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800

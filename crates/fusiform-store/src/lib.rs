@@ -15,12 +15,17 @@
 
 pub mod correct;
 pub mod ingest;
+mod readers;
 pub mod schema;
 pub mod serve;
 
+#[cfg(test)]
+#[path = "tests/read_connections.rs"]
+mod read_connections;
+
 use std::collections::BTreeMap;
 
-use cortexkit_store::{open_sqlite, SqliteStore, StorageDescriptor, StoreError};
+use cortexkit_store::{open_sqlite, SqliteStore, StorageBackend, StorageDescriptor, StoreError};
 use fusiform_core::{
     BoundaryKind, Correction, FailureClass, FieldId, ObservationOutcome, SourceId, Timestamp,
 };
@@ -28,6 +33,9 @@ use rusqlite::{params, OptionalExtension};
 
 /// A lease-guarded, migrated catalog store.
 pub struct CatalogStore {
+    // Fields drop in declaration order. Close readers before the writer so its
+    // final close can checkpoint the WAL for backups of the closed database.
+    readers: readers::ReadPool,
     inner: SqliteStore,
 }
 
@@ -362,7 +370,14 @@ impl CatalogStore {
             )));
         }
 
-        Ok(Self { inner })
+        // Readers open only after migrations commit, and never acquire a writer
+        // lease. The original handle remains the sole fenced writer.
+        let path = match &descriptor.backend {
+            StorageBackend::Sqlite { path } => path,
+            other => return Err(StoreError::UnsupportedBackend(other.label().to_string()).into()),
+        };
+        let readers = readers::ReadPool::open(path)?;
+        Ok(Self { inner, readers })
     }
 
     /// The fence epoch of the held single-writer lease.
@@ -425,7 +440,7 @@ impl CatalogStore {
     /// (source, instant) and a count over the tail is a covering-index scan of
     /// a few hundred rows.
     pub fn observations_since(&self, source: SourceId, at: Timestamp) -> Result<i64, CatalogError> {
-        let n = self.inner.with_conn(|conn| {
+        let n = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT COUNT(*) FROM observation WHERE source = ?1 AND observed_at_ms >= ?2",
                 params![source.as_str(), at.0],
@@ -456,7 +471,7 @@ impl CatalogStore {
     /// so a freshly seeded store reports the moment its snapshot was taken and
     /// not the moment it was installed.
     pub fn record_begins_at(&self, source: SourceId) -> Result<Option<Timestamp>, CatalogError> {
-        let ts = self.inner.with_conn(|conn| {
+        let ts = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT MIN(observed_at_ms) FROM observation WHERE source = ?1",
                 params![source.as_str()],
@@ -491,7 +506,7 @@ impl CatalogStore {
              ORDER BY observed_at_ms DESC LIMIT 1",
             confirming_in_list()
         );
-        let ts = self.inner.with_conn(|conn| {
+        let ts = self.raw_conn(|conn| {
             conn.query_row(&sql, params![source.as_str(), instant.0], |r| {
                 r.get::<_, i64>(0)
             })
@@ -697,7 +712,7 @@ impl CatalogStore {
         fact: &FactKey,
         at: Timestamp,
     ) -> Result<Option<EraRow>, CatalogError> {
-        let row = self.inner.with_conn(|conn| {
+        let row = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT id, value_json, boundary_at_ms, boundary_kind, \
                         prior_observation_at_ms, observation_id, \
@@ -910,18 +925,20 @@ impl CatalogStore {
         Ok(rows)
     }
 
-    /// Run a read against the connection.
+    /// Run a read against a pooled read-only connection.
     ///
     /// Reads only. Writes go through `with_conn_fenced`, which checks that this
     /// process still holds the current writer lease before applying anything:
     /// when one instance replaces another, the outgoing one can briefly still
     /// have an open connection after losing the lease, and that check is what
     /// stops its late writes from landing on top of its replacement's.
+    /// Reads see committed WAL snapshots, not the writer's uncommitted changes;
+    /// reads needed within a write transaction must use its `tx` instead.
     pub(crate) fn raw_conn<T>(
         &self,
         f: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T>,
     ) -> Result<T, CatalogError> {
-        Ok(self.inner.with_conn(f)?)
+        Ok(self.readers.with_conn(f)?)
     }
 
     /// The ETag from the most recent observation that received one.
@@ -931,7 +948,7 @@ impl CatalogStore {
     /// poll, until that process has read a full document, because a 304 means
     /// the bytes are unchanged, not that the running binary has read them.
     pub fn last_etag(&self, source: SourceId) -> Result<Option<String>, CatalogError> {
-        let etag = self.inner.with_conn(|conn| {
+        let etag = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT etag FROM observation \
                  WHERE source = ?1 AND etag IS NOT NULL \
@@ -949,7 +966,7 @@ impl CatalogStore {
     /// Only observations that parsed a body carry a digest, so a 304 or a
     /// failure between two full fetches does not erase the comparison basis.
     pub fn last_normalized_hash(&self, source: SourceId) -> Result<Option<String>, CatalogError> {
-        let hash = self.inner.with_conn(|conn| {
+        let hash = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT normalized_hash FROM observation \
                  WHERE source = ?1 AND normalized_hash IS NOT NULL \
@@ -1010,7 +1027,7 @@ impl CatalogStore {
     /// along with the noise, which is the same class of loss the mark exists to
     /// prevent. Per-era exclusion is the exact answer and is not built yet.
     pub fn artifact_observations(&self) -> Result<Vec<i64>, CatalogError> {
-        let candidates: Vec<i64> = self.inner.with_conn(|conn| {
+        let candidates: Vec<i64> = self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT DISTINCT observation_id FROM era \
                  WHERE observation_id IS NOT NULL AND boundary_kind = 'observed'",
@@ -1056,7 +1073,7 @@ impl CatalogStore {
     /// near 1.0 is the signature, and anything else is a poll that changed real
     /// values and must not be marked.
     pub fn same_claim_era_fraction(&self, observation_id: i64) -> Result<(i64, i64), CatalogError> {
-        let pairs: Vec<(String, Option<String>)> = self.inner.with_conn(|conn| {
+        let pairs: Vec<(String, Option<String>)> = self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT e.value_json, ( \
                      SELECT p.value_json FROM era p \
@@ -1148,7 +1165,7 @@ impl CatalogStore {
         // table at mark time, so there is ONE definition of "restates the held
         // claim" and no stored set that can drift from it. Cheap because facts
         // carry few eras — 68,419 of them have exactly one, 140 have two.
-        let rows: Vec<(i64, String, bool)> = self.inner.with_conn(|conn| {
+        let rows: Vec<(i64, String, bool)> = self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT e.boundary_at_ms, e.value_json, \
                         (e.observation_id IS NOT NULL AND e.observation_id IN \
@@ -1205,7 +1222,7 @@ impl CatalogStore {
         &self,
         observation_id: i64,
     ) -> Result<Vec<(String, String)>, CatalogError> {
-        let rows = self.inner.with_conn(|conn| {
+        let rows = self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT action, reason FROM observation_artifact_event \
                  WHERE observation_id = ?1 ORDER BY id ASC",
@@ -1257,7 +1274,7 @@ impl CatalogStore {
     /// intent, and a test asserting only the response proves what the code says
     /// about itself.
     pub fn observation_artifact_reason(&self, id: i64) -> Result<Option<String>, CatalogError> {
-        let reason = self.inner.with_conn(|conn| {
+        let reason = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT reason FROM observation_artifact_event ev \
                  WHERE ev.observation_id = ?1 AND ev.action = 'marked' \
@@ -1278,7 +1295,7 @@ impl CatalogStore {
     /// meaning across installs, so a number alone is not something anyone can
     /// verify by reading it.
     pub fn observation_observed_at(&self, id: i64) -> Result<Option<Timestamp>, CatalogError> {
-        let at = self.inner.with_conn(|conn| {
+        let at = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT observed_at_ms FROM observation WHERE id = ?1",
                 params![id],
@@ -1290,7 +1307,7 @@ impl CatalogStore {
     }
 
     pub fn raw_hash_of_observation(&self, id: i64) -> Result<Option<String>, CatalogError> {
-        let hash = self.inner.with_conn(|conn| {
+        let hash = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT raw_hash FROM observation WHERE id = ?1",
                 params![id],
@@ -1307,7 +1324,7 @@ impl CatalogStore {
     /// class that was written down. Those are two different artifacts derived
     /// from one intent, and nothing else compares them.
     pub fn failure_class_of_observation(&self, id: i64) -> Result<Option<String>, CatalogError> {
-        let class = self.inner.with_conn(|conn| {
+        let class = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT failure_class FROM observation WHERE id = ?1",
                 params![id],
@@ -1320,7 +1337,7 @@ impl CatalogStore {
 
     /// The current catalog version.
     pub fn catalog_version(&self) -> Result<i64, CatalogError> {
-        let v = self.inner.with_conn(|conn| {
+        let v = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT version FROM catalog_version WHERE id = 1",
                 [],
@@ -2007,7 +2024,7 @@ impl CatalogStore {
         at_ms: i64,
         provider_id: Option<&str>,
     ) -> Result<Vec<NewPlanPrice>, CatalogError> {
-        let rows = self.inner.with_conn(|conn| {
+        let rows = self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT provider_id, tier, minor_units, exponent, currency, period, \
                         boundary_at_ms, established_by, established_at_ms, \
