@@ -581,10 +581,14 @@ fn status_reports_quiet_polls_and_failures() {
         .expect("a failed poll must be reported");
     assert_eq!(failure.failure_class.as_deref(), Some("network"));
 
-    // Counts come from the same read a consumer gets, so status and catalog.get
-    // cannot disagree about how many models exist.
+    // Status counts stored upstream rows. Current reads additionally list
+    // curated rows and aliases, which have no stored observations to count.
     let catalog = get(&f, "{}");
-    assert_eq!(status.model_count, catalog.model_count());
+    assert_eq!(catalog.curated.len(), 1);
+    assert_eq!(
+        status.model_count + catalog.curated.len() + catalog.aliased.len(),
+        catalog.model_count()
+    );
     assert!(status.era_count > status.model_count as i64);
 }
 

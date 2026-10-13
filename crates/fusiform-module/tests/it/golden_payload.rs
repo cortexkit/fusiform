@@ -237,7 +237,16 @@ fn plane_store() -> (CatalogStore, tempfile::TempDir, Vec<(String, String)>) {
 /// Both dispatch paths must apply a plane before filtering. Bulk cases carry
 /// every provider row, not an artificial one-model store that hides neighbours.
 fn plane_cases(cuts: &[(String, String)]) -> Vec<(String, serde_json::Value)> {
-    let mut cases = Vec::new();
+    let mut cases = vec![
+        (
+            "catalog.get — meta oauth serves the curated row".into(),
+            serde_json::json!({"provider_id":"meta", "auth_method":"oauth"}),
+        ),
+        (
+            "catalog.get — meta apikey excludes the curated row".into(),
+            serde_json::json!({"provider_id":"meta", "auth_method":"apikey"}),
+        ),
+    ];
     for (filter, prefixes) in [
         ("unfiltered", None),
         ("rates", Some(vec!["rate."])),
@@ -1238,6 +1247,14 @@ fn cases() -> Vec<(&'static str, String)> {
             "catalog.status",
             r#"{"name":"catalog.status","arguments":{"polls":3}}"#.to_string(),
         ),
+        (
+            "catalog.get — a curated plane-only model",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"meta","model_id":"muse-wonder-full-1.0"}}"#.to_string(),
+        ),
+        (
+            "catalog.history — a curated row is not stored",
+            r#"{"name":"catalog.history","arguments":{"provider_id":"meta","model_id":"muse-wonder-full-1.0","fact_key":"limit.context"}}"#.to_string(),
+        ),
     ]
 }
 
@@ -1376,6 +1393,8 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
         r#""resolved_at_ms": -1"#,
         // A curated alias and the marker on a price borrowed through it.
         r#""aliased""#,
+        r#""curated""#,
+        r#""auth_methods""#,
         r#""basis": "alias""#,
         // Current-only plane variants and both provenance disclosures.
         r#""plane""#,
@@ -1460,6 +1479,7 @@ fn every_read_response_field_reaches_the_fixture() {
         &present,
         &[
             "CatalogGetResponse",
+            "CuratedModelWire",
             "PlaneWire",
             "BillingRuleWire",
             "HistoryResponse",
@@ -1471,7 +1491,7 @@ fn every_read_response_field_reaches_the_fixture() {
 
     assert!(
         checked >= 40,
-        "this examined {checked} fields across seven structs; fewer than 40 means \
+        "this examined {checked} fields across eight structs; fewer than 40 means \
          the scan broke rather than the protocol shrinking"
     );
 

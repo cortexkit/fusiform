@@ -693,9 +693,46 @@ fn render_catalog_models(
     for identity in models.keys() {
         let _ = writeln!(out, "  {identity}");
     }
+    out.push_str(&render_curated(response));
     out.push_str(&render_withheld(response));
     out.push_str(&render_uncertain(response));
     out.push_str(&render_overridden(response));
+    out
+}
+
+/// Login restrictions must be visible even on a plain read: the provider id
+/// alone does not establish that an API-key credential can call this model.
+fn render_curated(response: &serde_json::Value) -> String {
+    let mut out = String::new();
+    if let Some(rows) = response.get("curated").and_then(|v| v.as_array()) {
+        for row in rows {
+            let methods = row["auth_methods"]
+                .as_array()
+                .map(|methods| {
+                    methods
+                        .iter()
+                        .filter_map(|method| method.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            let _ = writeln!(
+                out,
+                "\ncurated: {} (not stored upstream)",
+                row["model"].as_str().unwrap_or("?")
+            );
+            let _ = writeln!(
+                out,
+                "  allowed login methods: {methods} (all others refused)"
+            );
+            let _ = writeln!(
+                out,
+                "  source: {}",
+                row["source_ref"].as_str().unwrap_or("?")
+            );
+            let _ = writeln!(out, "  review by: {}", row["review_by_ms"]);
+        }
+    }
     out
 }
 
@@ -933,6 +970,7 @@ fn render_single_model(
             out.push_str(&format!("  {key:<34}  {value}\n"));
         }
     }
+    out.push_str(&render_curated(response));
     // PRINTS NOTHING. The caller prints what this returns, and for a while
     // this function did both — so every single-model read rendered its facts
     // TWICE, under a header correctly saying "1 model".
@@ -1121,6 +1159,14 @@ fn render_history(response: &serde_json::Value) -> String {
         return out;
     };
     if eras.is_empty() {
+        if let Some(row) = response.get("curated").filter(|v| v.is_object()) {
+            let _ = writeln!(
+                out,
+                "\nno eras here: this row is curated at read time, not stored upstream"
+            );
+            let _ = writeln!(out, "source: {}", row["source_ref"].as_str().unwrap_or("?"));
+            return out;
+        }
         // An empty history that is not an absence.
         //
         // The value IS served on this row, derived at serve time from another
@@ -3306,5 +3352,44 @@ mod render_history_tests {
             !out.contains("served from"),
             "and nothing may claim an inheritance that did not happen: {out}"
         );
+    }
+}
+
+#[cfg(test)]
+mod curated_render_tests {
+    use super::*;
+
+    #[test]
+    fn composed_catalog_text_discloses_curated_login_restrictions_and_source() {
+        let response = serde_json::json!({
+            "models": {"meta/muse-wonder-full-1.0": {"limit.context":1048576}},
+            "curated": [{"model":"meta/muse-wonder-full-1.0", "auth_methods":["oauth"],
+                "source_ref":"Authenticated probes; https://models.dev/models.json", "review_by_ms":1797033600000i64}]
+        });
+        for bulk in [false, true] {
+            let mut response = response.clone();
+            if bulk {
+                response["models"]["meta/other"] = serde_json::json!({"limit.context":100});
+            }
+            let text = render_catalog_models(&response, response["models"].as_object().unwrap());
+            assert_eq!(
+                text.matches("curated: meta/muse-wonder-full-1.0 (not stored upstream)")
+                    .count(),
+                1
+            );
+            assert!(text.contains("allowed login methods: oauth (all others refused)"));
+            assert!(text.contains("source: Authenticated probes; https://models.dev/models.json"));
+            assert!(text.contains("review by: 1797033600000"));
+        }
+    }
+
+    #[test]
+    fn composed_curated_history_text_does_not_suggest_checking_the_fact_key() {
+        let response = serde_json::json!({"provider_id":"meta", "model_id":"muse-wonder-full-1.0", "fact_key":"limit.context", "eras":[],
+            "curated":{"source_ref":"Authenticated probes"}});
+        let text = render_history(&response);
+        assert!(text.contains("curated at read time, not stored upstream"));
+        assert!(text.contains("source: Authenticated probes"));
+        assert!(!text.contains("check the fact key"));
     }
 }

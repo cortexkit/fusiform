@@ -914,3 +914,62 @@ expect_red = ["measured_fields_are_read_or_declared::every_seed_key_is_read_or_d
 only = true
 timeout_s = 600
 build_timeout_s = 1800
+
+[[control]]
+id = "curated-login-allowlist-call-site"
+guards = "a curated provider row is not served to an unlisted credential login method"
+file = "crates/fusiform-module/src/route.rs"
+old = ".is_some_and(|method| !row.auth_methods.contains(method))"
+new = ".is_some_and(|method| { let _ = method; false /* NON-VACUITY BREAK */ })"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+select = "expected"
+expect_red = ["route::curated_tests::unlisted_login_method_never_serves_a_curated_row"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "curated-upstream-wins-call-site"
+guards = "any upstream observation for the provider/model makes the curated row stand down, including a retired row"
+file = "crates/fusiform-module/src/route.rs"
+old = """
+if store
+                .model_is_known(source, provider, model)
+                .map_err(|e| store_error(&e))?"""
+new = """
+if false /* NON-VACUITY BREAK */ && store
+                .model_is_known(source, provider, model)
+                .map_err(|e| store_error(&e))?"""
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+select = "expected"
+expect_red = ["route::curated_tests::a_stored_upstream_row_supersedes_curated_facts_and_disclosure"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "curated-disclosure-call-site"
+guards = "every served curated row carries its login allowlist and source in the top-level disclosure"
+file = "crates/fusiform-module/src/route.rs"
+old = "response.curated.push(disclosure);"
+new = "let _ = disclosure; // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+select = "expected"
+expect_red = ["route::curated_tests::every_served_curated_row_discloses_its_allowlist_and_source"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800

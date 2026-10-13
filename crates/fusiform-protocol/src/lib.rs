@@ -512,6 +512,14 @@ pub struct CatalogGetResponse {
     /// which fusiform deliberately never serves.
     pub models: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
 
+    /// Current-only rows supplied by curation, not stored upstream observations.
+    /// `auth_methods` is an allowlist: only these login methods may serve the row.
+    /// The routing consumer must refuse a credential whose login method is not
+    /// listed. Absence of a row from `curated` means fusiform places no login
+    /// restriction on it. Omitted when empty; upstream rows always win.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub curated: Vec<CuratedModelWire>,
+
     /// Facts this read withheld because their record is known bad.
     ///
     /// Omitted from the wire when empty, which is the ordinary case, so this
@@ -1338,6 +1346,17 @@ pub struct HistoryEra {
     pub window_from_ms: Option<i64>,
 }
 
+/// Provenance and login restrictions for one curated provider row.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CuratedModelWire {
+    pub model: String,
+    /// An allowlist, not a preference: unlisted credential login methods must
+    /// be refused by the routing consumer.
+    pub auth_methods: Vec<String>,
+    pub source_ref: String,
+    pub review_by_ms: i64,
+}
+
 /// A `catalog.history` response.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HistoryResponse {
@@ -1347,6 +1366,10 @@ pub struct HistoryResponse {
     pub fact_key: String,
     /// Oldest first: a history is read forwards.
     pub eras: Vec<HistoryEra>,
+    /// This row is curated at read time and has no stored eras. The source
+    /// explains the served fact, rather than suggesting a misspelled fact key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curated: Option<CuratedModelWire>,
     /// When this fact's value last GENUINELY changed, in epoch milliseconds.
     ///
     /// # Why a consumer cannot compute this from `eras`
@@ -1506,6 +1529,8 @@ pub struct StatusResponse {
     /// It is also not a cursor you SEND: `catalog.status` takes no instant, only
     /// a count of recent polls.
     pub catalog_version: i64,
+    /// Stored upstream models only. Curated rows and aliases are computed at
+    /// read time and do not increase this count or `models_priced`.
     pub model_count: usize,
     /// Every fact key this producer can serve, whether or not any model
     /// currently carries it.

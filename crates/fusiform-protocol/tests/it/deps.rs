@@ -232,6 +232,12 @@ fn every_response_type_round_trips() {
     use std::collections::BTreeMap;
 
     let catalog = CatalogGetResponse {
+        curated: vec![CuratedModelWire {
+            model: "meta/muse-wonder-full-1.0".into(),
+            auth_methods: vec!["oauth".into()],
+            source_ref: "Authenticated probes and models.dev lab record".into(),
+            review_by_ms: 1_797_033_600_000,
+        }],
         retired: vec![fusiform_protocol::RetiredModelWire {
             model: "kimi-for-coding/k3".to_string(),
             retired_at_ms: 1_789_738_000_000,
@@ -292,6 +298,7 @@ fn every_response_type_round_trips() {
     );
 
     let history = HistoryResponse {
+        curated: None,
         last_changed_at_ms: Some(1_786_529_249_396),
         inherited_from: None,
         source: "models.dev".into(),

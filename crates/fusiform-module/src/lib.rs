@@ -11,6 +11,7 @@
 pub mod aliases;
 pub mod billing_planes;
 pub mod creators;
+pub mod curated_models;
 pub mod fetch;
 pub mod health;
 pub mod loop_;

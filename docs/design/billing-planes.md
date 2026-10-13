@@ -161,3 +161,52 @@ Still open:
 2. Google implicit caching: how the first request's tokens bill. No reader
    needs it yet; routing sees no Google cache-write tokens.
 3. DeepSeek reasoning: the docs imply output pricing without stating it.
+
+## 8. Plane-only model rows
+
+A lab record is not a provider API row. Meta's Muse Wonder Full is published
+in `https://models.dev/models.json` as `meta/muse-wonder-full`, but not in the
+provider catalog (`api.json`). Authenticated probes on 2026-10-13 used
+the coding-plan credential `oauth:meta` to read the model list
+and send a request to the OpenAI Responses endpoint at
+`https://api.meta.ai/v1`: the unversioned id returned 404, while
+`muse-wonder-full-1.0` returned 200. That versioned id is the served provider
+row; the lab id is its `model.canonical_id`.
+
+`data/curated-models.json` supplies these missing provider facts at read time,
+never at ingest. Each row has a source, establishment date, review date 60 days
+later, and a login-method allowlist. A plain `catalog.get` (no `auth_method`)
+lists the row in bulk or named reads and attaches a top-level `curated` array.
+Each entry has
+`model`, `auth_methods`, `source_ref`, and `review_by_ms`. **The routing consumer
+must refuse credentials whose login method is not in `auth_methods`.** Absence
+of a row from `curated` places no login restriction on it. A `meta`/`oauth` read
+serves this row; `meta`/`apikey` does not. A named read on an excluded login
+returns an empty model map, not curated facts under an API credential.
+
+The Meta OAuth plane is a ruleless `quota_proxy`: ordinary API prices are
+relative weights against subscription usage limits, not an amount billed.
+Meta publishes no rule specifying how input, output or cached tokens consume
+those limits, so no per-class billing rule is supplied.
+Muse Wonder Full publishes no API price to borrow, so its curated row has no
+`rate.*` facts. It also has no published output limit; `limit.output` is null.
+Only facts in `SERVED_FACTS` may be supplied. Name, release date, blog and model
+card are retained in provenance rather than invented as new fact keys.
+
+An upstream observation of the same `(provider_id, model_id)` always wins,
+even if retired or removed by a fact filter. A test compares curated identities
+with the embedded seed (the saved models.dev provider snapshot) and says
+“upstream now publishes this row; remove the curated row”; planted seed,
+unknown-key and subscription-price rows test the fences. An overdue-row gate
+requires re-verification and new dates, or removal. Malformed and duplicate
+rows are reported as rejects; the shipped file must have none.
+
+Curated rows obey provider and fact filters. A named read keeps the row and its
+disclosure when a fact filter matches nothing; a bulk read drops such rows.
+Point-in-time reads (`at_ms`, an epoch-millisecond instant) replay what the
+store held then; they never serve today's unstored curated claims.
+`catalog.history` returns no eras for a curated fact and carries a `curated`
+object with the row's source:
+these facts were never stored, so “check the fact key” is the wrong explanation.
+`catalog.status.model_count`, `models_priced`, era counts and catalog versions
+remain store-based; current `catalog.get.models` includes the extra identities.

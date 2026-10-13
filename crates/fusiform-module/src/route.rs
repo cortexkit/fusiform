@@ -197,6 +197,27 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
     // Reached only when the read found nothing, so the ordinary path pays no
     // extra query.
     if rows.is_empty() {
+        if let Some(row) = crate::curated_models::models()
+            .get(&(request.provider_id.clone(), request.model_id.clone()))
+        {
+            if !store
+                .model_is_known(source, &request.provider_id, &request.model_id)
+                .map_err(|e| store_error(&e))?
+                && row.facts.contains_key(&request.fact_key)
+            {
+                return Ok(HistoryResponse {
+                    source: source.as_str().to_string(),
+                    provider_id: request.provider_id,
+                    model_id: request.model_id,
+                    fact_key: request.fact_key,
+                    eras: Vec::new(),
+                    curated: Some(curated_disclosure(row)),
+                    last_changed_at_ms: None,
+                    inherited_from: None,
+                    overridden: None,
+                });
+            }
+        }
         // An alias id has no eras because fusiform never observed it: its facts
         // are another row's, served under the alias at read time. Name that
         // row instead of refusing the id as unknown, so a consumer knows whose
@@ -214,6 +235,7 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
                 model_id: request.model_id,
                 fact_key: request.fact_key,
                 eras: Vec::new(),
+                curated: None,
                 last_changed_at_ms: None,
                 inherited_from: Some(alias_origin(store, source, alias)),
                 overridden: None,
@@ -350,6 +372,7 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
         model_id: request.model_id,
         fact_key: request.fact_key,
         eras,
+        curated: None,
         last_changed_at_ms,
         inherited_from,
         overridden,
@@ -826,6 +849,28 @@ pub fn serve_catalog_get(
 
     let aliases = crate::aliases::aliases();
     let named = request.provider_id.is_some() && request.model_id.is_some();
+    let mut curated = Vec::new();
+    if at.is_none() {
+        for ((provider, model), row) in crate::curated_models::models() {
+            if request
+                .provider_id
+                .as_deref()
+                .is_some_and(|p| p != provider)
+                || request.model_id.as_deref().is_some_and(|m| m != model)
+            {
+                continue;
+            }
+            // Any upstream observation, including a retirement, supersedes the
+            // curated claim. Check the store, not the filtered response.
+            if store
+                .model_is_known(source, provider, model)
+                .map_err(|e| store_error(&e))?
+            {
+                continue;
+            }
+            curated.push(row);
+        }
+    }
     if let (Some(provider_id), Some(model_id)) =
         (request.provider_id.as_deref(), request.model_id.as_deref())
     {
@@ -847,7 +892,19 @@ pub fn serve_catalog_get(
         }
     }
 
-    let (snapshot, retired) = if let (Some(provider_id), Some(model_id)) =
+    let (snapshot, retired) = if named && !curated.is_empty() {
+        (
+            CatalogSnapshot {
+                source,
+                resolved_at: Timestamp(now_ms()),
+                catalog_version: store.catalog_version().map_err(|e| store_error(&e))?,
+                models: Vec::new(),
+                withheld: Vec::new(),
+                uncertain: Vec::new(),
+            },
+            Vec::new(),
+        )
+    } else if let (Some(provider_id), Some(model_id)) =
         (request.provider_id.as_deref(), request.model_id.as_deref())
     {
         single_model_snapshot(store, source, provider_id, model_id, at, &request)?
@@ -890,6 +947,7 @@ pub fn serve_catalog_get(
             // Checked only when the filter matched nothing, so the ordinary
             // path pays no query.
             if snapshot.models.is_empty()
+                && curated.is_empty()
                 && !store
                     .provider_is_known(source, &provider)
                     .map_err(|e| store_error(&e))?
@@ -942,6 +1000,25 @@ pub fn serve_catalog_get(
             request.provider_id.as_deref(),
             request.fact_prefixes.as_ref(),
         )?;
+    }
+    for row in curated {
+        // A plain read lists availability; a plane read must respect the login
+        // restriction even when the provider has other unrestricted rows.
+        if request
+            .auth_method
+            .as_ref()
+            .is_some_and(|method| !row.auth_methods.contains(method))
+        {
+            continue;
+        }
+        let mut facts = row.facts.clone();
+        narrow_to_requested(&mut facts, requested_prefixes.as_ref());
+        if !named && facts.is_empty() {
+            continue;
+        }
+        let disclosure = curated_disclosure(row);
+        response.models.insert(disclosure.model.clone(), facts);
+        response.curated.push(disclosure);
     }
     Ok(finish_plane_view(
         response,
@@ -1467,8 +1544,20 @@ fn render(
         // Filled by the alias paths in `serve_catalog_get`, which are the only
         // callers that serve one row's facts under another id.
         aliased: Vec::new(),
+        curated: Vec::new(),
         plane: None,
         billing_rules: Vec::new(),
+    }
+}
+
+fn curated_disclosure(
+    row: &crate::curated_models::CuratedModel,
+) -> fusiform_protocol::CuratedModelWire {
+    fusiform_protocol::CuratedModelWire {
+        model: format!("{}/{}", row.provider_id, row.model_id),
+        auth_methods: row.auth_methods.clone(),
+        source_ref: row.source_ref.clone(),
+        review_by_ms: row.review_by_ms,
     }
 }
 
@@ -4126,5 +4215,224 @@ fn alias_origin(
         family,
         basis: "alias".to_string(),
         model_id: Some(alias.target_model_id.clone()),
+    }
+}
+
+#[cfg(test)]
+mod curated_tests {
+    use super::*;
+    use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+    use fusiform_core::BoundaryKind;
+    use fusiform_store::NewEra;
+    use serde_json::{json, Value};
+
+    const ID: &str = "meta/muse-wonder-full-1.0";
+    const MODEL: &str = "muse-wonder-full-1.0";
+
+    fn store() -> (CatalogStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().into(),
+            },
+        })
+        .unwrap();
+        (store, dir)
+    }
+
+    fn era(model: &str, key: &str, value: Value) -> NewEra {
+        NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "meta".into(),
+            model_id: model.into(),
+            fact_key: FactKey::from_stored(key.into()),
+            value_json: value.to_string(),
+            boundary_at: Timestamp(1000),
+            boundary_kind: BoundaryKind::Seed,
+            observation_id: None,
+        }
+    }
+
+    fn get(store: &CatalogStore, args: Value) -> CatalogGetResponse {
+        serve_catalog_get(store, &serde_json::to_vec(&args).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn plain_and_oauth_reads_serve_published_curated_facts() {
+        let (store, _dir) = store();
+        for args in [
+            json!({}),
+            json!({"provider_id":"meta"}),
+            json!({"provider_id":"meta", "model_id":MODEL}),
+            json!({"provider_id":"meta", "auth_method":"oauth"}),
+            json!({"provider_id":"meta", "model_id":MODEL, "auth_method":"oauth"}),
+        ] {
+            let response = get(&store, args);
+            let facts = &response.models[ID];
+            assert_eq!(facts["model.canonical_id"], "meta/muse-wonder-full");
+            assert_eq!(facts["limit.context"], 1048576);
+            assert!(facts["limit.output"].is_null());
+            assert_eq!(facts["model.family"], "muse");
+            assert_eq!(facts["model.open_weights"], false);
+            for key in [
+                "capability.attachment",
+                "capability.reasoning",
+                "capability.tool_call",
+            ] {
+                assert_eq!(facts[key], true);
+            }
+            assert!(!facts.keys().any(|key| key.starts_with("rate.")));
+        }
+    }
+
+    #[test]
+    fn unlisted_login_method_never_serves_a_curated_row() {
+        let (store, _dir) = store();
+        store
+            .append_eras(&[era("ordinary", "existence", json!("present"))])
+            .unwrap();
+        for args in [
+            json!({"provider_id":"meta", "auth_method":"apikey"}),
+            json!({"provider_id":"meta", "model_id":MODEL, "auth_method":"apikey"}),
+        ] {
+            let response = get(&store, args);
+            assert!(!response.models.contains_key(ID));
+            assert!(response.curated.is_empty());
+        }
+        assert!(get(
+            &store,
+            json!({"provider_id":"meta", "auth_method":"apikey"})
+        )
+        .models
+        .contains_key("meta/ordinary"));
+    }
+
+    #[test]
+    fn a_stored_upstream_row_supersedes_curated_facts_and_disclosure() {
+        let (store, _dir) = store();
+        for state in ["present", "retired"] {
+            let mut existence = era(MODEL, "existence", json!(state));
+            existence.boundary_at = Timestamp(if state == "present" { 1000 } else { 2000 });
+            let mut limit = era(MODEL, "limit.context", json!(42));
+            limit.boundary_at = existence.boundary_at;
+            store.append_eras(&[existence, limit]).unwrap();
+            for args in [
+                json!({"provider_id":"meta"}),
+                json!({"provider_id":"meta", "model_id":MODEL}),
+            ] {
+                let response = get(&store, args);
+                assert!(response.curated.is_empty());
+                if state == "present" {
+                    assert_eq!(response.models[ID]["limit.context"], 42);
+                    assert!(!response.models[ID].contains_key("model.canonical_id"));
+                } else {
+                    assert!(!response.models.contains_key(ID));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_served_curated_row_discloses_its_allowlist_and_source() {
+        let (store, _dir) = store();
+        for args in [
+            json!({}),
+            json!({"provider_id":"meta", "model_id":MODEL}),
+            json!({"provider_id":"meta", "auth_method":"oauth"}),
+        ] {
+            let response = get(&store, args);
+            assert!(response.models.contains_key(ID));
+            assert_eq!(response.curated.len(), 1);
+            let row = &response.curated[0];
+            assert_eq!(row.model, ID);
+            assert_eq!(row.auth_methods, ["oauth"]);
+            assert!(row.source_ref.contains("16:42:35Z"));
+            assert!(row.source_ref.contains("16:42:45Z"));
+            assert!(row.source_ref.contains("https://models.dev/models.json"));
+            assert_eq!(row.review_by_ms, 1797033600000);
+        }
+    }
+
+    #[test]
+    fn curated_rows_respect_fact_and_provider_filters() {
+        let (store, _dir) = store();
+        store
+            .append_eras(&[era("ordinary", "existence", json!("present"))])
+            .unwrap();
+        for method in [None, Some("oauth")] {
+            let mut args = json!({"provider_id":"meta", "fact_prefixes":["capability."]});
+            if let Some(method) = method {
+                args["auth_method"] = method.into();
+            }
+            let response = get(&store, args.clone());
+            assert_eq!(response.models[ID].len(), 3);
+            assert!(response.models[ID]
+                .keys()
+                .all(|key| key.starts_with("capability.")));
+            assert_eq!(response.curated.len(), 1);
+            args["fact_prefixes"] = json!(["rate."]);
+            let response = get(&store, args.clone());
+            assert!(!response.models.contains_key(ID));
+            assert!(response.curated.is_empty());
+            args["model_id"] = MODEL.into();
+            let response = get(&store, args);
+            assert!(response.models[ID].is_empty());
+            assert_eq!(response.curated.len(), 1);
+        }
+        let response = get(&store, json!({"provider_id":"meta", "model_id":"ordinary"}));
+        assert!(!response.models.contains_key(ID));
+        assert!(response.curated.is_empty());
+    }
+
+    #[test]
+    fn point_in_time_reads_never_serve_curated_rows() {
+        let (store, _dir) = store();
+        store
+            .append_eras(&[era("ordinary", "existence", json!("present"))])
+            .unwrap();
+        for args in [
+            json!({"at_ms":1000}),
+            json!({"provider_id":"meta", "at_ms":1000}),
+        ] {
+            let response = get(&store, args);
+            assert!(!response.models.contains_key(ID));
+            assert!(response.curated.is_empty());
+        }
+        assert!(serve_catalog_get(
+            &store,
+            &serde_json::to_vec(&json!({"provider_id":"meta", "model_id":MODEL, "at_ms":1000}))
+                .unwrap()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn curated_history_names_the_source_without_storing_eras_or_changing_status() {
+        let (store, _dir) = store();
+        let before = serve_status(&store, b"{}").unwrap();
+        let version = store.catalog_version().unwrap();
+        let _ = get(&store, json!({"provider_id":"meta", "auth_method":"oauth"}));
+        let response = serve_history(
+            &store,
+            &serde_json::to_vec(
+                &json!({"provider_id":"meta", "model_id":MODEL, "fact_key":"limit.context"}),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(response.eras.is_empty());
+        assert!(response
+            .curated
+            .unwrap()
+            .source_ref
+            .contains("operator's Meta coding-plan login"));
+        let after = serve_status(&store, b"{}").unwrap();
+        assert_eq!(after.model_count, before.model_count);
+        assert_eq!(after.models_priced, before.models_priced);
+        assert_eq!(after.era_count, before.era_count);
+        assert_eq!(store.catalog_version().unwrap(), version);
     }
 }

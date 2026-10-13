@@ -3,6 +3,17 @@
   "how_to_add_a_plane": "Read a source that states how the auth method bills, not just where its model ids route. Record the source, who established the claim and when, and a review date 60 days later. A ruleless quota proxy is still a billing claim and needs its own provenance and review.",
   "planes": [
     {
+      "provider_id": "meta",
+      "auth_method": "oauth",
+      "kind": "quota_proxy",
+      "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with 12 ids including muse-wonder-full-1.0; POST https://api.meta.ai/v1/responses with muse-wonder-full-1.0 at 16:42:45Z returned 200.",
+      "established_by": "fusiform",
+      "established_at_ms": 1791849600000,
+      "review_by_ms": 1797033600000,
+      "note": "Meta's coding plan bills by subscription and publishes no token-class quota rule. API prices are a relative quota stand-in, not an amount billed. The curated Muse Wonder Full row has no API price to borrow and therefore carries no rates.",
+      "rules": []
+    },
+    {
       "provider_id": "openai",
       "auth_method": "chatgpt",
       "kind": "quota_proxy",

@@ -622,6 +622,43 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — a curated plane-only model": {
+    "request": {
+      "arguments": {
+        "model_id": "muse-wonder-full-1.0",
+        "provider_id": "meta"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "curated": [
+        {
+          "auth_methods": [
+            "oauth"
+          ],
+          "model": "meta/muse-wonder-full-1.0",
+          "review_by_ms": 1797033600000,
+          "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with muse-wonder-full-1.0 among 12 ids; POST https://api.meta.ai/v1/responses with muse-wonder-full at 16:42:35Z returned 404 'The requested model was not found.'; POST with muse-wonder-full-1.0 at 16:42:45Z returned 200. Lab record meta/muse-wonder-full in https://models.dev/models.json read 2026-10-13: Muse Wonder Full, released 2026-10-12; https://research.meta.ai/blog/muse-wonder and https://research.meta.ai/static/muse-wonder-model-card. No output limit or cost published."
+        }
+      ],
+      "models": {
+        "meta/muse-wonder-full-1.0": {
+          "capability.attachment": true,
+          "capability.reasoning": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": null,
+          "model.canonical_id": "meta/muse-wonder-full",
+          "model.family": "muse",
+          "model.open_weights": false
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — a model priced only in a mode, with no base rate": {
     "request": {
       "arguments": {
@@ -1073,6 +1110,70 @@
       ]
     }
   },
+  "catalog.get — meta apikey excludes the curated row": {
+    "request": {
+      "arguments": {
+        "auth_method": "apikey",
+        "provider_id": "meta"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {},
+      "plane": {
+        "auth_method": "apikey",
+        "kind": "upstream",
+        "provider_id": "meta"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — meta oauth serves the curated row": {
+    "request": {
+      "arguments": {
+        "auth_method": "oauth",
+        "provider_id": "meta"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "curated": [
+        {
+          "auth_methods": [
+            "oauth"
+          ],
+          "model": "meta/muse-wonder-full-1.0",
+          "review_by_ms": 1797033600000,
+          "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with muse-wonder-full-1.0 among 12 ids; POST https://api.meta.ai/v1/responses with muse-wonder-full at 16:42:35Z returned 404 'The requested model was not found.'; POST with muse-wonder-full-1.0 at 16:42:45Z returned 200. Lab record meta/muse-wonder-full in https://models.dev/models.json read 2026-10-13: Muse Wonder Full, released 2026-10-12; https://research.meta.ai/blog/muse-wonder and https://research.meta.ai/static/muse-wonder-model-card. No output limit or cost published."
+        }
+      ],
+      "models": {
+        "meta/muse-wonder-full-1.0": {
+          "capability.attachment": true,
+          "capability.reasoning": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": null,
+          "model.canonical_id": "meta/muse-wonder-full",
+          "model.family": "muse",
+          "model.open_weights": false
+        }
+      },
+      "plane": {
+        "auth_method": "oauth",
+        "kind": "quota_proxy",
+        "provider_id": "meta",
+        "review_by_ms": 1797033600000,
+        "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with 12 ids including muse-wonder-full-1.0; POST https://api.meta.ai/v1/responses with muse-wonder-full-1.0 at 16:42:45Z returned 200."
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — mode rates beside base rates, and a mode with no price": {
     "request": {
       "arguments": {
@@ -1361,6 +1462,31 @@
       "last_changed_at_ms": 9000,
       "model_id": "claude-sonnet-4-5",
       "provider_id": "anthropic",
+      "source": "models.dev"
+    }
+  },
+  "catalog.history — a curated row is not stored": {
+    "request": {
+      "arguments": {
+        "fact_key": "limit.context",
+        "model_id": "muse-wonder-full-1.0",
+        "provider_id": "meta"
+      },
+      "name": "catalog.history"
+    },
+    "response": {
+      "curated": {
+        "auth_methods": [
+          "oauth"
+        ],
+        "model": "meta/muse-wonder-full-1.0",
+        "review_by_ms": 1797033600000,
+        "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with muse-wonder-full-1.0 among 12 ids; POST https://api.meta.ai/v1/responses with muse-wonder-full at 16:42:35Z returned 404 'The requested model was not found.'; POST with muse-wonder-full-1.0 at 16:42:45Z returned 200. Lab record meta/muse-wonder-full in https://models.dev/models.json read 2026-10-13: Muse Wonder Full, released 2026-10-12; https://research.meta.ai/blog/muse-wonder and https://research.meta.ai/static/muse-wonder-model-card. No output limit or cost published."
+      },
+      "eras": [],
+      "fact_key": "limit.context",
+      "model_id": "muse-wonder-full-1.0",
+      "provider_id": "meta",
       "source": "models.dev"
     }
   },

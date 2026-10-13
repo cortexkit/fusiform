@@ -393,9 +393,32 @@ mod tests {
             rejects.is_empty(),
             "the shipped file must parse: {rejects:?}"
         );
-        assert_eq!(table.len(), 4, "an empty or truncated table must not pass");
+        assert_eq!(table.len(), 5, "an empty or truncated table must not pass");
         assert_eq!(&table, planes());
         assert!(std::ptr::eq(planes(), planes()), "the table is parsed once");
+    }
+
+    #[test]
+    fn meta_oauth_is_a_sourced_ruleless_quota_stand_in() {
+        let plane = &planes()[&("meta".into(), "oauth".into())];
+        assert_eq!(plane.kind, PlaneKind::QuotaProxy);
+        assert!(plane.rules.is_empty());
+        assert!(plane
+            .source_ref
+            .contains("operator's Meta coding-plan login"));
+        assert!(plane.source_ref.contains("vault credential oauth:meta"));
+        assert!(plane.source_ref.contains("16:42:35Z"));
+        assert!(plane.source_ref.contains("16:42:45Z"));
+        assert!(plane
+            .source_ref
+            .contains("https://api.meta.ai/v1/responses"));
+        assert_eq!(plane.established_by, "fusiform");
+        assert_eq!(plane.established_at_ms, 1_791_849_600_000);
+        assert_eq!(plane.review_by_ms, 1_797_033_600_000);
+        assert_eq!(
+            plane.review_by_ms - plane.established_at_ms,
+            60 * 86_400_000
+        );
     }
 
     #[test]
@@ -430,7 +453,7 @@ mod tests {
                 1,
             ),
         ];
-        assert_eq!(planes().len(), expected.len());
+        assert_eq!(planes().len(), expected.len() + 1);
         for (provider, auth, kind, source, count) in expected {
             let p = &planes()[&(provider.into(), auth.into())];
             assert_eq!(
