@@ -638,6 +638,16 @@ impl CatalogStore {
             // model's arrival and withdrawal are its `existence` eras; every
             // other era belonging to a model that did NOT change existence in
             // the same poll is a fact revision on a model already known.
+            //
+            // `facts_changed` is all of the poll's eras minus those on a model
+            // whose existence moved in it, with that model set built once per
+            // poll by `IN (...)`. It must not be a per-era `NOT EXISTS`: that
+            // re-scans the poll's eras for every era, so it is quadratic in
+            // the poll's size. A poll that adds a fact to every model writes
+            // about 17,600 eras, and the quadratic form then took 13.5 s for
+            // that one poll on the live store, so every `catalog.status` read
+            // timed out while the poll sat in the window. The set form takes
+            // milliseconds for the same poll and returns the same count.
             let mut stmt = conn.prepare(
                 "SELECT o.id, o.observed_at_ms, o.outcome, o.failure_class, \
                         o.detail, o.normalized_hash, o.raw_hash, o.duration_ms, \
@@ -649,12 +659,12 @@ impl CatalogStore {
                         (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id \
                            AND e.fact_key = 'existence' \
                            AND e.value_json = '\"absent\"') AS withdrawn, \
-                        (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id \
-                           AND NOT EXISTS ( \
-                             SELECT 1 FROM era x WHERE x.observation_id = o.id \
-                               AND x.fact_key = 'existence' \
-                               AND x.provider_id = e.provider_id \
-                               AND x.model_id = e.model_id)) AS facts_changed \
+                        (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id) \
+                          - (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id \
+                               AND (e.provider_id, e.model_id) IN ( \
+                                 SELECT x.provider_id, x.model_id FROM era x \
+                                 WHERE x.observation_id = o.id \
+                                   AND x.fact_key = 'existence')) AS facts_changed \
                  FROM observation o WHERE o.source = ?1 \
                  ORDER BY o.observed_at_ms DESC, o.id DESC LIMIT ?2",
             )?;
