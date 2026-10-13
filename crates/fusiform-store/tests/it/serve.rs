@@ -9,7 +9,7 @@ use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::plan_ingest;
-use fusiform_store::serve::{CatalogQuery, POINT_IN_TIME_SQL};
+use fusiform_store::serve::{CatalogQuery, POINT_IN_TIME_SQL, RECENT_OBSERVATIONS_SQL};
 use fusiform_store::{CatalogStore, FactKey, NewObservation};
 
 const FIXTURE: &str = include_str!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
@@ -463,6 +463,54 @@ fn a_read_records_the_instant_it_resolved_at() {
     assert_eq!(
         snapshot.models, again.models,
         "re-asking for the recorded instant must return the same snapshot"
+    );
+}
+
+/// The poll-composition query behind `catalog.status` runs no subquery per row.
+///
+/// SQLite re-runs a correlated subquery for every outer row, so a per-era
+/// subquery makes the count quadratic in a poll's size. That shipped twice: a
+/// per-era `NOT EXISTS`, then a correlated `IN (...)`. Both took over 13 s on a
+/// real 17,610-era poll, timing out every status read. Asserted on the plan
+/// rather than wall clock, because the plan is deterministic and the cost only
+/// shows on a large poll. The control proves the check can see a correlated
+/// subquery when one is present.
+#[test]
+fn the_poll_composition_query_has_no_correlated_subquery() {
+    let f = fixture();
+    seed(&f, 1_000);
+    let path = f.dir.path().join("store.db");
+    drop(f.store);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let plan = |sql: &str| -> String {
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        stmt.query_map(rusqlite::params!["models.dev", 10i64], |r| {
+            r.get::<_, String>(3)
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+        .join(" | ")
+    };
+
+    // Control: the form that shipped in the first fix, correlated on the outer
+    // poll. The planner reports it, so the check below can see one.
+    let correlated = plan(
+        "SELECT o.id, (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id \
+           AND (e.provider_id, e.model_id) IN (SELECT x.provider_id, x.model_id \
+           FROM era x WHERE x.observation_id = o.id AND x.fact_key = 'existence')) \
+         FROM observation o WHERE o.source = ?1 LIMIT ?2",
+    );
+    assert!(
+        correlated.contains("CORRELATED"),
+        "control: the planner must report a correlated subquery here: {correlated}"
+    );
+
+    let shipped = plan(RECENT_OBSERVATIONS_SQL);
+    assert!(
+        !shipped.contains("CORRELATED"),
+        "the poll-composition query runs a subquery per row, which is quadratic \
+         in a poll's size: {shipped}"
     );
 }
 

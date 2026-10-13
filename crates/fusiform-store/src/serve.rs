@@ -603,6 +603,52 @@ impl HistoryRow {
     }
 }
 
+/// The recent polls with each one's composition, newest first.
+///
+/// The composition comes from the eras each poll opened. A model's arrival and
+/// withdrawal are its `existence` eras; every other era belonging to a model
+/// that did NOT change existence in the same poll is a fact revision on a model
+/// already known.
+///
+/// # Why one aggregate pass, and no correlated subquery
+///
+/// The counts are computed by grouping the selected polls' eras once, joined
+/// against the set of models whose existence moved in each poll. Any form that
+/// evaluates a subquery per era is quadratic in a poll's size, because SQLite
+/// re-runs a correlated subquery for every outer row. A poll that adds a fact
+/// to every model writes about 17,600 eras; a per-era `NOT EXISTS` took 13.5 s
+/// on that one poll on the live store, and a correlated `IN (...)` was no
+/// better (17 s), so every `catalog.status` read timed out while the poll was
+/// in the window. This form takes about 10 ms for the same polls and returns
+/// identical counts. `the_poll_composition_query_has_no_correlated_subquery`
+/// holds it to that shape.
+pub const RECENT_OBSERVATIONS_SQL: &str = "\
+    WITH recent AS ( \
+        SELECT o.id, o.observed_at_ms, o.outcome, o.failure_class, o.detail, \
+               o.normalized_hash, o.raw_hash, o.duration_ms \
+        FROM observation o WHERE o.source = ?1 \
+        ORDER BY o.observed_at_ms DESC, o.id DESC LIMIT ?2), \
+    moved AS MATERIALIZED ( \
+        SELECT DISTINCT x.observation_id, x.provider_id, x.model_id FROM era x \
+        WHERE x.observation_id IN (SELECT id FROM recent) \
+          AND x.fact_key = 'existence'), \
+    counts AS ( \
+        SELECT e.observation_id AS oid, COUNT(*) AS eras, \
+               SUM(e.fact_key = 'existence' AND e.value_json = '\"present\"') AS arrived, \
+               SUM(e.fact_key = 'existence' AND e.value_json = '\"absent\"') AS withdrawn, \
+               SUM(m.observation_id IS NULL) AS facts_changed \
+        FROM era e LEFT JOIN moved m \
+          ON m.observation_id = e.observation_id \
+         AND m.provider_id = e.provider_id AND m.model_id = e.model_id \
+        WHERE e.observation_id IN (SELECT id FROM recent) \
+        GROUP BY e.observation_id) \
+    SELECT r.id, r.observed_at_ms, r.outcome, r.failure_class, r.detail, \
+           r.normalized_hash, r.raw_hash, r.duration_ms, \
+           COALESCE(c.eras, 0), COALESCE(c.arrived, 0), \
+           COALESCE(c.withdrawn, 0), COALESCE(c.facts_changed, 0) \
+    FROM recent r LEFT JOIN counts c ON c.oid = r.id \
+    ORDER BY r.observed_at_ms DESC, r.id DESC";
+
 impl CatalogStore {
     /// The most recent polls, newest first, each with what it actually changed.
     ///
@@ -634,40 +680,7 @@ impl CatalogStore {
         limit: u32,
     ) -> Result<Vec<ObservationRow>, CatalogError> {
         let rows = self.raw_conn(|conn| {
-            // The composition comes from the eras this observation opened. A
-            // model's arrival and withdrawal are its `existence` eras; every
-            // other era belonging to a model that did NOT change existence in
-            // the same poll is a fact revision on a model already known.
-            //
-            // `facts_changed` is all of the poll's eras minus those on a model
-            // whose existence moved in it, with that model set built once per
-            // poll by `IN (...)`. It must not be a per-era `NOT EXISTS`: that
-            // re-scans the poll's eras for every era, so it is quadratic in
-            // the poll's size. A poll that adds a fact to every model writes
-            // about 17,600 eras, and the quadratic form then took 13.5 s for
-            // that one poll on the live store, so every `catalog.status` read
-            // timed out while the poll sat in the window. The set form takes
-            // milliseconds for the same poll and returns the same count.
-            let mut stmt = conn.prepare(
-                "SELECT o.id, o.observed_at_ms, o.outcome, o.failure_class, \
-                        o.detail, o.normalized_hash, o.raw_hash, o.duration_ms, \
-                        (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id) \
-                          AS eras, \
-                        (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id \
-                           AND e.fact_key = 'existence' \
-                           AND e.value_json = '\"present\"') AS arrived, \
-                        (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id \
-                           AND e.fact_key = 'existence' \
-                           AND e.value_json = '\"absent\"') AS withdrawn, \
-                        (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id) \
-                          - (SELECT COUNT(*) FROM era e WHERE e.observation_id = o.id \
-                               AND (e.provider_id, e.model_id) IN ( \
-                                 SELECT x.provider_id, x.model_id FROM era x \
-                                 WHERE x.observation_id = o.id \
-                                   AND x.fact_key = 'existence')) AS facts_changed \
-                 FROM observation o WHERE o.source = ?1 \
-                 ORDER BY o.observed_at_ms DESC, o.id DESC LIMIT ?2",
-            )?;
+            let mut stmt = conn.prepare(RECENT_OBSERVATIONS_SQL)?;
             let mapped = stmt.query_map(params![source.as_str(), limit], |r| {
                 Ok(ObservationRow {
                     id: r.get(0)?,
