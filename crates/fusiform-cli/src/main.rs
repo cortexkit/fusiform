@@ -593,6 +593,12 @@ fn print_status(response: &serde_json::Value) {
         "eras             {}",
         get("era_count").and_then(|v| v.as_i64()).unwrap_or(-1)
     );
+    // Where the record starts, so an operator knows how far back `get --at`
+    // can reach before it is refused. Omitted by a module too old to report
+    // it, and on an empty store, rather than printed as a guess.
+    if let Some(begins) = get("history_begins_at_ms").and_then(|v| v.as_i64()) {
+        println!("history from     {}", format_instant(begins));
+    }
 
     // Failed polls across the WHOLE history, printed before the poll window
     // rather than inside it.

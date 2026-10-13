@@ -1067,6 +1067,39 @@ fn a_read_before_the_record_is_refused_rather_than_answered_empty() {
     );
 }
 
+/// `catalog.status` names the bound the refusal above enforces, as a number.
+///
+/// A consumer replaying history needs to know where the record starts before
+/// it asks. Without this field the only way to learn it was to send a
+/// too-old read and parse the number out of the refusal's English message.
+/// The test checks both halves of the contract against each other: the bound
+/// status reports is answerable, and one millisecond before it is refused.
+#[test]
+fn status_reports_the_bound_the_pre_history_refusal_enforces() {
+    let (store, _dir) = store();
+
+    let status = match serve_tool_call(&store, br#"{"name":"catalog.status","arguments":{}}"#) {
+        Ok(ToolResponse::Status(s)) => s,
+        other => panic!("catalog.status must be served: {other:?}"),
+    };
+    let begins = status
+        .history_begins_at_ms
+        .expect("a store with an observation must report where its history begins");
+    // The fixture's first observation is at 1_000.
+    assert_eq!(begins, 1_000);
+
+    let at = |ms: i64| format!(r#"{{"name":"catalog.get","arguments":{{"at_ms":{ms}}}}}"#);
+    assert!(
+        serve_tool_call(&store, at(begins).as_bytes()).is_ok(),
+        "the reported bound must itself be answerable"
+    );
+    assert!(
+        serve_tool_call(&store, at(begins - 1).as_bytes()).is_err(),
+        "one millisecond before the reported bound must be refused, or the \
+         field and the refusal disagree about where the record starts"
+    );
+}
+
 /// A named model with no facts in the requested plane is still RETURNED.
 ///
 /// # The defect, and the population that makes it matter

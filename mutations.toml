@@ -865,3 +865,18 @@ target = "--test it"
 expect_red = ["manifest_probe::the_daemon_binary_prints_its_registration_manifest_with_no_daemon"]
 only = false
 timeout_s = 600
+
+[[control]]
+id = "status-reports-history-begins"
+guards = "catalog.status reports the earliest recorded instant, the same bound the pre-history refusal enforces"
+file = "crates/fusiform-module/src/route.rs"
+old = "        history_begins_at_ms: store\n            .record_begins_at(source)\n            .map_err(|e| store_error(&e))?\n            .map(|t| t.0),"
+new = "        history_begins_at_ms: None,"
+edits = []
+test_file = "crates/fusiform-module/tests/it/served_corrections.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["served_corrections::status_reports_the_bound_the_pre_history_refusal_enforces"]
+only = false
+timeout_s = 600

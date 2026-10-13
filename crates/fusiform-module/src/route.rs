@@ -617,6 +617,12 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
         // Counted from the same snapshot as the model total, so the two cannot
         // disagree about which models exist.
         models_priced: Some(snapshot.priced_model_count()),
+        // The same read `refuse_before_the_record` uses, so the bound a
+        // consumer is told and the bound it is refused at are one value.
+        history_begins_at_ms: store
+            .record_begins_at(source)
+            .map_err(|e| store_error(&e))?
+            .map(|t| t.0),
         era_count,
         recent_polls: polls
             .into_iter()

@@ -1573,6 +1573,24 @@ pub struct StatusResponse {
     /// deployment asymmetry makes that a certainty rather than a risk.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub models_priced: Option<usize>,
+    /// The earliest instant fusiform holds a record for, in unix ms.
+    ///
+    /// A point-in-time `catalog.get` before this instant is refused with
+    /// `no_coverage`, because fusiform was not yet watching and an empty answer
+    /// would claim the catalog was empty. A consumer that replays history needs
+    /// this bound before it asks, and used to learn it by sending a
+    /// deliberately too-old read and parsing the number out of the refusal's
+    /// English text, which any rewording of that message would break.
+    ///
+    /// It is the same value that refusal uses, read from the store's earliest
+    /// observation, so the two cannot disagree. It can move later after a
+    /// restore from backup and never moves earlier, so read it per session
+    /// rather than caching it forever.
+    ///
+    /// `None` on an empty store, which has no record to bound anything with,
+    /// and from a module that predates this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_begins_at_ms: Option<i64>,
     pub era_count: i64,
     /// The most recent polls, newest first.
     ///
