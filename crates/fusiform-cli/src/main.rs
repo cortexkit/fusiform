@@ -588,7 +588,6 @@ fn print_status(response: &serde_json::Value) {
     // includes "deliberately disagreeing with the upstream about these facts".
     // An operator would otherwise learn it only by happening to read one of the
     // affected models.
-    print!("{}", render_overridden(response));
     println!(
         "eras             {}",
         get("era_count").and_then(|v| v.as_i64()).unwrap_or(-1)
@@ -696,7 +695,6 @@ fn render_catalog_models(
     out.push_str(&render_curated(response));
     out.push_str(&render_withheld(response));
     out.push_str(&render_uncertain(response));
-    out.push_str(&render_overridden(response));
     out
 }
 
@@ -904,56 +902,7 @@ fn render_failures(response: &serde_json::Value) -> String {
     )
 }
 
-fn render_overridden(response: &serde_json::Value) -> String {
-    let Some(overridden) = response.get("overridden").and_then(|v| v.as_array()) else {
-        return String::new();
-    };
-    if overridden.is_empty() {
-        return String::new();
-    }
-
-    let mut out = format!(
-        "\n{} overridden — fusiform serves a different value than the \
-         upstream published:\n",
-        count(overridden.len(), "fact")
-    );
-    for o in overridden {
-        let field = |k: &str| o.get(k).and_then(|v| v.as_str()).unwrap_or("?");
-        out.push_str(&format!(
-            "  {}/{}  {}\n",
-            field("provider_id"),
-            field("model_id"),
-            field("fact_key")
-        ));
-        out.push_str(&format!(
-            "      upstream {} -> served {}\n",
-            field("upstream_value"),
-            field("served_value")
-        ));
-        // The authority on its own line and in full: an operator asking "says
-        // who" must be able to answer from what is on screen. A line they
-        // cannot re-check is one they learn to skip, and a skipped line is the
-        // same as no line.
-        out.push_str(&format!("      {}\n", field("authority")));
-    }
-    out
-}
-
-/// One model's facts, with the qualification blocks that belong beside them.
-///
-/// # The co-location is load-bearing, not layout
-///
-/// An override is reported by its ABSENCE returning to normal: when the
-/// upstream adopts fusiform's value the block disappears, and the only thing
-/// telling an operator the override ended is the fact value printed above it
-/// having reverted. Those two must be in ONE output or the transition is
-/// invisible — a block that goes quiet is indistinguishable from an override
-/// still holding.
-///
-/// BROCA's point, and they are right that it was accidental: the property lived
-/// in the layout rather than in a decision, so moving the block to another
-/// command would silently lose it and the change would look like tidying.
-/// Returned as text so a test can hold the two together.
+/// One model's facts, followed by curation, withholding and uncertainty notices.
 fn render_single_model(
     response: &serde_json::Value,
     models: &serde_json::Map<String, serde_json::Value>,
@@ -971,23 +920,9 @@ fn render_single_model(
         }
     }
     out.push_str(&render_curated(response));
-    // PRINTS NOTHING. The caller prints what this returns, and for a while
-    // this function did both — so every single-model read rendered its facts
-    // TWICE, under a header correctly saying "1 model".
-    //
-    // It survived because the duplicate is the second screenful: `--json`
-    // shows one model, the header says one model, and every hand check of this
-    // path went through `head`, which cuts before the repeat. Found by driving
-    // a correction end to end in a lab and reading the whole output.
-    //
-    // The mixed shape came from making the override block testable: the block
-    // was returned so a test could hold it beside the fact value, and the
-    // printing was left in place beneath it. A function that both prints and
-    // returns the same text has two callers by construction — itself and
-    // whoever uses the return.
     out.push_str(&render_withheld(response));
     out.push_str(&render_uncertain(response));
-    out.push_str(&render_overridden(response));
+    // Return the assembled text so the caller can print it once.
     out
 }
 
@@ -1094,33 +1029,6 @@ fn render_uncertain(response: &serde_json::Value) -> String {
     out
 }
 
-/// The override in force on a fact whose history is being read.
-///
-/// Printed BEFORE the eras rather than after, which is the opposite of
-/// `withheld` and deliberate: this line changes how every row below should be
-/// read. A reader who reaches the eras first has already taken the newest one
-/// as the current value, and a footnote afterwards is a correction to a
-/// conclusion they have made rather than context for one they have not.
-///
-/// Returns the text so the artifact under test is the sentence an operator
-/// reads. This file shipped "1 models arrived" to production once because the
-/// pluralisation was correct and nothing exercised the composed line.
-fn render_history_override(response: &serde_json::Value) -> String {
-    let Some(o) = response.get("overridden").filter(|v| !v.is_null()) else {
-        return String::new();
-    };
-    let get = |k: &str| o.get(k).and_then(|v| v.as_str()).unwrap_or("?");
-    format!(
-        "  NOTE: fusiform serves {} for this fact, not the {} recorded below.\n\
-         \x20       The eras are what the upstream published and are not rewritten;\n\
-         \x20       the override applies to the current catalog only.\n\
-         \x20       {}\n\n",
-        get("served_value"),
-        get("upstream_value"),
-        get("authority"),
-    )
-}
-
 /// The whole history block as a string, printed once by the caller.
 ///
 /// It printed directly until now, which is the one shape this codebase already
@@ -1151,9 +1059,7 @@ fn render_history(response: &serde_json::Value) -> String {
             .unwrap_or("?"),
     ));
 
-    // Before the eras: this note changes how every row below reads.
     out.push('\n');
-    out.push_str(&render_history_override(response));
 
     let Some(eras) = response.get("eras").and_then(|v| v.as_array()) else {
         return out;
@@ -1280,31 +1186,15 @@ fn render_history(response: &serde_json::Value) -> String {
     out
 }
 
-/// When the value GENUINELY last changed, printed after the eras.
+/// When this fact's value last changed, printed after its recorded eras.
 ///
-/// # Why this is not derivable from the list above it
+/// A poll may restate an unchanged value, so the newest era's boundary is not
+/// necessarily the last change. The store excludes those representation-only
+/// restatements before supplying this timestamp; the era list does not contain
+/// enough information for the CLI to derive it.
 ///
-/// The newest era's boundary is the obvious answer and it is wrong whenever a
-/// poll restated values already in force. One poll on 2026-08-16 wrote 17,455
-/// such eras, so reading the newest boundary makes every priced fact in the
-/// catalog report that instant and the whole catalog look freshly maintained.
-/// Which polls those were is not in the era rows; the store excludes them per
-/// era before answering.
-///
-/// # Why it renders at all
-///
-/// It was served for a day and printed NOWHERE. An operator running
-/// `ck models history` saw the eras and not the one instant that accounts for
-/// them — the field two consumers had asked for, invisible at the surface they
-/// would read it from. Third time in this repository: `uncertain` sat on the
-/// wire unrendered for three commits and `overridden` for three more. A
-/// producer adds a field, tests the wire, and the consumer-facing renderer is a
-/// separate edit no test reaches.
-///
-/// # Why it speaks on agreement too
-///
-/// Silence when the two agree would make the line's absence ambiguous between
-/// "the newest era IS the change" and "this build does not print it".
+/// Print it even when it agrees with the newest era. Otherwise silence would
+/// mean either agreement or a daemon that did not supply the timestamp.
 fn render_last_changed(response: &serde_json::Value) -> String {
     let Some(ms) = response.get("last_changed_at_ms").and_then(|v| v.as_i64()) else {
         // Absent on an older daemon, and absent when the store read failed.
@@ -1905,104 +1795,6 @@ mod tests {
             field_id_for_fact_key("rate.input").unwrap(),
             serde_json::json!({"field": "rate", "class": "input"})
         );
-    }
-
-    /// The override block renders, and says everything an operator needs.
-    ///
-    /// Written because the block existed on the wire, in the golden fixture,
-    /// and in three integration tests while rendering NOWHERE — the same defect
-    /// as `uncertain` earlier the same day, in the same file. Found by testing
-    /// BROCA's prediction that recent attention on an artifact makes its
-    /// unexamined dimensions less visible, and the prediction paid out on the
-    /// most recent thing I had built.
-    #[test]
-    fn an_override_names_the_values_and_the_authority() {
-        // Real shape, taken from the live response rather than invented.
-        let response = serde_json::json!({
-            "overridden": [{
-                "provider_id": "anthropic",
-                "model_id": "claude-sonnet-4-5",
-                "fact_key": "limit.context",
-                "upstream_value": "1000000",
-                "served_value": "200000",
-                "authority": "https://docs.claude.com/... — '200k-token context window'"
-            }]
-        });
-
-        let out = render_overridden(&response);
-
-        // Singular, because one override is the common case rather than a
-        // boundary. "1 facts overridden" shipped to production once already, in
-        // this file, from a composed sentence whose parts were each correct.
-        assert!(
-            out.contains("1 fact overridden"),
-            "the count must agree with its noun: {out}"
-        );
-        assert!(
-            out.contains("anthropic/claude-sonnet-4-5"),
-            "the row must be identified: {out}"
-        );
-        assert!(
-            out.contains("upstream 1000000 -> served 200000"),
-            "BOTH values must appear. Showing only the served one leaves an \
-             operator unable to see that anything was changed: {out}"
-        );
-        assert!(
-            out.contains("docs.claude.com"),
-            "the authority must be present, or 'says who' cannot be answered \
-             from the screen: {out}"
-        );
-    }
-
-    /// The fact value and the override block appear in ONE output.
-    ///
-    /// The property BROCA identified as accidental. An override ending is
-    /// reported by its block DISAPPEARING, so the only thing telling an
-    /// operator it ended is the value above having reverted — and that only
-    /// works if the two are in the same output. A block that goes quiet is
-    /// otherwise indistinguishable from an override still holding.
-    ///
-    /// This test exists because nothing stopped someone moving the block to
-    /// another command, where the change would look like tidying and the
-    /// transition would be silently lost.
-    #[test]
-    fn the_fact_value_and_its_override_are_rendered_together() {
-        let response = serde_json::json!({
-            "resolved_at_ms": 1_786_600_000_000_i64,
-            "catalog_version": 1_786_600_000_000_i64,
-            "models": { "anthropic/claude-sonnet-4-5": { "limit.context": 200_000 } },
-            "overridden": [{
-                "provider_id": "anthropic", "model_id": "claude-sonnet-4-5",
-                "fact_key": "limit.context",
-                "upstream_value": "1000000", "served_value": "200000",
-                "authority": "https://docs.claude.com/... — '200k-token context window'"
-            }]
-        });
-        let models = response["models"].as_object().unwrap().clone();
-        let out = render_single_model(&response, &models);
-
-        let value_at = out
-            .find("limit.context")
-            .expect("the fact must be rendered");
-        let block_at = out
-            .find("overridden")
-            .expect("the override block must be rendered in the SAME output");
-        assert!(
-            value_at < block_at,
-            "the served value must appear before its override block, so a \
-             reverted value and a vanished block read as one transition: {out}"
-        );
-    }
-
-    /// Nothing is printed when nothing was overridden.
-    ///
-    /// The ordinary case, and the one that decides whether the block is read at
-    /// all: a header printed on every response is noise an operator learns to
-    /// skip, which is the same as not printing it.
-    #[test]
-    fn an_ordinary_response_prints_no_override_block() {
-        assert!(render_overridden(&serde_json::json!({})).is_empty());
-        assert!(render_overridden(&serde_json::json!({"overridden": []})).is_empty());
     }
 
     /// Date arithmetic, against instants whose rendering is known independently.
@@ -2836,60 +2628,6 @@ mod tests {
         // an empty list after it.
         assert_eq!(line(0, 0, 0), "");
         assert_eq!(render_changes(None), "");
-    }
-
-    /// History must reconcile itself with what the catalog serves.
-    ///
-    /// The defect this pins: `ck models history --fact limit.context` for
-    /// claude-sonnet-4-5 printed the upstream's 1,000,000 and said nothing
-    /// about the 200,000 that `catalog.get` returns. Both surfaces correct,
-    /// neither mentioning the other, which reads as one of them being wrong —
-    /// and the reader most likely to hit it is one checking a suspicious number
-    /// against the record.
-    #[test]
-    fn history_reconciles_itself_with_what_is_served() {
-        let with = serde_json::json!({
-            "overridden": {
-                "provider_id": "anthropic",
-                "model_id": "claude-sonnet-4-5",
-                "fact_key": "limit.context",
-                "upstream_value": "1000000",
-                "served_value": "200000",
-                "authority": "docs.claude.com — 'a 200k-token context window'"
-            }
-        });
-        let line = render_history_override(&with);
-        // BOTH numbers, because showing only the served one leaves a reader
-        // unable to see that anything was changed.
-        assert!(
-            line.contains("200000") && line.contains("1000000"),
-            "the note must name both values or a reader cannot see a change \
-             occurred: {line}"
-        );
-        assert!(
-            line.contains("docs.claude.com"),
-            "the note must carry the authority, or it asserts without a source: {line}"
-        );
-        // And it must not claim the eras were rewritten.
-        assert!(
-            line.contains("not rewritten"),
-            "the note must say the record is intact, or an operator reads it as \
-             history having been edited: {line}"
-        );
-
-        // The ordinary case prints nothing. A note on every response is noise a
-        // reader learns to skip, which is the same as no note at all.
-        assert_eq!(
-            render_history_override(&serde_json::json!({"eras": []})),
-            "",
-            "a fact with no override must print nothing"
-        );
-        assert_eq!(
-            render_history_override(&serde_json::json!({"overridden": null})),
-            "",
-            "an explicit null must print nothing rather than a header with \
-             question marks in it"
-        );
     }
 
     #[test]

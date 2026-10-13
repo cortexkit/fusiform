@@ -193,6 +193,12 @@ Muse Wonder Full publishes no API price to borrow, so its curated row has no
 Only facts in `SERVED_FACTS` may be supplied. Name, release date, blog and model
 card are retained in provenance rather than invented as new fact keys.
 
+Curated fact corrections belong in `data/curated-models.json`, with the same
+source, review deadline and login-method discipline as other curated model
+claims. Extend those rows for future corrections rather than adding a separate
+correction dataset. The current precedence rule remains unchanged: an observed
+upstream row wins over a curated row.
+
 An upstream observation of the same `(provider_id, model_id)` always wins,
 even if retired or removed by a fact filter. A test compares curated identities
 with the embedded seed (the saved models.dev provider snapshot) and says

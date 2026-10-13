@@ -66,8 +66,8 @@ pub type Aliases = BTreeMap<(String, String), Alias>;
 
 /// Parse an alias document, reporting rows that did not load.
 ///
-/// Rejects are COUNTED rather than skipped silently, as the creator and
-/// overlay loaders do: a loader that quietly returns fewer rows turns a schema
+/// Rejects are counted rather than skipped silently, as the creator loader
+/// does: a loader that quietly returns fewer rows turns a schema
 /// mistake into a model that mysteriously answers `no_coverage`.
 pub fn load_reporting_rejects(doc: &str) -> (Aliases, Vec<String>) {
     #[derive(serde::Deserialize)]

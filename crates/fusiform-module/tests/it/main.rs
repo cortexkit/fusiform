@@ -25,6 +25,5 @@ mod scope_and_preset;
 mod served_corrections;
 mod shrink_guard;
 mod tick;
-mod window_overlay;
 mod wire_fact_table;
 mod wire_types_decode_the_wire;

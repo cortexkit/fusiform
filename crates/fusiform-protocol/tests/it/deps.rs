@@ -262,14 +262,6 @@ fn every_response_type_round_trips() {
                 fields: serde_json::json!([{"field":"rate","class":"output"}]),
             }],
         }],
-        overridden: vec![fusiform_protocol::OverriddenFactWire {
-            provider_id: "anthropic".into(),
-            model_id: "claude-sonnet-4-5".into(),
-            fact_key: "limit.context".into(),
-            upstream_value: "1000000".into(),
-            served_value: "200000".into(),
-            authority: "https://docs.claude.com/...".into(),
-        }],
         uncertain: vec![fusiform_protocol::UncertainFactWire {
             provider_id: "anthropic".into(),
             model_id: "claude-sonnet-4-5".into(),
@@ -312,7 +304,6 @@ fn every_response_type_round_trips() {
             correction: None,
             window_from_ms: Some(1_000),
         }],
-        overridden: None,
     };
     let back: HistoryResponse =
         serde_json::from_str(&serde_json::to_string(&history).unwrap()).unwrap();
@@ -326,7 +317,6 @@ fn every_response_type_round_trips() {
             last_class: Some("network".into()),
             polls_back: Some(196),
         }),
-        overridden: vec![],
         source: "models.dev".into(),
         catalog_version: 7,
         model_count: 6_270,

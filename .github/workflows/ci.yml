@@ -17,7 +17,7 @@ on:
   #
   # Every dependency is a crates.io version pinned in Cargo.lock, so the lock
   # cannot go stale beneath a still commit. What still changes on its own is
-  # the DATE: the curated plan-price and window-overlay review gates and the
+  # the DATE: the curated plan-price review gate and the
   # seed freshness gate fail when time passes with nothing touched, and a
   # push-only gate is silent for exactly the quiet stretch in which those dates
   # lapse. The toolchain moves too, since CI takes `stable`.

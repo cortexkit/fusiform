@@ -202,7 +202,7 @@ echo >&2
 # Every dependency is a crates.io version pinned in Cargo.lock, so nothing can
 # move underneath a commit that is sitting still. A scheduled red on an
 # unchanged commit therefore means something that depends on the DATE fired —
-# the curated plan-price and window-overlay review gates, or the seed freshness
+# the curated plan-price review gate, or the seed freshness
 # gate — or the world outside the repository changed: the Rust toolchain,
 # which CI takes as `stable`, or GitHub itself. Each of those needs the log;
 # none is cleared by touching the lock.

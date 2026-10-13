@@ -110,7 +110,7 @@ pub fn rows() -> &'static Vec<PlanPrice> {
 
 /// Parse, returning the rows and a reason for each one refused.
 ///
-/// Rejects are counted rather than fatal, matching the window overlay: the file
+/// Rejects are counted rather than fatal: the file
 /// is embedded at compile time, so a malformed row is a defect in the tree
 /// rather than bad input at runtime, and a test asserting zero rejects fails
 /// before anything ships. Panicking here would take down a daemon whose catalog

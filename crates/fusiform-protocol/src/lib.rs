@@ -464,18 +464,11 @@ pub struct CatalogGetResponse {
     /// replay:         catalog.get {at_ms:T} -> the values in force at T
     /// ```
     ///
-    /// Two caveats a replaying consumer needs, and neither is visible in the
-    /// number itself:
-    ///
-    /// - A replayed read may carry `uncertain` entries. Fusiform polls on a
-    ///   cadence, so an instant between two polls has a value that was in
-    ///   force at the last observation and may have changed before the next
-    ///   one. The bracket says which window is unobserved rather than
-    ///   pretending the instant was measured.
-    /// - A replayed read is NOT overridden. Serve-time corrections apply to
-    ///   the current view only, so replaying a decision returns what the
-    ///   upstream published, which is what the decision was actually made on.
-    ///   The `overridden` array names any divergence on a current read.
+    /// A replayed read may carry `uncertain` entries. Fusiform polls on a
+    /// cadence, so an instant between two polls has a value that was in
+    /// force at the last observation and may have changed before the next
+    /// one. The bracket says which window is unobserved rather than
+    /// pretending the instant was measured.
     ///
     /// # Auditing a consumer for this: look at WRITES, not reads
     ///
@@ -603,31 +596,6 @@ pub struct CatalogGetResponse {
     /// is repricing against a value that may not have been in force.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub uncertain: Vec<UncertainFactWire>,
-    /// Facts whose served value differs from what the upstream published.
-    ///
-    /// # The served value is fusiform's judgment, not the upstream's word
-    ///
-    /// models.dev publishes a 1,000,000-token context window for
-    /// `anthropic/claude-sonnet-4-5`; Anthropic's own documentation names that
-    /// model as its example of the 200k class. Fusiform serves 200,000, because
-    /// a consumer trusting 1M sends five times the real ceiling into a hard 400
-    /// — the Anthropic wall is prompt-only, so nothing truncates.
-    ///
-    /// Every entry names the upstream value, the served value, and the
-    /// AUTHORITY behind the change. The authority is load-bearing: a divergence
-    /// an operator cannot answer "says who" about makes distrusting the
-    /// correction their cheapest move.
-    ///
-    /// **Always empty on a point-in-time read.** A correction records what a
-    /// source says NOW and carries no validity interval, so applying it to a
-    /// past instant would manufacture a claim about a window nobody observed.
-    /// History serves what the upstream published, which is the true statement
-    /// about the record.
-    ///
-    /// A consumer ignoring this list gets the safe value; one reading it can
-    /// audit. Both are correct, and the default is the safe one.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub overridden: Vec<OverriddenFactWire>,
     /// Entries in `models` served under an ALIAS id with another row's facts.
     ///
     /// # What an alias is, and what it is not
@@ -649,8 +617,8 @@ pub struct CatalogGetResponse {
     /// - **A real row always wins.** If the upstream ever publishes the alias
     ///   id itself, that row is served and the alias is not applied.
     ///
-    /// Every other disclosure on the response (`overridden`, `uncertain`,
-    /// `withheld`) about the facts an alias served names the TARGET's
+    /// Every other disclosure on the response (`uncertain`, `withheld`)
+    /// about the facts an alias served names the TARGET's
     /// identity, because that is the row the facts came from.
     ///
     /// Omitted when empty, which is every read that touched no alias.
@@ -720,33 +688,6 @@ pub struct AliasedModelWire {
     /// Where the identity claim was read: the file and pinned revision that
     /// routes the alias id to the target's backend model.
     pub source_ref: String,
-}
-
-/// One fact whose served value differs from the upstream's.
-///
-/// # Not to be confused with `CorrectedFact`, which is a different claim
-///
-/// `CorrectedFact` says FUSIFORM'S OWN RECORD was wrong over a past window —
-/// a defect in this module's reading, marked so historical queries refuse.
-///
-/// This says THE UPSTREAM'S PUBLISHED VALUE is wrong right now, and fusiform is
-/// serving something else. The upstream's record is intact and history still
-/// reports it; only the current served view differs.
-///
-/// The names had to diverge because a consumer meeting both in one crate would
-/// reasonably assume they were related. They are not: one is an admission, the
-/// other is an override.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OverriddenFactWire {
-    pub provider_id: String,
-    pub model_id: String,
-    pub fact_key: String,
-    /// What the upstream published, verbatim, as JSON text.
-    pub upstream_value: String,
-    /// What fusiform serves instead.
-    pub served_value: String,
-    /// WHO says so, and specific enough to go and read.
-    pub authority: String,
 }
 
 /// A fact whose recorded value at the read instant may already have ended.
@@ -1422,24 +1363,6 @@ pub struct HistoryResponse {
     /// is the one to ask for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inherited_from: Option<crate::money::InheritedFrom>,
-    /// The override in force on this fact right now, when there is one.
-    ///
-    /// # Why history carries this and does NOT apply it
-    ///
-    /// The eras below are what the upstream published, and they stay that way:
-    /// an override is a serve-time judgment about the CURRENT view, not a
-    /// correction to fusiform's record of what was said. Rewriting them would
-    /// forge the record — the thing this store exists to prevent.
-    ///
-    /// But an operator reading history for `limit.context` on a model whose
-    /// value is overridden was seeing the upstream's number with nothing to
-    /// reconcile it against what `catalog.get` serves. Two surfaces
-    /// disagreeing, both correct, with no cross-reference — which reads as one
-    /// of them being wrong.
-    ///
-    /// Absent when no override applies, which is the ordinary case.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub overridden: Option<OverriddenFactWire>,
 }
 
 /// A `catalog.status` request.
@@ -1583,19 +1506,6 @@ pub struct StatusResponse {
     /// false clean bill.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failures: Option<FailureHistoryWire>,
-    /// Facts fusiform is currently serving against what the upstream publishes.
-    ///
-    /// # Why this belongs on the status surface and not only on a read
-    ///
-    /// `catalog.get` reports the overrides that apply to the rows it returned.
-    /// An operator asking "what is fusiform doing" is asking a different
-    /// question, and the answer includes "deliberately disagreeing with the
-    /// upstream about two facts" — which they would otherwise learn only by
-    /// happening to read one of those two models.
-    ///
-    /// Empty in the ordinary case, and omitted from the wire when empty.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub overridden: Vec<OverriddenFactWire>,
     /// How many of those models carry at least one rate.
     ///
     /// Measured on the live store: 420 of 6,293 present models carry no rate at

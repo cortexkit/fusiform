@@ -100,10 +100,10 @@ fleet consumers over subc routes and pushed on change.
    consumer that wants pull semantics.
 
    **`catalog.diff` was never built; the shipped surface is four tools:**
-   `catalog.get` (current or point-in-time, with `withheld`, `uncertain` and
-   `overridden` reported rather than silently applied), `catalog.history`
+   `catalog.get` (current or point-in-time, with `withheld` and `uncertain`
+   reported alongside the facts), `catalog.history`
    (every era for one fact, with observation windows), `catalog.status`
-   (poll record, counts, overrides), and `catalog.correct` (operator-driven
+   (poll record and counts), and `catalog.correct` (operator-driven
    correction of fusiform's own past record). A diff is derivable from
    `catalog.history` and carries no provenance of its own, which is why it
    lost to an era history that does.

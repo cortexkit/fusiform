@@ -20,7 +20,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::billing_planes::{self, Plane, PlaneKind, RuleState};
-use crate::overlay;
 use fusiform_core::{FieldId, SourceId, Timestamp};
 use fusiform_store::correct::{apply_correction, plan_correction};
 use fusiform_store::serve::{CatalogQuery, CatalogSnapshot, Presence};
@@ -34,11 +33,11 @@ use serde::Deserialize;
 pub use fusiform_protocol::{
     BillingRuleWire, CatalogGetRequest, CatalogGetResponse, CorrectRequest, CorrectResponse,
     CorrectedFact, CorrectionDetail, HistoryEra, HistoryRequest, HistoryResponse,
-    MarkArtifactRequest, MarkArtifactResponse, OverriddenFactWire, PlanAmount, PlanPriceWire,
-    PlanPricesRequest, PlanPricesResponse, PlaneWire, PollChanges, RetractArtifactRequest,
-    RetractArtifactResponse, StatusPoll, StatusRequest, StatusResponse, ToolResponse,
-    UncertainFactWire, WithheldFactWire, TOOLS, TOOL_CORRECT, TOOL_GET, TOOL_HISTORY,
-    TOOL_MARK_ARTIFACT, TOOL_PLAN_PRICES, TOOL_RETRACT_ARTIFACT, TOOL_STATUS,
+    MarkArtifactRequest, MarkArtifactResponse, PlanAmount, PlanPriceWire, PlanPricesRequest,
+    PlanPricesResponse, PlaneWire, PollChanges, RetractArtifactRequest, RetractArtifactResponse,
+    StatusPoll, StatusRequest, StatusResponse, ToolResponse, UncertainFactWire, WithheldFactWire,
+    TOOLS, TOOL_CORRECT, TOOL_GET, TOOL_HISTORY, TOOL_MARK_ARTIFACT, TOOL_PLAN_PRICES,
+    TOOL_RETRACT_ARTIFACT, TOOL_STATUS,
 };
 
 /// Why a request could not be served.
@@ -214,7 +213,6 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
                     curated: Some(curated_disclosure(row)),
                     last_changed_at_ms: None,
                     inherited_from: None,
-                    overridden: None,
                 });
             }
         }
@@ -238,7 +236,6 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
                 curated: None,
                 last_changed_at_ms: None,
                 inherited_from: Some(alias_origin(store, source, alias)),
-                overridden: None,
             });
         }
         if !store
@@ -293,37 +290,6 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
         })
         .collect();
 
-    // Disclose an override on this fact WITHOUT applying it to the eras.
-    //
-    // Through the SAME function `catalog.get` uses, because the first version
-    // of this did the lookup by hand and got both halves wrong in production:
-    // it reported an override on a model whose overlay value AGREES with the
-    // catalog, and it printed an empty upstream value. Two rules live in that
-    // function and a hand-written second copy had neither.
-    //
-    // The current value is the LAST era: this query orders oldest-first, and a
-    // reader reaching for `first()` would compare against the model's original
-    // value forever.
-    //
-    // The eras are what the upstream published and stay that way; an override
-    // is a judgment about the current view. But an operator reading history for
-    // an overridden fact was seeing the upstream's number alone, with nothing
-    // reconciling it against what catalog.get serves — two surfaces
-    // disagreeing, both correct, which reads as one of them being wrong.
-    let overridden = eras.last().and_then(|newest| {
-        override_for(
-            &newest.value,
-            &request.provider_id,
-            &request.model_id,
-            &request.fact_key,
-            overlay::corrections().get(&(
-                request.provider_id.clone(),
-                request.model_id.clone(),
-                FactKey::from_stored(request.fact_key.clone()),
-            ))?,
-        )
-    });
-
     // Served here rather than left to the consumer because the exclusion it
     // applies is not derivable from the era list above: which polls were
     // fusiform's own representation changes is not in those rows, and a
@@ -375,51 +341,6 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
         curated: None,
         last_changed_at_ms,
         inherited_from,
-        overridden,
-    })
-}
-
-/// The disclosure a correction produces against a value the store actually
-/// holds, or `None` when there is nothing to say.
-///
-/// # Why this is one function and not a rule written down twice
-///
-/// It encodes two decisions that are easy to state and easy to omit, and a
-/// second hand-written copy omitted BOTH in production:
-///
-/// 1. **A correction that changes nothing is not reported.** The upstream may
-///    have fixed the row, leaving the cell redundant rather than wrong. A line
-///    reading `1000000 -> 1000000` trains an operator to skim the ones that
-///    matter — and worse, a note on every response destroys the very
-///    distinction the disclosure exists to draw.
-///
-/// 2. **The upstream value comes from the ROW, never from the correction.**
-///    `Correction::upstream_value` is a slot filled in here, not a value
-///    carried by the overlay: the line must report what THIS poll published,
-///    not what the overlay's author saw. Reading the unfilled slot yields an
-///    empty string, which renders as a sentence naming one value where it
-///    promises two.
-fn override_for(
-    value: &serde_json::Value,
-    provider_id: &str,
-    model_id: &str,
-    fact_key: &str,
-    correction: &overlay::Correction,
-) -> Option<OverriddenFactWire> {
-    let served: serde_json::Value = match correction.served_value.parse::<i64>() {
-        Ok(n) => serde_json::Value::from(n),
-        Err(_) => serde_json::Value::String(correction.served_value.clone()),
-    };
-    if *value == served {
-        return None;
-    }
-    Some(OverriddenFactWire {
-        provider_id: provider_id.to_string(),
-        model_id: model_id.to_string(),
-        fact_key: fact_key.to_string(),
-        upstream_value: value.to_string(),
-        served_value: correction.served_value.clone(),
-        authority: correction.authority.clone(),
     })
 }
 
@@ -579,25 +500,6 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
         .read_catalog(&CatalogQuery::current(source))
         .map_err(|e| store_error(&e))?;
 
-    // The overrides in effect right now, from the same snapshot the counts come
-    // from, so status cannot disagree with itself about which models exist.
-    //
-    // Rendered into the wire model map first because that is the shape both
-    // this and `catalog.get` compare against — building a second traversal here
-    // would be two artifacts of one rule with nothing holding them together.
-    let mut wire_models: BTreeMap<String, BTreeMap<String, serde_json::Value>> = BTreeMap::new();
-    for model in &snapshot.models {
-        wire_models.insert(
-            format!("{}/{}", model.provider_id, model.model_id),
-            model
-                .facts
-                .iter()
-                .map(|(k, v)| (k.as_str().to_string(), fact_for_the_wire(v)))
-                .collect(),
-        );
-    }
-    let overridden = overrides_in_effect(&wire_models, overlay::corrections());
-
     // Failed polls across the whole history, not just the poll window.
     //
     // The window is ten by default and a failure can sit far outside it, so an
@@ -623,7 +525,6 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
     Ok(StatusResponse {
         source: source.as_str().to_string(),
         catalog_version,
-        overridden,
         failures,
         // Read from the contract table rather than collected from the snapshot.
         //
@@ -981,7 +882,6 @@ pub fn serve_catalog_get(
         source,
         snapshot,
         at,
-        overlay::corrections(),
         Some((store, crate::creators::creators())),
         request.fact_prefixes.as_ref(),
     );
@@ -1085,8 +985,7 @@ fn finish_plane_view(
     requested_prefixes: Option<&Vec<String>>,
 ) -> CatalogGetResponse {
     let Some(plane) = plane else {
-        // Leave even the ordinary filter/override ordering untouched. Existing
-        // callers did not ask for a billing claim and must receive the old bytes.
+        // Callers that did not ask for a billing claim keep the ordinary view.
         return response;
     };
     response.plane = Some(plane.wire);
@@ -1443,16 +1342,10 @@ fn single_model_snapshot(
 /// that. A value that does not parse is a stored row this build cannot read,
 /// which is loud rather than silently dropped: dropping it would present a
 /// model as having no rate.
-/// Render a snapshot onto the wire.
-///
-/// Takes `at` so it can tell a current-view read from a point-in-time one:
-/// corrections apply only to the former, and the distinction is not derivable
-/// from the snapshot, which always carries a concrete resolved instant.
 fn render(
     source: SourceId,
     snapshot: CatalogSnapshot,
     at: Option<Timestamp>,
-    corrections: &overlay::Corrections,
     inherit: Option<(&CatalogStore, &crate::creators::Creators)>,
     requested_prefixes: Option<&Vec<String>>,
 ) -> CatalogGetResponse {
@@ -1474,7 +1367,7 @@ fn render(
         // catalog HELD at an instant, and an inherited rate is what fusiform
         // derives today from a table that did not exist then -- serving it into
         // a historical answer would put a present-tense derivation inside a
-        // past-tense claim. Same rule the overlay overrides already follow.
+        // past-tense claim.
         if let (Some((store, creators)), None) = (inherit, at) {
             inherit_rate_for(store, source, creators, &mut facts, &model.model_id);
         }
@@ -1515,18 +1408,6 @@ fn render(
         })
         .collect();
 
-    // Corrections apply to the CURRENT VIEW only.
-    //
-    // `at` is Some for a point-in-time read, and an overlay cell carries
-    // observed_at with no validity interval — so applying today's reading to a
-    // past instant would state something about a window nobody observed. The
-    // record keeps saying what models.dev said.
-    let overridden = if at.is_none() {
-        apply_corrections(&mut models, corrections)
-    } else {
-        Vec::new()
-    };
-
     CatalogGetResponse {
         source: source.as_str().to_string(),
         resolved_at_ms: snapshot.resolved_at.0,
@@ -1534,7 +1415,6 @@ fn render(
         models,
         withheld,
         uncertain,
-        overridden,
         // Filled by the NAMED-read caller, which is the only path that knows a
         // specific model was excluded. A bulk read leaves it empty on purpose:
         // 805 retired models against 7,852 present, permanent in an append-only
@@ -1660,101 +1540,6 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
-}
-
-/// Replace upstream values with fusiform's corrections, for a CURRENT-VIEW read.
-///
-/// # The point-in-time exclusion is the whole reason the caller passes a flag
-///
-/// An overlay cell carries `observed_at` and no validity interval. "Anthropic's
-/// documentation, read today, says 200k" does not establish what was true in
-/// July — they may have reduced it, and the catalog may have been right at the
-/// time. Applying a present-day reading to a past instant manufactures a claim
-/// about a window nobody observed: not a forged observation, a forged
-/// inference.
-///
-/// So a point-in-time read never reaches this function, and history keeps
-/// saying what models.dev said — the true statement about the record.
-/// Which corrections currently DIVERGE from what the upstream publishes.
-///
-/// Reporting only — nothing is mutated. Shares its rule with
-/// [`apply_corrections`] by construction: both ask whether the served value
-/// differs from the stored one, so `catalog.get` and `catalog.status` cannot
-/// disagree about what is being overridden.
-///
-/// A correction whose row the upstream has since fixed is a no-op and is
-/// omitted from both. That is not an error: the cell is redundant rather than
-/// wrong, and reporting "1000000 -> 1000000" would train an operator to skim
-/// the entries that matter.
-fn overrides_in_effect(
-    models: &BTreeMap<String, BTreeMap<String, serde_json::Value>>,
-    corrections: &overlay::Corrections,
-) -> Vec<OverriddenFactWire> {
-    let mut out = Vec::new();
-    for (identity, facts) in models {
-        let Some((provider_id, model_id)) = identity.split_once('/') else {
-            continue;
-        };
-        for (fact_key, value) in facts {
-            let key = (
-                provider_id.to_string(),
-                model_id.to_string(),
-                FactKey::from_stored(fact_key.clone()),
-            );
-            let Some(correction) = corrections.get(&key) else {
-                continue;
-            };
-            let Some(wire) = override_for(value, provider_id, model_id, fact_key, correction)
-            else {
-                continue;
-            };
-            out.push(wire);
-        }
-    }
-    out
-}
-
-fn apply_corrections(
-    models: &mut BTreeMap<String, BTreeMap<String, serde_json::Value>>,
-    corrections: &overlay::Corrections,
-) -> Vec<OverriddenFactWire> {
-    let mut applied = Vec::new();
-
-    for (identity, facts) in models.iter_mut() {
-        // The identity is `provider/model`, and a model id may itself contain a
-        // slash (`openai/gpt-oss-120b` under 28 providers). Split ONCE from the
-        // left: the provider id never contains one.
-        let Some((provider_id, model_id)) = identity.split_once('/') else {
-            continue;
-        };
-
-        for (fact_key, value) in facts.iter_mut() {
-            let key = (
-                provider_id.to_string(),
-                model_id.to_string(),
-                FactKey::from_stored(fact_key.clone()),
-            );
-            let Some(correction) = corrections.get(&key) else {
-                continue;
-            };
-
-            let served: serde_json::Value = match correction.served_value.parse::<i64>() {
-                Ok(n) => serde_json::Value::from(n),
-                Err(_) => serde_json::Value::String(correction.served_value.clone()),
-            };
-
-            let Some(wire) = override_for(value, provider_id, model_id, fact_key, correction)
-            else {
-                // Nothing to report AND nothing to apply: the two go together,
-                // since a value already equal to the correction needs no write.
-                continue;
-            };
-            applied.push(wire);
-            *value = served;
-        }
-    }
-
-    applied
 }
 
 /// Mark one poll as fusiform changing its own representation.
@@ -3445,7 +3230,7 @@ mod billing_plane_tests {
     }
 
     #[test]
-    fn plane_views_run_after_ordinary_overrides() {
+    fn plane_views_preserve_non_rate_facts() {
         let (store, _dir) = store();
         seed(
             &store,
@@ -3461,10 +3246,8 @@ mod billing_plane_tests {
                 get(&store, request("anthropic", model, "oauth", Some("limit."))).unwrap();
             assert_eq!(
                 response.models["anthropic/claude-sonnet-4-5"]["limit.context"],
-                200_000
+                1_000_000
             );
-            assert_eq!(response.overridden.len(), 1);
-            assert_eq!(response.overridden[0].fact_key, "limit.context");
             assert!(response.billing_rules.is_empty());
         }
     }
@@ -4010,8 +3793,8 @@ fn serve_named_alias(
 /// The target's current served facts under the alias key, or `None` when the
 /// target is absent or retired.
 ///
-/// Runs the SAME named read the target would get — inheritance, overrides and
-/// all — so an alias can never serve something different from what a caller
+/// Runs the same named read the target would get, including inheritance,
+/// so an alias can never serve something different from what a caller
 /// asking for the target directly receives, apart from the rate markers.
 ///
 /// The fact filter is widened exactly as `widened_for_inheritance` widens it:
@@ -4062,7 +3845,6 @@ fn aliased_response(
         source,
         snapshot,
         None,
-        overlay::corrections(),
         Some((store, crate::creators::creators())),
         wide.as_ref(),
     );
@@ -4130,7 +3912,7 @@ fn mark_rates_borrowed_through_alias(
 /// out, because the caller asked about the ALIAS's provider. Like the bulk
 /// read itself, an entry the fact filter leaves empty is dropped.
 ///
-/// Disclosures about the target (`overridden`, `withheld`, `uncertain`) are
+/// Disclosures about the target (`withheld`, `uncertain`) are
 /// merged once each, since the bulk read may already carry them for the
 /// target's own entry.
 fn add_aliases_to_bulk(
@@ -4155,7 +3937,6 @@ fn add_aliases_to_bulk(
         let CatalogGetResponse {
             models,
             aliased,
-            overridden,
             withheld,
             uncertain,
             ..
@@ -4165,11 +3946,6 @@ fn add_aliases_to_bulk(
         }
         response.models.extend(models);
         response.aliased.extend(aliased);
-        for o in overridden {
-            if !response.overridden.contains(&o) {
-                response.overridden.push(o);
-            }
-        }
         for w in withheld {
             if !response.withheld.contains(&w) {
                 response.withheld.push(w);

@@ -20,8 +20,9 @@ assumed by readers.
 
 ## Why fusiform, after I refused it once
 
-I declined this on two grounds and both were wrong. Recorded because the
-corrections are the useful part.
+I initially declined the subscription-price plane because I thought its key
+used a provider vocabulary that this catalog did not recognize. That objection
+was wrong: the consumer's key uses models.dev provider slugs.
 
 **"The key uses a foreign provider vocabulary."** I measured insula's `provider`
 field (`codex`, `claude` — zero models in this catalog) and reasoned about the
@@ -29,12 +30,6 @@ key as though that were it. The field the key actually uses is `apiProvider`,
 published since August, carrying models.dev slugs. Verified on the live wire:
 22 of 22 rows carry one, and every slug resolves here — including
 `alibaba -> alibaba-coding-plan`, which picks the plan plane over the API twin.
-
-**"Window-overlay's machinery needs a model dimension."** It carries
-`model_id: "*"` cells already. The half of that objection which survives is
-narrower and worth keeping: the schema accepts a wildcard and the *serving* path
-skips it, so provider-level facts exist as a data shape and not as a queryable
-one. A tier price needs a new serving path either way.
 
 **The argument that decides it** is one I had already made to QTA as a hazard
 and then failed to apply: a subscription price is a **dated fact that rots with

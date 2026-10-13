@@ -459,10 +459,9 @@ fn normalize_model(
             // it would be right for some providers and wrong for others with no
             // way to tell which.
             //
-            // Same posture as the tiered-rate scheme: carry what is sourced,
-            // refuse to carry a claim the source does not make. The overlay is
-            // where a per-path ceiling belongs, because a cell there names the
-            // path it was measured on.
+            // Carry sourced fields, but not a claim the source does not make.
+            // A per-path ceiling requires a documented measurement naming the
+            // access path it constrains.
             input: _,
         }) => Limits {
             context_tokens: absent_if_zero(*context),
