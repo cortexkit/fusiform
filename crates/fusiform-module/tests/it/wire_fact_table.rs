@@ -180,48 +180,81 @@ fn limit_output_is_byte_affecting_because_broca_renders_it_as_the_default_cap() 
     );
 }
 
-/// The design note's status table lists every tool the module actually serves.
+/// The module-surface doc's tool list names exactly the tools the module serves.
 ///
-/// Found stale: §10 Serve listed three tools for the several hours after
-/// `catalog.correct` went live. The row was written when the read surface was
-/// the whole surface, and adding a tool did not feel like changing what §10
-/// says — so a reader citing it would have believed the served surface was
-/// read-only, which is the most consequential property in that row to be wrong
-/// about.
+/// Found stale once: the served-tool list in the documentation named three
+/// tools for several hours after `catalog.correct` went live. The list was
+/// written when the read surface was the whole surface, and adding a tool did
+/// not feel like changing the doc — so a reader citing it would have believed
+/// the served surface was read-only, which is the most consequential property
+/// in that list to be wrong about.
 ///
-/// This is the narrow, mechanical part of the staleness problem: the tool list
-/// is checkable, so a test should check it rather than a human re-reading. The
-/// rest of that table is prose about behaviour and stays a human's job.
+/// Checked in both directions: a served tool the doc omits, and a name in the
+/// doc's list that the module no longer serves. The tool list is checkable, so
+/// a test checks it rather than a human re-reading; the prose around it stays
+/// a human's job.
 #[test]
-fn the_design_notes_serve_row_lists_every_served_tool() {
-    const NOTE: &str = include_str!("../../../../docs/design/schema-and-store.md");
-    let missing = undocumented_tools(NOTE, fusiform_protocol::TOOLS);
+fn the_module_surface_doc_lists_exactly_the_served_tools() {
+    const DOC: &str = include_str!("../../../../docs/module-surface.md");
+    let named = documented_tools(DOC);
+    // Both checks below iterate, and an iteration over nothing asserts
+    // nothing: an extraction that stopped matching would pass in silence.
+    assert!(
+        named.len() >= 3,
+        "found {} backticked names in the doc's 'Tools, as served:' paragraph, \
+         which cannot be right; the extraction has stopped matching",
+        named.len()
+    );
+    let (missing, phantom) = tool_list_drift(DOC, fusiform_protocol::TOOLS);
     assert!(
         missing.is_empty(),
-        "served tools absent from §10 Serve: {missing:?}"
+        "served tools absent from docs/module-surface.md: {missing:?}"
+    );
+    assert!(
+        phantom.is_empty(),
+        "docs/module-surface.md names tools the module does not serve: {phantom:?}"
     );
 }
 
-fn undocumented_tools<'a>(note: &str, tools: &'a [&str]) -> Vec<&'a str> {
-    let row = note
-        .lines()
-        .find(|l| l.starts_with("| §10 Serve"))
-        .expect("the status table must have a §10 Serve row");
+/// The paragraph that states the served tools, joined onto one line because
+/// the doc is hard-wrapped and reading only its first line would drop names.
+fn tool_paragraph(doc: &str) -> String {
+    doc.split("\n\n")
+        .find(|p| p.trim_start().starts_with("Tools, as served:"))
+        .expect("docs/module-surface.md states a paragraph beginning 'Tools, as served:'")
+        .replace('\n', " ")
+}
 
-    tools
+fn documented_tools(doc: &str) -> Vec<String> {
+    tool_paragraph(doc)
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .collect()
+}
+
+/// Served tools the doc omits, and documented names the module does not serve.
+fn tool_list_drift<'a>(doc: &str, tools: &'a [&str]) -> (Vec<&'a str>, Vec<String>) {
+    let named = documented_tools(doc);
+    let missing = tools
         .iter()
         .copied()
-        .filter(|tool| !row.contains(tool))
-        .collect()
+        .filter(|tool| !named.iter().any(|n| n == tool))
+        .collect();
+    let phantom = named
+        .into_iter()
+        .filter(|name| !tools.contains(&name.as_str()))
+        .collect();
+    (missing, phantom)
 }
 
 #[test]
 fn planted_undocumented_tool_is_reported() {
-    assert_eq!(
-        undocumented_tools(
-            "| §10 Serve | catalog.get |",
-            &["catalog.get", "catalog.lost"]
-        ),
-        ["catalog.lost"]
+    let (missing, phantom) = tool_list_drift(
+        "Tools, as served: `catalog.get`, `catalog.ghost`.",
+        &["catalog.get", "catalog.lost"],
     );
+    assert_eq!(missing, ["catalog.lost"]);
+    assert_eq!(phantom, ["catalog.ghost"]);
 }

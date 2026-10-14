@@ -477,8 +477,8 @@ fn a_genuine_mass_withdrawal_needs_more_than_one_poll() {
 ///   is the failure being prevented. Any threshold permitting that makes the
 ///   guard decorative.
 ///
-/// Both numbers come from `/docs/upstream-models-dev-measured.md` and the two
-/// live captures behind it, not from taste.
+/// Both numbers come from measurements of two live captures of the upstream
+/// document, not from taste.
 ///
 /// **A mutant inside the range survives this test, and that is correct.**
 /// Setting the constant to 0.49 breaks nothing here, because the measurements

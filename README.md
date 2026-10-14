@@ -1,89 +1,65 @@
 # fusiform
 
-The CortexKit AI-model capability catalog: one structured data plane describing
-what AI models exist, what they can do, and what they cost — across every
-modality (LLM, image generation, video generation, audio, embeddings), across
-every provider.
+Fusiform is the CortexKit catalog of AI models: what models exist, what each
+can do, and what it costs, across providers and modalities, with the full
+history of every fact. It runs as `ck-fusiform`, a module supervised by the
+CortexKit daemon (subc). It polls the public [models.dev](https://models.dev)
+catalog every 30 minutes, records every poll and every change in an
+append-only SQLite store, and serves point-in-time reads, fact histories,
+curated billing planes and subscription prices to other modules as tools. An
+operator reads it with `ck models`.
 
-Named for the fusiform gyrus: the brain's recognition-and-categorization
-region, the part that knows what things are and what their properties are.
+| Crate | Role |
+| --- | --- |
+| `fusiform-core` | domain types, money, and the models.dev normalizer; no I/O |
+| `fusiform-store` | the append-only SQLite store: schema, ingest, point-in-time reads, corrections |
+| `fusiform-protocol` | the wire types consumers compile against; published to crates.io |
+| `fusiform-module` | the `ck-fusiform` module: poll loop, tool routing, health, curated data |
+| `fusiform-cli` | the `ck-models` operator CLI, run as `ck models <verb>` |
+| `fusiform-testkit` | shared test helpers; never linked into a binary |
 
-Runs as `ck-fusiform`, a supervised module of the subc daemon. See
-`docs/charter.md` for scope, constraints, and the fleet context.
+## Build and test
 
-## Building
-
-The repository builds from a clone of itself alone. Every dependency comes from
-crates.io, including the CortexKit crates it uses (the subc client and wire
-crates from subconscious, and the store crates from commons), at the versions
-pinned in `Cargo.lock`:
+Everything below needs only a Rust toolchain. Every dependency, including the
+CortexKit crates, comes from crates.io at the versions in `Cargo.lock`, so the
+repository builds from its own checkout.
 
 ```sh
 cargo build --release --locked
-cargo test --workspace --locked
+cargo test --locked --workspace --all-targets
 ```
 
-`cargo t` and `cargo c` are aliases for the guarded test and clippy runs (see
-`.cargo/config.toml`), and `.githooks/pre-push` refuses a push whose lock,
-formatting, or committed lock would fail CI.
+`cargo t` (`test --locked`) and `cargo c` (clippy with `-D warnings`) are
+aliases in `.cargo/config.toml`. The full gate a change must pass, including
+the mutation-proof check, is in `CONTRIBUTING.md`.
 
-There is deliberately no dependency on engram, the fleet's backup module.
-Fusiform is enrolled with it through a descriptor file
-(`crates/fusiform-module/data/engram-catalog.json`), and validating that
-descriptor is engram's job at capture time.
+Tests that reach the live upstream do nothing unless `FUSIFORM_LIVE=1` is set,
+and tests that read a full captured models.dev document do nothing unless
+`FUSIFORM_FULL_PAYLOAD` names that file. When unset they print a skip notice
+and pass. CI sets neither.
 
-Scripts: `scripts/release-build.sh` builds with the commit stamped in and runs
-anywhere. `scripts/stage.sh` signs with the Apple Developer identity named in
-`FUSIFORM_SIGNING_IDENTITY` and is
-macOS-only; it refuses immediately elsewhere rather than failing partway.
+Release and packaging scripts:
 
-## Mutation proofs
+- `scripts/release-build.sh` builds release binaries with the commit stamped
+  in and refuses a dirty tree. It runs anywhere.
+- `scripts/stage.sh` signs with the Apple Developer identity named in
+  `FUSIFORM_SIGNING_IDENTITY`. It is macOS-only and refuses elsewhere.
+- `scripts/refresh-seed.sh` refreshes the embedded copy of the upstream
+  catalog.
+- `scripts/install-enrollment.sh` enrolls a deployed store with the backup
+  module.
 
-A guard is only worth something if its test fails when the rule it guards is
-broken. `mutations.toml` records that proof for each standing guard: one row
-breaks the rule (an exact `old` text replaced by `new`) and names the tests that
-must go red, by full libtest path. Integration tests build into one binary per
-crate, so a test in `crates/fusiform-store/tests/it/serve.rs` is
-`serve::<name>` under `--test it`.
+### Mutation proofs
 
-`ckdev-mutate` (the `cortexkit-mutate` crate in cortexkit/commons, installed at
-the commit pinned in `.github/workflows/ci.yml`) replays the rows. CI's
-`mutations` job replays every row on each push to `master`, the rows a change
-touches on pull requests and `train/**` pushes, and every row with `--broad` on
-the nightly schedule. `--broad` runs all of a package's test targets and grades
-a catch outside the expected target as `CAUGHT_BROADLY`, unless the row is
-marked `hub` with the shared property it guards as the reason.
+`mutations.toml` records, for each standing guard, an edit that breaks it and
+the tests that must go red. See [`docs/mutations.md`](docs/mutations.md).
 
-A new guard gets a row, not a proof written into a commit message. Prove it
-and let the runner append the row; it appends only when the named tests go red:
+## Documentation
 
-```sh
-ckdev-mutate prove --id point-in-time-boundary-inclusive-outer \
-  --guards "a point-in-time read AT a boundary instant serves that era" \
-  --file crates/fusiform-store/src/serve.rs \
-  --old 'AND e.boundary_at_ms <= ?2' --new 'AND e.boundary_at_ms < ?2' \
-  --test-file crates/fusiform-store/tests/it/serve.rs \
-  --package fusiform-store --target='--test it' \
-  --expect-red serve::a_read_at_a_boundary_instant_returns_the_new_value
-```
-
-If the guard sits in a function a caller must reach, add a second row that
-removes the call. `ckdev-mutate check` validates every row without editing
-anything; `ckdev-mutate run --only <id>` replays one. The rows' anchors must match
-exactly once, so an edit to guarded code can fail `check` until the row's
-`old` text is updated to match.
-
-When nobody knows yet which test should catch a mutant (an age-selected sweep,
-auditing old code), use `ckdev-mutate explore`. It runs the whole package (or the
-workspace with `--workspace`), lists every test that went red, or explains a
-survivor, and `--append` writes the row on a catch:
-
-```sh
-ckdev-mutate explore --package fusiform-module \
-  --file crates/fusiform-module/src/fetch.rs \
-  --old 'blake3::hash(bytes)' --new 'blake3::hash(&[])'
-```
+Start with [`docs/architecture.md`](docs/architecture.md). Contracts, the data
+model and operator guides are linked from there.
 
 ## License
 
-MIT; see `LICENSE`.
+MIT; see `LICENSE`. The embedded models.dev catalog is MIT-licensed by its
+authors; see `THIRD-PARTY-NOTICES.md`.

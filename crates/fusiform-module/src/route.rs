@@ -937,7 +937,7 @@ fn select_billing_plane(request: &CatalogGetRequest) -> Result<Option<SelectedPl
         return Ok(None);
     };
     // The accepted methods are apikey, chatgpt, oauth and antigravity: the login
-    // methods the credential vault records (docs/design/billing-planes.md).
+    // methods the credential vault records (docs/billing-planes.md).
     // The set is closed so that a new login method is refused until someone
     // reviews how it bills, instead of quietly receiving the API price card.
     if !billing_planes::AUTH_METHODS.contains(&auth_method) {

@@ -5,9 +5,8 @@
 //! authority**. A field whose meaning cannot be established does not get a
 //! plausible default — it gets an explicit unknown, or it stops the parse.
 //!
-//! The measurements that shaped each rule are in
-//! `docs/design/schema-and-store.md`; the ones that decide code here are noted
-//! at the rule.
+//! The rules a consumer relies on are stated in `docs/wire-contract.md`; the
+//! measurements that decide code here are noted at the rule.
 //!
 //! # What this module refuses to do
 //!

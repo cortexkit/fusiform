@@ -1,19 +1,21 @@
-//! The design note's table list matches the schema it describes.
+//! The data-model doc's table list matches the schema it describes.
+//!
+//! The public statement of the schema is `docs/data-model.md`. Its paragraph
+//! beginning "Tables, as shipped:" is held against a real store in both
+//! directions, and the functions it names as mechanisms are held against the
+//! source.
 //!
 //! # Why a test rather than care
 //!
-//! §9 of `docs/design/schema-and-store.md` named six tables. Four never
-//! existed, and the list omitted `era` — the table holding every fact fusiform
-//! serves. It had been a specification written before any code, and it sat
-//! under a §0.1 row reading **built**, so nothing in the document told a reader
-//! it was a plan.
+//! An earlier design document named six tables. Four never existed, and the
+//! list omitted `era` — the table holding every fact fusiform serves. It had
+//! been a specification written before any code, and it sat under a status row
+//! reading **built**, so nothing in the document told a reader it was a plan.
 //!
-//! That is ASTRO's 2026-08-13 finding in a different artifact: a note cannot
-//! say whether it describes an intention or the shipped system, and the reader
-//! has no way to tell. Their prose was true about a crate and false about their
-//! runtime; mine was true about a design and false about the database. In both
-//! cases re-reading confirms it, because the sentence is well formed and
-//! describes something that could exist.
+//! A document cannot say whether it describes an intention or the shipped
+//! system, and the reader has no way to tell. Re-reading confirms it either
+//! way, because the sentence is well formed and describes something that could
+//! exist.
 //!
 //! "Re-verify the notes more often" is attention, and attention fails on the
 //! day nobody is watching. A table list is mechanically checkable, so it is
@@ -25,7 +27,7 @@ use fusiform_store::CatalogStore;
 fn table_list(note: &str) -> String {
     note.split("\n\n")
         .find(|p| p.trim_start().starts_with("Tables, as shipped:"))
-        .expect("§9 states a table list beginning 'Tables, as shipped:'")
+        .expect("docs/data-model.md states a table list beginning 'Tables, as shipped:'")
         .replace('\n', " ")
 }
 
@@ -85,8 +87,8 @@ fn planted_nonexistent_documented_function_is_reported() {
 ///
 /// Written to, not merely opened: the store crate creates `cortexkit_fence` on
 /// the FIRST FENCED WRITE rather than at open, measured with a probe. A fixture
-/// that only opens would compare the note against a state no running module is
-/// ever in, and would report the fence table as a phantom in the note.
+/// that only opens would compare the doc against a state no running module is
+/// ever in, and would report the fence table as a phantom in the doc.
 fn tables_in_a_real_store() -> Vec<String> {
     use fusiform_core::{ObservationOutcome, SourceId, Timestamp};
     use fusiform_store::NewObservation;
@@ -132,18 +134,19 @@ fn tables_in_a_real_store() -> Vec<String> {
     names
 }
 
+// Named for the design note this list used to live in. The name is kept
+// because `mutations.toml` cites the test by this path.
 #[test]
 fn the_design_note_names_the_tables_that_exist() {
     let note = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../docs/design/schema-and-store.md"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/data-model.md"),
     )
-    .expect("the design note is in the repository");
+    .expect("the data-model doc is in the repository");
 
-    // The PARAGRAPH under §9 that states the table list, not its first line.
-    // The note is hard-wrapped, so the list spans two lines and reading one of
-    // them silently drops half the names — which the first version of this test
-    // did, reporting a real table as missing from a note that names it.
+    // The PARAGRAPH that states the table list, not its first line. The doc is
+    // hard-wrapped, so the list spans several lines and reading one of them
+    // silently drops names — which the first version of this test did,
+    // reporting a real table as missing from a document that names it.
     let line = &table_list(&note);
 
     // Both directions below are FOR loops, and a for loop over an empty
@@ -154,11 +157,11 @@ fn the_design_note_names_the_tables_that_exist() {
     // `ckdev-mutate`) — a failure path returning the same type as the success
     // path, so failure-to-measure arrives dressed as evidence.
     //
-    // The floors are measured, not guessed: the store creates five tables
-    // (observation, era, catalog_version, cortexkit_schema_version, and
-    // cortexkit_fence once a fenced write has happened), and §9 names all of
-    // them. Stated as floors so adding a table does not fail a test about
-    // extraction.
+    // The floors are deliberately low: the store creates seven tables
+    // (observation, era, catalog_version, observation_artifact_event,
+    // plan_price_era, cortexkit_schema_version, and cortexkit_fence once a
+    // fenced write has happened), and the doc names all of them. Stated as
+    // floors so adding a table does not fail a test about extraction.
     let real_tables = tables_in_a_real_store();
     assert!(
         real_tables.len() >= 3,
@@ -170,7 +173,7 @@ fn the_design_note_names_the_tables_that_exist() {
     let named = table_names(line);
     assert!(
         named.len() >= 3,
-        "the note extraction found {} backticked names in §9. The reverse \
+        "the doc extraction found {} backticked names in the table list. The reverse \
          direction below iterates over these, so an extraction that finds \
          nothing reports no phantom tables while checking none. Paragraph was: \
          {line}",
@@ -181,62 +184,62 @@ fn the_design_note_names_the_tables_that_exist() {
     for table in &real_tables {
         assert!(
             !violations.contains(&format!("undocumented table: {table}")),
-            "the store creates `{table}` and the design note's §9 does not name it.\n\
-             Note says: {line}\n\
-             A reader takes that list for the schema, and §0.1 marks §9 as built."
+            "the store creates `{table}` and docs/data-model.md does not name it.\n\
+             Doc says: {line}\n\
+             A reader takes that list for the schema."
         );
     }
 
-    // And the reverse: a name in the note that no longer exists. Without this,
+    // And the reverse: a name in the doc that no longer exists. Without this,
     // a dropped table leaves a phantom in the document forever — which is the
     // half of the defect that was actually present, four times over.
     let real = real_tables;
     for word in named {
         assert!(
             !violations.contains(&format!("phantom table: {word}")),
-            "the design note's §9 names `{word}`, which the store does not create.\n\
+            "docs/data-model.md names `{word}` as a table, which the store does not create.\n\
              Real tables: {real:?}"
         );
     }
 }
 
-/// Functions the design note names as mechanisms must exist.
+/// Functions the data-model doc names as mechanisms must exist.
 ///
 /// # Why this is a fence rather than a convention
 ///
-/// The note tells a later author where a producer annotation may live and
+/// The doc tells a later author where a producer annotation may live and
 /// names the function that enforces it: the diff and the digest share one
 /// definition of the upstream's claim, `upstream_claim_of`. That sentence is
 /// the reason someone will not repeat the incident of 2026-08-16 — and it is
 /// prose, which nothing checks.
 ///
-/// This week produced two rots of exactly that shape: a `--polls 60` hint that
-/// was true when written and pointed 136 polls short by the time anyone
+/// The same week produced two rots of exactly that shape: a `--polls 60` hint
+/// that was true when written and pointed 136 polls short by the time anyone
 /// followed it, and a route comment describing the same constant in words.
 /// Both were correct at the moment of writing and silently false afterwards.
 ///
-/// So a name the note relies on is held against the source. Renaming the
-/// function is fine; renaming it while leaving the note pointing at the old
+/// So a name the doc relies on is held against the source. Renaming the
+/// function is fine; renaming it while leaving the doc pointing at the old
 /// name is what this refuses.
 #[test]
 fn the_design_note_names_functions_that_exist() {
-    let note = include_str!("../../../../docs/design/schema-and-store.md");
+    let note = include_str!("../../../../docs/data-model.md");
     let ingest = include_str!("../../src/ingest.rs");
 
-    // Named in the note as the shared definition of what the upstream said.
+    // Named in the doc as the shared definition of what the upstream said.
     // One name today; add to this check rather than beside it, so the reason
     // stays attached to the rule.
     let symbol = "upstream_claim_of";
     assert!(
         note.contains(symbol),
-        "the note must still name {symbol}, or this test is guarding a \
+        "docs/data-model.md must still name {symbol}, or this test is guarding a \
          sentence nobody wrote"
     );
     assert!(
         missing_documented_functions(note, ingest, &[symbol]).is_empty(),
-        "the design note names `{symbol}` as the mechanism that keeps the diff \
+        "docs/data-model.md names `{symbol}` as the mechanism that keeps the diff \
          and the digest agreeing about what the upstream claimed, and no such \
-         function exists. Either restore it or correct the note — a reader \
+         function exists. Either restore it or correct the doc — a reader \
          deciding where to put a new annotation follows that name."
     );
 }

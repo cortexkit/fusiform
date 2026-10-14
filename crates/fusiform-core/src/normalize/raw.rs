@@ -79,8 +79,8 @@ pub struct RawLimit {
     /// separately from the total.
     ///
     /// Read but NOT YET SERVED, and the distinction is the point. This field
-    /// was measured on day one (`docs/upstream-models-dev-measured.md` records
-    /// the shape as `{context, output, input?}` and counts its zeros), and the
+    /// was measured on day one (the upstream's limit shape is
+    /// `{context, output, input?}`, with zeros counted), and the
     /// struct shipped without it — so serde dropped it in silence on 1,199
     /// rows for three days.
     ///

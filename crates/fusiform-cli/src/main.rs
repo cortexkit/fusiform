@@ -35,7 +35,7 @@
 //!               [--include-retired] [--auth-method M]
 //! ck models history --provider P --model M --fact rate.input
 //! ck models correct --provider P --model M --field rate.input
-//!                   --from MS --until MS --reason docs/findings/... [--commit]
+//!                   --from MS --until MS --reason <finding> [--commit]
 //! ```
 
 use std::{

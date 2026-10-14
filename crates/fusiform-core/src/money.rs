@@ -1,8 +1,8 @@
 //! Money, and the parse boundary where an upstream's floats stop existing.
 //!
 //! Every rule here is a rule the fleet learned from an incident, and the ones
-//! that look pedantic are the ones that cost something. See
-//! `docs/design/schema-and-store.md` §4.
+//! that look pedantic are the ones that cost something. The served money
+//! vocabulary is described in `docs/wire-contract.md`.
 
 // The wire vocabulary moved to `fusiform-protocol` and is re-exported here.
 //

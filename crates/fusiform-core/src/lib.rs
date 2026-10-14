@@ -7,9 +7,9 @@
 //! no daemon — those belong to `fusiform-module`. What lives here is the shape
 //! of the catalog and the rules that make it honest.
 //!
-//! The design these types implement, with the measurements behind each rule,
-//! is `docs/design/schema-and-store.md`. Three of its constraints are worth
-//! restating at the door, because every type below is shaped by one of them:
+//! The data model these types implement is described in `docs/data-model.md`
+//! and `docs/wire-contract.md`. Three of its constraints are worth restating
+//! at the door, because every type below is shaped by one of them:
 //!
 //! - **Fusiform describes; it never dispatches.** It may say what a model is,
 //!   never how to speak to it. Fields that select a renderer are parsed, kept
@@ -208,7 +208,7 @@ pub struct Correction {
     pub affected_from: Timestamp,
     /// Known exactly: when fusiform stopped recording the bad value.
     pub affected_until: Timestamp,
-    /// Names the defect record under `docs/findings/`, so an audit is
+    /// Names the defect record (a finding document), so an audit is
     /// repeatable rather than dependent on prose.
     pub reason: String,
 }

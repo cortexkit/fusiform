@@ -13,7 +13,9 @@ shape, so depending on it does not couple a consumer to the daemon's
 internals.
 
 The daemon itself lives in the same repository:
-<https://github.com/cortexkit/fusiform>.
+<https://github.com/cortexkit/fusiform>. What every field means, the refusal
+codes, and the tests that prove each rule are in
+[`docs/wire-contract.md`](https://github.com/cortexkit/fusiform/blob/master/docs/wire-contract.md).
 
 ## License
 
