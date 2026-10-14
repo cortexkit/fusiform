@@ -1020,3 +1020,18 @@ target = "--test it"
 expect_red = ["route::every_tool_schema_names_exactly_its_request_fields"]
 only = false
 timeout_s = 600
+
+[[control]]
+id = "exec-scratch-avoids-var-folders"
+guards = "test binaries are never linked or copied under macOS /var/folders, where a fresh executable can be held past a test deadline"
+file = "crates/fusiform-testkit/src/lib.rs"
+old = "    if under_var_folders {"
+new = "    if under_var_folders && false {"
+edits = []
+test_file = "crates/fusiform-testkit/src/lib.rs"
+runner = "cargo"
+package = "fusiform-testkit"
+target = "--lib"
+expect_red = ["tests::executables_never_go_under_var_folders"]
+only = false
+timeout_s = 300

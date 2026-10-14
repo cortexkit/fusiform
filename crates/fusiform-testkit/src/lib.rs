@@ -6,6 +6,50 @@
 //! `[dev-dependencies]`, and `no_production_crate_depends_on_the_testkit`
 //! in the workspace tests enforces that.
 
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+
+/// The base directory for scratch copies or links of built binaries that a test
+/// executes.
+///
+/// It is `$TMPDIR` when that is set, absolute, and not under macOS's
+/// per-user `/var/folders` area; otherwise `/tmp`. Two constraints decide it:
+/// - Inside a sandboxed worker, writes are allowed only in the checkout, the
+///   task's own `$TMPDIR` and build caches, so a fixed `/tmp` path fails there.
+/// - On a Mac outside the sandbox, `$TMPDIR` is under `/var/folders`, where
+///   macOS can hold a freshly written executable for 30 seconds or more before
+///   it runs, long enough to trip a test's deadline.
+///
+/// Create the actual directory inside it with
+/// `tempfile::Builder::new().tempdir_in(exec_scratch_base())`.
+pub fn exec_scratch_base() -> PathBuf {
+    exec_scratch_base_from(std::env::var_os("TMPDIR").as_deref())
+}
+
+/// [`exec_scratch_base`] for a given `$TMPDIR` value, so the rule can be tested
+/// without changing the process environment.
+pub fn exec_scratch_base_from(tmpdir: Option<&OsStr>) -> PathBuf {
+    let fallback = PathBuf::from("/tmp");
+    let Some(raw) = tmpdir.map(Path::new) else {
+        return fallback;
+    };
+    if !raw.is_absolute() {
+        return fallback;
+    }
+    // Canonicalized so a symlink into `/var/folders` (and `/var` itself, which
+    // is a symlink to `/private/var` on macOS) is still caught. A path that
+    // does not exist cannot be canonicalized and is checked as written.
+    let resolved = std::fs::canonicalize(raw).unwrap_or_else(|_| raw.to_path_buf());
+    let under_var_folders = [raw, resolved.as_path()]
+        .iter()
+        .any(|p| p.starts_with("/var/folders") || p.starts_with("/private/var/folders"));
+    if under_var_folders {
+        fallback
+    } else {
+        raw.to_path_buf()
+    }
+}
+
 /// Replace text in a fixture, and refuse to continue if nothing changed.
 ///
 /// # Why this exists rather than a bare `str::replace`
@@ -77,4 +121,32 @@ fn nearest_hint(text: &str, from: &str) -> String {
 pub fn mutate_bytes(bytes: &[u8], from: &str, to: &str) -> Vec<u8> {
     let text = String::from_utf8(bytes.to_vec()).expect("fixture is UTF-8");
     mutate(&text, from, to).into_bytes()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::exec_scratch_base_from;
+    use std::ffi::OsStr;
+    use std::path::PathBuf;
+
+    #[test]
+    fn executables_never_go_under_var_folders() {
+        let base = |v: Option<&str>| exec_scratch_base_from(v.map(OsStr::new));
+        // Control: an ordinary absolute TMPDIR, such as a worker's per-task
+        // folder, is used as given. Without it, the assertions below would
+        // also pass for a function that always returns /tmp.
+        assert_eq!(
+            base(Some("/srv/worker/task-tmp")),
+            PathBuf::from("/srv/worker/task-tmp")
+        );
+        // A Mac head's default TMPDIR, in both spellings, falls back to /tmp.
+        assert_eq!(base(Some("/var/folders/ab/cd/T")), PathBuf::from("/tmp"));
+        assert_eq!(
+            base(Some("/private/var/folders/ab/cd/T")),
+            PathBuf::from("/tmp")
+        );
+        // Unset or relative values fall back too.
+        assert_eq!(base(None), PathBuf::from("/tmp"));
+        assert_eq!(base(Some("relative/tmp")), PathBuf::from("/tmp"));
+    }
 }

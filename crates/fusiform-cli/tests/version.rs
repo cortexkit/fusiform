@@ -120,7 +120,12 @@ fn a_hung_version_probe_is_killed_at_its_deadline() {
 #[test]
 fn both_binaries_answer_version_with_no_arguments_and_no_daemon() {
     let mut checked = 0;
-    let scratch = tempfile::tempdir().expect("scratch dir for ckdev links");
+    // Not `tempfile::tempdir()`: on a Mac that is under /var/folders, where a
+    // fresh executable can be held long enough to trip the probe's deadline.
+    let scratch = tempfile::Builder::new()
+        .prefix("fusiform-exec-")
+        .tempdir_in(fusiform_testkit::exec_scratch_base())
+        .expect("scratch dir for ckdev links");
     for name in ["ck-fusiform", "ck-models"] {
         let built = binary(name);
         if !built.exists() {

@@ -269,6 +269,7 @@ dependencies = [
  "fusiform-module",
  "fusiform-protocol",
  "fusiform-store",
+ "fusiform-testkit",
  "serde_json",
  "subc-client-rs",
  "subc-protocol",

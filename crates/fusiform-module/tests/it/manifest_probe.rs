@@ -18,7 +18,12 @@ use subc_protocol::PROTOCOL_VERSION;
 
 #[test]
 fn the_daemon_binary_prints_its_registration_manifest_with_no_daemon() {
-    let scratch = tempfile::tempdir().expect("scratch dir for the ckdev link");
+    // Not `tempfile::tempdir()`: on a Mac that is under /var/folders, where a
+    // fresh executable can be held long enough to trip the probe's deadline.
+    let scratch = tempfile::Builder::new()
+        .prefix("fusiform-exec-")
+        .tempdir_in(fusiform_testkit::exec_scratch_base())
+        .expect("scratch dir for the ckdev link");
     let built = std::path::Path::new(env!("CARGO_BIN_EXE_ck-fusiform"));
     let link = scratch
         .path()

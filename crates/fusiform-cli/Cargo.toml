@@ -25,3 +25,5 @@ tokio = { workspace = true }
 [dev-dependencies]
 # Scratch directory for the `ckdev-` links the version test runs.
 tempfile = "3"
+# Chooses where that scratch directory goes (`exec_scratch_base`).
+fusiform-testkit = { workspace = true }
