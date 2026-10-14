@@ -2,11 +2,13 @@
 
 ## Reporting a vulnerability
 
-Report vulnerabilities privately through GitHub's private vulnerability
-reporting: open the repository's **Security** tab and choose **Report a
-vulnerability**. Do not open a public issue for a suspected vulnerability.
+GitHub's private vulnerability reporting is not yet enabled for this
+repository. Until it is, open an issue that says you have a security report
+and asks for a private way to send it. Put no details of the vulnerability in
+the issue itself.
 
-Include what you found, how to reproduce it, and what you think the impact is.
+When you send the report, include what you found, how to reproduce it, and
+what you think the impact is.
 
 ## Threat model
 
