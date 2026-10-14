@@ -8,5 +8,5 @@
 # to stamp a build. That refusal is correct and cost a near-miss to discover:
 # the script's message was hidden behind a grep filter, so a stale binary was
 # signed and staged before a version check caught it.
-ARCHITECTURE.md
-STRUCTURE.md
+/ARCHITECTURE.md
+/STRUCTURE.md
