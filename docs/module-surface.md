@@ -63,9 +63,10 @@ supervisor (subc), which routes each tool call to the module.
 
 `route::the_manifest_declares_what_is_true_and_omits_what_is_not` pins the
 trust tier, the absent storage bindings and the empty `identity_scope`.
-The `catalog.get` input schema in the manifest does not list `auth_method`,
-although the request type accepts it; callers that validate against the
-manifest schema cannot select a billing plane.
+Each tool's input schema in the manifest names exactly the fields its
+request type decodes, so a caller that validates its arguments against the
+schema can use every argument the route accepts
+(`route::every_tool_schema_names_exactly_its_request_fields`).
 
 `ck-fusiform --manifest` prints the manifest as JSON with an empty top-level
 `runtime_computed` array, without connecting to a daemon

@@ -229,7 +229,11 @@ pub fn manifest() -> ModuleManifest {
                         "fact_prefixes": {"type": "array", "items": {"type": "string"}},
                         "include_retired": {"type": "boolean"},
                         "provider_id": {"type": "string"},
-                        "model_id": {"type": "string"}
+                        "model_id": {"type": "string"},
+                        // Selects a provider's billing plane. Validated by the
+                        // route against its closed list, so an unknown method is
+                        // refused by name rather than by this schema.
+                        "auth_method": {"type": "string"}
                     },
                     "additionalProperties": false
                 }),

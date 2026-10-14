@@ -1005,3 +1005,18 @@ expect_red = ["read_connections::catalog_read_completes_during_writer_transactio
 only = false
 timeout_s = 600
 build_timeout_s = 1800
+
+[[control]]
+id = "manifest-schema-matches-request-fields"
+guards = "every tool's manifest input schema names exactly the fields its request type decodes"
+file = "crates/fusiform-module/src/lib.rs"
+old = "                        \"auth_method\": {\"type\": \"string\"}\n"
+new = ""
+edits = []
+test_file = "crates/fusiform-module/tests/it/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["route::every_tool_schema_names_exactly_its_request_fields"]
+only = false
+timeout_s = 600

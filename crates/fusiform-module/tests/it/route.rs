@@ -615,6 +615,97 @@ fn an_unknown_tool_is_refused() {
     }
 }
 
+/// Each tool's declared input schema names exactly the request type's fields.
+///
+/// The manifest schema is what a caller validating its arguments reads; the
+/// request type is what the route actually decodes. Nothing compared them, and
+/// `catalog.get`'s schema missed `auth_method`, so a caller that checks its
+/// request against the schema could not select a billing plane. The request
+/// types are scanned from the protocol crate's source because most of them do
+/// not derive `Serialize`, so there is no instance to read field names from.
+#[test]
+fn every_tool_schema_names_exactly_its_request_fields() {
+    const PROTOCOL: &str = include_str!("../../../fusiform-protocol/src/lib.rs");
+    let pairs = [
+        ("catalog.get", "CatalogGetRequest"),
+        ("catalog.history", "HistoryRequest"),
+        ("catalog.status", "StatusRequest"),
+        ("catalog.correct", "CorrectRequest"),
+        ("catalog.mark_artifact", "MarkArtifactRequest"),
+        ("catalog.retract_artifact", "RetractArtifactRequest"),
+        ("plan.prices", "PlanPricesRequest"),
+    ];
+    let manifest = fusiform_module::manifest();
+    let tools: Vec<_> = manifest
+        .provides
+        .iter()
+        .flat_map(|role| match role {
+            subc_protocol::manifest::ProviderRole::ToolProvider { tools, .. } => tools.clone(),
+            _ => Vec::new(),
+        })
+        .collect();
+    assert_eq!(
+        tools.len(),
+        pairs.len(),
+        "a tool was added or removed: pair it with its request type here"
+    );
+    for (tool, request) in pairs {
+        let schema = &tools
+            .iter()
+            .find(|t| t.name == tool)
+            .unwrap_or_else(|| panic!("{tool} is not declared"))
+            .schema;
+        let declared: std::collections::BTreeSet<String> = schema["properties"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{tool} schema has no properties object"))
+            .keys()
+            .cloned()
+            .collect();
+        let fields = request_fields(PROTOCOL, request);
+        assert_eq!(
+            declared, fields,
+            "{tool}: the manifest schema and {request} disagree about which arguments exist"
+        );
+    }
+}
+
+/// The `pub` field names of `pub struct <name> { ... }` in `source`.
+///
+/// Fails rather than returning an empty set, so a renamed struct or a changed
+/// layout cannot make the comparison above pass by comparing nothing.
+fn request_fields(source: &str, name: &str) -> std::collections::BTreeSet<String> {
+    let start = source
+        .find(&format!("pub struct {name} {{"))
+        .unwrap_or_else(|| panic!("pub struct {name} not found in the protocol crate"));
+    let body = &source[start..];
+    let body = &body[..body.find("\n}").expect("struct body ends")];
+    let fields: std::collections::BTreeSet<String> = body
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("pub "))
+        .filter_map(|rest| {
+            rest.split_once(':')
+                .map(|(field, _)| field.trim().to_string())
+        })
+        .filter(|field| !field.starts_with("struct "))
+        .collect();
+    assert!(!fields.is_empty(), "{name}: found no pub fields");
+    assert!(
+        !body.contains("serde(rename"),
+        "{name} renames a field; teach this scan the wire name"
+    );
+    fields
+}
+
+#[test]
+fn the_request_field_scan_sees_a_planted_field() {
+    let planted = "pub struct Planted {\n    #[serde(default)]\n    pub a: Option<i64>,\n    pub b: String,\n}\n";
+    let found = request_fields(planted, "Planted");
+    assert_eq!(
+        found,
+        ["a".to_string(), "b".to_string()].into_iter().collect()
+    );
+}
+
 /// The manifest and the dispatch table describe the same tools.
 ///
 /// Two lists of tool names in different files, with nothing comparing them: a
