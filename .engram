@@ -1,0 +1,8 @@
+# Files git does not hold that engram backs up nightly. Format: one
+# repo-relative file or folder per line; folders are recursive.
+
+# Design history, incident findings and measurements, kept out of the
+# public repository.
+.cortexkit/internal-docs/
+# This checkout's agent settings.
+.cortexkit/alfonso.jsonc
