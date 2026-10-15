@@ -1040,12 +1040,12 @@ timeout_s = 300
 id = "catalog-page-disclosures-stay-on-their-provider-page"
 guards = "withheld facts for later providers are disclosed only on the page serving those providers"
 file = "crates/fusiform-module/src/route.rs"
-old = '''    response
-        .withheld
-        .retain(|row| providers.contains(model_provider(&row.model)));'''
-new = '''    response
-        .withheld
-        .retain(|row| !row.model.is_empty()); // NON-VACUITY BREAK'''
+old = '''    for row in std::mem::take(&mut response.withheld) {
+        providers
+            .entry(model_provider(&row.model).to_owned())'''
+new = '''    for row in std::mem::take(&mut response.withheld) {
+        providers
+            .entry("p00".to_owned()) // NON-VACUITY BREAK'''
 edits = []
 test_file = "crates/fusiform-module/src/route/paging_tests.rs"
 runner = "cargo"

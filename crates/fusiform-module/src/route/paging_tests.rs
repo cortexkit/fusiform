@@ -378,3 +378,142 @@ fn embedded_seed_paging_measurement_and_unpaged_compatibility() {
         full_bytes.len()
     );
 }
+
+#[test]
+fn embedded_seed_page_wall_times() {
+    let (store, _dir) = empty_store();
+    crate::seed::seed_if_empty(&store).unwrap();
+    let mut args = json!({"paged":true});
+    let mut page_number = 0;
+    loop {
+        let started = std::time::Instant::now();
+        let page = get(&store, args.clone(), CATALOG_PAGE_BYTES);
+        let elapsed = started.elapsed();
+        page_number += 1;
+        println!(
+            "embedded seed page {page_number}: {:.3} ms",
+            elapsed.as_secs_f64() * 1000.0
+        );
+        match page.next_page_token {
+            Some(token) => args["page_token"] = token.into(),
+            None => break,
+        }
+    }
+    assert!(page_number >= 2);
+}
+
+// Retained only as an independent compatibility oracle: this is the previous
+// candidate-by-candidate algorithm, not the production size-accounting path.
+fn candidate_reference_page(
+    response: CatalogGetResponse,
+    cursor: Option<&PageCursor>,
+    budget: usize,
+) -> CatalogGetResponse {
+    let mut providers: BTreeSet<String> = response
+        .models
+        .keys()
+        .chain(response.withheld.iter().map(|row| &row.model))
+        .chain(response.curated.iter().map(|row| &row.model))
+        .chain(response.retired.iter().map(|row| &row.model))
+        .chain(response.aliased.iter().map(|row| &row.model))
+        .chain(response.billing_rules.iter().map(|row| &row.model))
+        .map(|model| model_provider(model).to_owned())
+        .chain(response.uncertain.iter().map(|row| row.provider_id.clone()))
+        .collect();
+    if let Some(cursor) = cursor {
+        providers.retain(|provider| provider > &cursor.provider);
+    }
+    let mut selected = BTreeSet::new();
+    let mut page = response.clone();
+    scope_page(&mut page, &selected);
+    for (index, provider) in providers.iter().enumerate() {
+        selected.insert(provider.clone());
+        let mut candidate = response.clone();
+        scope_page(&mut candidate, &selected);
+        candidate.next_page_token = (index + 1 < providers.len()).then(|| {
+            format!(
+                "v1:{}:{}:{}",
+                response.catalog_version, response.resolved_at_ms, provider
+            )
+        });
+        let size = serde_json::to_vec(&candidate).unwrap().len();
+        if size > budget && selected.len() > 1 {
+            break;
+        }
+        page = candidate;
+        if size > budget {
+            break;
+        }
+    }
+    page
+}
+
+#[test]
+fn linear_packing_matches_candidate_reference_boundaries() {
+    let (store, _dir) = fixture();
+    for args in [
+        json!({}),
+        json!({"at_ms":5000}),
+        json!({"at_ms":5000,"fact_prefixes":["rate.input"]}),
+    ] {
+        let mut full = get(&store, args, usize::MAX);
+        // JSON escaping changes byte counts in both entry keys and page tokens.
+        full.models.insert(
+            "provider:\"\\μ/m".into(),
+            BTreeMap::from([("model.family".into(), json!("escaped\"\\value\nμ"))]),
+        );
+        let all: BTreeSet<_> = full
+            .models
+            .keys()
+            .map(|m| model_provider(m).to_owned())
+            .chain(
+                full.withheld
+                    .iter()
+                    .map(|row| model_provider(&row.model).to_owned()),
+            )
+            .collect();
+        let mut budgets = BTreeSet::from([1, 2600, 4096]);
+        let mut selected = BTreeSet::new();
+        for (index, provider) in all.iter().enumerate() {
+            selected.insert(provider.clone());
+            let mut candidate = full.clone();
+            scope_page(&mut candidate, &selected);
+            candidate.next_page_token = (index + 1 < all.len()).then(|| {
+                format!(
+                    "v1:{}:{}:{}",
+                    full.catalog_version, full.resolved_at_ms, provider
+                )
+            });
+            let size = serde_json::to_vec(&candidate).unwrap().len();
+            budgets.extend([size - 1, size, size + 1]);
+        }
+        let mut multi_page = false;
+        for budget in budgets {
+            let mut cursor = None;
+            let mut page_count = 0;
+            loop {
+                let expected = candidate_reference_page(full.clone(), cursor.as_ref(), budget);
+                let actual = page_catalog(full.clone(), cursor.as_ref(), budget).unwrap();
+                assert_eq!(
+                    actual.models.keys().collect::<Vec<_>>(),
+                    expected.models.keys().collect::<Vec<_>>(),
+                    "budget {budget}, page {page_count}"
+                );
+                assert_eq!(
+                    actual.next_page_token, expected.next_page_token,
+                    "budget {budget}, page {page_count}"
+                );
+                page_count += 1;
+                match actual.next_page_token {
+                    Some(token) => cursor = Some(parse_page_token(&token).unwrap()),
+                    None => break,
+                }
+            }
+            multi_page |= page_count > 1;
+        }
+        assert!(
+            multi_page,
+            "reference comparison must cross page boundaries"
+        );
+    }
+}

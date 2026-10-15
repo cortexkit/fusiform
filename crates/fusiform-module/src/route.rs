@@ -1038,6 +1038,7 @@ fn model_provider(model: &str) -> &str {
         .0
 }
 
+#[cfg(test)]
 fn scope_page(response: &mut CatalogGetResponse, providers: &BTreeSet<String>) {
     response
         .models
@@ -1063,55 +1064,247 @@ fn scope_page(response: &mut CatalogGetResponse, providers: &BTreeSet<String>) {
 }
 
 fn page_catalog(
-    response: CatalogGetResponse,
+    mut response: CatalogGetResponse,
     cursor: Option<&PageCursor>,
     budget: usize,
 ) -> Result<CatalogGetResponse, RouteError> {
-    // Include disclosure-only providers too: withholding every matching fact
-    // must not cause that provider's explanation to disappear between pages.
-    let mut providers: BTreeSet<String> = response
-        .models
-        .keys()
-        .chain(response.withheld.iter().map(|r| &r.model))
-        .chain(response.curated.iter().map(|r| &r.model))
-        .chain(response.retired.iter().map(|r| &r.model))
-        .chain(response.aliased.iter().map(|r| &r.model))
-        .chain(response.billing_rules.iter().map(|r| &r.model))
-        .map(|model| model_provider(model).to_string())
-        .chain(response.uncertain.iter().map(|r| r.provider_id.clone()))
-        .collect();
+    let mut providers = partition_providers(&mut response);
     if let Some(cursor) = cursor {
-        providers.retain(|provider| provider > &cursor.provider);
+        providers.retain(|provider, _| provider > &cursor.provider);
     }
-    let mut selected = BTreeSet::new();
-    let mut page = response.clone();
-    scope_page(&mut page, &selected);
-    for (index, provider) in providers.iter().enumerate() {
-        selected.insert(provider.clone());
-        let mut candidate = response.clone();
-        scope_page(&mut candidate, &selected);
-        candidate.next_page_token = (index + 1 < providers.len()).then(|| {
-            format!(
-                "v1:{}:{}:{}",
-                response.catalog_version, response.resolved_at_ms, provider
-            )
-        });
-        // Measure the same compact response serialization sent by the handler,
-        // including disclosures and the continuation token, not just the models.
-        let size = serde_json::to_vec(&candidate)
-            .map_err(|e| RouteError::unavailable(e.to_string()))?
-            .len();
-        if size > budget && selected.len() > 1 {
+    response.next_page_token = None;
+    let mut sized = Vec::with_capacity(providers.len());
+    let mut token_reserve = 0;
+    for (provider, rows) in providers {
+        let contribution = rows.contribution()?;
+        let token = format!(
+            "v1:{}:{}:{}",
+            response.catalog_version, response.resolved_at_ms, provider
+        );
+        let token_bytes = compact_size(&token)? + r#","next_page_token":"#.len();
+        token_reserve = token_reserve.max(token_bytes);
+        sized.push((provider, rows, contribution, token, token_bytes));
+    }
+    // Reserve the largest encoded token before packing. Replacing that reserve
+    // with each boundary's actual token cost preserves exact greedy boundaries,
+    // including the final page, which needs no token at all.
+    let mut estimate = PageEstimate {
+        bytes: compact_size(&response)? + token_reserve,
+        present: [false; 7],
+    };
+    let mut count = 0;
+    for (index, (_, _, contribution, _, token_bytes)) in sized.iter().enumerate() {
+        let candidate = estimate.with_provider(contribution)?;
+        let token_bytes = if index + 1 < sized.len() {
+            *token_bytes
+        } else {
+            0
+        };
+        let size = candidate.bytes - token_reserve + token_bytes;
+        if size > budget && count > 0 {
             break;
         }
-        page = candidate;
-        // Always return one whole provider, even over budget. Providers exceeding
-        // the supervisor's 4 MiB frame limit would need model-level paging.
+        count += 1;
+        estimate = candidate;
         if size > budget {
             break;
         }
     }
-    Ok(page)
+    let mut boundaries = Vec::with_capacity(count);
+    let mut has_more = count < sized.len();
+    for (provider, rows, _, token, _) in sized.into_iter().take(count) {
+        rows.append_to(&mut response);
+        boundaries.push((provider, token));
+    }
+    let initial_count = boundaries.len();
+    loop {
+        response.next_page_token = if has_more {
+            boundaries.last().map(|(_, token)| token.clone())
+        } else {
+            None
+        };
+        // Normally the additive estimate is exact, so the completed page is
+        // serialized just once. Keep a bounded fallback if the wire shape and
+        // accounting ever diverge: remove a whole provider, never individual rows.
+        if compact_size(&response)? <= budget || boundaries.len() <= 1 {
+            return Ok(response);
+        }
+        let (last, _) = boundaries
+            .pop()
+            .expect("an oversized multi-provider page has a last provider");
+        let mut remaining = partition_providers(&mut response);
+        assert!(
+            remaining.remove(&last).is_some(),
+            "page rebuild must remove its last provider"
+        );
+        assert!(
+            remaining.len() == boundaries.len() && boundaries.len() < initial_count,
+            "page rebuild must strictly decrease the provider count"
+        );
+        for rows in remaining.into_values() {
+            rows.append_to(&mut response);
+        }
+        has_more = true;
+        // Always return one whole provider, even over budget. Providers exceeding
+        // the supervisor's 4 MiB frame limit would need model-level paging.
+    }
+}
+
+#[derive(Default, serde::Serialize)]
+struct ProviderRows {
+    models: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    curated: Vec<fusiform_protocol::CuratedModelWire>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    withheld: Vec<WithheldFactWire>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    retired: Vec<fusiform_protocol::RetiredModelWire>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    uncertain: Vec<UncertainFactWire>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    aliased: Vec<fusiform_protocol::AliasedModelWire>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    billing_rules: Vec<BillingRuleWire>,
+}
+
+// The empty models object is already in the envelope. Optional array headers
+// appear only once per page; provider payloads supply their interior JSON bytes.
+const DISCLOSURE_HEADERS: [&str; 6] = [
+    r#","curated":[]"#,
+    r#","withheld":[]"#,
+    r#","retired":[]"#,
+    r#","uncertain":[]"#,
+    r#","aliased":[]"#,
+    r#","billing_rules":[]"#,
+];
+
+struct ProviderContribution {
+    bytes: usize,
+    present: [bool; 7],
+}
+
+#[derive(Clone, Copy)]
+struct PageEstimate {
+    bytes: usize,
+    present: [bool; 7],
+}
+
+impl PageEstimate {
+    fn with_provider(mut self, provider: &ProviderContribution) -> Result<Self, RouteError> {
+        let mut added = provider.bytes;
+        for (index, present) in provider.present.iter().enumerate() {
+            if *present {
+                added += if self.present[index] {
+                    1
+                } else if index > 0 {
+                    DISCLOSURE_HEADERS[index - 1].len()
+                } else {
+                    0
+                };
+                self.present[index] = true;
+            }
+        }
+        self.bytes = self
+            .bytes
+            .checked_add(added)
+            .ok_or_else(|| RouteError::unavailable("catalog page size overflow"))?;
+        Ok(self)
+    }
+}
+
+impl ProviderRows {
+    fn contribution(&self) -> Result<ProviderContribution, RouteError> {
+        let present = [
+            !self.models.is_empty(),
+            !self.curated.is_empty(),
+            !self.withheld.is_empty(),
+            !self.retired.is_empty(),
+            !self.uncertain.is_empty(),
+            !self.aliased.is_empty(),
+            !self.billing_rules.is_empty(),
+        ];
+        let headers = DISCLOSURE_HEADERS
+            .iter()
+            .zip(&present[1..])
+            .filter_map(|(header, present)| present.then_some(header.len()))
+            .sum::<usize>();
+        // This serializes each provider's map entries and disclosure rows once,
+        // including escaped keys, values, and separators within each collection.
+        let bytes = compact_size(self)? - r#"{"models":{}}"#.len() - headers;
+        Ok(ProviderContribution { bytes, present })
+    }
+
+    fn append_to(self, page: &mut CatalogGetResponse) {
+        page.models.extend(self.models);
+        page.curated.extend(self.curated);
+        page.withheld.extend(self.withheld);
+        page.retired.extend(self.retired);
+        page.uncertain.extend(self.uncertain);
+        page.aliased.extend(self.aliased);
+        page.billing_rules.extend(self.billing_rules);
+    }
+}
+
+fn compact_size(value: &impl serde::Serialize) -> Result<usize, RouteError> {
+    serde_json::to_vec(value)
+        .map(|bytes| bytes.len())
+        .map_err(|e| RouteError::unavailable(e.to_string()))
+}
+
+fn partition_providers(response: &mut CatalogGetResponse) -> BTreeMap<String, ProviderRows> {
+    let mut providers: BTreeMap<String, ProviderRows> = BTreeMap::new();
+    for (model, facts) in std::mem::take(&mut response.models) {
+        providers
+            .entry(model_provider(&model).to_owned())
+            .or_default()
+            .models
+            .insert(model, facts);
+    }
+    // Include disclosure-only providers: withholding every matching fact must
+    // not make that provider's explanation disappear between pages.
+    for row in std::mem::take(&mut response.withheld) {
+        providers
+            .entry(model_provider(&row.model).to_owned())
+            .or_default()
+            .withheld
+            .push(row);
+    }
+    for row in std::mem::take(&mut response.uncertain) {
+        providers
+            .entry(row.provider_id.clone())
+            .or_default()
+            .uncertain
+            .push(row);
+    }
+    for row in std::mem::take(&mut response.curated) {
+        providers
+            .entry(model_provider(&row.model).to_owned())
+            .or_default()
+            .curated
+            .push(row);
+    }
+    for row in std::mem::take(&mut response.retired) {
+        providers
+            .entry(model_provider(&row.model).to_owned())
+            .or_default()
+            .retired
+            .push(row);
+    }
+    for row in std::mem::take(&mut response.aliased) {
+        providers
+            .entry(model_provider(&row.model).to_owned())
+            .or_default()
+            .aliased
+            .push(row);
+    }
+    for row in std::mem::take(&mut response.billing_rules) {
+        providers
+            .entry(model_provider(&row.model).to_owned())
+            .or_default()
+            .billing_rules
+            .push(row);
+    }
+    providers
 }
 
 struct SelectedPlane {
