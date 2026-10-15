@@ -232,6 +232,7 @@ fn every_response_type_round_trips() {
     use std::collections::BTreeMap;
 
     let catalog = CatalogGetResponse {
+        next_page_token: None,
         curated: vec![CuratedModelWire {
             model: "meta/muse-wonder-full-1.0".into(),
             auth_methods: vec!["oauth".into()],

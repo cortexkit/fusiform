@@ -21,7 +21,7 @@ Tools, as served: `catalog.get`, `catalog.history`, `catalog.status`,
 
 | Tool | Execution mode | What it does |
 | --- | --- | --- |
-| `catalog.get` | pure | read the catalog, optionally at a past instant or on a billing plane |
+| `catalog.get` | pure | read the catalog, optionally at a past instant, in whole-provider pages, or on a billing plane |
 | `catalog.history` | pure | every era for one fact |
 | `catalog.status` | pure | recent polls, versions and counts |
 | `catalog.correct` | mutating | record that fusiform's record was wrong over a window |
@@ -36,6 +36,15 @@ and that the manifest and the dispatch table list the same tools
 (`route::the_manifest_and_the_dispatch_agree_on_which_tools_exist`). Both are
 in `crates/fusiform-module/tests/it/`. Request
 and response fields are in [`wire-contract.md`](wire-contract.md).
+
+For whole-catalog reads, `paged: true` enables greedy 3 MiB whole-provider
+pages, ordered by provider id. Forward `next_page_token` as `page_token` with
+the same filters until absent. Tokens preserve page one's version and resolved
+instant; a changed version is `refused` and requires restarting from page one.
+Paging cannot be combined with provider/model selectors or a billing plane.
+Unpaged responses remain unchanged at any size during consumer migration
+(`route::paging_tests::pages_cover_whole_providers_in_order_and_scope_disclosures`,
+`route::paging_tests::continuation_after_era_write_is_refused`).
 
 Every tool name contains a dot (`catalog.*` for the observed plane, `plan.*`
 for the curated one). An MCP gateway that accepts only `[A-Za-z0-9_-]+` tool

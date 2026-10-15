@@ -373,6 +373,20 @@ pub struct CatalogGetRequest {
     #[serde(default)]
     pub provider_id: Option<String>,
 
+    /// Read whole providers in ascending provider-id order, within a 3 MiB page.
+    /// Requires no provider_id, model_id, or auth_method. If catalog_version
+    /// changes between pages, the continuation is refused; discard the partial
+    /// catalog and restart from page one. Keep all filters unchanged across
+    /// pages. Explicit at_ms is allowed for historical reads; current reads
+    /// must not switch to at_ms because that would omit serve-time derivations.
+    #[serde(default)]
+    pub paged: bool,
+
+    /// Opaque snapshot cursor from next_page_token; omit on page one.
+    /// Valid only with paged: true and without provider_id or model_id.
+    #[serde(default)]
+    pub page_token: Option<String>,
+
     /// Select this provider's billing plane: `apikey`, `chatgpt`, `oauth`, or
     /// `antigravity`. Requires `provider_id` and is current-only (no `at_ms`).
     /// Absent means the ordinary catalog view, without plane rules or proxies.
@@ -384,6 +398,10 @@ pub struct CatalogGetRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CatalogGetResponse {
     pub source: String,
+    /// Continue with this opaque token and paged: true; absent on the last page
+    /// and every unpaged read. Restart from page one if catalog_version changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_page_token: Option<String>,
     /// The instant this snapshot resolves to, always concrete.
     ///
     /// # This is the field that tells a shrunken catalog from a historical one

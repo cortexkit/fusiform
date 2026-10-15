@@ -278,6 +278,8 @@ Every field is optional; `{}` reads the current catalog.
 | `provider_id` | string | none | only this provider |
 | `model_id` | string | none | only this model; requires `provider_id` |
 | `auth_method` | string | none | select a billing plane; see [`billing-planes.md`](billing-planes.md) |
+| `paged` | boolean | `false` | read whole providers in bounded pages; no provider/model/plane selector |
+| `page_token` | string | none | opaque continuation from `next_page_token`; requires `paged: true` |
 
 `model_id` without `provider_id` is `bad_request`
 (`route::a_model_id_without_a_provider_is_refused`).
@@ -290,6 +292,7 @@ Every field is optional; `{}` reads the current catalog.
 | `resolved_at_ms` | always | §3 |
 | `catalog_version` | always | §3 (`route::the_response_carries_the_catalog_version`) |
 | `models` | always | §4 |
+| `next_page_token` | on a non-final paged response | opaque continuation for the next page; absent on all unpaged reads |
 | `withheld` | when non-empty | §5.3 |
 | `retired` | when non-empty | §5.4 |
 | `uncertain` | when non-empty | §5.4 |
@@ -303,6 +306,58 @@ Every response field reaches the golden fixture
 served bytes match it (`golden_payload::the_served_payloads_match_the_golden_fixture`).
 A read without `auth_method` carries no plane fields
 (`golden_payload::every_non_plane_golden_case_has_no_plane_bytes`).
+
+#### Whole-catalog paging
+
+Send `{"paged":true}` for page one. Repeat the same filters (including `at_ms`
+if supplied) with `page_token` set to the previous `next_page_token` until that
+field is absent. Providers are ordered by ascending provider id (the model map
+is a `BTreeMap` keyed by `provider/model`); a provider is never split. Pages
+greedily include whole providers while the **actual compact serialized response**,
+including disclosures and the token, fits 3 MiB (3 × 1024 × 1024 bytes). This
+leaves envelope/framing headroom below the supervisor's 4 MiB per-module-reply
+frame limit. A single provider exceeding 3 MiB is returned alone, never dropped;
+a provider exceeding 4 MiB would require model-level paging.
+
+All model-scoped disclosures (`withheld`, `uncertain`, `curated`, `aliased`,
+`retired`, `billing_rules`) are scoped to that page's providers. Providers with
+only withheld facts still have a page. Bulk reads do not populate `retired`,
+and paging cannot select a billing plane, so `plane`/`billing_rules` are absent.
+`source`, `catalog_version`, and **page one's `resolved_at_ms`** repeat on every
+page. Merge the model maps and concatenate disclosures to reconstruct the read.
+
+The opaque token's current versioned encoding is
+`v1:<catalog_version>:<resolved_at_ms>:<last_provider_id>`. The two numbers are
+canonical decimal i64 values; only the first three colons are separators.
+Consumers must forward the token unchanged, not construct it. A malformed token,
+a token without `paged: true`, or paging combined with `provider_id`, `model_id`,
+or `auth_method` is `bad_request`.
+
+If the store's current version differs from the token's, continuation is
+`refused` with an instruction to restart from page one. This is a deliberate,
+non-retryable decline of that snapshot, not malformed input or a transient
+availability failure: retrying the same token cannot repair it. Discard partial
+pages and begin a new read. An unchanged version means unchanged stored content,
+so subsequent pages truthfully report the first page's instant. Current reads
+remain current reads internally: converting them into `at_ms` reads would skip
+serve-time inheritance, aliases, and curated rows and change their values.
+Historical paging is supported by repeating the explicit `at_ms` on every page.
+
+**Migration compatibility:** unpaged reads remain byte-for-byte unchanged at any
+size, including responses above 4 MiB; there is no truncation or size refusal in
+this release. Consumers must migrate before the supervisor enforces its limit.
+`ck models get` without `--provider` pages automatically, restarting at most
+three times on snapshot refusals or version changes, and merges before JSON
+output or rendering. Provider-scoped CLI reads remain unpaged.
+
+Tests: `route::paging_tests::pages_cover_whole_providers_in_order_and_scope_disclosures`,
+`route::paging_tests::disclosure_only_providers_survive_and_oversized_providers_are_not_split`,
+`route::paging_tests::continuation_after_era_write_is_refused`,
+`route::paging_tests::invalid_paging_requests_are_bad_requests`,
+`route::paging_tests::embedded_seed_paging_measurement_and_unpaged_compatibility`,
+`paging_tests::paging_loop_merges_and_restarts_on_version_change`, and
+`paging_tests::paging_loop_restarts_snapshot_refusals_and_bounds_restarts`.
+The golden case `catalog.get — first provider page` carries a real continuation.
 
 ### 5.3 Refusals and withheld facts
 

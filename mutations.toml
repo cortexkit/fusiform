@@ -1010,7 +1010,7 @@ build_timeout_s = 1800
 id = "manifest-schema-matches-request-fields"
 guards = "every tool's manifest input schema names exactly the fields its request type decodes"
 file = "crates/fusiform-module/src/lib.rs"
-old = "                        \"auth_method\": {\"type\": \"string\"}\n"
+old = "                        \"auth_method\": {\"type\": \"string\"},\n"
 new = ""
 edits = []
 test_file = "crates/fusiform-module/tests/it/route.rs"
@@ -1035,3 +1035,58 @@ target = "--lib"
 expect_red = ["tests::executables_never_go_under_var_folders"]
 only = false
 timeout_s = 300
+
+[[control]]
+id = "catalog-page-disclosures-stay-on-their-provider-page"
+guards = "withheld facts for later providers are disclosed only on the page serving those providers"
+file = "crates/fusiform-module/src/route.rs"
+old = '''    response
+        .withheld
+        .retain(|row| providers.contains(model_provider(&row.model)));'''
+new = '''    response
+        .withheld
+        .retain(|row| !row.model.is_empty()); // NON-VACUITY BREAK'''
+edits = []
+test_file = "crates/fusiform-module/src/route/paging_tests.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::paging_tests::pages_cover_whole_providers_in_order_and_scope_disclosures"]
+select = "expected"
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+[[control]]
+id = "catalog-page-token-rejects-changed-version"
+guards = "a snapshot token never continues after a catalog version change"
+file = "crates/fusiform-module/src/route.rs"
+old = "    if version != cursor.catalog_version {"
+new = "    if false && version != cursor.catalog_version { // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/src/route/paging_tests.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::paging_tests::continuation_after_era_write_is_refused"]
+select = "expected"
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+[[control]]
+id = "cli-catalog-paging-restarts-on-version-change"
+guards = "the CLI discards partial pages and restarts instead of merging different catalog versions"
+file = "crates/fusiform-cli/src/main.rs"
+old = ".is_some_and(|old| old.catalog_version != page.catalog_version)"
+new = ".is_some_and(|old| false && old.catalog_version != page.catalog_version) /* NON-VACUITY BREAK */"
+edits = []
+test_file = "crates/fusiform-cli/src/main.rs"
+runner = "cargo"
+package = "fusiform-cli"
+target = "--bin ck-models"
+expect_red = ["paging_tests::paging_loop_merges_and_restarts_on_version_change"]
+select = "expected"
+only = false
+timeout_s = 600
+build_timeout_s = 1800

@@ -374,9 +374,45 @@ fn render_all() -> String {
             "plane labels must not replace an ordinary golden case: {label}"
         );
     }
+    ordinary
+        .as_object_mut()
+        .unwrap()
+        .insert("catalog.get — first provider page".into(), render_paged());
     let mut text = serde_json::to_string_pretty(&ordinary).unwrap();
     text.push('\n');
     text
+}
+
+fn render_paged() -> serde_json::Value {
+    let (store, _dir) = store();
+    // The second provider cannot fit with the first. Its large family value
+    // stays off this page, keeping the golden small while using the real budget.
+    let upstream = serde_json::json!({
+        "000-page": {"id":"000-page","name":"Synthetic first provider","models":{
+            "m":{"id":"m","name":"Synthetic model","family":"synthetic"}}},
+        "001-page": {"id":"001-page","name":"Synthetic page boundary","models":{
+            "m":{"id":"m","name":"Synthetic model","family":"x".repeat(3 * 1024 * 1024)}}}
+    });
+    let catalog = normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
+        .unwrap()
+        .catalog;
+    let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
+    // Keep the ordinary fixture's rows intact; only these synthetic providers
+    // are added to the independent store used for this one golden case.
+    let eras: Vec<_> = plan
+        .eras
+        .into_iter()
+        .filter(|e| e.provider_id.starts_with("00"))
+        .collect();
+    store.append_eras(&eras).unwrap();
+    let request = serde_json::json!({"name":"catalog.get","arguments":{"paged":true,"at_ms":1000}});
+    let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+    let response = serde_json::to_value(response).unwrap();
+    assert!(response["next_page_token"]
+        .as_str()
+        .unwrap()
+        .ends_with(":000-page"));
+    serde_json::json!({"request":request,"response":response})
 }
 
 fn non_plane_leaks(doc: &serde_json::Value) -> (usize, Vec<String>) {
@@ -436,8 +472,9 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         .count();
     assert_eq!(plain_plane_cases, 1);
     for (text, expected) in [
-        (GOLDEN.to_string(), cases().len() + plain_plane_cases),
+        (GOLDEN.to_string(), cases().len() + plain_plane_cases + 1),
         (render(), cases().len()),
+        (serde_json::json!({"paged":render_paged()}).to_string(), 1),
     ] {
         let doc = serde_json::from_str(&text).unwrap();
         let (checked, leaks) = non_plane_leaks(&doc);

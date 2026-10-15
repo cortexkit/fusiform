@@ -233,7 +233,9 @@ pub fn manifest() -> ModuleManifest {
                         // Selects a provider's billing plane. Validated by the
                         // route against its closed list, so an unknown method is
                         // refused by name rather than by this schema.
-                        "auth_method": {"type": "string"}
+                        "auth_method": {"type": "string"},
+                        "paged": {"type": "boolean", "default": false},
+                        "page_token": {"type": "string"}
                     },
                     "additionalProperties": false
                 }),

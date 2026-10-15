@@ -302,6 +302,8 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
             let mut a = serde_json::Map::new();
             if let Some(p) = &args.provider {
                 a.insert("provider_id".into(), serde_json::json!(p));
+            } else {
+                a.insert("paged".into(), serde_json::json!(true));
             }
             if let Some(method) = &args.auth_method {
                 a.insert("auth_method".into(), serde_json::json!(method));
@@ -428,7 +430,16 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
 
     let (tool, arguments) = request_for(&args)?;
 
-    let response = call(args.connection_file.as_deref(), tool, arguments).await?;
+    let response = if args.command == "get" && args.provider.is_none() {
+        read_catalog_pages(arguments, |arguments| {
+            call(args.connection_file.as_deref(), tool, arguments)
+        })
+        .await?
+    } else {
+        call(args.connection_file.as_deref(), tool, arguments)
+            .await
+            .map_err(|e| e.to_string())?
+    };
 
     if args.json {
         println!(
@@ -449,6 +460,96 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
         _ => unreachable!("the command was validated above"),
     }
     Ok(())
+}
+
+#[derive(Debug)]
+enum CallFailure {
+    SnapshotChanged,
+    Other(String),
+}
+
+impl std::fmt::Display for CallFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SnapshotChanged => {
+                f.write_str("catalog changed since the first page; restart from page one")
+            }
+            Self::Other(message) => f.write_str(message),
+        }
+    }
+}
+
+impl From<String> for CallFailure {
+    fn from(message: String) -> Self {
+        Self::Other(message)
+    }
+}
+
+fn classify_call_error(tool: &str, error: subc_client_rs::CallError) -> CallFailure {
+    if let subc_client_rs::CallError::Module(body) = &error {
+        if body.code == fusiform_protocol::CODE_REFUSED
+            && body.message == "catalog changed since the first page; restart from page one"
+        {
+            return CallFailure::SnapshotChanged;
+        }
+    }
+    CallFailure::Other(format!("{tool} failed: {error}"))
+}
+
+async fn read_catalog_pages<F, Fut>(
+    first_request: serde_json::Value,
+    mut fetch: F,
+) -> Result<serde_json::Value, String>
+where
+    F: FnMut(serde_json::Value) -> Fut,
+    Fut: std::future::Future<Output = Result<serde_json::Value, CallFailure>>,
+{
+    let mut restarts = 0;
+    'restart: loop {
+        let mut request = first_request.clone();
+        let mut merged: Option<fusiform_protocol::CatalogGetResponse> = None;
+        loop {
+            let raw = match fetch(request.clone()).await {
+                Ok(raw) => raw,
+                Err(CallFailure::SnapshotChanged) => {
+                    if restarts == 3 {
+                        return Err("catalog kept changing; gave up after 3 restarts".into());
+                    }
+                    restarts += 1;
+                    continue 'restart;
+                }
+                Err(error) => return Err(error.to_string()),
+            };
+            let mut page: fusiform_protocol::CatalogGetResponse =
+                serde_json::from_value(raw).map_err(|e| format!("invalid catalog page: {e}"))?;
+            if merged
+                .as_ref()
+                .is_some_and(|old| old.catalog_version != page.catalog_version)
+            {
+                if restarts == 3 {
+                    return Err("catalog kept changing; gave up after 3 restarts".into());
+                }
+                restarts += 1;
+                continue 'restart;
+            }
+            let next = page.next_page_token.take();
+            if let Some(merged) = &mut merged {
+                merged.models.extend(page.models);
+                merged.withheld.extend(page.withheld);
+                merged.uncertain.extend(page.uncertain);
+                merged.curated.extend(page.curated);
+                merged.retired.extend(page.retired);
+                merged.aliased.extend(page.aliased);
+                merged.billing_rules.extend(page.billing_rules);
+            } else {
+                merged = Some(page);
+            }
+            match next {
+                Some(token) => request["page_token"] = token.into(),
+                None => return serde_json::to_value(merged.unwrap()).map_err(|e| e.to_string()),
+            }
+        }
+    }
 }
 
 /// The connection-file ladder now lives in `subc-transport`, and this CLI calls
@@ -477,7 +578,7 @@ async fn call(
     override_path: Option<&Path>,
     tool: &str,
     arguments: serde_json::Value,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, CallFailure> {
     // The ladder is the transport crate's, not a copy of it.
     //
     // Four rungs lived here, dated against `ck`'s own reader because a copy
@@ -514,7 +615,8 @@ async fn call(
              If the daemon is running, name its connection file with --subc.",
             candidates.len(),
             tried.join("\n")
-        ));
+        )
+        .into());
     };
 
     // Through the owner's constructor: `BindIdentity` became non-exhaustive in
@@ -553,12 +655,12 @@ async fn call(
             opts,
         )
         .await
-        .map_err(|e| format!("{tool} failed: {e}"))?;
+        .map_err(|e| classify_call_error(tool, e))?;
 
     consumer.close().await;
 
     serde_json::from_slice(&raw)
-        .map_err(|e| format!("{tool} returned a body that did not parse: {e}"))
+        .map_err(|e| CallFailure::Other(format!("{tool} returned a body that did not parse: {e}")))
 }
 
 fn print_status(response: &serde_json::Value) {
@@ -3129,5 +3231,129 @@ mod curated_render_tests {
         assert!(text.contains("curated at read time, not stored upstream"));
         assert!(text.contains("source: Authenticated probes"));
         assert!(!text.contains("check the fact key"));
+    }
+}
+
+#[cfg(test)]
+mod paging_tests {
+    use super::*;
+    use serde_json::{json, Value};
+    use std::collections::VecDeque;
+
+    fn page(version: i64, provider: &str, next: Option<&str>) -> Value {
+        let mut page = json!({
+            "source":"models.dev", "catalog_version":version, "resolved_at_ms":1000,
+            "models":{format!("{provider}/m"):{"limit.context":100}},
+            "curated":[{"model":format!("{provider}/m"),"auth_methods":["oauth"],"source_ref":"synthetic","review_by_ms":2000}]
+        });
+        if let Some(next) = next {
+            page["next_page_token"] = next.into();
+        }
+        page
+    }
+
+    #[test]
+    fn whole_catalog_requests_page_but_provider_reads_do_not() {
+        for flags in [
+            vec!["ck-models", "get"],
+            vec!["ck-models", "get", "--at", "1000", "--rates"],
+        ] {
+            let args = parse_args(flags.into_iter().map(OsString::from)).unwrap();
+            let (_, request) = request_for(&args).unwrap();
+            assert_eq!(request["paged"], true);
+            assert!(request.get("page_token").is_none());
+        }
+        let args = parse_args(
+            ["ck-models", "get", "--provider", "openai"]
+                .into_iter()
+                .map(OsString::from),
+        )
+        .unwrap();
+        let (_, request) = request_for(&args).unwrap();
+        assert!(request.get("paged").is_none());
+    }
+
+    #[tokio::test]
+    async fn paging_loop_merges_and_restarts_on_version_change() {
+        let mut pages = VecDeque::from([
+            Ok(page(1, "discard", Some("old"))),
+            Ok(page(2, "also-discard", None)),
+            Ok(page(2, "a", Some("new"))),
+            Ok(page(2, "b", None)),
+        ]);
+        let mut requests = Vec::new();
+        let result = read_catalog_pages(json!({"paged":true,"fact_prefixes":["limit."]}), |args| {
+            requests.push(args);
+            std::future::ready(pages.pop_front().expect("unexpected extra request"))
+        })
+        .await
+        .unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(requests[0].get("page_token").is_none());
+        assert_eq!(requests[1]["page_token"], "old");
+        assert!(requests[2].get("page_token").is_none());
+        assert_eq!(requests[3]["page_token"], "new");
+        assert!(requests
+            .iter()
+            .all(|r| r["fact_prefixes"] == json!(["limit."])));
+        assert_eq!(result["catalog_version"], 2);
+        assert_eq!(
+            result["models"],
+            json!({"a/m":{"limit.context":100},"b/m":{"limit.context":100}})
+        );
+        assert_eq!(result["curated"].as_array().unwrap().len(), 2);
+        assert!(result.get("next_page_token").is_none());
+    }
+
+    #[tokio::test]
+    async fn paging_loop_restarts_snapshot_refusals_and_bounds_restarts() {
+        let mut pages = VecDeque::from([
+            Ok(page(1, "discard", Some("old"))),
+            Err(CallFailure::SnapshotChanged),
+            Ok(page(2, "a", None)),
+        ]);
+        let result = read_catalog_pages(json!({"paged":true}), |_| {
+            std::future::ready(pages.pop_front().unwrap())
+        })
+        .await
+        .unwrap();
+        assert_eq!(result["models"], json!({"a/m":{"limit.context":100}}));
+        let mut calls = 0;
+        let error = read_catalog_pages(json!({"paged":true}), |_| {
+            calls += 1;
+            std::future::ready(Err(CallFailure::SnapshotChanged))
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(calls, 4);
+        assert!(error.contains("after 3 restarts"));
+        let mut calls = 0;
+        let error = read_catalog_pages(json!({"paged":true}), |_| {
+            calls += 1;
+            std::future::ready(Ok(page(calls, "a", Some("next"))))
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(calls, 8);
+        assert!(error.contains("after 3 restarts"));
+    }
+
+    #[test]
+    fn only_snapshot_module_refusals_trigger_a_restart() {
+        let message = "catalog changed since the first page; restart from page one";
+        for (code, text, restart) in [
+            (fusiform_protocol::CODE_REFUSED, message, true),
+            (fusiform_protocol::CODE_BAD_REQUEST, message, false),
+            (
+                fusiform_protocol::CODE_REFUSED,
+                "a different deliberate refusal",
+                false,
+            ),
+        ] {
+            let body: subc_protocol::ErrorBody =
+                serde_json::from_value(json!({"code":code,"message":text})).unwrap();
+            let error = classify_call_error("catalog.get", subc_client_rs::CallError::Module(body));
+            assert_eq!(matches!(error, CallFailure::SnapshotChanged), restart);
+        }
     }
 }

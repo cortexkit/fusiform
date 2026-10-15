@@ -1008,6 +1008,38 @@
       ]
     }
   },
+  "catalog.get — first provider page": {
+    "request": {
+      "arguments": {
+        "at_ms": 1000,
+        "paged": true
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "000-page/m": {
+          "capability.attachment": null,
+          "capability.input_modalities": null,
+          "capability.output_modalities": null,
+          "capability.reasoning": null,
+          "capability.reasoning_options": null,
+          "capability.tool_call": null,
+          "existence": "present",
+          "limit.context": null,
+          "limit.output": null,
+          "model.canonical_id": null,
+          "model.family": "synthetic",
+          "model.open_weights": null,
+          "model.status": null
+        }
+      },
+      "next_page_token": "v1:0:1000:000-page",
+      "resolved_at_ms": 1000,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — inside a corrected interval": {
     "request": {
       "arguments": {

@@ -26,6 +26,9 @@ use fusiform_store::serve::{CatalogQuery, CatalogSnapshot, Presence};
 use fusiform_store::{CatalogError, CatalogStore, FactKey};
 use serde::Deserialize;
 
+#[cfg(test)]
+mod paging_tests;
+
 // The served contract lives in `fusiform-protocol` so a consumer can compile
 // against it without taking this module's store, network or runtime. Re-exported
 // here because this file is where the contract is USED, and a reader following
@@ -697,6 +700,19 @@ pub fn serve_catalog_get(
     store: &CatalogStore,
     body: &[u8],
 ) -> Result<CatalogGetResponse, RouteError> {
+    serve_catalog_get_with_budget(store, body, CATALOG_PAGE_BYTES)
+}
+
+// The supervisor limits each module reply frame to 4 MiB. A 3 MiB compact
+// response leaves headroom for its envelope/framing. Unpaged reads remain
+// unchanged until consumers have migrated to paging.
+const CATALOG_PAGE_BYTES: usize = 3 * 1024 * 1024;
+
+fn serve_catalog_get_with_budget(
+    store: &CatalogStore,
+    body: &[u8],
+    page_budget: usize,
+) -> Result<CatalogGetResponse, RouteError> {
     // An empty body is a request for everything. A consumer calling a read with
     // no arguments should not have to know that `{}` is the incantation.
     let mut request: CatalogGetRequest = if body.is_empty() {
@@ -707,6 +723,34 @@ pub fn serve_catalog_get(
     };
 
     let source = parse_source(request.source.as_deref())?;
+    if request.page_token.is_some() && !request.paged {
+        return Err(RouteError::bad_request("page_token requires paged: true"));
+    }
+    if request.paged
+        && (request.provider_id.is_some()
+            || request.model_id.is_some()
+            || request.auth_method.is_some())
+    {
+        return Err(RouteError::bad_request(
+            "paged cannot be combined with provider_id, model_id, or auth_method",
+        ));
+    }
+    let cursor = request
+        .page_token
+        .as_deref()
+        .map(parse_page_token)
+        .transpose()?;
+    if let Some(cursor) = &cursor {
+        check_page_version(
+            store.catalog_version().map_err(|e| store_error(&e))?,
+            cursor,
+        )?;
+        if request.at_ms.is_some_and(|at| at != cursor.resolved_at_ms) {
+            return Err(RouteError::bad_request(
+                "at_ms must match the first page's instant",
+            ));
+        }
+    }
 
     // Select the plane before reading rows. A subscription with no declared
     // billing claim must never receive the API card, even if its provider or
@@ -920,11 +964,154 @@ pub fn serve_catalog_get(
         response.models.insert(disclosure.model.clone(), facts);
         response.curated.push(disclosure);
     }
-    Ok(finish_plane_view(
-        response,
-        plane,
-        requested_prefixes.as_ref(),
-    ))
+    let mut response = finish_plane_view(response, plane, requested_prefixes.as_ref());
+    if request.paged {
+        // Rendering can consult aliases after the main store read. Reject a
+        // concurrent version change rather than publish a mixed first page.
+        let rendered = PageCursor {
+            catalog_version: response.catalog_version,
+            resolved_at_ms: response.resolved_at_ms,
+            provider: String::new(),
+        };
+        check_page_version(
+            store.catalog_version().map_err(|e| store_error(&e))?,
+            &rendered,
+        )?;
+        if let Some(cursor) = &cursor {
+            check_page_version(response.catalog_version, cursor)?;
+            // An unchanged catalog version means the stored content is unchanged,
+            // so this page is also the current view at page one's instant. Do not
+            // turn it into an at_ms query: that would omit serve-time derivations.
+            response.resolved_at_ms = cursor.resolved_at_ms;
+        }
+        response = page_catalog(response, cursor.as_ref(), page_budget)?;
+    }
+    Ok(response)
+}
+
+struct PageCursor {
+    catalog_version: i64,
+    resolved_at_ms: i64,
+    provider: String,
+}
+
+fn parse_page_token(token: &str) -> Result<PageCursor, RouteError> {
+    // v1:<catalog_version>:<resolved_at_ms>:<last_provider>; split only the
+    // first three separators so future provider ids may themselves contain ':'.
+    let invalid = || RouteError::bad_request("malformed page_token: expected v1 snapshot token");
+    let mut parts = token.splitn(4, ':');
+    if parts.next() != Some("v1") {
+        return Err(invalid());
+    }
+    let number = |text: Option<&str>| -> Result<i64, RouteError> {
+        let text = text.ok_or_else(invalid)?;
+        let value: i64 = text.parse().map_err(|_| invalid())?;
+        if value.to_string() != text {
+            return Err(invalid());
+        }
+        Ok(value)
+    };
+    let catalog_version = number(parts.next())?;
+    let resolved_at_ms = number(parts.next())?;
+    let provider = parts.next().filter(|p| !p.is_empty()).ok_or_else(invalid)?;
+    Ok(PageCursor {
+        catalog_version,
+        resolved_at_ms,
+        provider: provider.to_string(),
+    })
+}
+
+fn check_page_version(version: i64, cursor: &PageCursor) -> Result<(), RouteError> {
+    if version != cursor.catalog_version {
+        return Err(RouteError {
+            code: fusiform_protocol::CODE_REFUSED,
+            message: "catalog changed since the first page; restart from page one".into(),
+        });
+    }
+    Ok(())
+}
+
+fn model_provider(model: &str) -> &str {
+    model
+        .split_once('/')
+        .expect("served identities contain a provider")
+        .0
+}
+
+fn scope_page(response: &mut CatalogGetResponse, providers: &BTreeSet<String>) {
+    response
+        .models
+        .retain(|model, _| providers.contains(model_provider(model)));
+    response
+        .withheld
+        .retain(|row| providers.contains(model_provider(&row.model)));
+    response
+        .uncertain
+        .retain(|row| providers.contains(&row.provider_id));
+    response
+        .curated
+        .retain(|row| providers.contains(model_provider(&row.model)));
+    response
+        .retired
+        .retain(|row| providers.contains(model_provider(&row.model)));
+    response
+        .aliased
+        .retain(|row| providers.contains(model_provider(&row.model)));
+    response
+        .billing_rules
+        .retain(|row| providers.contains(model_provider(&row.model)));
+}
+
+fn page_catalog(
+    response: CatalogGetResponse,
+    cursor: Option<&PageCursor>,
+    budget: usize,
+) -> Result<CatalogGetResponse, RouteError> {
+    // Include disclosure-only providers too: withholding every matching fact
+    // must not cause that provider's explanation to disappear between pages.
+    let mut providers: BTreeSet<String> = response
+        .models
+        .keys()
+        .chain(response.withheld.iter().map(|r| &r.model))
+        .chain(response.curated.iter().map(|r| &r.model))
+        .chain(response.retired.iter().map(|r| &r.model))
+        .chain(response.aliased.iter().map(|r| &r.model))
+        .chain(response.billing_rules.iter().map(|r| &r.model))
+        .map(|model| model_provider(model).to_string())
+        .chain(response.uncertain.iter().map(|r| r.provider_id.clone()))
+        .collect();
+    if let Some(cursor) = cursor {
+        providers.retain(|provider| provider > &cursor.provider);
+    }
+    let mut selected = BTreeSet::new();
+    let mut page = response.clone();
+    scope_page(&mut page, &selected);
+    for (index, provider) in providers.iter().enumerate() {
+        selected.insert(provider.clone());
+        let mut candidate = response.clone();
+        scope_page(&mut candidate, &selected);
+        candidate.next_page_token = (index + 1 < providers.len()).then(|| {
+            format!(
+                "v1:{}:{}:{}",
+                response.catalog_version, response.resolved_at_ms, provider
+            )
+        });
+        // Measure the same compact response serialization sent by the handler,
+        // including disclosures and the continuation token, not just the models.
+        let size = serde_json::to_vec(&candidate)
+            .map_err(|e| RouteError::unavailable(e.to_string()))?
+            .len();
+        if size > budget && selected.len() > 1 {
+            break;
+        }
+        page = candidate;
+        // Always return one whole provider, even over budget. Providers exceeding
+        // the supervisor's 4 MiB frame limit would need model-level paging.
+        if size > budget {
+            break;
+        }
+    }
+    Ok(page)
 }
 
 struct SelectedPlane {
@@ -1409,6 +1596,7 @@ fn render(
         .collect();
 
     CatalogGetResponse {
+        next_page_token: None,
         source: source.as_str().to_string(),
         resolved_at_ms: snapshot.resolved_at.0,
         catalog_version: snapshot.catalog_version,

@@ -58,6 +58,19 @@ ck models get --provider openai --auth-method chatgpt
 - `--auth-method` selects a billing plane and requires `--provider`; it cannot
   be combined with `--at`. See [`billing-planes.md`](billing-planes.md).
 
+Without `--provider`, `get` automatically reads whole-provider pages and merges
+them before rendering or `--json` output. A catalog change during the read
+discards partial pages and restarts from page one; after three restarts the CLI
+fails clearly rather than displaying a mixed catalog. Provider reads stay
+unpaged (`paging_tests::whole_catalog_requests_page_but_provider_reads_do_not`,
+`paging_tests::paging_loop_restarts_snapshot_refusals_and_bounds_restarts`).
+Direct tool consumers should use `paged: true` and forward `next_page_token`
+as `page_token`, retaining all filters, until it is absent. See the
+[wire paging contract](wire-contract.md#whole-catalog-paging) for snapshot
+consistency and 3 MiB page sizing. Unpaged reads are still served unchanged at
+any size during migration, so clients must opt in before the supervisor starts
+enforcing its 4 MiB module-reply frame limit.
+
 ## See how one fact changed
 
 ```sh
