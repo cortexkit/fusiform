@@ -8,7 +8,8 @@
 //! This pins the whole table.
 
 use fusiform_protocol::refusal::{
-    RefusalKind, CODE_BAD_REQUEST, CODE_NO_COVERAGE, CODE_REFUSED, CODE_UNAVAILABLE,
+    RefusalKind, CODE_BAD_REQUEST, CODE_CATALOG_CHANGED, CODE_NO_COVERAGE, CODE_REFUSED,
+    CODE_UNAVAILABLE,
 };
 
 #[test]
@@ -18,7 +19,10 @@ fn every_code_maps_to_its_own_kind() {
         (CODE_NO_COVERAGE, RefusalKind::OutsideCoverage),
         (CODE_UNAVAILABLE, RefusalKind::Retryable),
         (CODE_REFUSED, RefusalKind::Declined),
+        (CODE_CATALOG_CHANGED, RefusalKind::RestartFromFirstPage),
     ];
+    // Restarting is not retrying: the same continuation is refused again.
+    assert!(!RefusalKind::of(CODE_CATALOG_CHANGED).is_retryable());
     for (code, kind) in table {
         assert_eq!(RefusalKind::of(code), kind, "{code} maps to the wrong kind");
     }

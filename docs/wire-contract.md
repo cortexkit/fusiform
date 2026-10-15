@@ -51,6 +51,7 @@ maps a code to what the consumer should do
 | `no_coverage` | `outside_coverage` | the request was well formed and fusiform has no catalog to answer it: unknown provider or model, an instant before the record begins, an undeclared billing plane, an unknown observation id | no; accept the answer |
 | `unavailable` | `retryable` | fusiform cannot answer now: no store is open, or a store read failed | yes |
 | `refused` | `declined` | a write fusiform declines because performing it would be wrong (a correction the planner rejects) | no; reconsider the request |
+| `catalog_changed` | `restart_from_first_page` | a paged read's continuation arrived after the catalog changed since its first page | no; restart the paged read from page one |
 | any other code | `unrecognized` | a code this build of the protocol crate does not know | no |
 
 Guarantees:
@@ -333,11 +334,10 @@ Consumers must forward the token unchanged, not construct it. A malformed token,
 a token without `paged: true`, or paging combined with `provider_id`, `model_id`,
 or `auth_method` is `bad_request`.
 
-If the store's current version differs from the token's, continuation is
-`refused` with an instruction to restart from page one. This is a deliberate,
-non-retryable decline of that snapshot, not malformed input or a transient
-availability failure: retrying the same token cannot repair it. Discard partial
-pages and begin a new read. An unchanged version means unchanged stored content,
+If the store's current version differs from the token's, the continuation is
+refused with its own code, `catalog_changed`, so a reader can recognise it
+without matching message text. Retrying the same token cannot repair it.
+Discard partial pages and begin a new read from page one. An unchanged version means unchanged stored content,
 so subsequent pages truthfully report the first page's instant. Current reads
 remain current reads internally: converting them into `at_ms` reads would skip
 serve-time inheritance, aliases, and curated rows and change their values.

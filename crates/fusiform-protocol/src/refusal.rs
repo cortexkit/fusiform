@@ -49,10 +49,18 @@ pub const CODE_UNAVAILABLE: &str = "unavailable";
 /// would withhold a value that is correct.
 pub const CODE_REFUSED: &str = "refused";
 
+/// A paged read's continuation arrived after the catalog changed since its
+/// first page, so the page cannot be served from the same snapshot.
+///
+/// Its own code because the response is specific: restart the paged read from
+/// page one. A reader must be able to tell this from any other refusal without
+/// matching message text, and retrying the same `page_token` fails the same way.
+pub const CODE_CATALOG_CHANGED: &str = "catalog_changed";
+
 /// What a consumer should DO about a refusal.
 ///
-/// Three kinds because they have three different responses, and a consumer that
-/// cannot tell them apart necessarily gets two of them wrong.
+/// One kind per response, because a consumer that cannot tell two kinds apart
+/// necessarily gets one of them wrong.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RefusalKind {
@@ -68,6 +76,9 @@ pub enum RefusalKind {
     /// A deliberate refusal to act. Retrying is wrong; the request itself is
     /// the thing to reconsider.
     Declined,
+    /// Restart the paged read from page one. The catalog changed between pages;
+    /// the same continuation token will be refused again.
+    RestartFromFirstPage,
     /// A code this consumer's build does not recognise.
     ///
     /// Present so an added code NARROWS what a consumer may conclude rather
@@ -90,6 +101,7 @@ impl RefusalKind {
             CODE_NO_COVERAGE => RefusalKind::OutsideCoverage,
             CODE_UNAVAILABLE => RefusalKind::Retryable,
             CODE_REFUSED => RefusalKind::Declined,
+            CODE_CATALOG_CHANGED => RefusalKind::RestartFromFirstPage,
             _ => RefusalKind::Unrecognized,
         }
     }

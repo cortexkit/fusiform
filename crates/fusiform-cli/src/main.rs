@@ -487,9 +487,8 @@ impl From<String> for CallFailure {
 
 fn classify_call_error(tool: &str, error: subc_client_rs::CallError) -> CallFailure {
     if let subc_client_rs::CallError::Module(body) = &error {
-        if body.code == fusiform_protocol::CODE_REFUSED
-            && body.message == "catalog changed since the first page; restart from page one"
-        {
+        // Keyed on the code alone: message text is for people and may change.
+        if body.code == fusiform_protocol::CODE_CATALOG_CHANGED {
             return CallFailure::SnapshotChanged;
         }
     }
@@ -3342,13 +3341,12 @@ mod paging_tests {
     fn only_snapshot_module_refusals_trigger_a_restart() {
         let message = "catalog changed since the first page; restart from page one";
         for (code, text, restart) in [
-            (fusiform_protocol::CODE_REFUSED, message, true),
+            (fusiform_protocol::CODE_CATALOG_CHANGED, message, true),
+            // The code decides, never the text: reworded, it still restarts.
+            (fusiform_protocol::CODE_CATALOG_CHANGED, "reworded", true),
+            // And the same text under another code does not.
+            (fusiform_protocol::CODE_REFUSED, message, false),
             (fusiform_protocol::CODE_BAD_REQUEST, message, false),
-            (
-                fusiform_protocol::CODE_REFUSED,
-                "a different deliberate refusal",
-                false,
-            ),
         ] {
             let body: subc_protocol::ErrorBody =
                 serde_json::from_value(json!({"code":code,"message":text})).unwrap();

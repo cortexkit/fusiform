@@ -40,7 +40,8 @@ and response fields are in [`wire-contract.md`](wire-contract.md).
 For whole-catalog reads, `paged: true` enables greedy 3 MiB whole-provider
 pages, ordered by provider id. Forward `next_page_token` as `page_token` with
 the same filters until absent. Tokens preserve page one's version and resolved
-instant; a changed version is `refused` and requires restarting from page one.
+instant; a changed version is refused with code `catalog_changed` and requires
+restarting from page one.
 Paging cannot be combined with provider/model selectors or a billing plane.
 Unpaged responses remain unchanged at any size during consumer migration
 (`route::paging_tests::pages_cover_whole_providers_in_order_and_scope_disclosures`,

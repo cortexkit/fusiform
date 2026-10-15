@@ -35,7 +35,8 @@ pub mod money;
 pub mod refusal;
 
 pub use refusal::{
-    RefusalKind, CODE_BAD_REQUEST, CODE_NO_COVERAGE, CODE_REFUSED, CODE_UNAVAILABLE,
+    RefusalKind, CODE_BAD_REQUEST, CODE_CATALOG_CHANGED, CODE_NO_COVERAGE, CODE_REFUSED,
+    CODE_UNAVAILABLE,
 };
 
 pub use money::{

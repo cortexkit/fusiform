@@ -292,7 +292,7 @@ fn continuation_after_era_write_is_refused() {
         2600,
     )
     .unwrap_err();
-    assert_eq!(error.code, fusiform_protocol::CODE_REFUSED);
+    assert_eq!(error.code, fusiform_protocol::CODE_CATALOG_CHANGED);
     assert!(error.message.contains("restart from page one"));
 }
 

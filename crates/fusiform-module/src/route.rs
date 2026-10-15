@@ -1024,7 +1024,7 @@ fn parse_page_token(token: &str) -> Result<PageCursor, RouteError> {
 fn check_page_version(version: i64, cursor: &PageCursor) -> Result<(), RouteError> {
     if version != cursor.catalog_version {
         return Err(RouteError {
-            code: fusiform_protocol::CODE_REFUSED,
+            code: fusiform_protocol::CODE_CATALOG_CHANGED,
             message: "catalog changed since the first page; restart from page one".into(),
         });
     }
