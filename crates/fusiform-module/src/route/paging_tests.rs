@@ -297,6 +297,50 @@ fn continuation_after_era_write_is_refused() {
 }
 
 #[test]
+fn an_unpaged_whole_catalog_over_the_frame_limit_is_refused_never_truncated() {
+    let (store, _dir) = fixture();
+    let call = |args: Value, limit: usize| {
+        serve_catalog_get_with_limits(
+            &store,
+            &serde_json::to_vec(&args).unwrap(),
+            CATALOG_PAGE_BYTES,
+            limit,
+        )
+    };
+    let whole = call(json!({}), usize::MAX).unwrap();
+    let size = serde_json::to_vec(&whole).unwrap().len();
+
+    // Control: a reply exactly at the limit is served whole and unchanged.
+    let at_limit = call(json!({}), size).unwrap();
+    assert_eq!(at_limit.models, whole.models);
+
+    // One byte over: refused, naming the paged form, and nothing partial.
+    let error = call(json!({}), size - 1).unwrap_err();
+    assert_eq!(error.code, fusiform_protocol::CODE_BAD_REQUEST);
+    assert!(
+        error.message.contains("\"paged\": true"),
+        "{}",
+        error.message
+    );
+
+    // A provider-scoped read is never checked: paging does not apply to it.
+    let provider = whole
+        .models
+        .keys()
+        .next()
+        .unwrap()
+        .split_once('/')
+        .unwrap()
+        .0
+        .to_string();
+    assert!(call(json!({"provider_id": provider}), 1).is_ok());
+
+    // A paged read is bounded by its page budget instead, so the frame limit
+    // never refuses it.
+    assert!(call(json!({"paged": true}), 1).is_ok());
+}
+
+#[test]
 fn invalid_paging_requests_are_bad_requests() {
     let (store, _dir) = fixture();
     for args in [
@@ -337,13 +381,33 @@ fn invalid_paging_requests_are_bad_requests() {
 fn embedded_seed_paging_measurement_and_unpaged_compatibility() {
     let (store, _dir) = empty_store();
     crate::seed::seed_if_empty(&store).unwrap();
-    let full = get(&store, json!({}), CATALOG_PAGE_BYTES);
+    // The unpaged baseline is read with no frame limit, so the pages below can
+    // be compared with the whole catalog.
+    let unlimited = |args: Value| {
+        serve_catalog_get_with_limits(
+            &store,
+            &serde_json::to_vec(&args).unwrap(),
+            CATALOG_PAGE_BYTES,
+            usize::MAX,
+        )
+        .unwrap()
+    };
+    let full = unlimited(json!({}));
     let full_bytes = serde_json::to_vec(&full).unwrap();
     assert!(
-        full_bytes.len() > 4 * 1024 * 1024,
-        "control: unpaged reads still serve above the future frame limit"
+        full_bytes.len() > REPLY_FRAME_LIMIT_BYTES,
+        "control: the seed catalog is over the reply frame limit, so the \
+         refusal below is exercised by real data"
     );
-    let explicit = get(&store, json!({"paged":false}), 1);
+    // At the real limit the same unpaged read is refused, naming paging.
+    let error = serve_catalog_get_with_budget(&store, b"{}", CATALOG_PAGE_BYTES).unwrap_err();
+    assert_eq!(error.code, fusiform_protocol::CODE_BAD_REQUEST);
+    assert!(
+        error.message.contains("\"paged\": true"),
+        "{}",
+        error.message
+    );
+    let explicit = unlimited(json!({"paged":false}));
     let mut expected = full.clone();
     expected.resolved_at_ms = explicit.resolved_at_ms;
     assert_eq!(

@@ -43,9 +43,11 @@ the same filters until absent. Tokens preserve page one's version and resolved
 instant; a changed version is refused with code `catalog_changed` and requires
 restarting from page one.
 Paging cannot be combined with provider/model selectors or a billing plane.
-Unpaged responses remain unchanged at any size during consumer migration
+An unpaged whole-catalog read over the 4 MiB reply limit is refused with
+`bad_request` naming `paged: true`, never truncated
 (`route::paging_tests::pages_cover_whole_providers_in_order_and_scope_disclosures`,
-`route::paging_tests::continuation_after_era_write_is_refused`).
+`route::paging_tests::continuation_after_era_write_is_refused`,
+`route::paging_tests::an_unpaged_whole_catalog_over_the_frame_limit_is_refused_never_truncated`).
 
 Every tool name contains a dot (`catalog.*` for the observed plane, `plan.*`
 for the curated one). An MCP gateway that accepts only `[A-Za-z0-9_-]+` tool

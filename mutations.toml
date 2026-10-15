@@ -1090,3 +1090,18 @@ select = "expected"
 only = false
 timeout_s = 600
 build_timeout_s = 1800
+
+[[control]]
+id = "unpaged-whole-catalog-over-frame-limit-refused"
+guards = "an unpaged whole-catalog reply over the 4 MiB reply frame limit is refused naming paged, never served or truncated"
+file = "crates/fusiform-module/src/route.rs"
+old = "        if size > frame_limit {"
+new = "        if size > frame_limit && false {"
+edits = []
+test_file = "crates/fusiform-module/src/route/paging_tests.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::paging_tests::an_unpaged_whole_catalog_over_the_frame_limit_is_refused_never_truncated", "route::paging_tests::embedded_seed_paging_measurement_and_unpaged_compatibility"]
+only = false
+timeout_s = 900

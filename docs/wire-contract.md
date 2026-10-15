@@ -343,9 +343,13 @@ remain current reads internally: converting them into `at_ms` reads would skip
 serve-time inheritance, aliases, and curated rows and change their values.
 Historical paging is supported by repeating the explicit `at_ms` on every page.
 
-**Migration compatibility:** unpaged reads remain byte-for-byte unchanged at any
-size, including responses above 4 MiB; there is no truncation or size refusal in
-this release. Consumers must migrate before the supervisor enforces its limit.
+**Unpaged whole-catalog reads:** an unpaged read with no `provider_id` whose
+compact reply would exceed 4 MiB, the supervisor's limit for one reply frame,
+is refused with `bad_request` naming `"paged": true`. It is never truncated,
+because a partial catalog would make the missing models look retired. A reply
+exactly at the limit is served whole, and provider-scoped reads are never
+checked
+(`route::paging_tests::an_unpaged_whole_catalog_over_the_frame_limit_is_refused_never_truncated`).
 `ck models get` without `--provider` pages automatically, restarting at most
 three times on snapshot refusals or version changes, and merges before JSON
 output or rendering. Provider-scoped CLI reads remain unpaged.

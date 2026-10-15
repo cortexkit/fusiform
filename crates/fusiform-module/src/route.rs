@@ -700,18 +700,28 @@ pub fn serve_catalog_get(
     store: &CatalogStore,
     body: &[u8],
 ) -> Result<CatalogGetResponse, RouteError> {
-    serve_catalog_get_with_budget(store, body, CATALOG_PAGE_BYTES)
+    serve_catalog_get_with_limits(store, body, CATALOG_PAGE_BYTES, REPLY_FRAME_LIMIT_BYTES)
 }
 
-// The supervisor limits each module reply frame to 4 MiB. A 3 MiB compact
-// response leaves headroom for its envelope/framing. Unpaged reads remain
-// unchanged until consumers have migrated to paging.
+// The supervisor refuses any module reply frame larger than 4 MiB. A 3 MiB
+// compact page leaves headroom for the reply's envelope and framing.
 const CATALOG_PAGE_BYTES: usize = 3 * 1024 * 1024;
+const REPLY_FRAME_LIMIT_BYTES: usize = 4 * 1024 * 1024;
 
+#[cfg(test)]
 fn serve_catalog_get_with_budget(
     store: &CatalogStore,
     body: &[u8],
     page_budget: usize,
+) -> Result<CatalogGetResponse, RouteError> {
+    serve_catalog_get_with_limits(store, body, page_budget, REPLY_FRAME_LIMIT_BYTES)
+}
+
+fn serve_catalog_get_with_limits(
+    store: &CatalogStore,
+    body: &[u8],
+    page_budget: usize,
+    frame_limit: usize,
 ) -> Result<CatalogGetResponse, RouteError> {
     // An empty body is a request for everything. A consumer calling a read with
     // no arguments should not have to know that `{}` is the incantation.
@@ -985,6 +995,23 @@ fn serve_catalog_get_with_budget(
             response.resolved_at_ms = cursor.resolved_at_ms;
         }
         response = page_catalog(response, cursor.as_ref(), page_budget)?;
+    } else if request.provider_id.is_none() {
+        // A whole-catalog reply too large for one frame is refused here, naming
+        // the paged form, rather than left for the supervisor to replace with a
+        // bare `frame_too_large` that does not say how to read the catalog.
+        // Never truncated: a partial catalog would make the missing models look
+        // retired. A provider-scoped read is not checked, because paging does
+        // not apply to it and every provider today is far below the limit.
+        let size = serde_json::to_vec(&response)
+            .map_err(|e| RouteError::unavailable(e.to_string()))?
+            .len();
+        if size > frame_limit {
+            return Err(RouteError::bad_request(format!(
+                "the whole catalog is {size} bytes, over the {frame_limit}-byte reply \
+                 limit; read it in pages with \"paged\": true and follow \
+                 next_page_token, or name a provider_id"
+            )));
+        }
     }
     Ok(response)
 }

@@ -110,24 +110,34 @@ fn a_fresh_install_with_no_network_answers_a_read() {
         other => panic!("a fresh store must seed, got {other:?}"),
     }
 
-    // The read a consumer actually makes.
-    let response = match serve_tool_call(store, br#"{"name": "catalog.get", "arguments": {}}"#)
-        .expect("the catalog must be readable")
-    {
-        ToolResponse::Catalog(c) => c,
-        other => panic!("expected a catalog, got {other:?}"),
-    };
+    // The read a consumer actually makes: the whole catalog, in pages, since a
+    // seeded catalog is larger than one reply frame.
+    let mut models = std::collections::BTreeMap::new();
+    let mut args = serde_json::json!({"paged": true});
+    loop {
+        let call = serde_json::json!({"name": "catalog.get", "arguments": args});
+        let page = match serve_tool_call(store, &serde_json::to_vec(&call).unwrap())
+            .expect("the catalog must be readable")
+        {
+            ToolResponse::Catalog(c) => c,
+            other => panic!("expected a catalog, got {other:?}"),
+        };
+        models.extend(page.models);
+        match page.next_page_token {
+            Some(token) => args["page_token"] = token.into(),
+            None => break,
+        }
+    }
 
     assert!(
-        response.model_count() > 1_000,
+        models.len() > 1_000,
         "a seeded install must serve models, got {}",
-        response.model_count()
+        models.len()
     );
 
     // And the facts are real, not placeholders. A seed that populated identity
     // rows and nothing else would pass every count assertion above.
-    let sonnet = response
-        .models
+    let sonnet = models
         .iter()
         .find(|(k, _)| k.contains("claude-sonnet"))
         .map(|(_, v)| v)
