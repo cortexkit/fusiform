@@ -4552,7 +4552,9 @@ mod curated_tests {
                 args["auth_method"] = method.into();
             }
             let response = get(&store, args.clone());
-            assert_eq!(response.models[ID].len(), 3);
+            // The shipped row's capability facts: attachment, reasoning,
+            // reasoning_options and tool_call.
+            assert_eq!(response.models[ID].len(), 4);
             assert!(response.models[ID]
                 .keys()
                 .all(|key| key.starts_with("capability.")));

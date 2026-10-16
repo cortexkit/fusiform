@@ -629,13 +629,24 @@
           ],
           "model": "meta/muse-wonder-full-1.0",
           "review_by_ms": 1797033600000,
-          "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with muse-wonder-full-1.0 among 12 ids; POST https://api.meta.ai/v1/responses with muse-wonder-full at 16:42:35Z returned 404 'The requested model was not found.'; POST with muse-wonder-full-1.0 at 16:42:45Z returned 200. Lab record meta/muse-wonder-full in https://models.dev/models.json read 2026-10-13: Muse Wonder Full, released 2026-10-12; https://research.meta.ai/blog/muse-wonder and https://research.meta.ai/static/muse-wonder-model-card. No output limit or cost published."
+          "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with muse-wonder-full-1.0 among 12 ids; POST https://api.meta.ai/v1/responses with muse-wonder-full at 16:42:35Z returned 404 'The requested model was not found.'; POST with muse-wonder-full-1.0 at 16:42:45Z returned 200. Lab record meta/muse-wonder-full in https://models.dev/models.json read 2026-10-13: Muse Wonder Full, released 2026-10-12; https://research.meta.ai/blog/muse-wonder and https://research.meta.ai/static/muse-wonder-model-card. No output limit or cost published. Reasoning effort levels low, medium, high and xhigh: the operator's statement on 2026-10-16; the Muse Wonder blog shows Wonder Full at several reasoning efforts but does not name them, and the lab record carries no reasoning options."
         }
       ],
       "models": {
         "meta/muse-wonder-full-1.0": {
           "capability.attachment": true,
           "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ]
+            }
+          ],
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
@@ -1169,13 +1180,24 @@
           ],
           "model": "meta/muse-wonder-full-1.0",
           "review_by_ms": 1797033600000,
-          "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with muse-wonder-full-1.0 among 12 ids; POST https://api.meta.ai/v1/responses with muse-wonder-full at 16:42:35Z returned 404 'The requested model was not found.'; POST with muse-wonder-full-1.0 at 16:42:45Z returned 200. Lab record meta/muse-wonder-full in https://models.dev/models.json read 2026-10-13: Muse Wonder Full, released 2026-10-12; https://research.meta.ai/blog/muse-wonder and https://research.meta.ai/static/muse-wonder-model-card. No output limit or cost published."
+          "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with muse-wonder-full-1.0 among 12 ids; POST https://api.meta.ai/v1/responses with muse-wonder-full at 16:42:35Z returned 404 'The requested model was not found.'; POST with muse-wonder-full-1.0 at 16:42:45Z returned 200. Lab record meta/muse-wonder-full in https://models.dev/models.json read 2026-10-13: Muse Wonder Full, released 2026-10-12; https://research.meta.ai/blog/muse-wonder and https://research.meta.ai/static/muse-wonder-model-card. No output limit or cost published. Reasoning effort levels low, medium, high and xhigh: the operator's statement on 2026-10-16; the Muse Wonder blog shows Wonder Full at several reasoning efforts but does not name them, and the lab record carries no reasoning options."
         }
       ],
       "models": {
         "meta/muse-wonder-full-1.0": {
           "capability.attachment": true,
           "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ]
+            }
+          ],
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
@@ -1493,7 +1515,7 @@
         ],
         "model": "meta/muse-wonder-full-1.0",
         "review_by_ms": 1797033600000,
-        "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with muse-wonder-full-1.0 among 12 ids; POST https://api.meta.ai/v1/responses with muse-wonder-full at 16:42:35Z returned 404 'The requested model was not found.'; POST with muse-wonder-full-1.0 at 16:42:45Z returned 200. Lab record meta/muse-wonder-full in https://models.dev/models.json read 2026-10-13: Muse Wonder Full, released 2026-10-12; https://research.meta.ai/blog/muse-wonder and https://research.meta.ai/static/muse-wonder-model-card. No output limit or cost published."
+        "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with muse-wonder-full-1.0 among 12 ids; POST https://api.meta.ai/v1/responses with muse-wonder-full at 16:42:35Z returned 404 'The requested model was not found.'; POST with muse-wonder-full-1.0 at 16:42:45Z returned 200. Lab record meta/muse-wonder-full in https://models.dev/models.json read 2026-10-13: Muse Wonder Full, released 2026-10-12; https://research.meta.ai/blog/muse-wonder and https://research.meta.ai/static/muse-wonder-model-card. No output limit or cost published. Reasoning effort levels low, medium, high and xhigh: the operator's statement on 2026-10-16; the Muse Wonder blog shows Wonder Full at several reasoning efforts but does not name them, and the lab record carries no reasoning options."
       },
       "eras": [],
       "fact_key": "limit.context",
