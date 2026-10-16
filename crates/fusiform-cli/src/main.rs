@@ -794,8 +794,33 @@ fn render_catalog_models(
         let _ = writeln!(out, "  {identity}");
     }
     out.push_str(&render_curated(response));
+    out.push_str(&render_aliased(response));
     out.push_str(&render_withheld(response));
     out.push_str(&render_uncertain(response));
+    out
+}
+
+/// An alias serves another model's facts under its own id, and its prices are
+/// borrowed. Without this line an operator sees ordinary-looking facts and no
+/// sign of which model they really describe or what established that.
+fn render_aliased(response: &serde_json::Value) -> String {
+    let mut out = String::new();
+    if let Some(rows) = response.get("aliased").and_then(|v| v.as_array()) {
+        for row in rows {
+            let _ = writeln!(
+                out,
+                "\naliased: {} serves {}/{} (prices borrowed)",
+                row["model"].as_str().unwrap_or("?"),
+                row["target_provider_id"].as_str().unwrap_or("?"),
+                row["target_model_id"].as_str().unwrap_or("?")
+            );
+            let _ = writeln!(
+                out,
+                "  source: {}",
+                row["source_ref"].as_str().unwrap_or("?")
+            );
+        }
+    }
     out
 }
 
@@ -1021,6 +1046,7 @@ fn render_single_model(
         }
     }
     out.push_str(&render_curated(response));
+    out.push_str(&render_aliased(response));
     out.push_str(&render_withheld(response));
     out.push_str(&render_uncertain(response));
     // Return the assembled text so the caller can print it once.
@@ -3220,6 +3246,38 @@ mod curated_render_tests {
             assert!(text.contains("source: Authenticated probes; https://models.dev/models.json"));
             assert!(text.contains("review by: 1797033600000"));
         }
+    }
+
+    #[test]
+    fn composed_catalog_text_discloses_an_alias_and_its_source() {
+        let response = serde_json::json!({
+            "models": {"google/antigravity-gemini-4-argon": {"limit.context":1048576}},
+            "aliased": [{"model":"google/antigravity-gemini-4-argon",
+                "target_provider_id":"google", "target_model_id":"gemini-4-argon",
+                "source_ref":"antigravity-auth@48919aa7 model-registry.ts"}]
+        });
+        for bulk in [false, true] {
+            let mut response = response.clone();
+            if bulk {
+                response["models"]["google/other"] = serde_json::json!({"limit.context":100});
+            }
+            let text = render_catalog_models(&response, response["models"].as_object().unwrap());
+            assert_eq!(
+                text.matches(
+                    "aliased: google/antigravity-gemini-4-argon serves google/gemini-4-argon (prices borrowed)"
+                )
+                .count(),
+                1,
+                "{text}"
+            );
+            assert!(text.contains("source: antigravity-auth@48919aa7 model-registry.ts"));
+        }
+        // Control: a read with no alias prints no alias line.
+        let plain = serde_json::json!({"models": {"google/gemini-4-argon": {"limit.context":1}}});
+        assert!(
+            !render_catalog_models(&plain, plain["models"].as_object().unwrap())
+                .contains("aliased:")
+        );
     }
 
     #[test]

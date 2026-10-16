@@ -1105,3 +1105,18 @@ target = "--lib"
 expect_red = ["route::paging_tests::an_unpaged_whole_catalog_over_the_frame_limit_is_refused_never_truncated", "route::paging_tests::embedded_seed_paging_measurement_and_unpaged_compatibility"]
 only = false
 timeout_s = 900
+
+[[control]]
+id = "cli-renders-alias-disclosure"
+guards = "ck models get prints which model an alias serves and its source, on single and bulk reads"
+file = "crates/fusiform-cli/src/main.rs"
+old = "    out.push_str(&render_curated(response));\n    out.push_str(&render_aliased(response));\n    out.push_str(&render_withheld(response));\n    out.push_str(&render_uncertain(response));\n    // Return the assembled text so the caller can print it once."
+new = "    out.push_str(&render_curated(response));\n    out.push_str(&render_withheld(response));\n    out.push_str(&render_uncertain(response));\n    // Return the assembled text so the caller can print it once."
+edits = []
+test_file = "crates/fusiform-cli/src/main.rs"
+runner = "cargo"
+package = "fusiform-cli"
+target = "--bin ck-models"
+expect_red = ["curated_render_tests::composed_catalog_text_discloses_an_alias_and_its_source"]
+only = false
+timeout_s = 600
