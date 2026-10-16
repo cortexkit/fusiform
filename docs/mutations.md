@@ -59,13 +59,14 @@ until the row is updated.
 The `mutations` job in `.github/workflows/ci.yml` runs `ckdev-mutate check`
 and then:
 
-- on a push to `master`: every row;
-- on pull requests and pushes to `train/**`: the rows the change touches,
-  against the merge base;
+- on a push to `master`: rows whose files changed since the previous master tip;
+- on pull requests and pushes to `train/**`: rows the change touches, against
+  the pull-request base or train branch's merge base, respectively;
 - on the nightly schedule: every row with `--broad`. A catch outside the
   expected target is graded `CAUGHT_BROADLY` unless the row is marked `hub`,
   which declares that the mutated code is shared and is expected to redden
-  other targets too.
+  other targets too. The full replay remains nightly because a changed helper
+  or fixture can weaken a proof without changing the row's files.
 
 The run's report is uploaded as the `mutations` artifact.
 
