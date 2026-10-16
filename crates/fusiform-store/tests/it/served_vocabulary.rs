@@ -33,6 +33,7 @@ const SERVED_FACT_KEYS: &[&str] = &[
     // list and refuses any the model does not name. The mapping from an entry
     // to request bytes stays the consumer's; fusiform serves only the list.
     "capability.reasoning_options",
+    "capability.structured_output",
     "capability.tool_call",
     "capability.attachment",
     "capability.input_modalities",
@@ -626,6 +627,7 @@ fn every_capability_field_reaches_a_fact() {
         output_modalities,
         reasoning,
         reasoning_options,
+        structured_output,
         tool_call,
         attachment,
     } = &model.capabilities;
@@ -640,6 +642,7 @@ fn every_capability_field_reaches_a_fact() {
         (output_modalities.is_some(), "capability.output_modalities"),
         (reasoning.is_some(), "capability.reasoning"),
         (reasoning_options.is_some(), "capability.reasoning_options"),
+        (structured_output.is_some(), "capability.structured_output"),
         (tool_call.is_some(), "capability.tool_call"),
         (attachment.is_some(), "capability.attachment"),
     ] {
@@ -651,6 +654,11 @@ fn every_capability_field_reaches_a_fact() {
         );
     }
 
+    assert_eq!(
+        *structured_output,
+        Some(true),
+        "the fixture must exercise a published structured_output claim"
+    );
     assert!(
         keys.iter().filter(|k| k.starts_with("capability.")).count() >= 3,
         "the fixture must exercise several capabilities, or this asserts \

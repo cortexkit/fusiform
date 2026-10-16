@@ -333,6 +333,7 @@ pub const SERVED_FACT_NAMESPACE: &[&str] = &[
     "limit.output",
     "capability.reasoning",
     "capability.reasoning_options",
+    "capability.structured_output",
     "capability.tool_call",
     "capability.attachment",
     "capability.input_modalities",
@@ -394,7 +395,7 @@ fn facts_of(model: &NormalizedModel) -> Vec<(FactKey, String)> {
             FactKey::limit("output"),
             json_opt_u64(model.limits.output_tokens),
         ),
-        // Capabilities that a consumer branches on.
+        // Capability facts. An absent structured_output is not a false claim.
         (
             FactKey::capability("reasoning"),
             json_opt_bool(model.capabilities.reasoning),
@@ -426,6 +427,15 @@ fn facts_of(model: &NormalizedModel) -> Vec<(FactKey, String)> {
             json_modalities(&model.capabilities.output_modalities),
         ),
     ];
+
+    // Whether models.dev says the model supports structured output.
+    // No fact is written when the source omits the key; silence is unknown.
+    if let Some(supported) = model.capabilities.structured_output {
+        facts.push((
+            FactKey::capability("structured_output"),
+            json_opt_bool(Some(supported)),
+        ));
+    }
 
     // Rates, keyed per token class and condition. A rate row's key carries
     // every discriminator needed to select it, so a consumer never joins

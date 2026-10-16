@@ -121,6 +121,7 @@ value would do to a consumer:
 | `limit.output` | byte-affecting | integer token count, or `null` |
 | `capability.reasoning` | byte-affecting | `true`, `false` or `null` |
 | `capability.reasoning_options` | byte-affecting | the upstream's `reasoning_options` array verbatim, or `null` |
+| `capability.structured_output` | advisory | `true` or `false` only when published by models.dev; otherwise no fact |
 | `capability.tool_call` | advisory | `true`, `false` or `null` |
 | `capability.attachment` | advisory | `true`, `false` or `null` |
 | `capability.input_modalities` | advisory | list of modality strings, or `null` |
@@ -141,6 +142,10 @@ value would do to a consumer:
   renderers; fusiform cannot verify it.
 - **money**: a rate. Absent, stated zero and unpriced are distinct (§4.3).
 - **advisory**: descriptive. A wrong value is visible rather than silent.
+
+Structured output is a model-level claim only: it is omitted when models.dev
+has no key, and it does not establish that any particular route enforces JSON
+schema. Route behavior may differ, so alias projection does not carry this fact.
 
 The table matches what the producer emits, in both directions
 (`wire_fact_table::the_wire_fact_table_matches_what_the_producer_emits`,
@@ -402,7 +407,9 @@ The golden case `catalog.get — first provider page` carries a real continuatio
 Some routes expose a model under an id models.dev does not carry. A curated
 alias (see [`curated-data.md`](curated-data.md)) serves the target row's facts
 under the alias id and names it in `aliased` with `target_provider_id`,
-`target_model_id` and `source_ref`. Rules, tested in
+`target_model_id` and `source_ref`. The target's `capability.structured_output`
+claim is not projected: whether JSON Schema is enforced depends on the route,
+which a model-level fact cannot establish. Rules, tested in
 `crates/fusiform-module/src/route.rs`:
 
 1. Current reads only; a point-in-time read never aliases
@@ -412,7 +419,9 @@ under the alias id and names it in `aliased` with `target_provider_id`,
 3. Rates through an alias carry `inherited_from` with basis `alias`
    (`alias_tests::a_named_alias_read_serves_the_target_under_the_alias_key`),
    including mode rates (`mode_rates::an_alias_carries_its_targets_mode_rates_marked`).
-4. A retired or absent target serves nothing
+4. Structured-output claims are omitted from aliases while remaining on the
+   target row (`alias_tests::structured_output_is_not_projected_onto_an_alias`).
+5. A retired or absent target serves nothing
    (`alias_tests::a_retired_target_serves_nothing`,
    `alias_tests::an_absent_target_serves_nothing_and_names_it`).
 

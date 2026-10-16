@@ -17,7 +17,6 @@ const DECLARED_UNREAD: &[(&str, &str)] = &[
     ("model.type", "sparse model-kind labels with no consumer contract; not served"),
     ("model.provider", "SDK adapter and endpoint overrides select request rendering and destination; only presence is quarantined"),
     ("model.temperature", "request knob acceptance, not a model capacity; no served consumer contract"),
-    ("model.structured_output", "capability with no served consumer contract"),
     ("model.interleaved", "bool or field-selector object whose request-shaping meaning is unestablished"),
     ("model.experimental.modes.*.provider", "request body and header overrides that switch modes on; dropped at the parse boundary"),
 ];

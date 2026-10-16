@@ -310,6 +310,9 @@ pub enum CapabilityId {
     /// does not name, so a wrong list changes which requests it will send even
     /// when the reasoning flag itself is right.
     ReasoningOptions,
+    /// Whether models.dev says structured output is supported; the claim may be
+    /// corrected independently of other model capabilities.
+    StructuredOutput,
     ToolCall,
     Attachment,
     InputModalities,

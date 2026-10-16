@@ -2938,6 +2938,38 @@ mod alias_tests {
     }
 
     #[test]
+    fn structured_output_is_not_projected_onto_an_alias() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-3.8-flash", 300_000_000);
+        store
+            .append_eras(&[era_at(
+                "gemini-3.8-flash",
+                "capability.structured_output",
+                "true",
+                2_000,
+            )])
+            .unwrap();
+
+        let aliased = get(&store, &named("")).expect("the alias is served");
+        let alias_facts = &aliased.models[ALIAS];
+        assert!(
+            !alias_facts.contains_key("capability.structured_output"),
+            "an alias cannot claim route-specific schema enforcement"
+        );
+
+        let target = get(
+            &store,
+            r#"{"provider_id":"google","model_id":"gemini-3.8-flash"}"#,
+        )
+        .expect("the target is served directly");
+        assert_eq!(
+            target.models[TARGET]["capability.structured_output"],
+            serde_json::json!(true),
+            "the target row retains the upstream's published claim"
+        );
+    }
+
+    #[test]
     fn a_real_row_for_the_alias_id_wins() {
         let (store, _d) = store();
         seed_model(&store, "gemini-3.8-flash", 300_000_000);
@@ -4261,6 +4293,7 @@ fn aliased_response(
         return Ok(None);
     };
     mark_rates_borrowed_through_alias(&mut facts, alias);
+    omit_route_dependent_alias_facts(&mut facts);
     narrow_to_requested(&mut facts, prefixes);
 
     let alias_key = format!("{provider_id}/{model_id}");
@@ -4272,6 +4305,13 @@ fn aliased_response(
         source_ref: alias.source_ref.clone(),
     });
     Ok(Some(response))
+}
+
+/// A model capability does not necessarily survive routing through an alias.
+/// Whether a route enforces JSON schema depends on the route's own behavior,
+/// which the target model's structured-output claim cannot establish.
+fn omit_route_dependent_alias_facts(facts: &mut BTreeMap<String, serde_json::Value>) {
+    facts.remove("capability.structured_output");
 }
 
 /// Mark every rate on an aliased entry as the target's, not the route's.

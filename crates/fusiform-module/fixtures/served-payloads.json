@@ -27,6 +27,7 @@
               "type": "budget_tokens"
             }
           ],
+          "capability.structured_output": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -133,6 +134,7 @@
               ]
             }
           ],
+          "capability.structured_output": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -234,6 +236,7 @@
               ]
             }
           ],
+          "capability.structured_output": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1050000,
@@ -419,6 +422,7 @@
           ],
           "capability.reasoning": false,
           "capability.reasoning_options": null,
+          "capability.structured_output": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -778,6 +782,7 @@
           ],
           "capability.reasoning": true,
           "capability.reasoning_options": [],
+          "capability.structured_output": true,
           "capability.tool_call": true
         }
       },
@@ -1080,6 +1085,7 @@
               "type": "budget_tokens"
             }
           ],
+          "capability.structured_output": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -1387,6 +1393,7 @@
               "type": "budget_tokens"
             }
           ],
+          "capability.structured_output": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -1556,7 +1563,7 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 321,
+      "era_count": 328,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
@@ -1597,6 +1604,7 @@
         "limit.output",
         "capability.reasoning",
         "capability.reasoning_options",
+        "capability.structured_output",
         "capability.tool_call",
         "capability.attachment",
         "capability.input_modalities",
@@ -1786,6 +1794,7 @@
               ]
             }
           ],
+          "capability.structured_output": true,
           "capability.tool_call": true
         },
         "openai/gpt-image-1": {
@@ -2044,6 +2053,7 @@
               ]
             }
           ],
+          "capability.structured_output": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1050000,
@@ -2285,6 +2295,7 @@
               ]
             }
           ],
+          "capability.structured_output": true,
           "capability.tool_call": true
         }
       },
@@ -2506,6 +2517,7 @@
               ]
             }
           ],
+          "capability.structured_output": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1050000,
@@ -2703,6 +2715,7 @@
               "type": "budget_tokens"
             }
           ],
+          "capability.structured_output": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -2883,6 +2896,7 @@
               "type": "budget_tokens"
             }
           ],
+          "capability.structured_output": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,

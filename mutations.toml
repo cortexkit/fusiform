@@ -901,7 +901,7 @@ timeout_s = 600
 id = "canonical-model-id-raw-to-domain"
 guards = "upstream canonical identities survive normalization without substituting provider/model row ids"
 file = "crates/fusiform-core/src/normalize/mod.rs"
-old = "        canonical_id: raw.canonical_model_id.clone(),"
+old = "        canonical_id: (*canonical_model_id).clone(),"
 new = "        canonical_id: None, // NON-VACUITY BREAK"
 edits = []
 test_file = "crates/fusiform-core/tests/it/models_dev_normalization.rs"
@@ -1120,3 +1120,36 @@ target = "--bin ck-models"
 expect_red = ["curated_render_tests::composed_catalog_text_discloses_an_alias_and_its_source"]
 only = false
 timeout_s = 600
+
+
+[[control]]
+id = "structured-output-raw-to-domain-mapping"
+guards = "a published structured_output value survives the raw-to-domain conversion as the exact boolean"
+file = "crates/fusiform-core/src/normalize/mod.rs"
+old = "        structured_output: *structured_output,"
+new = "        structured_output: None, // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-store/tests/it/served_vocabulary.rs"
+runner = "cargo"
+package = "fusiform-store"
+target = "--test it"
+expect_red = ["served_vocabulary::every_capability_field_reaches_a_fact"]
+select = "expected"
+timeout_s = 600
+build_timeout_s = 1800
+
+[[control]]
+id = "alias-structured-output-route-exclusion"
+guards = "alias projections omit structured_output claims that cannot establish route-specific JSON Schema enforcement"
+file = "crates/fusiform-module/src/route.rs"
+old = "    omit_route_dependent_alias_facts(&mut facts);"
+new = "    // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::alias_tests::structured_output_is_not_projected_onto_an_alias"]
+select = "expected"
+timeout_s = 600
+build_timeout_s = 1800

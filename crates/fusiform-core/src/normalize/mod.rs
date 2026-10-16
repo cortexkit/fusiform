@@ -63,6 +63,9 @@ pub struct Capabilities {
     /// What the model produces. `None` when unpublished, per `input_modalities`.
     pub output_modalities: Option<Vec<Modality>>,
     pub reasoning: Option<bool>,
+    /// Whether models.dev claims the model supports structured output. `None`
+    /// means the upstream did not state a value; it is never defaulted to false.
+    pub structured_output: Option<bool>,
     /// The reasoning settings the model accepts, exactly as models.dev
     /// publishes them under `reasoning_options`.
     ///
@@ -397,6 +400,30 @@ fn normalize_model(
     let label = format!("{provider_id}/{model_id}");
     let key = ModelKey::new(SourceId::ModelsDev, provider_id, model_id);
 
+    // Name every parsed model field at this boundary. A new raw field must be
+    // carried, ignored, or quarantined deliberately rather than silently lost.
+    let raw::RawModel {
+        id: _,
+        name,
+        family,
+        canonical_model_id,
+        status,
+        release_date,
+        last_updated,
+        knowledge,
+        open_weights,
+        reasoning,
+        reasoning_options,
+        structured_output,
+        tool_call,
+        attachment,
+        limit,
+        modalities,
+        cost,
+        provider,
+        experimental,
+    } = raw;
+
     // Modalities are `None` when the upstream publishes no block, and an empty
     // Vec only when it publishes an empty list.
     //
@@ -413,18 +440,17 @@ fn normalize_model(
     // ships as data — and a consumer selecting models by modality would filter
     // out every affected model with nothing looking wrong.
     let capabilities = Capabilities {
-        input_modalities: raw
-            .modalities
+        input_modalities: modalities
             .as_ref()
             .map(|m| m.input.iter().map(|s| Modality::parse(s)).collect()),
-        output_modalities: raw
-            .modalities
+        output_modalities: modalities
             .as_ref()
             .map(|m| m.output.iter().map(|s| Modality::parse(s)).collect()),
-        reasoning: raw.reasoning,
-        reasoning_options: raw.reasoning_options.clone(),
-        tool_call: raw.tool_call,
-        attachment: raw.attachment,
+        reasoning: *reasoning,
+        reasoning_options: (*reasoning_options).clone(),
+        structured_output: *structured_output,
+        tool_call: *tool_call,
+        attachment: *attachment,
     };
 
     // TOTAL DESTRUCTURING, so a field added to `RawLimit` cannot be parsed and
@@ -436,7 +462,7 @@ fn normalize_model(
     // wire. Between them sits raw -> domain, and `limit.input` lived there
     // unnoticed: parsed into `RawLimit`, never carried into `Limits`, never
     // served, while the payload-side fence reported it as read.
-    let limits = match raw.limit.as_ref() {
+    let limits = match limit.as_ref() {
         None => Limits::default(),
         Some(crate::normalize::raw::RawLimit {
             context,
@@ -468,7 +494,7 @@ fn normalize_model(
         },
     };
 
-    let mut rates = match &raw.cost {
+    let mut rates = match cost.as_ref() {
         Some(cost) => normalize_rates(&label, cost, findings)?,
         // No cost object at all. Measured on 420 models. Recording nothing here
         // is correct: the absence is expressed by there being no rate rows, and
@@ -481,16 +507,15 @@ fn normalize_model(
     // Mode rates are read whether or not the model has a base cost: five live
     // models (anyapi and snowflake-cortex rows) price a mode and publish no
     // base rate, and that is served as published rather than dropped.
-    if let Some(experimental) = &raw.experimental {
+    if let Some(experimental) = experimental.as_ref() {
         for (name, mode) in &experimental.modes {
             rates.extend(normalize_mode_rates(&label, name, mode, findings));
         }
     }
 
     let quarantined = Quarantine {
-        provider_override: raw.provider.is_some(),
-        experimental_modes: raw
-            .experimental
+        provider_override: provider.is_some(),
+        experimental_modes: experimental
             .as_ref()
             .map(|e| e.modes.keys().cloned().collect())
             .unwrap_or_default(),
@@ -498,14 +523,14 @@ fn normalize_model(
 
     Ok(NormalizedModel {
         key,
-        display_name: raw.name.clone(),
-        family: raw.family.clone(),
-        canonical_id: raw.canonical_model_id.clone(),
-        status: raw.status.clone(),
-        release_date: raw.release_date.clone(),
-        last_updated: raw.last_updated.clone(),
-        knowledge_cutoff: raw.knowledge.clone(),
-        open_weights: raw.open_weights,
+        display_name: (*name).clone(),
+        family: (*family).clone(),
+        canonical_id: (*canonical_model_id).clone(),
+        status: (*status).clone(),
+        release_date: (*release_date).clone(),
+        last_updated: (*last_updated).clone(),
+        knowledge_cutoff: (*knowledge).clone(),
+        open_weights: *open_weights,
         capabilities,
         limits,
         rates,

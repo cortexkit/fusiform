@@ -1043,6 +1043,15 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                from it and refuses any setting the list does not name.",
     },
     ServedFact {
+        key: "capability.structured_output",
+        class: FactClass::Advisory,
+        note: "verbatim models.dev structured_output boolean. This is only the \
+               upstream's model-level claim and does not establish enforcement \
+               on every route to the model. It becomes ByteAffecting if a \
+               consumer uses it to shape request bytes; no consumer does so yet. \
+               Rows without the upstream key have no fact, not false.",
+    },
+    ServedFact {
         key: "capability.tool_call",
         class: FactClass::Advisory,
         note: "whether the model accepts tool definitions",

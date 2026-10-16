@@ -792,3 +792,26 @@ fn status_preserves_unknown_and_empty_strings_and_absence() {
     assert_eq!(model(&outcome, "p/empty").status.as_deref(), Some(""));
     assert_eq!(model(&outcome, "p/unpublished").status, None);
 }
+
+/// A missing structured-output claim is not a negative capability claim.
+#[test]
+fn structured_output_preserves_absence_and_published_booleans() {
+    let read = |body: &str| {
+        let text = format!(
+            r#"{{"p":{{"id":"p","name":"P","models":{{"m":{{"id":"m","name":"M"{body}}}}}}}}}"#
+        );
+        normalize_models_dev(text.as_bytes())
+            .expect("the model must normalize")
+            .catalog
+            .models()
+            .next()
+            .expect("one model")
+            .capabilities
+            .structured_output
+    };
+
+    assert_eq!(read(""), None, "absence remains unknown");
+    assert_eq!(read(r#","structured_output":null"#), None);
+    assert_eq!(read(r#","structured_output":true"#), Some(true));
+    assert_eq!(read(r#","structured_output":false"#), Some(false));
+}

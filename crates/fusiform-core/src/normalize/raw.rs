@@ -53,6 +53,9 @@ pub struct RawModel {
     pub knowledge: Option<String>,
     pub open_weights: Option<bool>,
     pub reasoning: Option<bool>,
+    /// Whether models.dev claims the model supports structured output. `None`
+    /// means the upstream did not state a value; it is never defaulted to false.
+    pub structured_output: Option<bool>,
     /// The reasoning settings the model accepts, held as the upstream's JSON
     /// untouched. A pass-through on purpose: entry types fusiform has not seen
     /// and `null` elements inside `values` are real upstream data, and a typed

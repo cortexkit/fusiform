@@ -139,6 +139,16 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
         );
     }
 
+    let structured_output = SERVED_FACTS
+        .iter()
+        .find(|f| f.key == "capability.structured_output")
+        .expect("capability.structured_output is served");
+    assert_eq!(
+        structured_output.class,
+        FactClass::Advisory,
+        "the upstream model claim does not establish route-specific enforcement"
+    );
+
     // Every rate is money. A rate classified as advisory would tell a consumer
     // that a wrong value cannot cost anything.
     for fact in SERVED_FACTS.iter().filter(|f| f.key.starts_with("rate.")) {
