@@ -7,6 +7,18 @@
   "aliases": [
     {
       "provider_id": "google",
+      "model_id": "antigravity-gemini-4-argon",
+      "target": {
+        "provider_id": "google",
+        "model_id": "gemini-4-argon"
+      },
+      "basis": "The resolver recognises the id as Argon and resolves every tier through getGeminiArgonAntigravityModel: low, medium and high go to gemini-4-argon-low, -medium and -high, and a missing or unknown tier defaults to gemini-4-argon-medium. RESOLVER_ALIASES maps each of those back to gemini-4-argon, so the suffix spells a reasoning level and every request reaches Google's gemini-4-argon.",
+      "source_ref": "antigravity-auth@48919aa7ae9378ea19af17e7d9da5b986395f00a packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS, RESOLVER_ALIASES, getGeminiArgonAntigravityModel), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, isGeminiArgonModel)",
+      "established_at_ms": 1792108800000,
+      "review_by_ms": 1797292800000
+    },
+    {
+      "provider_id": "google",
       "model_id": "antigravity-gemini-3.8-flash",
       "target": {
         "provider_id": "google",
