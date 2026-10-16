@@ -259,6 +259,30 @@ mod tests {
              effort at medium, so the target's reasoning options would be false \
              for it",
         ),
+        // Withdrawn server-side: two fetchAvailableModels reads on the daily
+        // Code Assist endpoint, just before 2026-10-14T13:11Z, listed none of
+        // these routes, and antigravity-auth@48919aa7 no longer defines the ids.
+        (
+            "google",
+            "antigravity-gemini-3.7-flash",
+            "Google withdrew the gemini-3.7-flash-low/-medium/-high routes \
+             (absent from fetchAvailableModels on 2026-10-14), so the alias \
+             would price a route that returns 404",
+        ),
+        (
+            "google",
+            "antigravity-gemini-3.6-flash",
+            "Google withdrew the gemini-3.6-flash-low/-medium/-high routes \
+             (absent from fetchAvailableModels on 2026-10-14), so the alias \
+             would price a route that returns 404",
+        ),
+        (
+            "google",
+            "antigravity-claude-sonnet-4-6-thinking",
+            "no claude-sonnet-4-6 route is served (absent from \
+             fetchAvailableModels on 2026-10-14), and the plugin now defines \
+             antigravity-claude-sonnet-5-5 instead",
+        ),
         (
             "google",
             "antigravity-claude-opus-4-6-thinking",

@@ -31,42 +31,6 @@
     },
     {
       "provider_id": "google",
-      "model_id": "antigravity-gemini-3.7-flash",
-      "target": {
-        "provider_id": "google",
-        "model_id": "gemini-3.7-flash"
-      },
-      "basis": "The plugin resolves every tier of this id through GEMINI_37_FLASH_ROUTES: low, medium and high go to gemini-3.7-flash-low, -medium and -high, and a missing or unknown tier defaults to gemini-3.7-flash-medium. The suffix is how Code Assist spells a reasoning level, so every request reaches Google's gemini-3.7-flash.",
-      "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (GEMINI_37_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
-      "established_at_ms": 1790294400000,
-      "review_by_ms": 1795478400000
-    },
-    {
-      "provider_id": "google",
-      "model_id": "antigravity-gemini-3.6-flash",
-      "target": {
-        "provider_id": "google",
-        "model_id": "gemini-3.6-flash"
-      },
-      "basis": "The plugin resolves every tier of this id through GEMINI_36_FLASH_ROUTES: low, medium and high go to gemini-3.6-flash-low, -medium and -high, and a missing or unknown tier defaults to gemini-3.6-flash-medium. The suffix is how Code Assist spells a reasoning level, so every request reaches Google's gemini-3.6-flash.",
-      "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (GEMINI_36_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
-      "established_at_ms": 1790294400000,
-      "review_by_ms": 1795478400000
-    },
-    {
-      "provider_id": "google",
-      "model_id": "antigravity-claude-sonnet-4-6-thinking",
-      "target": {
-        "provider_id": "anthropic",
-        "model_id": "claude-sonnet-4-6"
-      },
-      "basis": "The resolver strips the antigravity- prefix and looks the rest up in RESOLVER_ALIASES, which maps claude-sonnet-4-6-thinking and its -low, -medium and -high forms all to claude-sonnet-4-6. Every tier therefore reaches the claude-sonnet-4-6 backend; the thinking budget the plugin sends is request rendering, not a different model.",
-      "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (RESOLVER_ALIASES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
-      "established_at_ms": 1790294400000,
-      "review_by_ms": 1795478400000
-    },
-    {
-      "provider_id": "google",
       "model_id": "antigravity-gemini-3.1-flash-image",
       "target": {
         "provider_id": "google",
