@@ -37,6 +37,11 @@ pub struct CatalogStore {
     // final close can checkpoint the WAL for backups of the closed database.
     readers: readers::ReadPool,
     inner: SqliteStore,
+    /// The database file this store opened, exactly as the storage descriptor
+    /// named it. Kept so files that must sit beside the database (the backup
+    /// enrollment descriptor) are placed by the path actually opened, not by a
+    /// path re-derived from the environment that could disagree with it.
+    path: std::path::PathBuf,
 }
 
 /// What went wrong, at the domain's level rather than the driver's.
@@ -378,7 +383,16 @@ impl CatalogStore {
             other => return Err(StoreError::UnsupportedBackend(other.label().to_string()).into()),
         };
         let readers = readers::ReadPool::open(path)?;
-        Ok(Self { inner, readers })
+        Ok(Self {
+            inner,
+            readers,
+            path: std::path::PathBuf::from(path),
+        })
+    }
+
+    /// The database file this store opened.
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
     }
 
     /// The fence epoch of the held single-writer lease.

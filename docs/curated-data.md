@@ -14,7 +14,7 @@ that keep them honest.
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
 | `plan-prices.json` | subscription list prices | written to `plan_price_era` at start |
 | `models-dev-seed.json` | a copy of the upstream catalog for offline first boot | written as seed eras into an empty store |
-| `engram-catalog.json` | the backup enrollment descriptor | installed by a script; not read by the module |
+| `engram-catalog.json` | the backup enrollment descriptor | written beside `store.db` at start; not otherwise read |
 
 Billing planes and plan prices have their own documents,
 [`billing-planes.md`](billing-planes.md) and [`plan-prices.md`](plan-prices.md).

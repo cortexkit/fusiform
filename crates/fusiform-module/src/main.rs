@@ -26,6 +26,7 @@ use subc_protocol::ModuleHelloAckBody;
 
 use fusiform_store::CatalogStore;
 
+use fusiform_module::enrollment;
 use fusiform_module::fetch::{Fetcher, SourceEndpoint};
 use fusiform_module::health;
 use fusiform_module::loop_::{tick, PollContext, POLL_INTERVAL_MS};
@@ -146,6 +147,13 @@ impl ModuleHandler for Fusiform {
         };
 
         self.signals.store_opened();
+
+        // Enroll the store with engram, the fleet's backup owner, by writing its
+        // descriptor beside the database. Placed by the path the store actually
+        // opened, so the descriptor's relative `store.db` names this database.
+        // A failure is logged and makes health Degraded but does not stop the
+        // module: a backup gap is not a reason to stop answering reads.
+        enrollment::write_beside_store(store.path(), &self.signals);
 
         // Seed an empty store before anything reads it. A fresh install with no
         // network must be able to answer, and an empty catalog is a wrong

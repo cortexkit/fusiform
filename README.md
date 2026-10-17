@@ -9,6 +9,10 @@ append-only SQLite store, and serves point-in-time reads, fact histories,
 curated billing planes and subscription prices to other modules as tools. An
 operator reads it with `ck models`.
 
+The module enrolls its own store with the CortexKit backup module, engram: at
+every start it writes its backup descriptor, `engram-catalog.json`, beside
+`store.db`. See [`docs/backup-and-restore.md`](docs/backup-and-restore.md).
+
 | Crate | Role |
 | --- | --- |
 | `fusiform-core` | domain types, money, and the models.dev normalizer; no I/O |
@@ -46,8 +50,6 @@ Release and packaging scripts:
   `FUSIFORM_SIGNING_IDENTITY`. It is macOS-only and refuses elsewhere.
 - `scripts/refresh-seed.sh` refreshes the embedded copy of the upstream
   catalog.
-- `scripts/install-enrollment.sh` enrolls a deployed store with the backup
-  module.
 
 ### Mutation proofs
 

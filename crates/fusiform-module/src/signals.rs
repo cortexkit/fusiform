@@ -141,6 +141,14 @@ pub struct Signals {
     /// That is the absent-versus-unknown collapse fusiform exists to prevent,
     /// occurring in fusiform's own health.
     adoption_failed: AtomicU64,
+    /// Set when the backup enrollment descriptor could not be written beside
+    /// the store at startup.
+    ///
+    /// Without it the only trace is a stderr line, and the consequence — engram
+    /// silently not backing up this store — is invisible until a restore is
+    /// needed and there is nothing to restore. Serving is unaffected, so health
+    /// reports Degraded rather than Failing.
+    catalog_write_failed: AtomicU64,
 }
 
 /// A value meaning "never happened", chosen so ordinary arithmetic on it is
@@ -167,6 +175,7 @@ impl Signals {
             last_write_ms: AtomicI64::new(NEVER),
             store_open: AtomicU64::new(0),
             adoption_failed: AtomicU64::new(0),
+            catalog_write_failed: AtomicU64::new(0),
         }
     }
 
@@ -476,6 +485,16 @@ impl Signals {
     /// Whether any startup adoption read failed.
     pub fn adoption_did_fail(&self) -> bool {
         self.adoption_failed.load(Ordering::Relaxed) == 1
+    }
+
+    /// Record that the backup enrollment descriptor could not be written.
+    pub fn catalog_write_failed(&self) {
+        self.catalog_write_failed.store(1, Ordering::Relaxed);
+    }
+
+    /// Whether writing the backup enrollment descriptor failed at startup.
+    pub fn catalog_write_did_fail(&self) -> bool {
+        self.catalog_write_failed.load(Ordering::Relaxed) == 1
     }
 
     pub fn store_is_open(&self) -> bool {

@@ -288,6 +288,7 @@ fn the_metric_names_are_pinned() {
         "last_write_age_ms",
         "observation_age_ms",
         "process_attempt_age_ms",
+        "process_backup_catalog_write_failed",
         "process_consecutive_failures",
         "process_poll_attempts",
         "process_polls_recorded",

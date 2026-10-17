@@ -67,12 +67,47 @@ pub const LOOP_SILENT_AFTER_MS: i64 = 70 * 60 * 1_000;
 /// later, so an in-flight tick can only ever account for one of them.
 pub const UNRECORDED_TICKS_DEGRADED: u64 = 2;
 
+/// What health says when the backup enrollment descriptor was not written.
+pub const CATALOG_WRITE_FAILED_DETAIL: &str =
+    "the backup enrollment descriptor (engram-catalog.json) could not be \
+     written beside the store, so engram is not backing up this module's \
+     store. Serving is unaffected; check the module's stderr for the path and \
+     error, and restart once it is fixed";
+
 /// Build a health report from mechanical signals alone.
 ///
 /// `now_ms` is passed in rather than read from the clock inside, so the
 /// arithmetic is testable at an exact instant. A health path that reads the
 /// clock itself can only be tested by sleeping.
 pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
+    let mut report = serving_report(signals, now_ms);
+
+    // A failed enrollment write is checked AFTER everything about serving, and
+    // can only lower Ok to Degraded, never raise anything to Failing.
+    //
+    // It does not affect a single read, so it must not mask or outrank a
+    // serving problem: an operator told about backups while the loop is dead
+    // is being told the less urgent of two things. But it must not disappear
+    // behind one either, because the only other trace is a stderr line and the
+    // consequence — no backups — is discovered only when a restore is needed.
+    // So when serving is already unhealthy, the catalog is named in the same
+    // detail rather than replacing it.
+    if signals.catalog_write_did_fail() {
+        report.detail = Some(match report.detail.take() {
+            Some(d) if report.status != HealthStatus::Ok => {
+                format!("{d}; also, {CATALOG_WRITE_FAILED_DETAIL}")
+            }
+            _ => CATALOG_WRITE_FAILED_DETAIL.to_string(),
+        });
+        if report.status == HealthStatus::Ok {
+            report.status = HealthStatus::Degraded;
+        }
+    }
+    report
+}
+
+/// Health as far as serving catalog reads is concerned.
+fn serving_report(signals: &Signals, now_ms: i64) -> HealthReport {
     // Dispatch impairment first: without a store, nothing else is meaningful.
     // A module reporting "degraded, catalog is stale" while unable to answer
     // any read at all would be describing the less important of its two
@@ -342,6 +377,10 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
         "observation_age_ms": signals.observation_age_ms(now_ms),
         "last_write_age_ms": signals.last_write_age_ms(now_ms),
         "store_open": signals.store_is_open(),
+        // Process-scoped: set when THIS process failed to write the backup
+        // enrollment descriptor at startup, and cleared only by a restart that
+        // writes it.
+        "process_backup_catalog_write_failed": signals.catalog_write_did_fail(),
         // How long since the loop last ATTEMPTED, distinct from how long since
         // it last observed. A failing loop keeps this current while
         // observation_age_ms grows; a stopped loop leaves both behind.
@@ -498,6 +537,47 @@ mod tests {
         assert_eq!(m["observation_age_ms"], 1_000);
         assert_eq!(m["last_write_age_ms"], 900);
         assert_eq!(m["store_open"], true);
+    }
+
+    /// A descriptor that could not be written is Degraded, never Failing, and
+    /// the detail names the catalog so an operator knows it is about backups.
+    #[test]
+    fn a_failed_catalog_write_is_degraded_not_failing() {
+        let s = open_store();
+        s.observed(0);
+        assert_eq!(report(&s, 1_000).status, HealthStatus::Ok);
+
+        s.catalog_write_failed();
+        let r = report(&s, 1_000);
+        assert_eq!(r.status, HealthStatus::Degraded);
+        let detail = r.detail.unwrap_or_default();
+        assert!(detail.contains("engram-catalog.json"), "{detail}");
+        let m = r.metrics.expect("metrics must always be present");
+        assert_eq!(m["process_backup_catalog_write_failed"], true);
+    }
+
+    /// When serving is already unhealthy, the catalog failure is added to the
+    /// detail rather than hiding the serving problem or being hidden by it.
+    #[test]
+    fn a_failed_catalog_write_does_not_mask_a_serving_problem() {
+        let s = open_store();
+        s.observed(0);
+        s.catalog_write_failed();
+        let r = report(&s, STALE_AFTER_MS + 1);
+        assert_eq!(r.status, HealthStatus::Degraded);
+        let detail = r.detail.unwrap_or_default();
+        // The serving problem (here, a loop that stopped two hours ago) still
+        // leads the detail.
+        assert!(
+            detail.starts_with("the poll loop has not attempted"),
+            "{detail}"
+        );
+        assert!(detail.contains("engram-catalog.json"), "{detail}");
+
+        // And it never turns a missing store into anything but Failing.
+        let none = Signals::new();
+        none.catalog_write_failed();
+        assert_eq!(report(&none, 1_000).status, HealthStatus::Failing);
     }
 
     #[test]

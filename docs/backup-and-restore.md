@@ -41,39 +41,49 @@ Not declared, deliberately:
 Engram reads the descriptor from the module's data directory, not from the
 repository. A data directory without one is not captured.
 
-## 2. Install it
+## 2. How it gets there
 
-Run this after the module is deployed and its store exists:
+The module writes it. Every time `ck-fusiform` opens its store, it writes the
+descriptor (compiled into the binary from the repository file, byte for byte)
+as `engram-catalog.json` in the directory holding `store.db`. The directory is
+taken from the store path the daemon handed over, never from environment
+variables, so the descriptor's relative `store.db` names the database in use.
+There is nothing to install by hand.
 
-```sh
-scripts/install-enrollment.sh
-```
+On each start:
 
-The script:
+1. If an identical descriptor is already there, only its mode is set to `0600`.
+2. Otherwise the bytes are written to a temporary file in the same directory,
+   flushed to disk, set to `0600`, renamed over `engram-catalog.json`, and read
+   back and compared. A failed write never leaves a partial descriptor, because
+   the entry is `portable` and an unreadable one fails engram's whole capture
+   run, not just fusiform's entry.
+3. A live descriptor that differs from the binary's is overwritten: the
+   repository's bytes are authoritative. The module logs one line with the old
+   and new sizes. To change the descriptor, change the repository file and
+   release.
 
-1. refuses if there is no `store.db` in `${XDG_DATA_HOME:-$HOME/.local/share}/cortexkit/fusiform/`,
-   because enrolling a store that does not exist would make every capture
-   look for a missing file (pass `--force` only if the store is about to
-   appear);
-2. checks the descriptor's `schema_version`, `module_id` and that it has at
-   least one entry;
-3. refuses if a different descriptor is already installed, and shows the
-   difference (reconcile it, then re-run with `--force`);
-4. copies the descriptor into the data directory with mode `0600` and the
-   directory `0700`, and verifies the copy.
+If the write fails, the module keeps serving. It logs the path and the error on
+stderr, and health reports `Degraded` with a detail naming
+`engram-catalog.json` (and the metric `process_backup_catalog_write_failed` is
+`true`) until a restart writes the file.
 
-The script does not run engram's own parser. A descriptor engram rejects shows up in
-engram's own capture report, not here.
+The module does not run engram's own parser. A descriptor engram rejects shows
+up in engram's own capture report, not here.
 
-Verify: the installed file is identical to the repository's, and engram's next
-published capture includes the `fusiform/store` entry. A descriptor on disk is
-not evidence of a backup; a published capture that includes the entry is.
+Verify: the file beside `store.db` is identical to the repository's, and
+engram's next published capture includes the `fusiform/store` entry. A
+descriptor on disk is not evidence of a backup; a published capture that
+includes the entry is.
 
-Reverse: remove `engram-catalog.json` from the data directory. Engram stops
-capturing the store at its next run.
+Reverse: there is no per-machine opt-out. Removing `engram-catalog.json` from
+the data directory stops capture only until the module next starts and writes
+it again.
 
 Moving or renaming `store.db` without updating the descriptor makes a
-`portable` entry point at a missing file, which fails the capture.
+`portable` entry point at a missing file, which fails the capture. The module
+refuses to write the descriptor beside a store not named `store.db`, and
+reports that as the same `Degraded` state.
 
 ## 3. What a restore does
 
