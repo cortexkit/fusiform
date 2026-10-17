@@ -41,5 +41,25 @@
       "established_at_ms": 1790294400000,
       "review_by_ms": 1795478400000
     }
+  ],
+  "retired": [
+    {
+      "provider_id": "google",
+      "model_id": "antigravity-claude-sonnet-4-6-thinking",
+      "retired_at_ms": 1792191135000,
+      "reason": "Google withdrew the claude-sonnet-4-6 routes on the daily Code Assist endpoint (absent from fetchAvailableModels just before 2026-10-14T13:11Z), so the alias stopped being served."
+    },
+    {
+      "provider_id": "google",
+      "model_id": "antigravity-gemini-3.6-flash",
+      "retired_at_ms": 1792191135000,
+      "reason": "Google withdrew the gemini-3.6-flash-low/-medium/-high routes on the daily Code Assist endpoint (absent from fetchAvailableModels just before 2026-10-14T13:11Z), so the alias stopped being served."
+    },
+    {
+      "provider_id": "google",
+      "model_id": "antigravity-gemini-3.7-flash",
+      "retired_at_ms": 1792191135000,
+      "reason": "Google withdrew the gemini-3.7-flash-low/-medium/-high routes on the daily Code Assist endpoint (absent from fetchAvailableModels just before 2026-10-14T13:11Z), so the alias stopped being served."
+    }
   ]
 }

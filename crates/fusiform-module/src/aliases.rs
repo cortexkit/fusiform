@@ -169,6 +169,49 @@ pub fn aliases() -> &'static Aliases {
     PARSED.get_or_init(|| load_reporting_rejects(ALIASES).0)
 }
 
+/// An alias id fusiform used to serve and no longer does.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetiredAlias {
+    pub provider_id: String,
+    pub model_id: String,
+    /// When fusiform stopped serving the alias.
+    pub retired_at_ms: i64,
+    /// Why it was retired, for a reader of the file.
+    pub reason: String,
+}
+
+/// Alias ids that were served and then retired, keyed like the live table.
+///
+/// An alias is computed at read time and never stored, so deleting its row
+/// would make the id vanish from every read. A consumer that tracks identities
+/// across reads, and asks for retired rows, reads a vanished identity as a
+/// truncated response and refuses the refresh. Listing retired ids here lets
+/// the read report them the way a withdrawn upstream model is reported:
+/// present as an identity, marked absent.
+pub fn load_retired(doc: &str) -> BTreeMap<(String, String), RetiredAlias> {
+    #[derive(serde::Deserialize)]
+    struct Doc {
+        #[serde(default)]
+        retired: Vec<RetiredAlias>,
+    }
+    serde_json::from_str::<Doc>(doc)
+        .map(|d| {
+            d.retired
+                .into_iter()
+                .map(|r| ((r.provider_id.clone(), r.model_id.clone()), r))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The shipped retired-alias list, parsed once per process.
+pub fn retired_aliases() -> &'static BTreeMap<(String, String), RetiredAlias> {
+    static PARSED: std::sync::OnceLock<BTreeMap<(String, String), RetiredAlias>> =
+        std::sync::OnceLock::new();
+    PARSED.get_or_init(|| load_retired(ALIASES))
+}
+
 /// One alias row past its review date.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Overdue {
@@ -365,6 +408,22 @@ mod tests {
     fn the_seed_lookup_finds_a_row_that_exists() {
         assert!(seed_has("google", "gemini-3.8-flash"));
         assert!(!seed_has("google", "antigravity-gemini-3.8-flash"));
+    }
+
+    /// Every shipped retired id parses, and none is also a live alias: an id
+    /// cannot be both served and reported absent.
+    #[test]
+    fn retired_aliases_parse_and_are_not_live() {
+        let retired = retired_aliases();
+        assert_eq!(
+            retired.len(),
+            3,
+            "the three Code Assist ids withdrawn on 2026-10-14"
+        );
+        let live = aliases();
+        for key in retired.keys() {
+            assert!(!live.contains_key(key), "{key:?} is both live and retired");
+        }
     }
 
     #[test]

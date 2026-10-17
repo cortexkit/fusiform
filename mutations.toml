@@ -953,11 +953,13 @@ id = "curated-upstream-wins-call-site"
 guards = "any upstream observation for the provider/model makes the curated row stand down, including a retired row"
 file = "crates/fusiform-module/src/route.rs"
 old = """
-if store
+Check the store, not the filtered response.
+            if store
                 .model_is_known(source, provider, model)
                 .map_err(|e| store_error(&e))?"""
 new = """
-if false /* NON-VACUITY BREAK */ && store
+Check the store, not the filtered response.
+            if false /* NON-VACUITY BREAK */ && store
                 .model_is_known(source, provider, model)
                 .map_err(|e| store_error(&e))?"""
 edits = []
@@ -1153,3 +1155,18 @@ expect_red = ["route::alias_tests::structured_output_is_not_projected_onto_an_al
 select = "expected"
 timeout_s = 600
 build_timeout_s = 1800
+
+[[control]]
+id = "retired-alias-stays-an-identity"
+guards = "a retired alias id stays in retired-inclusive reads as an absent row, so a consumer tracking identities does not read its disappearance as a truncated catalog"
+file = "crates/fusiform-module/src/route.rs"
+old = "            response.models.insert(id, facts);\n        } else if named {"
+new = "            let _ = (id, facts);\n        } else if named {"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::alias_tests::a_retired_alias_is_reported_absent_not_dropped"]
+only = false
+timeout_s = 900

@@ -826,6 +826,30 @@ fn serve_catalog_get_with_limits(
             curated.push(row);
         }
     }
+    // Alias ids fusiform used to serve, reported as retired on current reads.
+    // See `aliases::retired_aliases` for why a retired alias cannot simply
+    // vanish. A real row for the id still wins, and a plane read never lists
+    // them, since a plane describes how a login is billed.
+    let mut retired_aliases = Vec::new();
+    if at.is_none() && plane.is_none() {
+        for ((provider, model), row) in crate::aliases::retired_aliases() {
+            if request
+                .provider_id
+                .as_deref()
+                .is_some_and(|p| p != provider)
+                || request.model_id.as_deref().is_some_and(|m| m != model)
+            {
+                continue;
+            }
+            if store
+                .model_is_known(source, provider, model)
+                .map_err(|e| store_error(&e))?
+            {
+                continue;
+            }
+            retired_aliases.push(row);
+        }
+    }
     if let (Some(provider_id), Some(model_id)) =
         (request.provider_id.as_deref(), request.model_id.as_deref())
     {
@@ -847,7 +871,7 @@ fn serve_catalog_get_with_limits(
         }
     }
 
-    let (snapshot, retired) = if named && !curated.is_empty() {
+    let (snapshot, retired) = if named && (!curated.is_empty() || !retired_aliases.is_empty()) {
         (
             CatalogSnapshot {
                 source,
@@ -975,6 +999,27 @@ fn serve_catalog_get_with_limits(
         response.curated.push(disclosure);
     }
     let mut response = finish_plane_view(response, plane, requested_prefixes.as_ref());
+    for row in retired_aliases {
+        let id = format!("{}/{}", row.provider_id, row.model_id);
+        if response.models.contains_key(&id) {
+            continue;
+        }
+        if request.include_retired {
+            // The same shape as a withdrawn upstream model: the identity is
+            // present and its existence fact says absent.
+            let mut facts = BTreeMap::from([(
+                "existence".to_string(),
+                serde_json::Value::String("absent".to_string()),
+            )]);
+            narrow_to_requested(&mut facts, requested_prefixes.as_ref());
+            response.models.insert(id, facts);
+        } else if named {
+            response.retired.push(fusiform_protocol::RetiredModelWire {
+                model: id,
+                retired_at_ms: row.retired_at_ms,
+            });
+        }
+    }
     if request.paged {
         // Rendering can consult aliases after the main store read. Reject a
         // concurrent version change rather than publish a mixed first page.
@@ -2935,6 +2980,65 @@ mod alias_tests {
         assert!(direct.models[TARGET]["rate.input"]
             .get("inherited_from")
             .is_none());
+    }
+
+    const RETIRED: &str = "google/antigravity-gemini-3.7-flash";
+
+    /// A retired alias stays an identity on retired-inclusive reads. A consumer
+    /// that tracks identities refuses a refresh where a known one vanished, so
+    /// deleting the row instead stalled that consumer on a stale catalog.
+    #[test]
+    fn a_retired_alias_is_reported_absent_not_dropped() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-3.8-flash", 1);
+
+        for args in [
+            r#"{"include_retired":true}"#,
+            r#"{"provider_id":"google","include_retired":true}"#,
+            r#"{"paged":true,"include_retired":true}"#,
+        ] {
+            let bulk = get(&store, args).unwrap();
+            assert_eq!(
+                bulk.models.get(RETIRED).map(|f| f["existence"].clone()),
+                Some(serde_json::json!("absent")),
+                "{args}: {:?}",
+                bulk.models.keys().collect::<Vec<_>>()
+            );
+        }
+
+        // Without include_retired a bulk read omits it, like any withdrawn row.
+        let plain = get(&store, r#"{"provider_id":"google"}"#).unwrap();
+        assert!(!plain.models.contains_key(RETIRED));
+
+        // A named read reports it retired rather than unknown.
+        let named = get(
+            &store,
+            r#"{"provider_id":"google","model_id":"antigravity-gemini-3.7-flash"}"#,
+        )
+        .expect("a retired alias is known, not no_coverage");
+        assert!(named.models.is_empty());
+        assert_eq!(
+            named
+                .retired
+                .iter()
+                .map(|r| r.model.as_str())
+                .collect::<Vec<_>>(),
+            vec![RETIRED]
+        );
+
+        // A point-in-time read never lists it: an alias has no past.
+        let at = get(&store, r#"{"include_retired":true,"at_ms":1500}"#).unwrap();
+        assert!(!at.models.contains_key(RETIRED));
+    }
+
+    /// A real upstream row for a retired alias id wins over the retirement.
+    #[test]
+    fn a_real_row_wins_over_a_retired_alias() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-3.8-flash", 1);
+        seed_model(&store, "antigravity-gemini-3.7-flash", 1);
+        let bulk = get(&store, r#"{"provider_id":"google","include_retired":true}"#).unwrap();
+        assert_eq!(bulk.models[RETIRED]["existence"], "present");
     }
 
     #[test]
