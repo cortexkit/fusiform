@@ -17,8 +17,10 @@ runner = "cargo"
 package = "fusiform-module"
 target = "--lib"
 expect_red = ["route::billing_plane_tests::kimi_plan_borrows_only_exact_canonical_api_cards_without_changing_storage"]
-only = true
+only = false
 timeout_s = 600
+hub = "This is the one call that borrows the Moonshot card for the Kimi coding plan, and the golden payload fixture in the it suite deliberately pins the Kimi plane cases, so removing it changes served bytes there as well as the lib plane test."
+hub_targets = ["it"]
 
 [[control]]
 id = "request-work-never-blocks-reader-runtime"
