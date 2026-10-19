@@ -51,8 +51,10 @@ On a `quota_proxy` plane:
    through an alias, see [`wire-contract.md`](wire-contract.md) §4.4) keeps its
    original marker (`billing_plane_tests::quota_proxies_preserve_the_first_hop_of_inherited_rates`,
    `billing_plane_tests::quota_proxies_do_not_erase_alias_markers`).
-3. Without `rates_from_provider`, mode rates are dropped, because a subscription's access to a priced API mode
-   is not established (`billing_plane_tests::quota_proxies_drop_all_mode_rates`).
+3. Mode rates are dropped on every quota proxy, including borrowed API cards,
+   because a subscription's access to a priced API mode is not established
+   (`billing_plane_tests::quota_proxies_drop_all_mode_rates`,
+   `billing_plane_tests::kimi_quota_proxy_drops_borrowed_mode_rates`).
 
 A `quota_proxy` declaration on `apikey` without an explicit price provider is rejected when the file loads
 (`billing_planes.rs`: `a_quota_proxy_on_apikey_without_a_price_provider_is_rejected_with_position`).
@@ -66,11 +68,17 @@ subscription quota rather than buying Moonshot API tokens.
 
 Only an exact `model.canonical_id` of `moonshotai/<id>` with a present
 `(moonshotai, <id>)` row in the current catalog establishes a target. The plan's
-entire rate card is replaced by every published `rate.*` fact on that target,
-including base, context-tier and mode keys. Each carries `inherited_from` with
-`basis: "quota_proxy"`, the target provider, model id and family. A copied mode
-price is a reference weight only, not evidence the subscription offers that
-mode. Plan-only keys are removed, not mixed into the API card.
+entire rate card is replaced by the published non-mode `rate.*` facts on that
+target, including base and context-tier keys. Each carries `inherited_from`
+with `basis: "quota_proxy"`, the target provider, model id and family. API mode
+prices are stripped because they cannot establish subscription mode access.
+Plan-only keys are removed, not mixed into the API card.
+
+`InheritedFrom.family` is a required string in the existing wire type. As with
+exact-row aliases, an absent or null target family uses the existing empty-string
+sentinel; it is not a stated family name. The canonical id establishes the target
+independently of family, so missing family does not block borrowing
+(`billing_plane_tests::kimi_plan_borrows_only_exact_canonical_api_cards_without_changing_storage`).
 
 If the canonical id is absent, names another provider, or has no present API
 row, the plan's rate keys and the five base token classes read
@@ -153,7 +161,7 @@ plane:
 | `provider_id` | yes | a models.dev provider slug |
 | `auth_method` | yes | one of the four methods |
 | `kind` | yes | `upstream` or `quota_proxy` |
-| `rates_from_provider` | no | non-empty provider slug; only valid on `quota_proxy`; borrow the exact canonical row's entire rate card |
+| `rates_from_provider` | no | non-empty provider slug; only valid on `quota_proxy`; replace rates with the exact canonical row's non-mode rate card |
 | `source_ref` | yes | the source that states how this login method bills |
 | `established_by`, `established_at_ms` | yes | who established the claim and when |
 | `review_by_ms` | yes | when it must be re-verified |

@@ -1483,14 +1483,22 @@ fn borrow_plane_rates(
         None
     };
     if let Some(origin) = origin {
-        let marker = serde_json::json!({
-            "provider_id": provider,
-            "model_id": origin.model_id,
-            "family": origin.facts.get(&FactKey::from_stored("model.family".into()))
-                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-                .and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default(),
-            "basis": "quota_proxy",
-        });
+        // InheritedFrom requires family. Like exact-row aliases, use its empty
+        // sentinel when absent or null: the canonical id, not family, identifies
+        // this API row, so a missing family must not prevent borrowing.
+        let family = origin
+            .facts
+            .get(&FactKey::from_stored("model.family".into()))
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        let marker = serde_json::to_value(fusiform_protocol::money::InheritedFrom {
+            provider_id: provider.to_string(),
+            model_id: Some(origin.model_id.clone()),
+            family,
+            basis: "quota_proxy".to_string(),
+        })
+        .expect("a struct of strings serialises");
         facts.retain(|key, _| !key.starts_with(fusiform_store::prefix::RATE));
         for (key, raw) in origin.facts {
             if !key.as_str().starts_with(fusiform_store::prefix::RATE) {
@@ -1528,10 +1536,12 @@ fn apply_billing_plane(
     facts: &mut BTreeMap<String, serde_json::Value>,
     plane: &Plane,
 ) -> Vec<BillingRuleWire> {
-    if plane.kind == PlaneKind::QuotaProxy && plane.rates_from_provider.is_none() {
+    if plane.kind == PlaneKind::QuotaProxy {
         // A subscription may not offer an API service mode. Keeping its price
         // would claim a charge for a mode whose availability is not established.
         facts.retain(|key, _| !fusiform_store::rate_key::is_mode_rate(key));
+    }
+    if plane.kind == PlaneKind::QuotaProxy && plane.rates_from_provider.is_none() {
         let marker = serde_json::to_value(fusiform_protocol::money::InheritedFrom {
             provider_id: plane.provider_id.clone(),
             family: facts
@@ -3657,6 +3667,10 @@ mod billing_plane_tests {
                 if id == "k3" || id == "k3-256k" {
                     let mut count = 0;
                     for (key, mut expected) in api_card.clone() {
+                        if key.contains(".mode.") {
+                            assert!(!facts.contains_key(key), "{id}/{key}");
+                            continue;
+                        }
                         if prefix.is_some_and(|p| !key.starts_with(p)) {
                             continue;
                         }
@@ -3708,6 +3722,112 @@ mod billing_plane_tests {
         )
         .unwrap_err();
         assert_eq!(error.code, "no_coverage");
+        assert_canonical_borrow_uses_the_required_empty_family_sentinel();
+    }
+
+    #[test]
+    fn kimi_quota_proxy_drops_borrowed_mode_rates() {
+        let (store, _dir) = store();
+        seed(&store, "moonshotai", "kimi-k3", card());
+        seed(
+            &store,
+            "kimi-code-plan-global",
+            "k3",
+            vec![
+                ("model.canonical_id", json!("moonshotai/kimi-k3")),
+                ("rate.input", json!({"state":"stated_zero"})),
+            ],
+        );
+        for model in [None, Some("k3")] {
+            for prefix in [None, Some("rate."), Some("rate.input.mode.")] {
+                let response = get(
+                    &store,
+                    request("kimi-code-plan-global", model, "apikey", prefix),
+                )
+                .unwrap();
+                let facts = &response.models["kimi-code-plan-global/k3"];
+                assert!(!facts.contains_key("rate.input.mode.fast"));
+                assert!(!facts.contains_key("rate.output.mode.fast.above_context.272000"));
+                assert!(facts.keys().all(|key| !key.contains(".mode.")));
+            }
+        }
+        let control = get(
+            &store,
+            json!({"provider_id":"moonshotai", "model_id":"kimi-k3"}),
+        )
+        .unwrap();
+        assert_eq!(
+            control.models["moonshotai/kimi-k3"]["rate.input.mode.fast"]["units"],
+            700
+        );
+        assert_eq!(
+            control.models["moonshotai/kimi-k3"]["rate.output.mode.fast.above_context.272000"]
+                ["units"],
+            800
+        );
+    }
+
+    fn assert_canonical_borrow_uses_the_required_empty_family_sentinel() {
+        let (store, _dir) = store();
+        for id in ["absent-family", "null-family"] {
+            let mut facts = vec![
+                ("existence", json!("present")),
+                (
+                    "rate.input",
+                    json!({"state":"priced", "units":100, "exponent":9, "currency":"USD", "unit_provenance":{"kind":"stated"}}),
+                ),
+            ];
+            if id == "null-family" {
+                facts.push(("model.family", Value::Null));
+            }
+            let eras: Vec<_> = facts
+                .into_iter()
+                .map(|(key, value)| NewEra {
+                    source: SourceId::ModelsDev,
+                    provider_id: "moonshotai".into(),
+                    model_id: id.into(),
+                    fact_key: FactKey::from_stored(key.into()),
+                    value_json: value.to_string(),
+                    boundary_at: Timestamp(1_000),
+                    boundary_kind: BoundaryKind::Seed,
+                    observation_id: None,
+                })
+                .collect();
+            store.append_eras(&eras).unwrap();
+            seed(
+                &store,
+                "kimi-code-plan-global",
+                id,
+                vec![
+                    ("model.canonical_id", json!(format!("moonshotai/{id}"))),
+                    ("rate.input", json!({"state":"stated_zero"})),
+                ],
+            );
+        }
+        let bulk = get(
+            &store,
+            request("kimi-code-plan-global", None, "apikey", Some("rate.")),
+        )
+        .unwrap();
+        for id in ["absent-family", "null-family"] {
+            let named = get(
+                &store,
+                request("kimi-code-plan-global", Some(id), "apikey", Some("rate.")),
+            )
+            .unwrap();
+            let identity = format!("kimi-code-plan-global/{id}");
+            assert_eq!(named.models[&identity], bulk.models[&identity]);
+            let rate = &named.models[&identity]["rate.input"];
+            assert_eq!(rate["state"], "priced");
+            assert_eq!(rate["units"], 100);
+            assert_eq!(
+                rate["inherited_from"],
+                json!({
+                    "provider_id":"moonshotai", "model_id":id, "family":"", "basis":"quota_proxy"
+                })
+            );
+            let _: fusiform_protocol::RateValue = serde_json::from_value(rate.clone()).unwrap();
+        }
     }
 
     #[test]

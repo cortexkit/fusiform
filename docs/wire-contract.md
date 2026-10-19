@@ -240,6 +240,12 @@ The object names `provider_id`, `family`, `basis`, and, under `alias` or a
 cross-provider `quota_proxy`, the target `model_id`. A consumer must not read
 it as the cost of the route.
 
+`family` is a required string. Exact-row aliases and cross-provider quota cards
+use the existing `""` sentinel when the target family is absent or null; this
+does not state a family name. Their target identity is established independently
+of family. Open-weight inheritance instead requires the serving row's family
+to find its curated creator, and skips inheritance if that family is missing.
+
 | `basis` | When | Rule |
 | --- | --- | --- |
 | `open_weights` | an open-weight row whose provider published no rate at all, for a family whose creator is curated | the creator's published rate is served, marked (`crates/fusiform-module/src/route.rs`: `inheritance_tests::an_unpriced_open_weight_row_inherits_and_says_whose_price_it_is`) |
@@ -247,8 +253,9 @@ it as the cost of the route.
 | `quota_proxy` | a subscription billing plane | an API list price is served as a relative weight, not an amount billed; cross-provider planes name the canonical target provider and `model_id` (see [`billing-planes.md`](billing-planes.md)) |
 
 The Kimi coding plane (`kimi-code-plan-global`, `apikey`) replaces its own zeros
-with every published rate on the exact `moonshotai/<id>` canonical row, base
-and tiered alike. It marks each rate with that API row's provider, model and
+with every published non-mode rate on the exact `moonshotai/<id>` canonical
+row, base and tiered alike. Mode rates are stripped on every quota-proxy plane.
+It marks each rate with that API row's provider, model and
 family under `quota_proxy`. No canonical id, another prefix, or an absent API
 row produces `unpriced` / `no_api_card`, never the plan's zero or a similar-name
 price. A read without `auth_method`, other planes, and stored upstream claims
