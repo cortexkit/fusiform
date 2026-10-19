@@ -11,6 +11,7 @@ that keep them honest.
 | `model-creators.json` | which provider published an open-weight family | at read time |
 | `model-aliases.json` | route-specific ids and the published row each one is | at read time, current reads only |
 | `curated-models.json` | provider rows models.dev does not carry | at read time, current reads only |
+| `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
 | `plan-prices.json` | subscription list prices | written to `plan_price_era` at start |
 | `models-dev-seed.json` | a copy of the upstream catalog for offline first boot | written as seed eras into an empty store |
@@ -26,7 +27,7 @@ the source file of the same name under `crates/fusiform-module/src/`.
 ## 1. Rules every curated file follows
 
 1. **Curated facts are never stored as observations.** Creators, aliases,
-   curated rows and billing planes are applied when a read is served, so a
+   curated rows, canonical links and billing planes are applied when a read is served, so a
    point-in-time read replays what the upstream published and never today's
    curation (see [`data-model.md`](data-model.md) §8).
 2. **An upstream row wins.** When models.dev publishes the same identity, the
@@ -149,7 +150,34 @@ When models.dev starts publishing the same identity, the suite fails with
 (`upstream_now_publishes_this_row_remove_the_curated_row`), checked against the
 embedded seed.
 
-## 5. The embedded seed (`models-dev-seed.json`)
+## 5. Canonical links (`canonical-links.json`)
+
+Each row in `links` names an existing `provider_id` / `model_id` and a
+`canonical_id` in `<lab>/<id>` form. This is the models.dev lab identity, not
+another provider's route id. The file fills only a null or absent
+`model.canonical_id`; any non-null upstream value wins, including a different
+identity. No fact is written to the store, and `at_ms` reads never apply links.
+
+Two sources establish the claim: `source_ref` is the provider's library URL,
+and `quote` is its sentence identifying the exact model and variant.
+`lab_source_ref` points to `https://models.dev/models.json`; `lab_quote` quotes
+that entry's `id` and `name` fields, with the lab encoded in `id`. Do not derive
+either identity from a route's spelling. A different size or unverified variant
+must stay unlinked. `established_by` is `fusiform`, `established_at_ms` records
+verification, and `review_by_ms` must be exactly 60 days later.
+
+The response's `canonical_links` list names each applied value and both sources
+(see [`wire-contract.md`](wire-contract.md) §5.7). It appears only when the
+identity survives the fact-prefix filter, on named, bulk and paged reads.
+
+Gates in `canonical_links.rs` check rejects, review dates, existence of the
+linked route in the embedded seed, and absence of an upstream
+`canonical_model_id`. When upstream fills the id, the failure names the link
+to remove. Each scan has a planted-violation test. Route tests in
+`route/canonical_link_tests.rs` cover null and absent facts, upstream wins,
+historical reads, filters, disclosure and unchanged stored facts/era counts.
+
+## 6. The embedded seed (`models-dev-seed.json`)
 
 A verbatim copy of `https://models.dev/api.json`, with
 `models-dev-seed.meta.json` recording the fetch instant, URL, SHA-256 and
@@ -161,10 +189,10 @@ the snapshot is older than 14 days (`seed.rs`: `the_embedded_seed_is_not_stale`)
 Refresh it with `scripts/refresh-seed.sh`. The seed is models.dev's data under
 its MIT license; see `THIRD-PARTY-NOTICES.md`.
 
-## 6. When a review gate fires
+## 7. When a review gate fires
 
-Plan prices, quota values, billing planes and rules, aliases and curated
-model rows each carry a review date, and a test fails once any date has
+Plan prices, quota values, billing planes and rules, aliases, canonical links
+and curated model rows each carry a review date, and a test fails once any date has
 passed. These are time-triggered: they fail on a day nobody changed anything,
 and CI's scheduled run exists so they fire then. The plan-price, billing-plane
 and seed gates' failure messages begin "NOT A BUILD FAILURE" and name what
@@ -172,11 +200,11 @@ to re-read.
 
 To clear one:
 
-1. Open the row's `source_ref` and read it again.
+1. Open the row's `source_ref` and read it again (and `lab_source_ref` for a canonical link).
 2. If the claim changed, update it (or remove the row).
 3. Whether or not it changed, record who looked (`established_by` where the
    file has it), when (`established_at_ms`), and a new `review_by_ms`: 60 days
-   later for billing planes, aliases and curated model rows; the file's stated
+   later for billing planes, aliases, canonical links and curated model rows; the file's stated
    interval for plan prices.
 4. Commit the file. Confirming a claim unchanged is a real result; the diff is
    the provenance change alone.

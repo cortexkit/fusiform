@@ -232,6 +232,15 @@ fn every_response_type_round_trips() {
     use std::collections::BTreeMap;
 
     let catalog = CatalogGetResponse {
+        canonical_links: vec![CanonicalLinkWire {
+            model: "ollama-cloud/kimi-k2.6".into(),
+            canonical_id: "moonshotai/kimi-k2.6".into(),
+            source_ref: "https://ollama.com/library/kimi-k2.6".into(),
+            quote: "Kimi K2.6 is an open-source, native multimodal agentic model.".into(),
+            lab_source_ref: "https://models.dev/models.json".into(),
+            lab_quote: r#"{"id":"moonshotai/kimi-k2.6","name":"Kimi K2.6"}"#.into(),
+            review_by_ms: 1_797_552_000_000,
+        }],
         next_page_token: None,
         curated: vec![CuratedModelWire {
             model: "meta/muse-wonder-full-1.0".into(),

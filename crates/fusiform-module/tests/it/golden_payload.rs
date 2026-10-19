@@ -426,9 +426,48 @@ fn render_all() -> String {
         .as_object_mut()
         .unwrap()
         .insert("catalog.get — first provider page".into(), render_paged());
+    ordinary.as_object_mut().unwrap().insert(
+        "catalog.get — a sourced canonical identity".into(),
+        render_canonical_link(),
+    );
     let mut text = serde_json::to_string_pretty(&ordinary).unwrap();
     text.push('\n');
     text
+}
+
+/// Isolate the real unlinked seed row so it cannot change ordinary-case counts.
+fn render_canonical_link() -> serde_json::Value {
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("canonical.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    let row = seed["ollama-cloud"]["models"]["kimi-k2.6"].clone();
+    assert!(row.is_object());
+    assert!(row["canonical_model_id"].is_null());
+    let doc = serde_json::json!({"ollama-cloud": {
+        "id":"ollama-cloud", "name":"Ollama Cloud",
+        "models":{"kimi-k2.6":row}
+    }});
+    let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+        .unwrap()
+        .catalog;
+    let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
+    store.append_eras(&plan.eras).unwrap();
+    let request = serde_json::json!({"name":"catalog.get","arguments":{
+        "provider_id":"ollama-cloud", "model_id":"kimi-k2.6",
+        "fact_prefixes":["model.canonical_id"]
+    }});
+    let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+    let mut response = serde_json::to_value(response).unwrap();
+    response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+    serde_json::json!({"request":request, "response":response})
 }
 
 fn render_paged() -> serde_json::Value {
@@ -525,9 +564,13 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         .count();
     assert_eq!(plain_plane_cases, 2);
     for (text, expected) in [
-        (GOLDEN.to_string(), cases().len() + plain_plane_cases + 1),
+        (GOLDEN.to_string(), cases().len() + plain_plane_cases + 2),
         (render(), cases().len()),
         (serde_json::json!({"paged":render_paged()}).to_string(), 1),
+        (
+            serde_json::json!({"canonical":render_canonical_link()}).to_string(),
+            1,
+        ),
     ] {
         let doc = serde_json::from_str(&text).unwrap();
         let (checked, leaks) = non_plane_leaks(&doc);
@@ -1621,6 +1664,7 @@ fn every_read_response_field_reaches_the_fixture() {
         &[
             "CatalogGetResponse",
             "CuratedModelWire",
+            "CanonicalLinkWire",
             "PlaneWire",
             "BillingRuleWire",
             "HistoryResponse",
@@ -1632,7 +1676,7 @@ fn every_read_response_field_reaches_the_fixture() {
 
     assert!(
         checked >= 40,
-        "this examined {checked} fields across eight structs; fewer than 40 means \
+        "this examined {checked} fields across nine structs; fewer than 40 means \
          the scan broke rather than the protocol shrinking"
     );
 

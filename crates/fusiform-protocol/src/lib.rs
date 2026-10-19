@@ -644,6 +644,11 @@ pub struct CatalogGetResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliased: Vec<AliasedModelWire>,
 
+    /// Sourced lab identities supplied only where upstream has no canonical id.
+    /// Current reads only; omitted when the identity fact is filtered out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub canonical_links: Vec<CanonicalLinkWire>,
+
     /// The billing plane selected by `auth_method`. Absent on ordinary reads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plane: Option<PlaneWire>,
@@ -1323,6 +1328,18 @@ pub struct CuratedModelWire {
     /// be refused by the routing consumer.
     pub auth_methods: Vec<String>,
     pub source_ref: String,
+    pub review_by_ms: i64,
+}
+
+/// Provenance for a curated `model.canonical_id`, not an upstream observation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanonicalLinkWire {
+    pub model: String,
+    pub canonical_id: String,
+    pub source_ref: String,
+    pub quote: String,
+    pub lab_source_ref: String,
+    pub lab_quote: String,
     pub review_by_ms: i64,
 }
 

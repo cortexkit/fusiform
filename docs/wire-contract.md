@@ -457,6 +457,24 @@ must refuse a credential whose login method is not listed. A model absent
 from `curated` carries no such restriction. Rules are in
 [`curated-data.md`](curated-data.md) §4.
 
+### 5.7 Canonical links
+
+`canonical_links` discloses sourced lab identities supplied where the upstream
+row's `model.canonical_id` is null or absent. It is an array, omitted when empty,
+whose entries have `model`, `canonical_id`, `source_ref`, `quote`,
+`lab_source_ref`, `lab_quote` and `review_by_ms`. For example, a current
+`ollama-cloud/kimi-k2.6` read serves `model.canonical_id: "moonshotai/kimi-k2.6"`
+and names that route, value, the Ollama library sentence and the models.dev lab
+entry in the disclosure. It is a curated identity claim, not an observation.
+
+Any non-null upstream identity wins without a disclosure, even if it disagrees.
+`at_ms` reads never apply links. Named, bulk and paged current reads all fill
+only null or absent identities and disclose each applied link. Fact-prefix
+filters still apply: `model.` and `model.canonical_id`
+include the value and disclosure; `rate.` alone includes neither. Neither the
+stored fact nor its history changes. Sources and review rules are in
+[`curated-data.md`](curated-data.md) §5.
+
 ## 6. `catalog.history`
 
 Every era for one fact, oldest first.

@@ -1,0 +1,88 @@
+{
+  "links": [
+    {
+      "provider_id": "ollama-cloud",
+      "model_id": "deepseek-v4-flash",
+      "canonical_id": "deepseek/deepseek-v4-flash",
+      "source_ref": "https://ollama.com/library/deepseek-v4-flash",
+      "quote": "DeepSeek-V4-Flash is the official release of DeepSeek-V4-Flash, built for efficient reasoning across a 1M-token context window, outperforming DeepSeek-V4-Pro (Preview).",
+      "lab_source_ref": "https://models.dev/models.json",
+      "lab_quote": "{\"id\": \"deepseek/deepseek-v4-flash\", \"name\": \"DeepSeek V4 Flash\"}",
+      "established_by": "fusiform",
+      "established_at_ms": 1792368000000,
+      "review_by_ms": 1797552000000
+    },
+    {
+      "provider_id": "ollama-cloud",
+      "model_id": "deepseek-v4-pro",
+      "canonical_id": "deepseek/deepseek-v4-pro",
+      "source_ref": "https://ollama.com/library/deepseek-v4-pro",
+      "quote": "DeepSeek-V4-Pro is the flagship model in the DeepSeek-V4 series — a Mixture-of-Experts model with 1.6T total parameters and 49B activated, built for frontier-level reasoning across a 1M-token context window.",
+      "lab_source_ref": "https://models.dev/models.json",
+      "lab_quote": "{\"id\": \"deepseek/deepseek-v4-pro\", \"name\": \"DeepSeek V4 Pro\"}",
+      "established_by": "fusiform",
+      "established_at_ms": 1792368000000,
+      "review_by_ms": 1797552000000
+    },
+    {
+      "provider_id": "ollama-cloud",
+      "model_id": "glm-5.1",
+      "canonical_id": "zhipuai/glm-5.1",
+      "source_ref": "https://ollama.com/library/glm-5.1",
+      "quote": "GLM-5.1 is Z.AI’s next-generation flagship model for agentic engineering, with significantly stronger coding capabilities than its predecessor.",
+      "lab_source_ref": "https://models.dev/models.json",
+      "lab_quote": "{\"id\": \"zhipuai/glm-5.1\", \"name\": \"GLM-5.1\"}",
+      "established_by": "fusiform",
+      "established_at_ms": 1792368000000,
+      "review_by_ms": 1797552000000
+    },
+    {
+      "provider_id": "ollama-cloud",
+      "model_id": "kimi-k2.5",
+      "canonical_id": "moonshotai/kimi-k2.5",
+      "source_ref": "https://ollama.com/library/kimi-k2.5",
+      "quote": "Kimi K2.5 is an open-source, native multimodal agentic model built through continual pretraining on approximately 15 trillion mixed visual and text tokens atop Kimi-K2-Base.",
+      "lab_source_ref": "https://models.dev/models.json",
+      "lab_quote": "{\"id\": \"moonshotai/kimi-k2.5\", \"name\": \"Kimi K2.5\"}",
+      "established_by": "fusiform",
+      "established_at_ms": 1792368000000,
+      "review_by_ms": 1797552000000
+    },
+    {
+      "provider_id": "ollama-cloud",
+      "model_id": "kimi-k2.6",
+      "canonical_id": "moonshotai/kimi-k2.6",
+      "source_ref": "https://ollama.com/library/kimi-k2.6",
+      "quote": "Kimi K2.6 is an open-source, native multimodal agentic model that advances practical capabilities in long-horizon coding, coding-driven design, proactive autonomous execution, and swarm-based task orchestration.",
+      "lab_source_ref": "https://models.dev/models.json",
+      "lab_quote": "{\"id\": \"moonshotai/kimi-k2.6\", \"name\": \"Kimi K2.6\"}",
+      "established_by": "fusiform",
+      "established_at_ms": 1792368000000,
+      "review_by_ms": 1797552000000
+    },
+    {
+      "provider_id": "ollama-cloud",
+      "model_id": "minimax-m2.5",
+      "canonical_id": "minimax/MiniMax-M2.5",
+      "source_ref": "https://ollama.com/library/minimax-m2.5",
+      "quote": "MiniMax M2.5 is the fastest-improving model series for coding and agentic workflows, trained with large-scale reinforcement learning across hundreds of thousands of real-world environments.",
+      "lab_source_ref": "https://models.dev/models.json",
+      "lab_quote": "{\"id\": \"minimax/MiniMax-M2.5\", \"name\": \"MiniMax-M2.5\"}",
+      "established_by": "fusiform",
+      "established_at_ms": 1792368000000,
+      "review_by_ms": 1797552000000
+    },
+    {
+      "provider_id": "ollama-cloud",
+      "model_id": "minimax-m2.7",
+      "canonical_id": "minimax/MiniMax-M2.7",
+      "source_ref": "https://ollama.com/library/minimax-m2.7",
+      "quote": "MiniMax M2.7 is the first model in the M2-series to deeply participate in its own evolution, capable of building complex agent harnesses and completing highly elaborate productivity tasks through Agent Teams, complex Skills, and dynamic tool search.",
+      "lab_source_ref": "https://models.dev/models.json",
+      "lab_quote": "{\"id\": \"minimax/MiniMax-M2.7\", \"name\": \"MiniMax-M2.7\"}",
+      "established_by": "fusiform",
+      "established_at_ms": 1792368000000,
+      "review_by_ms": 1797552000000
+    }
+  ]
+}

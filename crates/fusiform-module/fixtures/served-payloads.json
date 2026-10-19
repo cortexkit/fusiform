@@ -981,6 +981,39 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — a sourced canonical identity": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "model.canonical_id"
+        ],
+        "model_id": "kimi-k2.6",
+        "provider_id": "ollama-cloud"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "canonical_links": [
+        {
+          "canonical_id": "moonshotai/kimi-k2.6",
+          "lab_quote": "{\"id\": \"moonshotai/kimi-k2.6\", \"name\": \"Kimi K2.6\"}",
+          "lab_source_ref": "https://models.dev/models.json",
+          "model": "ollama-cloud/kimi-k2.6",
+          "quote": "Kimi K2.6 is an open-source, native multimodal agentic model that advances practical capabilities in long-horizon coding, coding-driven design, proactive autonomous execution, and swarm-based task orchestration.",
+          "review_by_ms": 1797552000000,
+          "source_ref": "https://ollama.com/library/kimi-k2.6"
+        }
+      ],
+      "catalog_version": 0,
+      "models": {
+        "ollama-cloud/kimi-k2.6": {
+          "model.canonical_id": "moonshotai/kimi-k2.6"
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — an instant inside an unobserved window": {
     "request": {
       "arguments": {

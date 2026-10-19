@@ -481,6 +481,7 @@ fn candidate_reference_page(
         .chain(response.retired.iter().map(|row| &row.model))
         .chain(response.aliased.iter().map(|row| &row.model))
         .chain(response.billing_rules.iter().map(|row| &row.model))
+        .chain(response.canonical_links.iter().map(|row| &row.model))
         .map(|model| model_provider(model).to_owned())
         .chain(response.uncertain.iter().map(|row| row.provider_id.clone()))
         .collect();
@@ -526,12 +527,29 @@ fn linear_packing_matches_candidate_reference_boundaries() {
             "provider:\"\\μ/m".into(),
             BTreeMap::from([("model.family".into(), json!("escaped\"\\value\nμ"))]),
         );
+        for model in ["p00/m", "z-canonical-only/m"] {
+            full.canonical_links
+                .push(fusiform_protocol::CanonicalLinkWire {
+                    model: model.into(),
+                    canonical_id: "lab/model".into(),
+                    source_ref: "https://example.com/library/model".into(),
+                    quote: "A quoted identity with escaping: \"model\".".into(),
+                    lab_source_ref: "https://models.dev/models.json".into(),
+                    lab_quote: r#"{"id":"lab/model","name":"Model"}"#.into(),
+                    review_by_ms: 1_797_552_000_000,
+                });
+        }
         let all: BTreeSet<_> = full
             .models
             .keys()
             .map(|m| model_provider(m).to_owned())
             .chain(
                 full.withheld
+                    .iter()
+                    .map(|row| model_provider(&row.model).to_owned()),
+            )
+            .chain(
+                full.canonical_links
                     .iter()
                     .map(|row| model_provider(&row.model).to_owned()),
             )
@@ -566,6 +584,10 @@ fn linear_packing_matches_candidate_reference_boundaries() {
                 assert_eq!(
                     actual.next_page_token, expected.next_page_token,
                     "budget {budget}, page {page_count}"
+                );
+                assert_eq!(
+                    actual.canonical_links, expected.canonical_links,
+                    "canonical disclosures at budget {budget}, page {page_count}"
                 );
                 page_count += 1;
                 match actual.next_page_token {

@@ -1202,3 +1202,26 @@ target = "--test it"
 expect_red = ["enrollment::a_fresh_directory_gets_the_exact_bytes_at_mode_0600", "enrollment::a_differing_file_is_replaced", "enrollment::startup_writes_the_descriptor_beside_the_opened_store"]
 only = false
 timeout_s = 900
+
+[[control]]
+id = "canonical-link-application-call-site"
+guards = "current named and bulk reads fill only missing canonical identities with sourced links without writing them"
+file = "crates/fusiform-module/src/route.rs"
+old = '''apply_canonical_link(
+                &model.provider_id,
+                &model.model_id,
+                &mut facts,
+                requested_prefixes,
+            )'''
+new = '''None::<fusiform_protocol::CanonicalLinkWire> /* NON-VACUITY BREAK */'''
+edits = []
+test_file = "crates/fusiform-module/src/route/canonical_link_tests.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::canonical_link_tests::canonical_links_fill_only_missing_identities_on_current_reads"]
+only = false
+hub = "The shared render call also supplies the canonical-link value and disclosure pinned by golden_payload::the_served_payloads_match_the_golden_fixture."
+hub_targets = ["it"]
+timeout_s = 600
+build_timeout_s = 1800

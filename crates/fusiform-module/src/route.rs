@@ -29,6 +29,10 @@ use serde::Deserialize;
 #[cfg(test)]
 mod paging_tests;
 
+#[cfg(test)]
+#[path = "route/canonical_link_tests.rs"]
+mod canonical_link_tests;
+
 // The served contract lives in `fusiform-protocol` so a consumer can compile
 // against it without taking this module's store, network or runtime. Re-exported
 // here because this file is where the contract is USED, and a reader following
@@ -959,6 +963,11 @@ fn serve_catalog_get_with_limits(
         Some((store, crate::creators::creators())),
         request.fact_prefixes.as_ref(),
     );
+    if !named {
+        // Widening for an absent identity can fetch only existence. Preserve the
+        // bulk-read contract: a model with no requested facts is not a result.
+        response.models.retain(|_, facts| !facts.is_empty());
+    }
     // Attached after rendering rather than passed through it: `render` is shared
     // with the bulk path, which has no retirements to report, and threading an
     // always-empty argument through it would invite a future caller to fill it.
@@ -1130,6 +1139,9 @@ fn scope_page(response: &mut CatalogGetResponse, providers: &BTreeSet<String>) {
     response
         .billing_rules
         .retain(|row| providers.contains(model_provider(&row.model)));
+    response
+        .canonical_links
+        .retain(|row| providers.contains(model_provider(&row.model)));
 }
 
 fn page_catalog(
@@ -1159,7 +1171,7 @@ fn page_catalog(
     // including the final page, which needs no token at all.
     let mut estimate = PageEstimate {
         bytes: compact_size(&response)? + token_reserve,
-        present: [false; 7],
+        present: [false; 8],
     };
     let mut count = 0;
     for (index, (_, _, contribution, _, token_bytes)) in sized.iter().enumerate() {
@@ -1234,28 +1246,31 @@ struct ProviderRows {
     aliased: Vec<fusiform_protocol::AliasedModelWire>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     billing_rules: Vec<BillingRuleWire>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    canonical_links: Vec<fusiform_protocol::CanonicalLinkWire>,
 }
 
 // The empty models object is already in the envelope. Optional array headers
 // appear only once per page; provider payloads supply their interior JSON bytes.
-const DISCLOSURE_HEADERS: [&str; 6] = [
+const DISCLOSURE_HEADERS: [&str; 7] = [
     r#","curated":[]"#,
     r#","withheld":[]"#,
     r#","retired":[]"#,
     r#","uncertain":[]"#,
     r#","aliased":[]"#,
     r#","billing_rules":[]"#,
+    r#","canonical_links":[]"#,
 ];
 
 struct ProviderContribution {
     bytes: usize,
-    present: [bool; 7],
+    present: [bool; 8],
 }
 
 #[derive(Clone, Copy)]
 struct PageEstimate {
     bytes: usize,
-    present: [bool; 7],
+    present: [bool; 8],
 }
 
 impl PageEstimate {
@@ -1291,6 +1306,7 @@ impl ProviderRows {
             !self.uncertain.is_empty(),
             !self.aliased.is_empty(),
             !self.billing_rules.is_empty(),
+            !self.canonical_links.is_empty(),
         ];
         let headers = DISCLOSURE_HEADERS
             .iter()
@@ -1311,6 +1327,7 @@ impl ProviderRows {
         page.uncertain.extend(self.uncertain);
         page.aliased.extend(self.aliased);
         page.billing_rules.extend(self.billing_rules);
+        page.canonical_links.extend(self.canonical_links);
     }
 }
 
@@ -1371,6 +1388,13 @@ fn partition_providers(response: &mut CatalogGetResponse) -> BTreeMap<String, Pr
             .entry(model_provider(&row.model).to_owned())
             .or_default()
             .billing_rules
+            .push(row);
+    }
+    for row in std::mem::take(&mut response.canonical_links) {
+        providers
+            .entry(model_provider(&row.model).to_owned())
+            .or_default()
+            .canonical_links
             .push(row);
     }
     providers
@@ -1455,6 +1479,12 @@ fn finish_plane_view(
             .models
             .get(&rule.model)
             .is_some_and(|facts| facts.contains_key(&rule.fact_key))
+    });
+    response.canonical_links.retain(|link| {
+        response
+            .models
+            .get(&link.model)
+            .is_some_and(|facts| facts.contains_key("model.canonical_id"))
     });
     Ok(response)
 }
@@ -1877,6 +1907,7 @@ fn render(
     requested_prefixes: Option<&Vec<String>>,
 ) -> CatalogGetResponse {
     let mut models = BTreeMap::new();
+    let mut canonical_links = Vec::new();
     for model in snapshot.models {
         let identity = format!("{}/{}", model.provider_id, model.model_id);
         let mut facts = BTreeMap::new();
@@ -1889,6 +1920,16 @@ fn render(
             });
             name_the_provenance_of_a_pre_0_11_row(&mut value);
             facts.insert(key.as_str().to_string(), value);
+        }
+        if at.is_none() {
+            if let Some(link) = apply_canonical_link(
+                &model.provider_id,
+                &model.model_id,
+                &mut facts,
+                requested_prefixes,
+            ) {
+                canonical_links.push(link);
+            }
         }
         // Inheritance is skipped for point-in-time reads. `at` asks what the
         // catalog HELD at an instant, and an inherited rate is what fusiform
@@ -1953,6 +1994,7 @@ fn render(
         // callers that serve one row's facts under another id.
         aliased: Vec::new(),
         curated: Vec::new(),
+        canonical_links,
         plane: None,
         billing_rules: Vec::new(),
     }
@@ -1967,6 +2009,32 @@ fn curated_disclosure(
         source_ref: row.source_ref.clone(),
         review_by_ms: row.review_by_ms,
     }
+}
+
+/// Fill a null or absent `model.canonical_id` and return its source disclosure.
+fn apply_canonical_link(
+    provider: &str,
+    model: &str,
+    facts: &mut BTreeMap<String, serde_json::Value>,
+    prefixes: Option<&Vec<String>>,
+) -> Option<fusiform_protocol::CanonicalLinkWire> {
+    const KEY: &str = "model.canonical_id";
+    if prefixes.is_some_and(|prefixes| !prefixes.iter().any(|p| KEY.starts_with(p)))
+        || facts.get(KEY).is_some_and(|id| !id.is_null())
+    {
+        return None;
+    }
+    let row = crate::canonical_links::links().get(&(provider.to_string(), model.to_string()))?;
+    facts.insert(KEY.to_string(), serde_json::json!(row.canonical_id));
+    Some(fusiform_protocol::CanonicalLinkWire {
+        model: format!("{provider}/{model}"),
+        canonical_id: row.canonical_id.clone(),
+        source_ref: row.source_ref.clone(),
+        quote: row.quote.clone(),
+        lab_source_ref: row.lab_source_ref.clone(),
+        lab_quote: row.lab_quote.clone(),
+        review_by_ms: row.review_by_ms,
+    })
 }
 
 /// One statement of the unknown-model refusal, for the two routes that ask it.
@@ -4328,6 +4396,13 @@ fn admits_rates(prefixes: &[String]) -> bool {
 /// [`narrow_to_requested`] if the caller did not ask for them.
 fn widened_for_inheritance(prefixes: &[String]) -> Vec<String> {
     let mut out = prefixes.to_vec();
+    // Keep an existing model readable even when its canonical-id fact is absent.
+    // Rendering can supply a sourced identity, then drops this extra presence fact.
+    if prefixes.iter().any(|p| "model.canonical_id".starts_with(p))
+        && !out.iter().any(|p| "existence".starts_with(p))
+    {
+        out.push("existence".to_string());
+    }
     if admits_rates(prefixes) && !out.iter().any(|p| p == fusiform_store::prefix::MODEL) {
         out.push(fusiform_store::prefix::MODEL.to_string());
     }
@@ -4705,6 +4780,9 @@ fn aliased_response(
     mark_rates_borrowed_through_alias(&mut facts, alias);
     omit_route_dependent_alias_facts(&mut facts);
     narrow_to_requested(&mut facts, prefixes);
+    if !facts.contains_key("model.canonical_id") {
+        response.canonical_links.clear();
+    }
 
     let alias_key = format!("{provider_id}/{model_id}");
     response.models.insert(alias_key.clone(), facts);
@@ -4797,6 +4875,7 @@ fn add_aliases_to_bulk(
             aliased,
             withheld,
             uncertain,
+            canonical_links,
             ..
         } = entry;
         if models.values().all(|facts| facts.is_empty()) {
@@ -4804,6 +4883,11 @@ fn add_aliases_to_bulk(
         }
         response.models.extend(models);
         response.aliased.extend(aliased);
+        for link in canonical_links {
+            if !response.canonical_links.contains(&link) {
+                response.canonical_links.push(link);
+            }
+        }
         for w in withheld {
             if !response.withheld.contains(&w) {
                 response.withheld.push(w);

@@ -10,6 +10,7 @@
 
 pub mod aliases;
 pub mod billing_planes;
+pub mod canonical_links;
 pub mod creators;
 pub mod curated_models;
 pub mod enrollment;
