@@ -2868,6 +2868,838 @@
       "source": "models.dev"
     }
   },
+  "kimi coding — bulk quota weights": {
+    "request": {
+      "arguments": {
+        "auth_method": "apikey",
+        "provider_id": "kimi-code-plan-global"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "kimi-code-plan-global/k3": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "toggle"
+            },
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "high",
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": 131072,
+          "model.canonical_id": "moonshotai/kimi-k3",
+          "model.family": "kimi-k3",
+          "model.open_weights": true,
+          "model.status": null,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 300000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 15000000000
+          }
+        },
+        "kimi-code-plan-global/k3-256k": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "high",
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 262144,
+          "limit.output": 131072,
+          "model.canonical_id": "moonshotai/kimi-k3",
+          "model.family": "kimi-k3",
+          "model.open_weights": true,
+          "model.status": null,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 300000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 15000000000
+          }
+        },
+        "kimi-code-plan-global/kimi-for-coding": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "toggle"
+            },
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "high",
+                "max"
+              ]
+            }
+          ],
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": 32768,
+          "model.canonical_id": "moonshotai/kimi-k2.8-preview",
+          "model.family": "kimi-k2",
+          "model.open_weights": false,
+          "model.status": null,
+          "rate.cache_read": {
+            "reason": "no_api_card",
+            "state": "unpriced"
+          },
+          "rate.cache_write": {
+            "reason": "no_api_card",
+            "state": "unpriced"
+          },
+          "rate.input": {
+            "reason": "no_api_card",
+            "state": "unpriced"
+          },
+          "rate.output": {
+            "reason": "no_api_card",
+            "state": "unpriced"
+          },
+          "rate.reasoning": {
+            "reason": "no_api_card",
+            "state": "unpriced"
+          }
+        },
+        "kimi-code-plan-global/kimi-for-coding-highspeed": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [],
+          "capability.structured_output": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 262144,
+          "limit.output": 32768,
+          "model.canonical_id": "moonshotai/kimi-k2.7-code-highspeed",
+          "model.family": "kimi-k2",
+          "model.open_weights": true,
+          "model.status": null,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k2",
+              "model_id": "kimi-k2.7-code-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 380000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k2",
+              "model_id": "kimi-k2.7-code-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1900000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k2",
+              "model_id": "kimi-k2.7-code-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 8000000000
+          }
+        }
+      },
+      "plane": {
+        "auth_method": "apikey",
+        "kind": "quota_proxy",
+        "provider_id": "kimi-code-plan-global",
+        "review_by_ms": 1797552000000,
+        "source_ref": "https://www.kimi.com/code/docs/en/kimi-code/membership.html"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "kimi coding — k3, rates": {
+    "request": {
+      "arguments": {
+        "auth_method": "apikey",
+        "fact_prefixes": [
+          "rate."
+        ],
+        "model_id": "k3",
+        "provider_id": "kimi-code-plan-global"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "kimi-code-plan-global/k3": {
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 300000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 15000000000
+          }
+        }
+      },
+      "plane": {
+        "auth_method": "apikey",
+        "kind": "quota_proxy",
+        "provider_id": "kimi-code-plan-global",
+        "review_by_ms": 1797552000000,
+        "source_ref": "https://www.kimi.com/code/docs/en/kimi-code/membership.html"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "kimi coding — k3-256k, rates": {
+    "request": {
+      "arguments": {
+        "auth_method": "apikey",
+        "fact_prefixes": [
+          "rate."
+        ],
+        "model_id": "k3-256k",
+        "provider_id": "kimi-code-plan-global"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "kimi-code-plan-global/k3-256k": {
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 300000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 15000000000
+          }
+        }
+      },
+      "plane": {
+        "auth_method": "apikey",
+        "kind": "quota_proxy",
+        "provider_id": "kimi-code-plan-global",
+        "review_by_ms": 1797552000000,
+        "source_ref": "https://www.kimi.com/code/docs/en/kimi-code/membership.html"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "kimi coding — kimi-for-coding, rates": {
+    "request": {
+      "arguments": {
+        "auth_method": "apikey",
+        "fact_prefixes": [
+          "rate."
+        ],
+        "model_id": "kimi-for-coding",
+        "provider_id": "kimi-code-plan-global"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "kimi-code-plan-global/kimi-for-coding": {
+          "rate.cache_read": {
+            "reason": "no_api_card",
+            "state": "unpriced"
+          },
+          "rate.cache_write": {
+            "reason": "no_api_card",
+            "state": "unpriced"
+          },
+          "rate.input": {
+            "reason": "no_api_card",
+            "state": "unpriced"
+          },
+          "rate.output": {
+            "reason": "no_api_card",
+            "state": "unpriced"
+          },
+          "rate.reasoning": {
+            "reason": "no_api_card",
+            "state": "unpriced"
+          }
+        }
+      },
+      "plane": {
+        "auth_method": "apikey",
+        "kind": "quota_proxy",
+        "provider_id": "kimi-code-plan-global",
+        "review_by_ms": 1797552000000,
+        "source_ref": "https://www.kimi.com/code/docs/en/kimi-code/membership.html"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "kimi coding — kimi-for-coding-highspeed, rates": {
+    "request": {
+      "arguments": {
+        "auth_method": "apikey",
+        "fact_prefixes": [
+          "rate."
+        ],
+        "model_id": "kimi-for-coding-highspeed",
+        "provider_id": "kimi-code-plan-global"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "kimi-code-plan-global/kimi-for-coding-highspeed": {
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k2",
+              "model_id": "kimi-k2.7-code-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 380000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k2",
+              "model_id": "kimi-k2.7-code-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1900000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k2",
+              "model_id": "kimi-k2.7-code-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 8000000000
+          }
+        }
+      },
+      "plane": {
+        "auth_method": "apikey",
+        "kind": "quota_proxy",
+        "provider_id": "kimi-code-plan-global",
+        "review_by_ms": 1797552000000,
+        "source_ref": "https://www.kimi.com/code/docs/en/kimi-code/membership.html"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "kimi coding — no auth method": {
+    "request": {
+      "arguments": {
+        "provider_id": "kimi-code-plan-global"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "kimi-code-plan-global/k3": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "toggle"
+            },
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "high",
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": 131072,
+          "model.canonical_id": "moonshotai/kimi-k3",
+          "model.family": "kimi-k3",
+          "model.open_weights": true,
+          "model.status": null,
+          "rate.cache_read": {
+            "state": "stated_zero"
+          },
+          "rate.cache_write": {
+            "state": "stated_zero"
+          },
+          "rate.input": {
+            "state": "stated_zero"
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          }
+        },
+        "kimi-code-plan-global/k3-256k": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "high",
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 262144,
+          "limit.output": 131072,
+          "model.canonical_id": "moonshotai/kimi-k3",
+          "model.family": "kimi-k3",
+          "model.open_weights": true,
+          "model.status": null,
+          "rate.cache_read": {
+            "state": "stated_zero"
+          },
+          "rate.cache_write": {
+            "state": "stated_zero"
+          },
+          "rate.input": {
+            "state": "stated_zero"
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          }
+        },
+        "kimi-code-plan-global/kimi-for-coding": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "toggle"
+            },
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "high",
+                "max"
+              ]
+            }
+          ],
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": 32768,
+          "model.canonical_id": "moonshotai/kimi-k2.8-preview",
+          "model.family": "kimi-k2",
+          "model.open_weights": false,
+          "model.status": null,
+          "rate.cache_read": {
+            "state": "stated_zero"
+          },
+          "rate.cache_write": {
+            "state": "stated_zero"
+          },
+          "rate.input": {
+            "state": "stated_zero"
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          }
+        },
+        "kimi-code-plan-global/kimi-for-coding-highspeed": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [],
+          "capability.structured_output": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 262144,
+          "limit.output": 32768,
+          "model.canonical_id": "moonshotai/kimi-k2.7-code-highspeed",
+          "model.family": "kimi-k2",
+          "model.open_weights": true,
+          "model.status": null,
+          "rate.cache_read": {
+            "state": "stated_zero"
+          },
+          "rate.cache_write": {
+            "state": "stated_zero"
+          },
+          "rate.input": {
+            "state": "stated_zero"
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "oauth anthropic — quota weights": {
     "request": {
       "arguments": {

@@ -3,6 +3,18 @@
   "how_to_add_a_plane": "Read a source that states how the auth method bills, not just where its model ids route. Record the source, who established the claim and when, and a review date 60 days later. A ruleless quota proxy is still a billing claim and needs its own provenance and review.",
   "planes": [
     {
+      "provider_id": "kimi-code-plan-global",
+      "auth_method": "apikey",
+      "kind": "quota_proxy",
+      "rates_from_provider": "moonshotai",
+      "source_ref": "https://www.kimi.com/code/docs/en/kimi-code/membership.html",
+      "established_by": "fusiform",
+      "established_at_ms": 1792368000000,
+      "review_by_ms": 1797552000000,
+      "note": "Kimi states: 'Kimi Code is the developer-focused AI coding service within Kimi membership benefits, provided together with a Kimi membership subscription and sharing the same quota. Requests from the CLI, VS Code, Desktop, and third-party tools all count toward that quota.' Its Quota and Limits section states: 'Both groups share the Kimi membership monthly total quota: if the monthly total is reached, Kimi Code quota is frozen until the monthly quota resets or you upgrade.' API Keys share that quota, so apikey does not mean pay-as-you-go for this provider. https://www.kimi.com/en/help/membership/membership-update-rules says credits are deducted based on actual token usage, varying with model, context length, tool calls and plan. No numeric per-token-class quota conversion is established by these pages. Moonshot API rates at each exact moonshotai canonical id are relative quota stand-ins, not subscription charges; an absent API card stays unpriced, never the plan's published zero.",
+      "rules": []
+    },
+    {
       "provider_id": "meta",
       "auth_method": "oauth",
       "kind": "quota_proxy",

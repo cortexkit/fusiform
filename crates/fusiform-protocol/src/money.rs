@@ -139,6 +139,10 @@ pub enum UnpricedReason {
     /// costs, including a billed-as rule whose target price is not published.
     /// Only plane reads produce it; stored history never carries it.
     NotEstablished,
+    /// A quota-proxy plane has no present API row at the model's exact
+    /// canonical id in its declared price provider. No name-based fallback
+    /// or subscription-provider zero can establish a quota weight.
+    NoApiCard,
 }
 
 /// The minimum a call is charged regardless of how little it consumes.
@@ -274,8 +278,8 @@ pub struct InheritedFrom {
     pub provider_id: String,
     /// The weights family both rows share, as the upstream names it.
     ///
-    /// Under `basis: "alias"` this is the TARGET row's `model.family`, and an
-    /// empty string only when the target publishes no family at all.
+    /// Under `basis: "alias"` or a cross-provider `quota_proxy` this is the
+    /// target row's `model.family`, empty when the target publishes no family.
     pub family: String,
     /// Why the two rows are relatable at all.
     ///
@@ -287,16 +291,17 @@ pub struct InheritedFrom {
     ///   `CatalogGetResponse::aliased`). An alias is an authored identity
     ///   claim, served on current reads only, and a real row for the alias id
     ///   always wins over it.
-    /// - `quota_proxy`: the same provider's API list price is a reference for a
-    ///   subscription plane, not a per-token charge on that plane. A reader
-    ///   must not treat a `quota_proxy` price as an amount billed.
+    /// - `quota_proxy`: an API list price is a reference for a subscription
+    ///   plane, not a per-token charge on that plane. A declared price provider
+    ///   may differ from the plan provider; then `model_id` names the exact
+    ///   canonical target. A reader must not treat this as an amount billed.
     pub basis: String,
-    /// The model id of the row whose price this is, when it differs from the
-    /// serving row's.
+    /// The model id of the row whose price this is, for aliases and
+    /// cross-provider quota cards.
     ///
-    /// Set under `basis: "alias"`, where the alias id and the target id are
-    /// different strings. Absent under `open_weights`, where both rows carry
-    /// the same model id, so rates inherited that way serialize exactly as
+    /// Set under `basis: "alias"` and cross-provider `quota_proxy`, naming the
+    /// target even if its id matches the serving id. Absent under `open_weights`,
+    /// where both rows carry the same model id, so inherited rates serialize as
     /// they did before this field existed.
     ///
     /// A rate carrying this is the target's API LIST PRICE, not the cost of

@@ -58,6 +58,8 @@ pub struct Plane {
     pub provider_id: String,
     pub auth_method: String,
     pub kind: PlaneKind,
+    /// Borrow only the exact canonical row from this provider on a quota view.
+    pub rates_from_provider: Option<String>,
     pub source_ref: String,
     pub established_by: String,
     pub established_at_ms: i64,
@@ -103,6 +105,7 @@ struct PlaneRow {
     provider_id: String,
     auth_method: String,
     kind: PlaneKind,
+    rates_from_provider: Option<String>,
     source_ref: String,
     established_by: String,
     established_at_ms: i64,
@@ -168,7 +171,18 @@ pub fn load_reporting_rejects(doc: &str) -> (Planes, Vec<String>) {
             )));
             continue;
         }
-        if row.kind == PlaneKind::QuotaProxy && row.auth_method == "apikey" {
+        if let Some(provider) = &row.rates_from_provider {
+            if row.kind != PlaneKind::QuotaProxy || provider.trim().is_empty() {
+                rejects.push(at(
+                    "rates_from_provider needs a non-empty provider on a quota_proxy plane",
+                ));
+                continue;
+            }
+        }
+        if row.kind == PlaneKind::QuotaProxy
+            && row.auth_method == "apikey"
+            && row.rates_from_provider.is_none()
+        {
             rejects.push(at("quota_proxy is not allowed on apikey: an API price is upstream, not a subscription quota weight"));
             continue;
         }
@@ -247,6 +261,7 @@ pub fn load_reporting_rejects(doc: &str) -> (Planes, Vec<String>) {
                 provider_id: row.provider_id,
                 auth_method: row.auth_method,
                 kind: row.kind,
+                rates_from_provider: row.rates_from_provider,
                 source_ref: row.source_ref,
                 established_by: row.established_by,
                 established_at_ms: row.established_at_ms,
@@ -393,9 +408,28 @@ mod tests {
             rejects.is_empty(),
             "the shipped file must parse: {rejects:?}"
         );
-        assert_eq!(table.len(), 5, "an empty or truncated table must not pass");
+        assert_eq!(table.len(), 6, "an empty or truncated table must not pass");
         assert_eq!(&table, planes());
         assert!(std::ptr::eq(planes(), planes()), "the table is parsed once");
+    }
+
+    #[test]
+    fn kimi_apikey_is_a_sourced_cross_provider_quota_stand_in() {
+        let plane = &planes()[&("kimi-code-plan-global".into(), "apikey".into())];
+        assert_eq!(plane.kind, PlaneKind::QuotaProxy);
+        assert_eq!(plane.rates_from_provider.as_deref(), Some("moonshotai"));
+        assert!(plane.rules.is_empty());
+        assert_eq!(
+            plane.source_ref,
+            "https://www.kimi.com/code/docs/en/kimi-code/membership.html"
+        );
+        assert_eq!(plane.established_by, "fusiform");
+        assert_eq!(plane.established_at_ms, 1_792_368_000_000);
+        assert_eq!(plane.review_by_ms, 1_797_552_000_000);
+        assert_eq!(
+            plane.review_by_ms - plane.established_at_ms,
+            60 * 86_400_000
+        );
     }
 
     #[test]
@@ -453,7 +487,7 @@ mod tests {
                 1,
             ),
         ];
-        assert_eq!(planes().len(), expected.len() + 1);
+        assert_eq!(planes().len(), expected.len() + 2);
         for (provider, auth, kind, source, count) in expected {
             let p = &planes()[&(provider.into(), auth.into())];
             assert_eq!(
@@ -539,12 +573,42 @@ mod tests {
     }
 
     #[test]
-    fn a_quota_proxy_on_apikey_is_rejected_with_position() {
+    fn a_quota_proxy_on_apikey_without_a_price_provider_is_rejected_with_position() {
         let mut bad = plane("bad", vec![]);
         bad["auth_method"] = json!("apikey");
         let (table, rejects) = load(vec![plane("good", vec![]), bad]);
         assert_eq!(table.len(), 1);
         assert_reject(&rejects, "plane 1", "quota_proxy is not allowed on apikey");
+    }
+
+    #[test]
+    fn a_price_provider_is_only_allowed_nonempty_on_a_quota_proxy() {
+        for (kind, provider) in [("upstream", "moonshotai"), ("quota_proxy", " ")] {
+            let mut bad = plane("bad", vec![]);
+            bad["kind"] = json!(kind);
+            bad["rates_from_provider"] = json!(provider);
+            let (table, rejects) = load(vec![plane("good", vec![]), bad]);
+            assert_eq!(table.len(), 1);
+            assert_reject(
+                &rejects,
+                "plane 1",
+                "rates_from_provider needs a non-empty provider on a quota_proxy plane",
+            );
+        }
+        let mut good = plane("subscription", vec![]);
+        good["auth_method"] = json!("apikey");
+        good["rates_from_provider"] = json!("moonshotai");
+        let (table, rejects) = load(vec![good]);
+        assert!(rejects.is_empty());
+        assert_eq!(
+            table
+                .values()
+                .next()
+                .unwrap()
+                .rates_from_provider
+                .as_deref(),
+            Some("moonshotai")
+        );
     }
 
     #[test]

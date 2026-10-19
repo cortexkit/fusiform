@@ -215,7 +215,11 @@ A rate is a JSON object tagged by `state` (`RateValue` in
 - `unpriced.reason` is one of `missing_rate` (the source describes the model
   and publishes no rate for this class), `no_catalog_coverage`,
   `unknown_charge_basis` (a rate exists and what it charges for cannot be
-  established), or `not_established` (billing-plane reads only).
+  established), `not_established` (a token-class billing rule is not established),
+  or `no_api_card` (a cross-provider quota plane has no present API row at the
+  model's exact canonical id in its declared price provider). The last two are
+  billing-plane reads only; stored history never carries them. `no_api_card`
+  is introduced in `fusiform-protocol` 0.37.0.
 - `unit_provenance.kind` is `stated`, `assumed_by_policy` (with `policy`) or
   `unknown`. models.dev publishes no currency, so its rates are USD under the
   policy `models-dev-usd-v1`, and every priced rate says so, including rates
@@ -232,16 +236,28 @@ A rate is a JSON object tagged by `state` (`RateValue` in
 ### 4.4 `inherited_from`
 
 A rate carrying `inherited_from` is not the serving provider's own statement.
-The object names `provider_id`, `family`, `basis`, and, under `alias`, the
-target `model_id`. A consumer must not read it as the cost of the route.
+The object names `provider_id`, `family`, `basis`, and, under `alias` or a
+cross-provider `quota_proxy`, the target `model_id`. A consumer must not read
+it as the cost of the route.
 
 | `basis` | When | Rule |
 | --- | --- | --- |
 | `open_weights` | an open-weight row whose provider published no rate at all, for a family whose creator is curated | the creator's published rate is served, marked (`crates/fusiform-module/src/route.rs`: `inheritance_tests::an_unpriced_open_weight_row_inherits_and_says_whose_price_it_is`) |
 | `alias` | a curated alias id (§5.5) | the target row's rates are served, marked with the target's `model_id` |
-| `quota_proxy` | a subscription billing plane | the provider's API list price is served as a relative weight, not an amount billed (see [`billing-planes.md`](billing-planes.md)) |
+| `quota_proxy` | a subscription billing plane | an API list price is served as a relative weight, not an amount billed; cross-provider planes name the canonical target provider and `model_id` (see [`billing-planes.md`](billing-planes.md)) |
 
-Inheritance rules, each with its test in `crates/fusiform-module/src/route.rs`:
+The Kimi coding plane (`kimi-code-plan-global`, `apikey`) replaces its own zeros
+with every published rate on the exact `moonshotai/<id>` canonical row, base
+and tiered alike. It marks each rate with that API row's provider, model and
+family under `quota_proxy`. No canonical id, another prefix, or an absent API
+row produces `unpriced` / `no_api_card`, never the plan's zero or a similar-name
+price. A read without `auth_method`, other planes, and stored upstream claims
+are unchanged; `at_ms` plane reads remain refused
+(`billing_plane_tests::kimi_plan_borrows_only_exact_canonical_api_cards_without_changing_storage`
+in `crates/fusiform-module/src/route.rs`,
+`golden_payload::kimi_plane_cases_pin_borrowed_cards_and_missing_api_coverage`).
+
+Open-weight inheritance rules, each with its test in `crates/fusiform-module/src/route.rs`:
 
 1. A closed-weight row never inherits
    (`inheritance_tests::a_closed_weight_row_does_not_inherit`).

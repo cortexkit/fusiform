@@ -730,6 +730,10 @@ fn unpriced_reason_str(r: fusiform_core::UnpricedReason) -> &'static str {
             "not_established is serve-only: normalization never constructs billing rules, \
              and plan_ingest receives only normalized values"
         ),
+        NoApiCard => unreachable!(
+            "no_api_card is serve-only: normalization never constructs quota proxies, \
+             and plan_ingest receives only normalized values"
+        ),
     }
 }
 

@@ -1,8 +1,8 @@
 # Billing planes
 
 The same model can bill differently depending on how a caller authenticates:
-an API key pays list prices per token, while a subscription login consumes a
-plan's quota. A billing plane is fusiform's statement of how one provider bills
+an API key usually pays list prices per token, while a subscription consumes a
+plan's quota (even if it authenticates with an API key). A billing plane is fusiform's statement of how one provider bills
 one login method. Planes are curated in
 `crates/fusiform-module/data/billing-planes.json`, compiled into the binary,
 and applied only when a read is served.
@@ -39,7 +39,7 @@ A `catalog.get` request selects a plane with `auth_method`:
 | `kind` | Meaning | Allowed on |
 | --- | --- | --- |
 | `upstream` | the provider's published rows are the bill; rules may fill classes the provider did not publish | any login method |
-| `quota_proxy` | a subscription billed as a flat fee against usage limits: the provider's published API prices are served only to say how heavily each token class weighs against those limits relative to the others, not as amounts billed | every method except `apikey` |
+| `quota_proxy` | a subscription billed as a flat fee against usage limits: API prices are relative quota stand-ins, not amounts billed or an established quota conversion formula | every method; `apikey` requires an explicit `rates_from_provider` |
 
 On a `quota_proxy` plane:
 
@@ -51,11 +51,53 @@ On a `quota_proxy` plane:
    through an alias, see [`wire-contract.md`](wire-contract.md) §4.4) keeps its
    original marker (`billing_plane_tests::quota_proxies_preserve_the_first_hop_of_inherited_rates`,
    `billing_plane_tests::quota_proxies_do_not_erase_alias_markers`).
-3. Mode rates are dropped, because a subscription's access to a priced API mode
+3. Without `rates_from_provider`, mode rates are dropped, because a subscription's access to a priced API mode
    is not established (`billing_plane_tests::quota_proxies_drop_all_mode_rates`).
 
-A `quota_proxy` declaration on `apikey` is rejected when the file loads
-(`billing_planes.rs`: `a_quota_proxy_on_apikey_is_rejected_with_position`).
+A `quota_proxy` declaration on `apikey` without an explicit price provider is rejected when the file loads
+(`billing_planes.rs`: `a_quota_proxy_on_apikey_without_a_price_provider_is_rejected_with_position`).
+
+### Cross-provider quota cards: Kimi Code
+
+The `(kimi-code-plan-global, apikey)` plane declares
+`rates_from_provider: "moonshotai"`. Routing derives `apikey` from the vault
+credential `apikey:kimi-for-coding`; this provider's API key consumes a
+subscription quota rather than buying Moonshot API tokens.
+
+Only an exact `model.canonical_id` of `moonshotai/<id>` with a present
+`(moonshotai, <id>)` row in the current catalog establishes a target. The plan's
+entire rate card is replaced by every published `rate.*` fact on that target,
+including base, context-tier and mode keys. Each carries `inherited_from` with
+`basis: "quota_proxy"`, the target provider, model id and family. A copied mode
+price is a reference weight only, not evidence the subscription offers that
+mode. Plan-only keys are removed, not mixed into the API card.
+
+If the canonical id is absent, names another provider, or has no present API
+row, the plan's rate keys and the five base token classes read
+`{"state":"unpriced","reason":"no_api_card"}` without a borrowed marker.
+No similar-name or family match, alias, inherited API price, or plan zero is a
+fallback. A target that exists but publishes no rate leaves those keys absent.
+The caller's filter is applied last, on named and provider-wide reads
+(`billing_plane_tests::kimi_plan_borrows_only_exact_canonical_api_cards_without_changing_storage`,
+`golden_payload::kimi_plane_cases_pin_borrowed_cards_and_missing_api_coverage`).
+
+The current canonical mappings send `k3` and `k3-256k` to
+`moonshotai/kimi-k3`, and `kimi-for-coding-highspeed` to
+`moonshotai/kimi-k2.7-code-highspeed`. `kimi-for-coding` names
+`moonshotai/kimi-k2.8-preview`, for which the current catalog has no API row.
+
+The [official membership guide](https://www.kimi.com/code/docs/en/kimi-code/membership.html)
+states: “Kimi Code is the developer-focused AI coding service within Kimi
+membership benefits, provided together with a Kimi membership subscription
+and sharing the same quota. Requests from the CLI, VS Code, Desktop, and
+third-party tools all count toward that quota.” It also states: “Both groups
+share the Kimi membership monthly total quota: if the monthly total is reached,
+Kimi Code quota is frozen until the monthly quota resets or you upgrade.”
+The [credit rules](https://www.kimi.com/en/help/membership/membership-update-rules)
+say usage is token-based and varies with model, context, tools and plan, but
+these pages establish no numeric per-token-class conversion. Moonshot prices
+are therefore explicitly a stand-in, not a measured subscription rate.
+Established 2026-10-19; review due 2026-12-18 (60 days).
 
 ## 3. Rules
 
@@ -111,6 +153,7 @@ plane:
 | `provider_id` | yes | a models.dev provider slug |
 | `auth_method` | yes | one of the four methods |
 | `kind` | yes | `upstream` or `quota_proxy` |
+| `rates_from_provider` | no | non-empty provider slug; only valid on `quota_proxy`; borrow the exact canonical row's entire rate card |
 | `source_ref` | yes | the source that states how this login method bills |
 | `established_by`, `established_at_ms` | yes | who established the claim and when |
 | `review_by_ms` | yes | when it must be re-verified |
@@ -126,7 +169,9 @@ document (tests in `billing_planes.rs`):
 
 - unknown `auth_method`, `kind`, `class` or `state`
   (`an_unknown_auth_method_is_rejected_with_position`,
-  `unknown_classes_and_states_are_rejected_with_position`);
+   `unknown_classes_and_states_are_rejected_with_position`);
+- `rates_from_provider` on a non-`quota_proxy` plane or an empty price provider
+  (`a_price_provider_is_only_allowed_nonempty_on_a_quota_proxy`);
 - a duplicate `(provider_id, auth_method)`
   (`duplicate_planes_name_the_original_document_position`);
 - missing or empty provenance on a plane or a rule

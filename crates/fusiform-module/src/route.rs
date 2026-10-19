@@ -863,11 +863,7 @@ fn serve_catalog_get_with_limits(
                 at,
                 request.fact_prefixes.as_ref(),
             )?;
-            return Ok(finish_plane_view(
-                response,
-                plane,
-                requested_prefixes.as_ref(),
-            ));
+            return finish_plane_view(store, source, response, plane, requested_prefixes.as_ref());
         }
     }
 
@@ -998,7 +994,8 @@ fn serve_catalog_get_with_limits(
         response.models.insert(disclosure.model.clone(), facts);
         response.curated.push(disclosure);
     }
-    let mut response = finish_plane_view(response, plane, requested_prefixes.as_ref());
+    let mut response =
+        finish_plane_view(store, source, response, plane, requested_prefixes.as_ref())?;
     for row in retired_aliases {
         let id = format!("{}/{}", row.provider_id, row.model_id);
         if response.models.contains_key(&id) {
@@ -1428,21 +1425,25 @@ fn select_billing_plane(request: &CatalogGetRequest) -> Result<Option<SelectedPl
 }
 
 /// Apply the selected plane only after the ordinary served view is built.
-/// It takes no store handle on purpose: plane prices and rule states describe
-/// one login method today, so they must never be written into the stored
-/// history that point-in-time reads replay as what the upstream published.
+/// The store is consulted only for an exact canonical API card. All derived
+/// prices stay in the response: history must retain only upstream claims.
 fn finish_plane_view(
+    store: &CatalogStore,
+    source: SourceId,
     mut response: CatalogGetResponse,
     plane: Option<SelectedPlane>,
     requested_prefixes: Option<&Vec<String>>,
-) -> CatalogGetResponse {
+) -> Result<CatalogGetResponse, RouteError> {
     let Some(plane) = plane else {
         // Callers that did not ask for a billing claim keep the ordinary view.
-        return response;
+        return Ok(response);
     };
     response.plane = Some(plane.wire);
     for (identity, facts) in &mut response.models {
         if let Some(declared) = plane.declared {
+            if let Some(provider) = &declared.rates_from_provider {
+                borrow_plane_rates(store, source, response.resolved_at_ms, facts, provider)?;
+            }
             response
                 .billing_rules
                 .extend(apply_billing_plane(identity, facts, declared));
@@ -1455,7 +1456,71 @@ fn finish_plane_view(
             .get(&rule.model)
             .is_some_and(|facts| facts.contains_key(&rule.fact_key))
     });
-    response
+    Ok(response)
+}
+
+/// Replace a plan's entire rate card, never topping up its published zeros.
+/// Only the upstream canonical identity can relate a plan row to an API row.
+fn borrow_plane_rates(
+    store: &CatalogStore,
+    source: SourceId,
+    at_ms: i64,
+    facts: &mut BTreeMap<String, serde_json::Value>,
+    provider: &str,
+) -> Result<(), RouteError> {
+    let target = facts
+        .get("model.canonical_id")
+        .and_then(|v| v.as_str())
+        .and_then(|id| id.split_once('/'))
+        .filter(|(p, id)| *p == provider && !id.is_empty());
+    let origin = if let Some((_, id)) = target {
+        store
+            .read_model(source, provider, id, Some(Timestamp(at_ms)))
+            .map_err(|e| store_error(&e))?
+            .0
+            .filter(|model| model.is_present())
+    } else {
+        None
+    };
+    if let Some(origin) = origin {
+        let marker = serde_json::json!({
+            "provider_id": provider,
+            "model_id": origin.model_id,
+            "family": origin.facts.get(&FactKey::from_stored("model.family".into()))
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                .and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default(),
+            "basis": "quota_proxy",
+        });
+        facts.retain(|key, _| !key.starts_with(fusiform_store::prefix::RATE));
+        for (key, raw) in origin.facts {
+            if !key.as_str().starts_with(fusiform_store::prefix::RATE) {
+                continue;
+            }
+            let mut value = serde_json::from_str(&raw).unwrap_or(serde_json::Value::String(raw));
+            name_the_provenance_of_a_pre_0_11_row(&mut value);
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("inherited_from".into(), marker.clone());
+            }
+            facts.insert(key.as_str().to_string(), value);
+        }
+    } else {
+        let unpriced = serde_json::to_value(fusiform_protocol::RateValue::Unpriced {
+            reason: fusiform_protocol::UnpricedReason::NoApiCard,
+            inherited_from: None,
+        })
+        .expect("a rate value serialises");
+        for (key, value) in facts.iter_mut() {
+            if key.starts_with(fusiform_store::prefix::RATE) {
+                *value = unpriced.clone();
+            }
+        }
+        // A plan can omit rate facts entirely. Still give callers an explicit
+        // reason for the unavailable base quota weights rather than silence.
+        for class in ["input", "output", "cache_read", "cache_write", "reasoning"] {
+            facts.insert(format!("rate.{class}"), unpriced.clone());
+        }
+    }
+    Ok(())
 }
 
 fn apply_billing_plane(
@@ -1463,7 +1528,7 @@ fn apply_billing_plane(
     facts: &mut BTreeMap<String, serde_json::Value>,
     plane: &Plane,
 ) -> Vec<BillingRuleWire> {
-    if plane.kind == PlaneKind::QuotaProxy {
+    if plane.kind == PlaneKind::QuotaProxy && plane.rates_from_provider.is_none() {
         // A subscription may not offer an API service mode. Keeping its price
         // would claim a charge for a mode whose availability is not established.
         facts.retain(|key, _| !fusiform_store::rate_key::is_mode_rate(key));
@@ -3522,6 +3587,127 @@ mod billing_plane_tests {
             control.models["anthropic/test-model"]["rate.input.mode.fast"]["units"],
             700
         );
+    }
+
+    #[test]
+    fn kimi_plan_borrows_only_exact_canonical_api_cards_without_changing_storage() {
+        let (store, _dir) = store();
+        let provider = "kimi-code-plan-global";
+        let api_card: Vec<_> = card()
+            .into_iter()
+            .map(|(key, mut value)| {
+                if value["state"] == "priced" {
+                    value["unit_provenance"] = json!({"kind":"stated"});
+                }
+                (key, value)
+            })
+            .collect();
+        seed(&store, "moonshotai", "kimi-k3", api_card.clone());
+        // Similar names and a matching family must not rescue an absent target.
+        seed(&store, "moonshotai", "kimi-for-coding", card());
+        for (id, canonical) in [
+            ("k3", Some("moonshotai/kimi-k3")),
+            ("k3-256k", Some("moonshotai/kimi-k3")),
+            ("kimi-for-coding", Some("moonshotai/kimi-k2.8-preview")),
+            ("wrong-prefix", Some("other/kimi-k3")),
+            ("no-canonical", None),
+        ] {
+            let mut extra = vec![
+                ("model.family", json!("plan-family")),
+                ("rate.input", json!({"state":"stated_zero"})),
+                ("rate.output", json!({"state":"stated_zero"})),
+                (
+                    "rate.output.above_context.999",
+                    json!({"state":"stated_zero"}),
+                ),
+            ];
+            if let Some(canonical) = canonical {
+                extra.push(("model.canonical_id", json!(canonical)));
+            }
+            seed(&store, provider, id, extra);
+        }
+        let plain = || {
+            let mut response = get(&store, json!({"provider_id":provider})).unwrap();
+            response.resolved_at_ms = 0;
+            serde_json::to_vec(&response).unwrap()
+        };
+        let before = plain();
+        let version = store.catalog_version().unwrap();
+        for prefix in [None, Some("rate."), Some("rate.input"), Some("capability.")] {
+            let bulk = get(&store, request(provider, None, "apikey", prefix)).unwrap();
+            assert_eq!(bulk.plane.as_ref().unwrap().kind, "quota_proxy");
+            for id in [
+                "k3",
+                "k3-256k",
+                "kimi-for-coding",
+                "wrong-prefix",
+                "no-canonical",
+            ] {
+                let named = get(&store, request(provider, Some(id), "apikey", prefix)).unwrap();
+                let key = format!("{provider}/{id}");
+                let facts = &named.models[&key];
+                assert_eq!(facts, &bulk.models[&key]);
+                if prefix == Some("capability.") {
+                    assert_eq!(
+                        facts,
+                        &BTreeMap::from([("capability.reasoning".into(), json!(true))])
+                    );
+                    continue;
+                }
+                if id == "k3" || id == "k3-256k" {
+                    let mut count = 0;
+                    for (key, mut expected) in api_card.clone() {
+                        if prefix.is_some_and(|p| !key.starts_with(p)) {
+                            continue;
+                        }
+                        name_the_provenance_of_a_pre_0_11_row(&mut expected);
+                        expected["inherited_from"] = json!({
+                            "provider_id":"moonshotai", "model_id":"kimi-k3",
+                            "family":"real-family", "basis":"quota_proxy"
+                        });
+                        assert_eq!(facts[key], expected, "{id}/{key}");
+                        let _: fusiform_protocol::RateValue =
+                            serde_json::from_value(facts[key].clone()).unwrap();
+                        count += 1;
+                    }
+                    assert_eq!(
+                        facts.keys().filter(|k| k.starts_with("rate.")).count(),
+                        count
+                    );
+                    assert!(!facts.contains_key("rate.output.above_context.999"));
+                } else {
+                    let mut count = 0;
+                    for (key, value) in facts.iter().filter(|(key, _)| key.starts_with("rate.")) {
+                        assert_eq!(
+                            value,
+                            &json!({"state":"unpriced", "reason":"no_api_card"}),
+                            "{id}/{key}"
+                        );
+                        let _: fusiform_protocol::RateValue =
+                            serde_json::from_value(value.clone()).unwrap();
+                        count += 1;
+                    }
+                    assert!(count > 0);
+                }
+            }
+        }
+        assert_eq!(
+            before,
+            plain(),
+            "plane reads must not change ordinary wire bytes"
+        );
+        assert_eq!(version, store.catalog_version().unwrap());
+        let replay = get(&store, json!({"provider_id":provider, "at_ms":1000})).unwrap();
+        assert_eq!(
+            replay.models["kimi-code-plan-global/k3"]["rate.input"],
+            json!({"state":"stated_zero"})
+        );
+        let error = get(
+            &store,
+            json!({"provider_id":provider, "auth_method":"apikey", "at_ms":1000}),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "no_coverage");
     }
 
     #[test]

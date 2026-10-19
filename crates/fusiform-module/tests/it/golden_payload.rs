@@ -216,6 +216,35 @@ fn plane_store() -> (CatalogStore, tempfile::TempDir, Vec<(String, String)>) {
         assert_ne!((provider, id), ALIAS_TARGET);
         cuts.push((provider.to_string(), id.to_string()));
     }
+    // Keep the real coding-plan zeros and their canonical API targets together;
+    // the missing preview target must remain missing, not a synthetic price.
+    for (provider, ids) in [
+        (
+            "kimi-code-plan-global",
+            vec![
+                "k3",
+                "k3-256k",
+                "kimi-for-coding",
+                "kimi-for-coding-highspeed",
+            ],
+        ),
+        ("moonshotai", vec!["kimi-k3", "kimi-k2.7-code-highspeed"]),
+    ] {
+        let mut cut = seed[provider].clone();
+        let mut models = serde_json::Map::new();
+        for id in ids {
+            let row = &seed[provider]["models"][id];
+            assert!(row.is_object(), "the seed must carry {provider}/{id}");
+            models.insert(id.to_string(), row.clone());
+        }
+        cut["models"] = models.into();
+        assert!(doc
+            .as_object_mut()
+            .unwrap()
+            .insert(provider.into(), cut)
+            .is_none());
+    }
+    assert!(seed["moonshotai"]["models"]["kimi-k2.8-preview"].is_null());
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -239,6 +268,14 @@ fn plane_store() -> (CatalogStore, tempfile::TempDir, Vec<(String, String)>) {
 fn plane_cases(cuts: &[(String, String)]) -> Vec<(String, serde_json::Value)> {
     let mut cases = vec![
         (
+            "kimi coding — bulk quota weights".into(),
+            serde_json::json!({"provider_id":"kimi-code-plan-global", "auth_method":"apikey"}),
+        ),
+        (
+            "kimi coding — no auth method".into(),
+            serde_json::json!({"provider_id":"kimi-code-plan-global"}),
+        ),
+        (
             "catalog.get — meta oauth serves the curated row".into(),
             serde_json::json!({"provider_id":"meta", "auth_method":"oauth"}),
         ),
@@ -247,6 +284,17 @@ fn plane_cases(cuts: &[(String, String)]) -> Vec<(String, serde_json::Value)> {
             serde_json::json!({"provider_id":"meta", "auth_method":"apikey"}),
         ),
     ];
+    for id in [
+        "k3",
+        "k3-256k",
+        "kimi-for-coding",
+        "kimi-for-coding-highspeed",
+    ] {
+        cases.push((
+            format!("kimi coding — {id}, rates"),
+            serde_json::json!({"provider_id":"kimi-code-plan-global", "model_id":id, "auth_method":"apikey", "fact_prefixes":["rate."]}),
+        ));
+    }
     for (filter, prefixes) in [
         ("unfiltered", None),
         ("rates", Some(vec!["rate."])),
@@ -449,7 +497,12 @@ fn non_plane_leaks(doc: &serde_json::Value) -> (usize, Vec<String>) {
                 leaks.push(format!("{label}: {forbidden}"));
             }
         }
-        for forbidden in [r#""state":"billed_as""#, "not_established", "quota_proxy"] {
+        for forbidden in [
+            r#""state":"billed_as""#,
+            "not_established",
+            "no_api_card",
+            "quota_proxy",
+        ] {
             if bytes.contains(forbidden) {
                 leaks.push(format!("{label}: {forbidden}"));
             }
@@ -463,14 +516,14 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
     // Check both saved bytes and live responses. A saved-only scan cannot see
     // plane logic accidentally applied to ordinary reads before regeneration.
     // The saved document also holds the plane document's own no-method control
-    // read (the plain anthropic case), which must be scanned like any ordinary
+    // reads (plain Anthropic and Kimi), which must be scanned like any ordinary
     // read, so it is counted here too.
     let (_store, _dir, cuts) = plane_store();
     let plain_plane_cases = plane_cases(&cuts)
         .iter()
         .filter(|(_, args)| args.get("auth_method").is_none())
         .count();
-    assert_eq!(plain_plane_cases, 1);
+    assert_eq!(plain_plane_cases, 2);
     for (text, expected) in [
         (GOLDEN.to_string(), cases().len() + plain_plane_cases + 1),
         (render(), cases().len()),
@@ -493,6 +546,7 @@ fn planted_plane_bytes_in_an_ordinary_case_are_reported() {
         serde_json::json!({"billing_rules":[]}),
         serde_json::json!({"rate":{"state":"billed_as", "key":"rate.input"}}),
         serde_json::json!({"rate":{"state":"unpriced", "reason":"not_established"}}),
+        serde_json::json!({"rate":{"state":"unpriced", "reason":"no_api_card"}}),
         serde_json::json!({"rate":{"inherited_from":{"basis":"quota_proxy"}}}),
     ] {
         let doc = serde_json::json!({"ordinary":{"request":{"arguments":{}}, "response":response}});
@@ -721,6 +775,56 @@ fn plane_cases_pin_missing_targets_published_api_prices_and_upstream_fills() {
                 serde_json::json!({"state":"billed_as", "key":input})
             );
             assert_rule(response, model, &key, "billed_as", source);
+        }
+    }
+}
+
+#[test]
+fn kimi_plane_cases_pin_borrowed_cards_and_missing_api_coverage() {
+    let doc: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
+    let bulk = &doc["kimi coding — bulk quota weights"]["response"];
+    assert_eq!(bulk["plane"]["kind"], "quota_proxy");
+    let plain = &doc["kimi coding — no auth method"]["response"];
+    assert!(plain.get("plane").is_none());
+    for (id, target) in [
+        ("k3", Some("kimi-k3")),
+        ("k3-256k", Some("kimi-k3")),
+        (
+            "kimi-for-coding-highspeed",
+            Some("kimi-k2.7-code-highspeed"),
+        ),
+        ("kimi-for-coding", None),
+    ] {
+        let identity = format!("kimi-code-plan-global/{id}");
+        let label = format!("kimi coding — {id}, rates");
+        let named = &doc[&label]["response"]["models"][&identity];
+        assert_eq!(
+            plain["models"][&identity]["rate.input"]["state"],
+            "stated_zero"
+        );
+        assert_eq!(
+            named["rate.input"]["state"],
+            if target.is_some() {
+                "priced"
+            } else {
+                "unpriced"
+            }
+        );
+        let rates = named.as_object().unwrap();
+        assert!(!rates.is_empty());
+        for (key, value) in rates {
+            assert!(key.starts_with("rate."));
+            assert_eq!(value, &bulk["models"][&identity][key]);
+            if let Some(target) = target {
+                assert_eq!(value["inherited_from"]["provider_id"], "moonshotai");
+                assert_eq!(value["inherited_from"]["model_id"], target);
+                assert_eq!(value["inherited_from"]["basis"], "quota_proxy");
+            } else {
+                assert_eq!(
+                    value,
+                    &serde_json::json!({"state":"unpriced", "reason":"no_api_card"})
+                );
+            }
         }
     }
 }

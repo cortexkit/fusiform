@@ -6,6 +6,21 @@
 # section for how to add one. Prefer `ckdev-mutate prove`, which appends a row only
 # when the named tests actually fail.
 [[control]]
+id = "kimi-plan-canonical-api-borrow-call-site"
+guards = "the Kimi coding quota plane replaces subscription zeros only with its exact canonical API card or an explicit no_api_card refusal"
+file = "crates/fusiform-module/src/route.rs"
+old = "                borrow_plane_rates(store, source, response.resolved_at_ms, facts, provider)?;"
+new = "                let _ = (store, source, response.resolved_at_ms, &facts, provider); // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::billing_plane_tests::kimi_plan_borrows_only_exact_canonical_api_cards_without_changing_storage"]
+only = true
+timeout_s = 600
+
+[[control]]
 id = "request-work-never-blocks-reader-runtime"
 guards = "blocking request work leaves the reader runtime free for binds, health and other connections"
 file = "crates/fusiform-module/src/lib.rs"

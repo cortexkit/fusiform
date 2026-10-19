@@ -38,6 +38,8 @@ fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
     let mut billed_tier = 0;
     let mut not_established = 0;
     let mut proxy = 0;
+    let mut no_api_card = 0;
+    let mut cross_provider = 0;
     let mut disclosed = 0;
     for (label, case) in fixture.as_object().unwrap() {
         if case["request"]["arguments"].get("auth_method").is_none() {
@@ -98,6 +100,18 @@ fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
                             "{label}/{key}"
                         );
                     }
+                    RateValue::Unpriced {
+                        reason: UnpricedReason::NoApiCard,
+                        inherited_from,
+                    } => {
+                        no_api_card += 1;
+                        assert!(inherited_from.is_none());
+                        assert_eq!(
+                            serde_json::to_value(&rate).unwrap(),
+                            *value,
+                            "{label}/{key}"
+                        );
+                    }
                     RateValue::Priced { inherited_from, .. }
                     | RateValue::StatedZero { inherited_from }
                     | RateValue::Unpriced { inherited_from, .. } => {
@@ -107,6 +121,11 @@ fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
                                 .as_ref()
                                 .expect("the proxy marker must decode");
                             assert_eq!(marker.basis, "quota_proxy");
+                            if plane.provider_id == "kimi-code-plan-global" {
+                                cross_provider += 1;
+                                assert_eq!(marker.provider_id, "moonshotai");
+                                assert!(marker.model_id.is_some());
+                            }
                             assert_eq!(
                                 serde_json::to_value(marker).unwrap(),
                                 value["inherited_from"]
@@ -117,7 +136,11 @@ fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
             }
         }
     }
-    assert_eq!(responses, 16, "every successful plane case must decode");
+    assert_eq!(responses, 21, "every successful plane case must decode");
+    assert!(
+        no_api_card > 0 && cross_provider > 0,
+        "Kimi's missing API cards and canonical target markers must decode"
+    );
     assert!(
         billed_base > 0 && billed_tier > 0 && not_established > 0 && proxy > 0 && disclosed > 0,
         "the fixture must exercise base/tier pointers, unknown targets, proxy markers and rules"
