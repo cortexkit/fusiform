@@ -88,6 +88,18 @@ fn seed_history(dir: &std::path::Path, at: Timestamp) {
             observation_id: None,
         }])
         .unwrap();
+    store
+        .append_eras(&[NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "p".into(),
+            model_id: "m".into(),
+            fact_key: FactKey::rate(fusiform_core::TokenClass::Input),
+            value_json: r#"{"state":"priced","units":100}"#.into(),
+            boundary_at: at,
+            boundary_kind: BoundaryKind::Seed,
+            observation_id: None,
+        }])
+        .unwrap();
 }
 
 /// A restart: a fresh process opening an existing store.
@@ -286,6 +298,8 @@ fn the_metric_names_are_pinned() {
         "last_failure_age_ms",
         "last_failure_class",
         "last_write_age_ms",
+        "model_count",
+        "models_priced",
         "observation_age_ms",
         "process_attempt_age_ms",
         "process_backup_catalog_write_failed",
@@ -334,6 +348,22 @@ fn a_restart_adopts_the_failure_count() {
         "the instant must be adopted too — the pair comes from one query and \
          either half can be dropped independently"
     );
+}
+
+#[test]
+fn a_restart_adopts_catalog_model_counts() {
+    let dir = tempfile::tempdir().unwrap();
+    let now = 10 * HOUR;
+    seed_history(dir.path(), Timestamp(now - 3 * HOUR));
+
+    let (store, signals) = restart(dir.path());
+    let metrics = health::report(&signals, now).metrics.unwrap();
+    let status = fusiform_module::route::serve_status(&store, b"").unwrap();
+
+    assert_eq!(metrics["model_count"], 1);
+    assert_eq!(metrics["models_priced"], 1);
+    assert_eq!(metrics["model_count"], status.model_count);
+    assert_eq!(metrics["models_priced"], status.models_priced.unwrap());
 }
 
 /// A failure stays readable after it has healed.

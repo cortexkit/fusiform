@@ -186,7 +186,10 @@ started; the others describe the catalog and survive a restart
 | `process_consecutive_failures` | process |
 | `process_attempt_age_ms` | process |
 | `failures_ever`, `last_failure_age_ms`, `last_failure_class` | catalog |
-| `observation_age_ms`, `last_write_age_ms` | catalog |
+| `observation_age_ms`, `last_write_age_ms`, `model_count`, `models_priced` | catalog |
 | `store_open` | process state |
 
+Model counts are cached from the same catalog snapshot used by `catalog.status`,
+at startup and after each changed poll; they remain unchanged on unchanged polls.
+Before the first successful count, `model_count` and `models_priced` are `null`.
 An age that has never been set is `null`, not zero.

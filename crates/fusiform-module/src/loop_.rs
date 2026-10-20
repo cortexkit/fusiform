@@ -33,6 +33,7 @@ use std::sync::Arc;
 use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, FailureClass, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::{catalog_digest, plan_ingest};
+use fusiform_store::serve::CatalogQuery;
 use fusiform_store::{CatalogStore, NewObservation};
 
 use crate::fetch::{hash_bytes, FetchOutcome, Fetcher, SourceEndpoint};
@@ -379,6 +380,12 @@ pub fn apply(
                 .store
                 .append_eras(&plan.eras)
                 .map_err(TickError::Store)?;
+            let snapshot = ctx
+                .store
+                .read_catalog(&CatalogQuery::current(ctx.source))
+                .map_err(TickError::Store)?;
+            ctx.signals
+                .set_model_counts(snapshot.model_count(), snapshot.priced_model_count());
             ctx.signals.wrote(now_ms);
 
             // The version advances only after the eras are durable. A version

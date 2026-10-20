@@ -15,6 +15,7 @@ use fusiform_core::{FailureClass, SourceId, Timestamp};
 use fusiform_store::CatalogStore;
 
 use fusiform_module::fetch::FetchOutcome;
+use fusiform_module::health;
 use fusiform_module::loop_::{apply, TickOutcome};
 use fusiform_module::signals::Signals;
 use fusiform_testkit::mutate;
@@ -51,6 +52,17 @@ fn body(bytes: &[u8], etag: Option<&str>) -> FetchOutcome {
         etag: etag.map(str::to_string),
         duration: Duration::from_millis(10),
     }
+}
+
+fn body_with_extra_model(priced: bool) -> Vec<u8> {
+    let mut document: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
+    let mut model = document["anthropic"]["models"]["claude-sonnet-4-5"].clone();
+    model["id"] = serde_json::json!("health-count-model");
+    if !priced {
+        model.as_object_mut().unwrap().remove("cost");
+    }
+    document["anthropic"]["models"]["health-count-model"] = model;
+    serde_json::to_vec(&document).unwrap()
 }
 
 fn run(f: &Fixture, outcome: FetchOutcome, at: i64) -> fusiform_module::loop_::TickReport {
@@ -94,6 +106,81 @@ fn the_first_tick_seeds() {
         .unwrap();
     assert_eq!(row.boundary_kind, fusiform_core::BoundaryKind::Seed);
     assert_eq!(row.observation_window(), None);
+}
+
+#[test]
+fn a_changed_poll_updates_model_count() {
+    let f = fixture();
+    run(&f, body(FIXTURE, None), 1_000);
+    let before = health::report(&f.signals, 1_000).metrics.unwrap()["model_count"]
+        .as_u64()
+        .unwrap();
+
+    let report = run(&f, body(&body_with_extra_model(false), None), 2_000);
+
+    assert!(matches!(report.outcome, TickOutcome::Changed { .. }));
+    assert_eq!(
+        health::report(&f.signals, 2_000).metrics.unwrap()["model_count"],
+        before + 1
+    );
+}
+
+#[test]
+fn a_changed_poll_updates_priced_model_count() {
+    let f = fixture();
+    run(&f, body(FIXTURE, None), 1_000);
+    let before = health::report(&f.signals, 1_000).metrics.unwrap()["models_priced"]
+        .as_u64()
+        .unwrap();
+
+    let report = run(&f, body(&body_with_extra_model(true), None), 2_000);
+
+    assert!(matches!(report.outcome, TickOutcome::Changed { .. }));
+    assert_eq!(
+        health::report(&f.signals, 2_000).metrics.unwrap()["models_priced"],
+        before + 1
+    );
+}
+
+#[test]
+fn cached_model_counts_match_catalog_status_after_a_changed_poll() {
+    let f = fixture();
+    run(&f, body(FIXTURE, None), 1_000);
+    run(&f, body(&body_with_extra_model(true), None), 2_000);
+
+    let metrics = health::report(&f.signals, 2_000).metrics.unwrap();
+    let status = fusiform_module::route::serve_status(&f.store, b"").unwrap();
+    assert_eq!(metrics["model_count"], status.model_count);
+    assert_eq!(metrics["models_priced"], status.models_priced.unwrap());
+}
+
+#[test]
+fn unchanged_and_not_modified_polls_keep_cached_model_counts() {
+    let f = fixture();
+    run(&f, body(FIXTURE, None), 1_000);
+    let counted = health::report(&f.signals, 1_000).metrics.unwrap();
+
+    let not_modified = run(
+        &f,
+        FetchOutcome::NotModified {
+            etag: Some("v1".into()),
+            duration: Duration::from_millis(10),
+        },
+        2_000,
+    );
+    assert_eq!(not_modified.outcome, TickOutcome::NotModified);
+    let after_not_modified = health::report(&f.signals, 2_000).metrics.unwrap();
+    assert_eq!(after_not_modified["model_count"], counted["model_count"]);
+    assert_eq!(
+        after_not_modified["models_priced"],
+        counted["models_priced"]
+    );
+
+    let unchanged = run(&f, body(FIXTURE, Some("v1")), 3_000);
+    assert_eq!(unchanged.outcome, TickOutcome::Unchanged);
+    let after_unchanged = health::report(&f.signals, 3_000).metrics.unwrap();
+    assert_eq!(after_unchanged["model_count"], counted["model_count"]);
+    assert_eq!(after_unchanged["models_priced"], counted["models_priced"]);
 }
 
 /// A second identical body writes an observation and no eras.

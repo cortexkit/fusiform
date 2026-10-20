@@ -340,6 +340,7 @@ fn describe_failure(signals: &Signals) -> &'static str {
 fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
     let (attempts, recorded) = signals.attempt_ledger();
     let (failures_ever, last_failure_age) = signals.failure_history(now_ms);
+    let (model_count, models_priced) = signals.model_counts();
     serde_json::json!({
         // Both halves of the conservation identity, so an operator can see the
         // divergence rather than take health's word for it. Named for what
@@ -376,6 +377,8 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
         // these describe the catalog rather than the process reading it.
         "observation_age_ms": signals.observation_age_ms(now_ms),
         "last_write_age_ms": signals.last_write_age_ms(now_ms),
+        "model_count": model_count,
+        "models_priced": models_priced,
         "store_open": signals.store_is_open(),
         // Process-scoped: set when THIS process failed to write the backup
         // enrollment descriptor at startup, and cleared only by a restart that
@@ -536,7 +539,19 @@ mod tests {
         assert_eq!(m["process_polls_unrecorded"], 0);
         assert_eq!(m["observation_age_ms"], 1_000);
         assert_eq!(m["last_write_age_ms"], 900);
+        assert!(m["model_count"].is_null());
+        assert!(m["models_priced"].is_null());
         assert_eq!(m["store_open"], true);
+    }
+
+    #[test]
+    fn counted_catalog_totals_are_reported_as_integers() {
+        let signals = Signals::new();
+        signals.set_model_counts(12, 9);
+
+        let metrics = report(&signals, 2_000).metrics.unwrap();
+        assert_eq!(metrics["model_count"], 12);
+        assert_eq!(metrics["models_priced"], 9);
     }
 
     /// A descriptor that could not be written is Degraded, never Failing, and

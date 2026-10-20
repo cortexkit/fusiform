@@ -22,9 +22,14 @@
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 use fusiform_core::FailureClass;
+use fusiform_store::serve::CatalogQuery;
+use fusiform_store::CatalogStore;
 
 /// No failure in the current streak.
 const CLASS_NONE: u64 = 0;
+
+/// A model count that has not yet been read from the catalog.
+const UNKNOWN_COUNT: i64 = -1;
 
 /// Encode a failure class for atomic storage.
 ///
@@ -125,6 +130,11 @@ pub struct Signals {
     last_failure_class: AtomicU64,
     /// When the store last accepted a write, in unix ms.
     last_write_ms: AtomicI64,
+    /// Current catalog counts, refreshed after changed polls and at startup.
+    ///
+    /// These stay in atomics so a health request never waits for the store.
+    model_count: AtomicI64,
+    models_priced: AtomicI64,
     /// Whether the store has been opened. Read as a dispatch-capability signal:
     /// a module that never opened its store cannot answer a read.
     store_open: AtomicU64,
@@ -173,6 +183,8 @@ impl Signals {
             last_failure_ms: AtomicI64::new(NEVER),
             last_failure_class: AtomicU64::new(CLASS_NONE),
             last_write_ms: AtomicI64::new(NEVER),
+            model_count: AtomicI64::new(UNKNOWN_COUNT),
+            models_priced: AtomicI64::new(UNKNOWN_COUNT),
             store_open: AtomicU64::new(0),
             adoption_failed: AtomicU64::new(0),
             catalog_write_failed: AtomicU64::new(0),
@@ -208,6 +220,26 @@ impl Signals {
         // whenever it happened, which is what an operator asks after the fact.
     }
 
+    /// Cache the catalog counts so health can report them without reading the store.
+    pub fn set_model_counts(&self, model_count: usize, models_priced: usize) {
+        self.model_count.store(
+            i64::try_from(model_count).unwrap_or(i64::MAX),
+            Ordering::Relaxed,
+        );
+        self.models_priced.store(
+            i64::try_from(models_priced).unwrap_or(i64::MAX),
+            Ordering::Relaxed,
+        );
+    }
+
+    /// The most recently counted catalog totals, or `None` until the first read.
+    pub fn model_counts(&self) -> (Option<u64>, Option<u64>) {
+        (
+            u64::try_from(self.model_count.load(Ordering::Relaxed)).ok(),
+            u64::try_from(self.models_priced.load(Ordering::Relaxed)).ok(),
+        )
+    }
+
     /// Adopt everything the store knows that a restart would otherwise erase.
     ///
     /// Called once when the store opens, before the poll loop starts. It lives
@@ -220,11 +252,20 @@ impl Signals {
     /// Errors are logged rather than returned. The store opened; a read failing
     /// here is not fatal because the loop will write its own values shortly, but
     /// it must not silently pass as a fresh install.
-    pub fn adopt_from_store(
-        &self,
-        store: &fusiform_store::CatalogStore,
-        source: fusiform_core::SourceId,
-    ) {
+    pub fn adopt_from_store(&self, store: &CatalogStore, source: fusiform_core::SourceId) {
+        match store.read_catalog(&CatalogQuery::current(source)) {
+            Ok(snapshot) => {
+                self.set_model_counts(snapshot.model_count(), snapshot.priced_model_count());
+            }
+            Err(e) => {
+                self.adoption_failed();
+                eprintln!(
+                    "fusiform: could not count catalog models at startup, so health will report \
+                     model_count and models_priced as null until a later catalog count succeeds: {e}"
+                );
+            }
+        }
+
         // The catalog's real age. Without it the staleness clock restarts with
         // the process, and a module whose upstream has been unreachable for
         // hours reports healthy the moment it restarts — which is precisely
