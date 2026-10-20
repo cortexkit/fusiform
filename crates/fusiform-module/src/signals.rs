@@ -232,7 +232,13 @@ impl Signals {
         );
     }
 
-    /// The most recently counted catalog totals, or `None` until the first read.
+    /// Mark the cached counts unknown when a catalog refresh fails.
+    pub fn mark_model_counts_unknown(&self) {
+        self.model_count.store(UNKNOWN_COUNT, Ordering::Relaxed);
+        self.models_priced.store(UNKNOWN_COUNT, Ordering::Relaxed);
+    }
+
+    /// Return cached catalog totals, or `None` before a successful count or after a failed refresh.
     pub fn model_counts(&self) -> (Option<u64>, Option<u64>) {
         (
             u64::try_from(self.model_count.load(Ordering::Relaxed)).ok(),

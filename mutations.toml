@@ -1231,9 +1231,10 @@ build_timeout_s = 1800
 id = "health-model-counts-refresh-after-changed-poll"
 guards = "a changed poll refreshes the cached health model counts after appending its eras"
 file = "crates/fusiform-module/src/loop_.rs"
-old = '''            ctx.signals
-                .set_model_counts(snapshot.model_count(), snapshot.priced_model_count());'''
-new = '''            let _ = snapshot; // NON-VACUITY BREAK'''
+old = '''                Ok(snapshot) => ctx
+                    .signals
+                    .set_model_counts(snapshot.model_count(), snapshot.priced_model_count()),'''
+new = '''                Ok(snapshot) => { let _ = snapshot; } // NON-VACUITY BREAK'''
 edits = []
 test_file = "crates/fusiform-module/tests/it/tick.rs"
 runner = "cargo"

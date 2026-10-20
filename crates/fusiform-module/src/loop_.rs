@@ -33,8 +33,8 @@ use std::sync::Arc;
 use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, FailureClass, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::{catalog_digest, plan_ingest};
-use fusiform_store::serve::CatalogQuery;
-use fusiform_store::{CatalogStore, NewObservation};
+use fusiform_store::serve::{CatalogQuery, CatalogSnapshot};
+use fusiform_store::{CatalogError, CatalogStore, NewObservation};
 
 use crate::fetch::{hash_bytes, FetchOutcome, Fetcher, SourceEndpoint};
 use crate::signals::Signals;
@@ -199,6 +199,19 @@ pub fn apply(
     source: SourceId,
     outcome: FetchOutcome,
     now_ms: i64,
+) -> Result<TickReport, TickError> {
+    apply_with_catalog_reader(store, signals, source, outcome, now_ms, |store, source| {
+        store.read_catalog(&CatalogQuery::current(source))
+    })
+}
+
+fn apply_with_catalog_reader(
+    store: &CatalogStore,
+    signals: &Signals,
+    source: SourceId,
+    outcome: FetchOutcome,
+    now_ms: i64,
+    mut read_catalog: impl FnMut(&CatalogStore, SourceId) -> Result<CatalogSnapshot, CatalogError>,
 ) -> Result<TickReport, TickError> {
     let ctx = ApplyCtx {
         store,
@@ -380,12 +393,20 @@ pub fn apply(
                 .store
                 .append_eras(&plan.eras)
                 .map_err(TickError::Store)?;
-            let snapshot = ctx
-                .store
-                .read_catalog(&CatalogQuery::current(ctx.source))
-                .map_err(TickError::Store)?;
-            ctx.signals
-                .set_model_counts(snapshot.model_count(), snapshot.priced_model_count());
+            // This snapshot only refreshes health telemetry; its failure must not
+            // turn an already-appended ingest into a failed poll.
+            match read_catalog(ctx.store, ctx.source) {
+                Ok(snapshot) => ctx
+                    .signals
+                    .set_model_counts(snapshot.model_count(), snapshot.priced_model_count()),
+                Err(e) => {
+                    ctx.signals.mark_model_counts_unknown();
+                    eprintln!(
+                        "fusiform: could not refresh cached model counts after a changed poll; \
+                         health will report null until a later catalog count succeeds: {e}"
+                    );
+                }
+            }
             ctx.signals.wrote(now_ms);
 
             // The version advances only after the eras are durable. A version
@@ -593,4 +614,67 @@ impl std::error::Error for TickError {}
 /// The source fusiform polls.
 pub fn default_source() -> SourceId {
     SourceId::ModelsDev
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+    use fusiform_core::SourceId;
+    use fusiform_store::{CatalogError, CatalogStore};
+
+    use super::{apply_with_catalog_reader, FetchOutcome, TickOutcome};
+    use crate::{health, signals::Signals};
+
+    #[test]
+    fn a_failed_count_refresh_does_not_fail_a_changed_ingest() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open(&StorageDescriptor {
+            module_id: "fusiform".to_string(),
+            storage_namespace: "default".to_string(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().to_string(),
+            },
+        })
+        .unwrap();
+        let signals = Signals::new();
+        signals.attempted(1_000);
+        signals.set_model_counts(50, 30);
+
+        let report = apply_with_catalog_reader(
+            &store,
+            &signals,
+            SourceId::ModelsDev,
+            FetchOutcome::Body {
+                bytes: include_bytes!("../../fusiform-core/fixtures/models-dev-excerpt.json")
+                    .to_vec(),
+                etag: None,
+                duration: Duration::from_millis(10),
+            },
+            1_000,
+            |store, source| {
+                assert!(
+                    store.era_count(source).unwrap() > 0,
+                    "the injected count read runs after the eras are appended"
+                );
+                Err(CatalogError::Invariant(
+                    "injected catalog snapshot read failure".to_string(),
+                ))
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(report.outcome, TickOutcome::Changed { .. }));
+        assert!(report.eras_written > 0);
+        assert!(store.era_count(SourceId::ModelsDev).unwrap() > 0);
+
+        let metrics = health::report(&signals, 1_000).metrics.unwrap();
+        assert_eq!(metrics["process_poll_attempts"], 1);
+        assert_eq!(metrics["process_polls_recorded"], 1);
+        assert_eq!(metrics["process_polls_unrecorded"], 0);
+        assert!(metrics["model_count"].is_null());
+        assert!(metrics["models_priced"].is_null());
+    }
 }
