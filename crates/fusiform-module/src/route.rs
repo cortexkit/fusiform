@@ -5191,9 +5191,9 @@ mod curated_tests {
     }
 }
 
-/// The curated System One rows: typed decision and extraction models that
-/// models.dev does not carry, one of them under a provider models.dev does not
-/// list at all.
+/// The curated decision and extraction models ("System One" models, in their
+/// vendors' term: they return typed decisions or values, never replies). None
+/// is in models.dev, and one is under a provider models.dev does not list.
 #[cfg(test)]
 mod system_one_tests {
     use super::*;

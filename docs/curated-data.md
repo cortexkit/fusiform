@@ -187,9 +187,11 @@ Serving rules, tested in `crates/fusiform-module/src/route.rs`
    (`system_one_tests::an_unknown_typesafe_model_is_refused_as_an_unknown_model`,
    `system_one_tests::point_in_time_reads_never_serve_system_one_rows`).
 
-The System One rows are covered on bulk, named, provider-filtered, paged and
-`apikey` plane reads, with fact-prefix filters and the decoded rate states, by
-`route.rs`'s `system_one_tests`.
+The decision and extraction rows (the vendors call them "System One"
+models: they return typed decisions or values, never replies) are covered on
+bulk, named, provider-filtered, paged and `apikey` plane reads, with
+fact-prefix filters and the decoded rate states, by `route.rs`'s
+`system_one_tests`.
 
 The consuming router must refuse a credential whose login method is not in
 `auth_methods`. A model absent from `curated` carries no login restriction.

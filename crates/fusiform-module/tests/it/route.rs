@@ -584,7 +584,12 @@ fn status_reports_quiet_polls_and_failures() {
     // Status counts stored upstream rows. Current reads additionally list
     // curated rows and aliases, which have no stored observations to count.
     let catalog = get(&f, "{}");
-    assert_eq!(catalog.curated.len(), 1);
+    // Every shipped curated row is served here: the fixture stores none of
+    // their identities upstream.
+    assert_eq!(
+        catalog.curated.len(),
+        fusiform_module::curated_models::models().len()
+    );
     assert_eq!(
         status.model_count + catalog.curated.len() + catalog.aliased.len(),
         catalog.model_count()
