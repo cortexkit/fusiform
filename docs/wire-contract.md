@@ -448,6 +448,10 @@ The golden case `catalog.get — first provider page` carries a real continuatio
   `retired_at_ms`, the instant fusiform first observed it gone
   (`route::a_named_read_of_a_retired_model_says_so`). A bulk read omits retired
   models without listing them (`route::retired_models_are_excluded_by_default`).
+  A retired alias id and a curated row the file holds are reported the same
+  way on current reads, with the instant fusiform stopped serving them, and a
+  retired-inclusive read lists them marked `existence: absent` (see
+  [`curated-data.md`](curated-data.md) §4, "Held rows").
 - **`uncertain`**: on a historical read, a fact whose value is served but sits
   inside a later era's observation window is listed with
   `superseded_after_ms` (the last instant the value was confirmed) and

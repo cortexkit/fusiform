@@ -1019,6 +1019,24 @@ timeout_s = 600
 build_timeout_s = 1800
 
 [[control]]
+id = "curated-held-row-is-not-served"
+guards = "a curated row named in the file's held array is not served as curated on any read; its id is reported as retired (absent on retired-inclusive reads, in retired on a named read) or left to the store's own withdrawn row"
+file = "crates/fusiform-module/src/route.rs"
+old = "    if crate::curated_models::held().contains_key(&key) {"
+new = "    if false && crate::curated_models::held().contains_key(&key) { // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/src/route/curated_held_tests.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::curated_held_tests::held_rows_are_not_served_on_current_reads", "route::curated_held_tests::held_rows_are_absent_identities_on_retired_inclusive_reads", "route::curated_held_tests::a_named_read_of_a_held_id_reports_it_retired", "route::curated_held_tests::a_provider_whose_only_row_is_held_stays_known", "route::curated_held_tests::history_of_a_held_id_names_no_curated_source", "route::curated_held_tests::releasing_a_held_entry_serves_the_row_as_curated_again", "route::curated_withdrawn_tests::a_held_row_leaves_the_withdrawn_upstream_row_to_report_itself"]
+only = false
+hub = "The shipped curated file holds the four System One rows, and the golden payload fixture in the it suite pins the named clef, named clairic and typesafe provider reads as held, so serving held rows again changes served bytes there, and the it suite's status count of served curated rows, as well as the lib held tests."
+hub_targets = ["it"]
+timeout_s = 600
+build_timeout_s = 1800
+
+[[control]]
 id = "catalog-reads-never-wait-for-writer-connection"
 guards = "a catalog read returns the last committed WAL snapshot while the fenced writer transaction is open, then sees its commit"
 file = "crates/fusiform-store/src/lib.rs"

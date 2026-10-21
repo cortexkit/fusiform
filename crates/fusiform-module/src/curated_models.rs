@@ -25,6 +25,37 @@ pub struct CuratedModel {
 
 pub type CuratedModels = BTreeMap<(String, String), CuratedModel>;
 
+/// A row in `models` that fusiform has stopped serving for now.
+///
+/// The row's data stays in `models` untouched, so serving it again is a
+/// one-line removal from `held`. While held, the row is never served as
+/// curated. If the store has never recorded the id, a current read reports it
+/// the way it reports a retired alias: absent on a retired-inclusive read and
+/// listed in `retired` on a named read. If the store has recorded it, the
+/// store's own row (present or withdrawn) answers instead. Deleting the row instead would make
+/// the id vanish, and a consumer that tracks identities reads a vanished id as
+/// a truncated catalog and refuses the refresh.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeldModel {
+    pub provider_id: String,
+    pub model_id: String,
+    /// When fusiform put the row on hold; served as `retired_at_ms` when the
+    /// store has never recorded the id.
+    pub held_since_ms: i64,
+    /// Why the row is held and what lets it be served again. Not served.
+    pub reason: String,
+}
+
+pub type HeldModels = BTreeMap<(String, String), HeldModel>;
+
+/// Everything the curated file carries: its rows, and which of them are held.
+#[derive(Debug, Default)]
+pub struct Table {
+    pub models: CuratedModels,
+    pub held: HeldModels,
+}
+
 /// Reject unsupported facts rather than silently exposing a new wire vocabulary.
 /// A row that admits a subscription login must never claim an API list price,
 /// so only an `apikey`-only row may carry `rate.*` facts.
@@ -94,6 +125,62 @@ fn invalid_rate(value: &serde_json::Value) -> Option<String> {
             "must be a priced rate with a stated currency, or a stated zero: {value}"
         )),
     }
+}
+
+/// Load the whole file: its rows, then its held entries checked against them.
+pub fn load_table_reporting_rejects(doc: &str) -> (Table, Vec<String>) {
+    let (models, mut rejects) = load_reporting_rejects(doc);
+    let (held, held_rejects) = load_held_reporting_rejects(doc, &models);
+    rejects.extend(held_rejects);
+    (Table { models, held }, rejects)
+}
+
+/// The `held` entries, each naming a row that loaded.
+///
+/// A held entry naming no row would hold nothing and report an id nobody
+/// serves, so it is a reject, as is an id held twice.
+pub fn load_held_reporting_rejects(doc: &str, rows: &CuratedModels) -> (HeldModels, Vec<String>) {
+    #[derive(serde::Deserialize)]
+    struct Doc {
+        #[serde(default)]
+        held: Vec<serde_json::Value>,
+    }
+    let doc: Doc = match serde_json::from_str(doc) {
+        Ok(doc) => doc,
+        Err(error) => {
+            return (
+                HeldModels::new(),
+                vec![format!("curated held list unreadable: {error}")],
+            )
+        }
+    };
+    let mut held = HeldModels::new();
+    let mut rejects = Vec::new();
+    for raw in doc.held {
+        let entry: HeldModel = match serde_json::from_value(raw) {
+            Ok(entry) => entry,
+            Err(error) => {
+                rejects.push(format!("curated held entry did not parse: {error}"));
+                continue;
+            }
+        };
+        let key = (entry.provider_id.clone(), entry.model_id.clone());
+        let invalid = if entry.reason.trim().is_empty() || entry.held_since_ms <= 0 {
+            Some("a held entry needs a reason and a positive held_since_ms")
+        } else if !rows.contains_key(&key) {
+            Some("a held entry must name a row in models")
+        } else if held.contains_key(&key) {
+            Some("duplicate held identity")
+        } else {
+            None
+        };
+        if let Some(reason) = invalid {
+            rejects.push(format!("curated held {}/{}: {reason}", key.0, key.1));
+        } else {
+            held.insert(key, entry);
+        }
+    }
+    (held, rejects)
 }
 
 /// Malformed rows and duplicate identities are counted, not silently skipped.
@@ -166,10 +253,91 @@ pub fn load_reporting_rejects(doc: &str) -> (CuratedModels, Vec<String>) {
     (rows, rejects)
 }
 
-/// Embedded rows are parsed once per process, never written to the store.
+/// The embedded file, parsed once per process, never written to the store.
+///
+/// A unit test may plant another document for its own thread with [`plant`],
+/// so route tests can exercise the rows both as served and as held.
+pub fn table() -> &'static Table {
+    #[cfg(test)]
+    if let Some(planted) = PLANTED.with(std::cell::Cell::get) {
+        return planted;
+    }
+    static PARSED: std::sync::OnceLock<Table> = std::sync::OnceLock::new();
+    PARSED.get_or_init(|| load_table_reporting_rejects(DOCUMENT).0)
+}
+
+/// Every row in the file, held or not.
 pub fn models() -> &'static CuratedModels {
-    static PARSED: std::sync::OnceLock<CuratedModels> = std::sync::OnceLock::new();
-    PARSED.get_or_init(|| load_reporting_rejects(DOCUMENT).0)
+    &table().models
+}
+
+/// The rows not served while held.
+pub fn held() -> &'static HeldModels {
+    &table().held
+}
+
+#[cfg(test)]
+thread_local! {
+    static PLANTED: std::cell::Cell<Option<&'static Table>> = const { std::cell::Cell::new(None) };
+}
+
+/// While the returned guard lives, `doc` stands in for the shipped file, on
+/// this thread only.
+///
+/// The planted document must load without rejects, so a test cannot pass on a
+/// document that silently lost the rows it means to exercise.
+#[cfg(test)]
+#[must_use = "the planted document is withdrawn when the guard drops"]
+pub(crate) fn plant(doc: &str) -> Planted {
+    let (table, rejects) = load_table_reporting_rejects(doc);
+    assert!(rejects.is_empty(), "planted curated document: {rejects:?}");
+    // Leaked: a planted table must outlive every `&'static` borrow the route
+    // takes from it, and a test process is short-lived.
+    let table: &'static Table = Box::leak(Box::new(table));
+    Planted(PLANTED.with(|planted| planted.replace(Some(table))))
+}
+
+/// Restores whatever was planted before, or the shipped file, when dropped.
+#[cfg(test)]
+pub(crate) struct Planted(Option<&'static Table>);
+
+#[cfg(test)]
+impl Drop for Planted {
+    fn drop(&mut self) {
+        PLANTED.with(|planted| planted.set(self.0));
+    }
+}
+
+/// The shipped document with the held entries for these ids removed, so
+/// those rows are served as curated again wherever upstream does not
+/// currently publish them.
+#[cfg(test)]
+pub(crate) fn document_releasing(ids: &[(&str, &str)]) -> String {
+    let mut doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
+    let held = doc["held"]
+        .as_array_mut()
+        .expect("the shipped file holds rows");
+    let before = held.len();
+    held.retain(|entry| {
+        !ids.iter().any(|(provider, model)| {
+            entry["provider_id"] == *provider && entry["model_id"] == *model
+        })
+    });
+    assert_eq!(
+        before - held.len(),
+        ids.len(),
+        "every released id must be held in the shipped file"
+    );
+    serde_json::to_string(&doc).unwrap()
+}
+
+/// The shipped document with nothing held: every row is served as curated
+/// wherever upstream does not currently publish it.
+#[cfg(test)]
+pub(crate) fn document_without_held() -> String {
+    let mut doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
+    doc.as_object_mut().unwrap().remove("held");
+    serde_json::to_string(&doc).unwrap()
 }
 
 pub fn upstream_collisions(rows: &CuratedModels, seed: &serde_json::Value) -> Vec<String> {
@@ -220,6 +388,94 @@ mod tests {
 
     fn planted(edit: impl FnOnce(&mut serde_json::Value)) -> String {
         planted_in("meta", "muse-wonder-full-1.0", edit)
+    }
+
+    /// The rows the shipped file holds: the four System One rows a consumer's
+    /// catalog assembly refuses while they lack context or capability facts.
+    const SHIPPED_HELD: &[(&str, &str)] = &[
+        ("cloudflare-workers-ai", "@cf/cloudflare/clairic"),
+        ("cloudflare-workers-ai", "@cf/cloudflare/clef"),
+        ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
+        ("typesafe", "jev-1.13.0"),
+    ];
+
+    /// 2026-10-21T20:30:00Z.
+    const HELD_SINCE_MS: i64 = 1_792_614_600_000;
+
+    /// The shipped document with one edit applied to its `held` array.
+    fn planted_held(edit: impl FnOnce(&mut Vec<serde_json::Value>)) -> String {
+        let mut doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
+        edit(doc["held"].as_array_mut().unwrap());
+        serde_json::to_string(&doc).unwrap()
+    }
+
+    #[test]
+    fn shipped_held_entries_load_and_keep_their_rows() {
+        let (table, rejects) = load_table_reporting_rejects(DOCUMENT);
+        assert!(rejects.is_empty(), "{rejects:?}");
+        let ids: Vec<(&str, &str)> = table
+            .held
+            .keys()
+            .map(|(provider, model)| (provider.as_str(), model.as_str()))
+            .collect();
+        assert_eq!(ids, SHIPPED_HELD);
+        for entry in table.held.values() {
+            assert_eq!(entry.held_since_ms, HELD_SINCE_MS);
+            assert!(entry.reason.contains("broca"), "{}", entry.reason);
+            assert!(entry.reason.contains("re-listed"), "{}", entry.reason);
+        }
+        // A held row keeps its full data in `models`.
+        let ids: Vec<(&str, &str)> = table
+            .models
+            .keys()
+            .map(|(provider, model)| (provider.as_str(), model.as_str()))
+            .collect();
+        assert_eq!(ids, SHIPPED);
+    }
+
+    #[test]
+    fn planted_held_entry_naming_no_row_is_rejected() {
+        let doc = planted_held(|held| {
+            let mut stray = held[0].clone();
+            stray["model_id"] = "@cf/cloudflare/not-a-row".into();
+            held.push(stray);
+        });
+        let (table, rejects) = load_table_reporting_rejects(&doc);
+        assert_eq!(rejects.len(), 1, "{rejects:?}");
+        assert!(rejects[0].contains("cloudflare-workers-ai/@cf/cloudflare/not-a-row"));
+        assert!(rejects[0].contains("must name a row in models"));
+        assert_eq!(table.held.len(), SHIPPED_HELD.len());
+        assert_eq!(table.models.len(), SHIPPED.len());
+    }
+
+    #[test]
+    fn planted_duplicate_or_malformed_held_entry_is_rejected() {
+        let doc = planted_held(|held| {
+            let duplicate = held[0].clone();
+            let mut no_reason = held[1].clone();
+            no_reason["reason"] = " ".into();
+            held.extend([duplicate, serde_json::json!({"provider_id":"typesafe"})]);
+            held[1] = no_reason;
+        });
+        let (table, rejects) = load_table_reporting_rejects(&doc);
+        assert_eq!(rejects.len(), 3, "{rejects:?}");
+        assert!(rejects[0].contains("needs a reason"), "{rejects:?}");
+        assert!(
+            rejects[1].contains("duplicate held identity"),
+            "{rejects:?}"
+        );
+        assert!(rejects[2].contains("did not parse"), "{rejects:?}");
+        assert_eq!(table.held.len(), SHIPPED_HELD.len() - 1);
+        // Control: removing an entry is not a reject; the row is simply served.
+        let doc = planted_held(|held| {
+            held.pop();
+        });
+        let (table, rejects) = load_table_reporting_rejects(&doc);
+        assert!(rejects.is_empty(), "{rejects:?}");
+        assert_eq!(table.held.len(), SHIPPED_HELD.len() - 1);
+        assert!(!table
+            .held
+            .contains_key(&("typesafe".to_string(), "jev-1.13.0".to_string())));
     }
 
     /// Load a planted document and return its single reject, after checking

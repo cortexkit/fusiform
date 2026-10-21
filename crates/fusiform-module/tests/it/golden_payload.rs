@@ -1440,8 +1440,10 @@ fn cases() -> Vec<(&'static str, String)> {
             r#"{"name":"catalog.history","arguments":{"provider_id":"meta","model_id":"muse-wonder-full-1.0","fact_key":"limit.context"}}"#.to_string(),
         ),
         (
-            // A typed decision model: `model.kind` is stated, and the output
-            // rate is a stated zero beside a priced input rate.
+            // A typed decision model. While the shipped file holds it, and the
+            // fixture's store has never seen the id, a named read reports it
+            // in `retired` at its `held_since_ms`; served, it states
+            // `model.kind` and a stated-zero output rate beside a priced input.
             "catalog.get — a curated decision model",
             r#"{"name":"catalog.get","arguments":{"provider_id":"cloudflare-workers-ai","model_id":"@cf/cloudflare/clef"}}"#.to_string(),
         ),
@@ -1451,9 +1453,17 @@ fn cases() -> Vec<(&'static str, String)> {
         ),
         (
             // models.dev does not list this provider at all, so every row a
-            // provider read returns is curated.
+            // provider read returns is curated. Its only row is held, so a
+            // plain read answers with zero models rather than refusing.
             "catalog.get — a provider served only through curated rows",
             r#"{"name":"catalog.get","arguments":{"provider_id":"typesafe"}}"#.to_string(),
+        ),
+        (
+            // The shipped file holds typesafe's only row. A retired-inclusive
+            // read still lists its id, marked absent, so a consumer tracking
+            // identities does not see it vanish.
+            "catalog.get — a held curated row stays an absent identity",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"typesafe","include_retired":true}}"#.to_string(),
         ),
     ]
 }
@@ -1817,7 +1827,22 @@ fn every_served_fact_key_reaches_the_fixture() {
     // which is exactly why it would have survived: nothing would have gone
     // wrong until someone added an unrelated field, and the scan's SUBJECT
     // would have been wrong the whole time.
-    let (count, missing) = missing_served_fact_keys(src, &present);
+    let (count, mut missing) = missing_served_fact_keys(src, &present);
+    // A curated-only fact that no unheld curated row states is served by
+    // nothing while those rows are held, so the producer cannot put it in the
+    // fixture. Computed from the shipped file rather than listed, so the
+    // exemption ends the moment one such row is served again, and the fence
+    // then demands the fact again.
+    let unheld = fusiform_module::curated_models::models()
+        .iter()
+        .filter(|(id, _)| !fusiform_module::curated_models::held().contains_key(*id))
+        .map(|(_, row)| row);
+    let served_curated: std::collections::BTreeSet<&String> =
+        unheld.flat_map(|row| row.facts.keys()).collect();
+    missing.retain(|key| {
+        !crate::wire_fact_table::CURATED_ONLY.contains(&key.as_str())
+            || served_curated.contains(key)
+    });
     assert!(
         count >= 15,
         "SERVED_FACTS carried 15 entries when this was written; found {count}, which \

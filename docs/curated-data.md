@@ -118,6 +118,8 @@ The shipped rows:
 | `cloudflare-workers-ai/@cf/cloudflare/clairic` | `extraction` | as above |
 | `typesafe/jev-1.13.0` | `decision` | models.dev does not list TypeSafe. Only the versioned id is served, never the moving alias `jev-latest` |
 
+All four rows after `meta` are currently held: see "Held rows" below.
+
 | Field | Meaning |
 | --- | --- |
 | `provider_id`, `model_id` | the served identity |
@@ -126,6 +128,61 @@ The shipped rows:
 | `source_ref` | the evidence for the row: each page read, with the sentences it states quoted verbatim |
 | `established_by` | optional; who read the sources. Not served |
 | `established_at_ms`, `review_by_ms` | the review date must be exactly 60 days after establishment |
+
+### Held rows
+
+The file's top-level `held` array names rows fusiform keeps in `models` but
+does not serve for now. Each entry has `provider_id` and `model_id` (which must
+name a row in `models`), `held_since_ms`, and a `reason` saying why the row is
+held and what lets it be served again. The held row's data stays in `models`
+unchanged, so serving it again is the removal of one `held` entry, not a revert.
+
+Shipped: the four decision and extraction rows above are held since
+2026-10-21T20:30:00Z. A consumer's catalog assembly (broca's) refuses its whole
+refresh when a present row lacks `limit.context`, `capability.attachment`,
+`capability.reasoning` or `capability.tool_call`, and these rows leave some of
+those out because the vendors do not state them. Each entry is removed once
+that consumer accepts a present row without those facts and its fix is
+deployed.
+
+On current reads (no `at_ms`, no `auth_method`) a held id is reported exactly
+the way a retired alias is, through the same code path in `route.rs`:
+
+- if the store knows the id (models.dev listed it once, as it did the three
+  Cloudflare ids), the store's own row is served as for any other upstream
+  row: absent on a retired-inclusive read, and in `retired` with the store's
+  retirement instant on a named read. No second row is added;
+- otherwise a retired-inclusive read (bulk, provider-filtered or paged) lists
+  the id with the single fact `existence: absent`, and a named read lists it
+  in `retired` with `held_since_ms` as `retired_at_ms`;
+- a read without `include_retired` does not list it, and nothing discloses
+  it in `curated`. A plane read never lists it, as for a retired alias.
+
+`catalog.history` names no curated source for a held row. A provider whose
+only rows are held (`typesafe`, while Jev is held) stays a known provider: a
+plain provider read answers with zero models, and a named read of a model it
+never carried is still refused as an unknown model.
+
+Why held and not deleted: a consumer that tracks identities across reads, and
+asks for retired rows, reads an identity that disappears without a retired
+row as a truncated catalog and refuses every refresh. Deleting alias rows did
+exactly that on 2026-10-17. So an id fusiform has served is never deleted
+from what it reports: a curated row is held, and an alias is moved to the
+alias file's `retired` list.
+
+Load rules: a held entry naming no row in `models`, an id held twice, and an
+entry without a reason or a positive `held_since_ms` are rejects
+(`planted_held_entry_naming_no_row_is_rejected`,
+`planted_duplicate_or_malformed_held_entry_is_rejected`); the shipped entries
+load (`shipped_held_entries_load_and_keep_their_rows`). Serving is tested in
+`route/curated_held_tests.rs`, including the control that removing a held
+entry serves the row as curated again
+(`releasing_a_held_entry_serves_the_row_as_curated_again`), and for a held id
+the store holds as a withdrawn upstream row in
+`curated_withdrawn_tests::a_held_row_leaves_the_withdrawn_upstream_row_to_report_itself`.
+The serving tests in `system_one_tests` and `curated_withdrawn_tests` that
+cover these rows as served plant the shipped file with its `held` array
+removed.
 
 Load rules:
 
@@ -212,7 +269,7 @@ The decision and extraction rows (the vendors call them "System One"
 models: they return typed decisions or values, never replies) are covered on
 bulk, named, provider-filtered, paged and `apikey` plane reads, with
 fact-prefix filters and the decoded rate states, by `route.rs`'s
-`system_one_tests`.
+`system_one_tests`, against the shipped file with nothing held.
 
 The consuming router must refuse a credential whose login method is not in
 `auth_methods`. A model absent from `curated` carries no login restriction.

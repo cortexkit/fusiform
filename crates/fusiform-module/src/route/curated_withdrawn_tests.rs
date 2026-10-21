@@ -91,6 +91,13 @@ fn ingest(store: &CatalogStore, at: i64, lists_clef: bool) {
         .unwrap();
 }
 
+/// The shipped curated file with nothing held, so clef is served as curated
+/// whenever upstream does not currently publish it.
+/// The shipped file holds clef; the held tests below read it that way.
+fn served() -> crate::curated_models::Planted {
+    crate::curated_models::plant(&crate::curated_models::document_without_held())
+}
+
 fn get(store: &CatalogStore, args: Value) -> CatalogGetResponse {
     serve_catalog_get(store, &serde_json::to_vec(&args).unwrap()).unwrap()
 }
@@ -223,6 +230,7 @@ fn current_reads(store: &CatalogStore) -> Vec<(&'static str, CatalogGetResponse)
 
 #[test]
 fn a_withdrawn_upstream_row_gives_way_to_the_curated_row() {
+    let _planted = served();
     let (store, _dir) = empty_store();
     ingest(&store, LISTED_AT, true);
     ingest(&store, WITHDRAWN_AT, false);
@@ -287,6 +295,7 @@ fn a_withdrawn_upstream_row_gives_way_to_the_curated_row() {
 
 #[test]
 fn an_upstream_relisting_wins_over_the_curated_row_again() {
+    let _planted = served();
     let (store, _dir) = empty_store();
     ingest(&store, LISTED_AT, true);
     ingest(&store, WITHDRAWN_AT, false);
@@ -302,4 +311,49 @@ fn an_upstream_relisting_wins_over_the_curated_row_again() {
     let kind = history(&store, "model.kind");
     assert!(kind.eras.is_empty());
     assert!(kind.curated.is_none(), "upstream wins on history too");
+}
+
+/// The shipped file holds clef. With clef withdrawn upstream, the store's own
+/// withdrawn row is what every current read reports: no curated row, no
+/// second row for the id, and on a named read the store's retirement.
+#[test]
+fn a_held_row_leaves_the_withdrawn_upstream_row_to_report_itself() {
+    let (store, _dir) = empty_store();
+    ingest(&store, LISTED_AT, true);
+    ingest(&store, WITHDRAWN_AT, false);
+
+    let named = get(&store, json!({"provider_id":PROVIDER, "model_id":MODEL}));
+    assert!(named.models.is_empty(), "{:?}", named.models);
+    assert!(named.curated.is_empty());
+    assert_eq!(
+        named.retired,
+        [fusiform_protocol::RetiredModelWire {
+            model: ID.to_string(),
+            // The store's retirement instant, not the file's held_since_ms.
+            retired_at_ms: WITHDRAWN_AT,
+        }]
+    );
+
+    for (read, response) in current_reads(&store) {
+        assert!(
+            !response.curated.iter().any(|c| c.model == ID),
+            "{read}: a held row is not disclosed as curated"
+        );
+        if read.contains("include_retired") {
+            // The stored upstream row, once, marked absent: its own facts.
+            let facts = &response.models[ID];
+            assert_eq!(facts["existence"], "absent", "{read}");
+            assert_eq!(facts["model.family"], "upstream-clef", "{read}");
+            assert!(!facts.contains_key("model.kind"), "{read}");
+        } else {
+            assert!(!response.models.contains_key(ID), "{read}");
+        }
+        // Control: the upstream row that was never withdrawn is still served.
+        assert!(response.models.contains_key(ORDINARY) || read.starts_with("named"));
+    }
+
+    // History names no curated source for a fact only the curated row states.
+    let kind = history(&store, "model.kind");
+    assert!(kind.eras.is_empty());
+    assert!(kind.curated.is_none());
 }

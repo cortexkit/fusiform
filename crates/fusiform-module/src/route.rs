@@ -37,6 +37,10 @@ mod canonical_link_tests;
 #[path = "route/curated_withdrawn_tests.rs"]
 mod curated_withdrawn_tests;
 
+#[cfg(test)]
+#[path = "route/curated_held_tests.rs"]
+mod curated_held_tests;
+
 // The served contract lives in `fusiform-protocol` so a consumer can compile
 // against it without taking this module's store, network or runtime. Re-exported
 // here because this file is where the contract is USED, and a reader following
@@ -830,13 +834,22 @@ fn serve_catalog_get_with_limits(
             }
         }
     }
-    // Alias ids fusiform used to serve, reported as retired on current reads.
-    // See `aliases::retired_aliases` for why a retired alias cannot simply
-    // vanish. A real row for the id still wins, and a plane read never lists
-    // them, since a plane describes how a login is billed.
-    let mut retired_aliases = Vec::new();
+    // Ids fusiform served and no longer does, reported as retired on current
+    // reads: retired alias ids, and curated rows the file holds. See
+    // `aliases::retired_aliases` and `curated_models::HeldModel` for why such
+    // an id cannot simply vanish. A row the store knows for the id serves
+    // instead (a withdrawn upstream row is then reported by the store's own
+    // retirement), and a plane read never lists them, since a plane describes
+    // how a login is billed.
+    let mut retired_ids = Vec::new();
     if at.is_none() && plane.is_none() {
-        for ((provider, model), row) in crate::aliases::retired_aliases() {
+        let retired_alias_ids = crate::aliases::retired_aliases()
+            .values()
+            .map(|row| (&row.provider_id, &row.model_id, row.retired_at_ms));
+        let held_ids = crate::curated_models::held()
+            .values()
+            .map(|row| (&row.provider_id, &row.model_id, row.held_since_ms));
+        for (provider, model, retired_at_ms) in retired_alias_ids.chain(held_ids) {
             if request
                 .provider_id
                 .as_deref()
@@ -851,7 +864,7 @@ fn serve_catalog_get_with_limits(
             {
                 continue;
             }
-            retired_aliases.push(row);
+            retired_ids.push((provider, model, retired_at_ms));
         }
     }
     if let (Some(provider_id), Some(model_id)) =
@@ -871,7 +884,7 @@ fn serve_catalog_get_with_limits(
         }
     }
 
-    let (snapshot, retired) = if named && (!curated.is_empty() || !retired_aliases.is_empty()) {
+    let (snapshot, retired) = if named && (!curated.is_empty() || !retired_ids.is_empty()) {
         (
             CatalogSnapshot {
                 source,
@@ -1015,8 +1028,8 @@ fn serve_catalog_get_with_limits(
     }
     let mut response =
         finish_plane_view(store, source, response, plane, requested_prefixes.as_ref())?;
-    for row in retired_aliases {
-        let id = format!("{}/{}", row.provider_id, row.model_id);
+    for (provider, model, retired_at_ms) in retired_ids {
+        let id = format!("{provider}/{model}");
         if response.models.contains_key(&id) {
             continue;
         }
@@ -1032,7 +1045,7 @@ fn serve_catalog_get_with_limits(
         } else if named {
             response.retired.push(fusiform_protocol::RetiredModelWire {
                 model: id,
-                retired_at_ms: row.retired_at_ms,
+                retired_at_ms,
             });
         }
     }
@@ -2053,6 +2066,10 @@ fn apply_canonical_link(
 /// whose current rows are served, and would report a mistyped model id under
 /// it as a wrong provider. Every route that asks "is this provider known"
 /// asks here instead.
+///
+/// A held row counts: its id is still reported (as retired when the store has
+/// no row for it), so its provider stays known. A provider whose only rows are held answers a plain read with
+/// zero models and a retired-inclusive read with those ids marked absent.
 fn provider_is_served(
     store: &CatalogStore,
     source: SourceId,
@@ -2100,6 +2117,9 @@ fn upstream_publishes_now(
 /// every read from then on. When upstream lists the model again, this answers
 /// `None` and the upstream row is served, with no edit to the curated file.
 ///
+/// A row listed in the file's `held` array is never in effect: see
+/// `curated_models::HeldModel`.
+///
 /// Every route that decides whether a curated row applies asks here, so the
 /// rule has one statement.
 fn curated_in_effect(
@@ -2108,11 +2128,15 @@ fn curated_in_effect(
     provider_id: &str,
     model_id: &str,
 ) -> Result<Option<&'static crate::curated_models::CuratedModel>, RouteError> {
-    let Some(row) =
-        crate::curated_models::models().get(&(provider_id.to_string(), model_id.to_string()))
-    else {
+    let key = (provider_id.to_string(), model_id.to_string());
+    let Some(row) = crate::curated_models::models().get(&key) else {
         return Ok(None);
     };
+    // A held row is never served as curated. When the store has no row for
+    // the id, current reads report it as retired instead.
+    if crate::curated_models::held().contains_key(&key) {
+        return Ok(None);
+    }
     if upstream_publishes_now(store, source, provider_id, model_id)? {
         return Ok(None);
     }
@@ -5301,6 +5325,12 @@ mod system_one_tests {
         ("typesafe", "jev-1.13.0", "decision", 42_000_000, None),
     ];
 
+    /// The shipped curated file with nothing held, so these rows are served.
+    /// The shipped file holds them; `curated_held_tests` covers that.
+    fn served() -> crate::curated_models::Planted {
+        crate::curated_models::plant(&crate::curated_models::document_without_held())
+    }
+
     fn store() -> (CatalogStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let store = CatalogStore::open(&StorageDescriptor {
@@ -5390,6 +5420,7 @@ mod system_one_tests {
 
     #[test]
     fn system_one_rows_are_served_on_bulk_named_provider_and_paged_reads() {
+        let _planted = served();
         let (store, _dir) = store();
         let mut bulk = Served::default();
         bulk.add(get(&store, json!({})));
@@ -5423,6 +5454,7 @@ mod system_one_tests {
 
     #[test]
     fn fact_prefixes_select_the_kind_and_the_rates_separately() {
+        let _planted = served();
         let (store, _dir) = store();
         for (provider, model, kind, ..) in ROWS {
             let id = format!("{provider}/{model}");
@@ -5449,6 +5481,7 @@ mod system_one_tests {
 
     #[test]
     fn a_stated_zero_output_rate_decodes_as_stated_zero() {
+        let _planted = served();
         let (store, _dir) = store();
         let response = get(&store, json!({}));
         for (provider, model, _, units, _) in ROWS {
@@ -5479,6 +5512,7 @@ mod system_one_tests {
 
     #[test]
     fn point_in_time_reads_never_serve_system_one_rows() {
+        let _planted = served();
         let (store, _dir) = store();
         // A point-in-time read needs a record to read against.
         store
@@ -5516,6 +5550,7 @@ mod system_one_tests {
 
     #[test]
     fn an_unknown_typesafe_model_is_refused_as_an_unknown_model() {
+        let _planted = served();
         let (store, _dir) = store();
         let response = get(
             &store,
@@ -5571,6 +5606,7 @@ mod system_one_tests {
 
     #[test]
     fn a_curated_history_read_names_the_source_for_a_system_one_row() {
+        let _planted = served();
         let (store, _dir) = store();
         for (provider, model, ..) in ROWS {
             let response = serve_history(

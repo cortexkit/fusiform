@@ -168,7 +168,7 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
 /// one: a value inferred for an upstream row would be fusiform's guess served
 /// as a statement. `model.kind` is absent on every upstream row, which means
 /// "not stated", never "chat".
-const CURATED_ONLY: &[&str] = &["model.kind"];
+pub(crate) const CURATED_ONLY: &[&str] = &["model.kind"];
 
 /// Tabled facts nothing emits, and curated-only facts the normalizer emits.
 ///
