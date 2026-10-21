@@ -4,7 +4,5 @@
 # Design history, incident findings and measurements, kept out of the
 # public repository.
 .cortexkit/internal-docs/
-# This checkout's agent settings. Listed under both names while the file is
-# renamed from alfonso.jsonc to prefrontal.jsonc; a missing path is skipped.
-.cortexkit/alfonso.jsonc
+# This checkout's agent settings.
 .cortexkit/prefrontal.jsonc
