@@ -108,13 +108,14 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
     }
 
     // And every tabled fact must be produced, or the table promises something
-    // that never arrives.
-    for key in &tabled {
-        assert!(
-            produced.iter().any(|p| p == key),
-            "the wire table lists {key:?} and the producer never emits it"
-        );
-    }
+    // that never arrives. A curated-only fact is produced by the curated rows
+    // rather than by the normalizer; see `CURATED_ONLY`.
+    let curated: Vec<String> = fusiform_module::curated_models::models()
+        .values()
+        .flat_map(|row| row.facts.keys().cloned())
+        .collect();
+    let unproduced = unproduced_tabled_facts(&produced, &curated, &tabled);
+    assert!(unproduced.is_empty(), "{}", unproduced.join("\n"));
 
     // The fields BROCA enumerated from their own render path, named
     // individually rather than counted: a count would pass if one were swapped
@@ -159,6 +160,79 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             fact.key
         );
     }
+}
+
+/// Served facts that only fusiform's curated rows state.
+///
+/// models.dev publishes no such field, so the normalizer must never produce
+/// one: a value inferred for an upstream row would be fusiform's guess served
+/// as a statement. `model.kind` is absent on every upstream row, which means
+/// "not stated", never "chat".
+const CURATED_ONLY: &[&str] = &["model.kind"];
+
+/// Tabled facts nothing emits, and curated-only facts the normalizer emits.
+///
+/// A tabled fact must come from the normalizer, or be declared curated-only
+/// and be carried by at least one curated row.
+fn unproduced_tabled_facts(
+    normalized: &[String],
+    curated: &[String],
+    tabled: &[&str],
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    for key in CURATED_ONLY {
+        if normalized.iter().any(|p| p == key) {
+            problems.push(format!(
+                "the normalizer emits {key:?}, which only curated rows may state"
+            ));
+        }
+    }
+    for key in tabled {
+        let produced = if CURATED_ONLY.contains(key) {
+            curated.iter().any(|p| p == key)
+        } else {
+            normalized.iter().any(|p| p == key)
+        };
+        if !produced {
+            problems.push(format!(
+                "the wire table lists {key:?} and the producer never emits it"
+            ));
+        }
+    }
+    problems
+}
+
+#[test]
+fn planted_unproduced_or_inferred_curated_only_fact_is_reported() {
+    let strings = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
+    // Control: an upstream fact from the normalizer and the curated-only fact
+    // from a curated row are both produced.
+    assert!(unproduced_tabled_facts(
+        &strings(&["existence"]),
+        &strings(&["model.kind"]),
+        &["existence", "model.kind"],
+    )
+    .is_empty());
+    // A curated-only fact no curated row carries promises something that
+    // never arrives.
+    assert_eq!(
+        unproduced_tabled_facts(&strings(&["existence"]), &[], &["existence", "model.kind"]),
+        ["the wire table lists \"model.kind\" and the producer never emits it"]
+    );
+    // A curated row cannot stand in for an upstream fact.
+    assert_eq!(
+        unproduced_tabled_facts(&[], &strings(&["existence"]), &["existence"]),
+        ["the wire table lists \"existence\" and the producer never emits it"]
+    );
+    // The normalizer inferring a curated-only fact is reported.
+    assert_eq!(
+        unproduced_tabled_facts(
+            &strings(&["model.kind"]),
+            &strings(&["model.kind"]),
+            &["model.kind"]
+        ),
+        ["the normalizer emits \"model.kind\", which only curated rows may state"]
+    );
 }
 
 /// `limit.output` is byte-affecting, because a named consumer renders it.

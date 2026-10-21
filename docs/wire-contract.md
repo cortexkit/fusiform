@@ -130,6 +130,7 @@ value would do to a consumer:
 | `model.open_weights` | advisory | `true`, `false` or `null` |
 | `model.canonical_id` | advisory | upstream canonical model id, or `null` |
 | `model.status` | advisory | upstream lifecycle label verbatim, or `null` |
+| `model.kind` | advisory | `"decision"` or `"extraction"`, on curated rows only; otherwise no fact (§4.6) |
 | `rate.input` | money | rate value (§4.3), per million input tokens |
 | `rate.output` | money | per million output tokens |
 | `rate.cache_read` | money | per million cached-read tokens |
@@ -291,6 +292,35 @@ parsed, quarantined and never served
 (`models_dev_normalization::renderer_selecting_fields_are_quarantined`,
 `served_vocabulary::unreliable_and_renderer_selecting_fields_are_not_facts`).
 Fusiform says what a model is, never how to speak to it.
+
+### 4.6 `model.kind`
+
+`model.kind` says what kind of work a model does. The values are the closed
+set `MODEL_KINDS` in the protocol crate:
+
+| Value | Meaning |
+| --- | --- |
+| `decision` | the model returns a typed choice, with probabilities, among options the request defines |
+| `extraction` | the model returns typed values it reads, computes, estimates or forecasts from its input |
+
+Neither kind writes conversational replies.
+
+1. Only curated rows state it ([`curated-data.md`](curated-data.md) §4).
+   models.dev publishes no such field and fusiform never infers one, so every
+   upstream row lacks the key
+   (`wire_fact_table::the_wire_fact_table_matches_what_the_producer_emits`).
+2. **Absent means not stated.** It never means `chat`, and a consumer must not
+   default it to `chat`.
+3. **A consumer must refuse chat work on any row whose `model.kind` is present
+   and is not `chat`.** A decision or extraction model given a chat prompt does
+   not answer it.
+4. A value outside `MODEL_KINDS` is rejected when the curated file loads, so it
+   is never served
+   (`curated_models::planted_model_kind_outside_the_vocabulary_is_rejected`).
+   A new value arrives only with a new `fusiform-protocol` version; `model.kind`
+   is introduced in 0.39.0.
+5. It is advisory: it decides which work a model receives, not the bytes of a
+   request.
 
 ## 5. `catalog.get`
 
@@ -454,8 +484,12 @@ which a model-level fact cannot establish. Rules, tested in
 stored upstream observations. Each entry has `model`, `auth_methods`,
 `source_ref` and `review_by_ms`. `auth_methods` is an allowlist: a consumer
 must refuse a credential whose login method is not listed. A model absent
-from `curated` carries no such restriction. Rules are in
-[`curated-data.md`](curated-data.md) §4.
+from `curated` carries no such restriction. A curated row may be the
+only thing fusiform serves under its provider (`typesafe`, which models.dev
+does not list): such a provider is known to every read, so a named read of a
+model it does not carry is refused as an unknown model, not an unknown
+provider (`route::system_one_tests::an_unknown_typesafe_model_is_refused_as_an_unknown_model`).
+Rules are in [`curated-data.md`](curated-data.md) §4.
 
 ### 5.7 Canonical links
 

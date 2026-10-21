@@ -103,21 +103,60 @@ Serving rules are in [`wire-contract.md`](wire-contract.md) §5.5.
 Schema `curated-models/v1`. A row supplies a provider row that models.dev's
 provider catalog does not carry, for example a model a provider serves under a
 versioned id while models.dev lists the model only under its creating lab,
-not under that provider.
+not under that provider, or a model under a provider models.dev does not list
+at all.
+
+The shipped rows:
+
+| Identity | Kind | Why curated |
+| --- | --- | --- |
+| `meta/muse-wonder-full-1.0` | not stated | models.dev lists the model only under the lab |
+| `cloudflare-workers-ai/@cf/cloudflare/clef` | `decision` | models.dev's Cloudflare provider does not list it |
+| `cloudflare-workers-ai/@cf/cloudflare/clef-flash` | `decision` | as above |
+| `cloudflare-workers-ai/@cf/cloudflare/clairic` | `extraction` | as above |
+| `typesafe/jev-1.13.0` | `decision` | models.dev does not list TypeSafe. Only the versioned id is served, never the moving alias `jev-latest` |
 
 | Field | Meaning |
 | --- | --- |
 | `provider_id`, `model_id` | the served identity |
 | `auth_methods` | a non-empty allowlist of distinct login methods from `apikey`, `chatgpt`, `oauth`, `antigravity` |
 | `facts` | fact key to value; keys must be in `SERVED_FACTS` |
-| `source_ref` | the evidence for the row |
+| `source_ref` | the evidence for the row: each page read, with the sentences it states quoted verbatim |
+| `established_by` | optional; who read the sources. Not served |
 | `established_at_ms`, `review_by_ms` | the review date must be exactly 60 days after establishment |
 
-Load rules: a fact key outside `SERVED_FACTS` is rejected
-(`curated_models.rs`: `planted_unknown_fact_is_rejected`); a login-restricted
-row may not carry any `rate.*` fact, because a subscription row must not claim
-an API list price (`planted_subscription_price_is_rejected`); duplicates and
-malformed rows are rejects (`duplicate_and_malformed_rows_are_counted_as_rejects`).
+Load rules:
+
+- a fact key outside `SERVED_FACTS` is rejected
+  (`curated_models.rs`: `planted_unknown_fact_is_rejected`);
+- only a row whose `auth_methods` is exactly `["apikey"]` may carry `rate.*`
+  facts, because a row a subscription login can read must not claim an API
+  list price (`planted_subscription_price_is_rejected`);
+- a curated rate is served exactly as written, so it must already be in the
+  served shape: a `priced` amount with `unit_provenance` `stated` (the source
+  printed the currency), or a bare `stated_zero`. A borrowed, unpriced or
+  policy-assumed rate is rejected
+  (`planted_rate_outside_the_served_shape_is_rejected`);
+- `model.kind` must be a value in `MODEL_KINDS` (`decision` or `extraction`);
+  anything else is rejected
+  (`planted_model_kind_outside_the_vocabulary_is_rejected`);
+- duplicates and malformed rows are rejects
+  (`duplicate_and_malformed_rows_are_counted_as_rejects`).
+
+`model.kind` says what work the model does: `decision` (a typed choice among
+options the request defines) or `extraction` (typed values read, computed or
+estimated from the input). Neither writes replies. Only curated rows state it;
+fusiform never infers it for a models.dev row, so it is absent there, and
+absent means "not stated", never `chat`. A consumer must refuse chat work on a
+row whose `model.kind` is present and is not `chat`
+([`wire-contract.md`](wire-contract.md) §4.6).
+
+A value the source does not state exactly is left out rather than rounded:
+TypeSafe documents Jev's context as "64k per-request / 32k per-question" and
+publishes no token count, so `typesafe/jev-1.13.0` carries no
+`limit.context`. Where sources conflict, the fact is left out: TypeSafe's models
+page lists text input while its images page says Jev accepts images, so the
+row carries no `capability.attachment`.
 Names, release dates and other provenance stay in `source_ref` rather than
 being invented as new fact keys.
 
@@ -141,6 +180,16 @@ Serving rules, tested in `crates/fusiform-module/src/route.rs`
 6. `catalog.history` returns no eras and a `curated` object naming the source;
    `catalog.status` counts are unaffected
    (`curated_history_names_the_source_without_storing_eras_or_changing_status`).
+7. A provider with curated rows is a known provider on every read, even when
+   models.dev does not list it. A named read of a model it does not carry is
+   refused `no_coverage` as an unknown model, and a point-in-time provider read
+   answers empty rather than refusing the provider
+   (`system_one_tests::an_unknown_typesafe_model_is_refused_as_an_unknown_model`,
+   `system_one_tests::point_in_time_reads_never_serve_system_one_rows`).
+
+The System One rows are covered on bulk, named, provider-filtered, paged and
+`apikey` plane reads, with fact-prefix filters and the decoded rate states, by
+`route.rs`'s `system_one_tests`.
 
 The consuming router must refuse a credential whose login method is not in
 `auth_methods`. A model absent from `curated` carries no login restriction.
@@ -148,7 +197,8 @@ The consuming router must refuse a credential whose login method is not in
 When models.dev starts publishing the same identity, the suite fails with
 "upstream now publishes this row; remove the curated row"
 (`upstream_now_publishes_this_row_remove_the_curated_row`), checked against the
-embedded seed.
+embedded seed for every row. A seed planted with each shipped identity in turn
+trips it (`planted_upstream_row_triggers_the_removal_fence`).
 
 ## 5. Canonical links (`canonical-links.json`)
 

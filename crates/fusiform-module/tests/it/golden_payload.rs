@@ -1439,6 +1439,22 @@ fn cases() -> Vec<(&'static str, String)> {
             "catalog.history — a curated row is not stored",
             r#"{"name":"catalog.history","arguments":{"provider_id":"meta","model_id":"muse-wonder-full-1.0","fact_key":"limit.context"}}"#.to_string(),
         ),
+        (
+            // A typed decision model: `model.kind` is stated, and the output
+            // rate is a stated zero beside a priced input rate.
+            "catalog.get — a curated decision model",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"cloudflare-workers-ai","model_id":"@cf/cloudflare/clef"}}"#.to_string(),
+        ),
+        (
+            "catalog.get — a curated extraction model",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"cloudflare-workers-ai","model_id":"@cf/cloudflare/clairic"}}"#.to_string(),
+        ),
+        (
+            // models.dev does not list this provider at all, so every row a
+            // provider read returns is curated.
+            "catalog.get — a provider served only through curated rows",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"typesafe"}}"#.to_string(),
+        ),
     ]
 }
 

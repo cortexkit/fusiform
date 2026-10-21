@@ -1110,6 +1110,18 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                establish whether the provider still serves the model.",
     },
     ServedFact {
+        key: "model.kind",
+        class: FactClass::Advisory,
+        note: "what kind of work the model does, from the closed set MODEL_KINDS: \
+               decision (returns a typed choice) or extraction (returns typed \
+               values). Neither model writes conversational replies. Stated only \
+               on fusiform's curated rows; models.dev publishes no such field \
+               and fusiform never infers one. ABSENT MEANS NOT STATED, never \
+               chat. A consumer must refuse chat work on any row whose kind is \
+               present and not chat. It gates which work a model receives, not \
+               the bytes of a request, so it is advisory in this table.",
+    },
+    ServedFact {
         key: "rate.input",
         class: FactClass::Money,
         note: "per million input tokens",
@@ -1135,6 +1147,19 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "per million reasoning tokens",
     },
 ];
+
+/// Every value `model.kind` can carry, as a closed set.
+///
+/// - `decision`: the model returns a typed choice among options it is given.
+/// - `extraction`: the model returns typed values it reads, computes or
+///   estimates from its input.
+///
+/// Neither writes conversational replies. A row without `model.kind` has not
+/// stated its kind; that is never a statement that it is a chat model. A
+/// consumer must refuse chat work on a row whose kind is present and is not
+/// `chat`. `chat` is not in this set today because no row states it, and a
+/// new value joins only with a version bump of this crate.
+pub const MODEL_KINDS: &[&str] = &["decision", "extraction"];
 
 /// One served fact and what a consumer may do with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

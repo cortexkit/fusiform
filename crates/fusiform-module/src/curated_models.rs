@@ -16,6 +16,9 @@ pub struct CuratedModel {
     pub auth_methods: Vec<String>,
     pub facts: BTreeMap<String, serde_json::Value>,
     pub source_ref: String,
+    /// Who read the sources, when the file records it. Not served.
+    #[serde(default)]
+    pub established_by: Option<String>,
     pub established_at_ms: i64,
     pub review_by_ms: i64,
 }
@@ -23,12 +26,13 @@ pub struct CuratedModel {
 pub type CuratedModels = BTreeMap<(String, String), CuratedModel>;
 
 /// Reject unsupported facts rather than silently exposing a new wire vocabulary.
-/// A login-restricted subscription row must never claim an API list price.
+/// A row that admits a subscription login must never claim an API list price,
+/// so only an `apikey`-only row may carry `rate.*` facts.
 fn invalid_facts(row: &CuratedModel) -> Option<String> {
-    for key in row.facts.keys() {
-        if !row.auth_methods.is_empty() && key.starts_with("rate.") {
+    for (key, value) in &row.facts {
+        if key.starts_with("rate.") && row.auth_methods != ["apikey"] {
             return Some(format!(
-                "subscription-only row must not carry a list price: {key}"
+                "a row admitting a subscription login must not carry a list price: {key}"
             ));
         }
         if !fusiform_protocol::SERVED_FACTS
@@ -37,8 +41,59 @@ fn invalid_facts(row: &CuratedModel) -> Option<String> {
         {
             return Some(format!("fact key is not in SERVED_FACTS: {key}"));
         }
+        if key == "model.kind"
+            && !value
+                .as_str()
+                .is_some_and(|kind| fusiform_protocol::MODEL_KINDS.contains(&kind))
+        {
+            return Some(format!(
+                "model.kind must be one of {:?}: {value}",
+                fusiform_protocol::MODEL_KINDS
+            ));
+        }
+        if key.starts_with("rate.") {
+            if let Some(reason) = invalid_rate(value) {
+                return Some(format!("{key}: {reason}"));
+            }
+        }
     }
     None
+}
+
+/// A curated rate is served byte for byte as written, so it must already be in
+/// the served shape: a priced amount whose currency the source stated, or a
+/// stated zero. Curated rows never borrow a price, never refuse one, and never
+/// carry fields the published `RateValue` type would silently drop.
+fn invalid_rate(value: &serde_json::Value) -> Option<String> {
+    let keys: std::collections::BTreeSet<&str> = value
+        .as_object()
+        .map(|obj| obj.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+    match serde_json::from_value::<fusiform_protocol::RateValue>(value.clone()) {
+        Ok(fusiform_protocol::RateValue::Priced {
+            amount,
+            inherited_from: None,
+            ..
+        }) if amount.units > 0
+            && amount.unit_provenance == fusiform_protocol::money::UnitProvenance::Stated
+            && keys
+                == std::collections::BTreeSet::from([
+                    "state",
+                    "units",
+                    "exponent",
+                    "currency",
+                    "unit_provenance",
+                ]) =>
+        {
+            None
+        }
+        Ok(fusiform_protocol::RateValue::StatedZero {
+            inherited_from: None,
+        }) if keys == std::collections::BTreeSet::from(["state"]) => None,
+        _ => Some(format!(
+            "must be a priced rate with a stated currency, or a stated zero: {value}"
+        )),
+    }
 }
 
 /// Malformed rows and duplicate identities are counted, not silently skipped.
@@ -71,8 +126,12 @@ pub fn load_reporting_rejects(doc: &str) -> (CuratedModels, Vec<String>) {
             .iter()
             .any(|field| field.trim().is_empty())
             || row.facts.is_empty()
+            || row
+                .established_by
+                .as_deref()
+                .is_some_and(|by| by.trim().is_empty())
         {
-            Some("empty identity, source or facts".to_string())
+            Some("empty identity, source, established_by or facts".to_string())
         } else if row.auth_methods.is_empty()
             || row
                 .auth_methods
@@ -132,17 +191,57 @@ pub fn overdue_at(rows: &CuratedModels, now_ms: i64) -> Vec<String> {
 mod tests {
     use super::*;
 
-    fn planted(edit: impl FnOnce(&mut serde_json::Value)) -> String {
+    /// The rows the shipped file carries, named so a row that silently fails to
+    /// load (or a new one) changes this test rather than passing a count.
+    const SHIPPED: &[(&str, &str)] = &[
+        ("cloudflare-workers-ai", "@cf/cloudflare/clairic"),
+        ("cloudflare-workers-ai", "@cf/cloudflare/clef"),
+        ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
+        ("meta", "muse-wonder-full-1.0"),
+        ("typesafe", "jev-1.13.0"),
+    ];
+
+    /// The shipped document with one edit applied to the row of that identity.
+    fn planted_in(
+        provider: &str,
+        model: &str,
+        edit: impl FnOnce(&mut serde_json::Value),
+    ) -> String {
         let mut doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
-        edit(&mut doc["models"][0]);
+        let row = doc["models"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|row| row["provider_id"] == provider && row["model_id"] == model)
+            .expect("the planted row is shipped");
+        edit(row);
         serde_json::to_string(&doc).unwrap()
+    }
+
+    fn planted(edit: impl FnOnce(&mut serde_json::Value)) -> String {
+        planted_in("meta", "muse-wonder-full-1.0", edit)
+    }
+
+    /// Load a planted document and return its single reject, after checking
+    /// that exactly the planted row was dropped and every other row loaded.
+    fn single_reject(doc: &str, provider: &str, model: &str) -> String {
+        let (rows, rejects) = load_reporting_rejects(doc);
+        assert_eq!(rejects.len(), 1, "{rejects:?}");
+        assert_eq!(rows.len(), SHIPPED.len() - 1);
+        assert!(!rows.contains_key(&(provider.to_string(), model.to_string())));
+        assert!(rejects[0].contains(&format!("{provider}/{model}")));
+        rejects[0].clone()
     }
 
     #[test]
     fn shipped_curated_rows_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 1);
+        let ids: Vec<(&str, &str)> = rows
+            .keys()
+            .map(|(provider, model)| (provider.as_str(), model.as_str()))
+            .collect();
+        assert_eq!(ids, SHIPPED);
     }
 
     #[test]
@@ -154,10 +253,18 @@ mod tests {
 
     #[test]
     fn planted_upstream_row_triggers_the_removal_fence() {
-        let seed = serde_json::json!({"meta":{"models":{"muse-wonder-full-1.0":{}}}});
-        let collisions = upstream_collisions(models(), &seed);
-        assert_eq!(collisions.len(), 1);
-        assert!(collisions[0].contains("upstream now publishes this row; remove the curated row"));
+        // Every shipped identity, one at a time, so the fence is shown to see
+        // each row rather than only the first one in the file.
+        for (provider, model) in SHIPPED {
+            let mut seed = serde_json::json!({});
+            seed[*provider]["models"][*model] = serde_json::json!({});
+            let collisions = upstream_collisions(models(), &seed);
+            assert_eq!(collisions.len(), 1, "{provider}/{model}: {collisions:?}");
+            assert!(collisions[0].starts_with(&format!("{provider}/{model}:")));
+            assert!(
+                collisions[0].contains("upstream now publishes this row; remove the curated row")
+            );
+        }
     }
 
     #[test]
@@ -172,21 +279,29 @@ mod tests {
 
     #[test]
     fn planted_overdue_row_requires_reverification_or_removal() {
-        let row = models().values().next().unwrap();
-        assert!(overdue_at(models(), row.review_by_ms).is_empty());
-        let overdue = overdue_at(models(), row.review_by_ms + 1);
-        assert_eq!(overdue.len(), 1);
-        assert!(overdue[0].contains("re-verify"));
-        assert!(overdue[0].contains("or remove"));
+        // Checked per row: rows carry different review dates, so an instant
+        // that makes one row overdue may make others overdue too.
+        assert_eq!(models().len(), SHIPPED.len());
+        for row in models().values() {
+            let id = format!("{}/{}:", row.provider_id, row.model_id);
+            assert!(!overdue_at(models(), row.review_by_ms)
+                .iter()
+                .any(|line| line.starts_with(&id)));
+            let overdue = overdue_at(models(), row.review_by_ms + 1);
+            let line = overdue
+                .iter()
+                .find(|line| line.starts_with(&id))
+                .unwrap_or_else(|| panic!("{id} must be overdue after its review date"));
+            assert!(line.contains("re-verify"));
+            assert!(line.contains("or remove"));
+        }
     }
 
     #[test]
     fn planted_unknown_fact_is_rejected() {
         let doc = planted(|row| row["facts"]["model.name"] = "Muse Wonder Full".into());
-        let (rows, rejects) = load_reporting_rejects(&doc);
-        assert!(rows.is_empty());
-        assert_eq!(rejects.len(), 1);
-        assert!(rejects[0].contains("not in SERVED_FACTS"));
+        let reject = single_reject(&doc, "meta", "muse-wonder-full-1.0");
+        assert!(reject.contains("not in SERVED_FACTS"));
     }
 
     #[test]
@@ -194,10 +309,87 @@ mod tests {
         let doc = planted(|row| {
             row["facts"]["rate.input"] = serde_json::json!({"state":"priced","units":1})
         });
-        let (rows, rejects) = load_reporting_rejects(&doc);
-        assert!(rows.is_empty());
-        assert_eq!(rejects.len(), 1);
-        assert!(rejects[0].contains("must not carry a list price"));
+        let reject = single_reject(&doc, "meta", "muse-wonder-full-1.0");
+        assert!(reject.contains("must not carry a list price"));
+        // An apikey row that also admits a subscription login is refused too:
+        // the price would be served to the subscription read.
+        let doc = planted_in("typesafe", "jev-1.13.0", |row| {
+            row["auth_methods"] = serde_json::json!(["apikey", "oauth"])
+        });
+        let reject = single_reject(&doc, "typesafe", "jev-1.13.0");
+        assert!(reject.contains("must not carry a list price"));
+    }
+
+    #[test]
+    fn planted_model_kind_outside_the_vocabulary_is_rejected() {
+        for bad in [
+            serde_json::json!("chat"),
+            serde_json::json!("Decision"),
+            serde_json::json!(""),
+            serde_json::json!(null),
+            serde_json::json!(["decision"]),
+        ] {
+            let doc = planted_in("cloudflare-workers-ai", "@cf/cloudflare/clef", |row| {
+                row["facts"]["model.kind"] = bad.clone()
+            });
+            let reject = single_reject(&doc, "cloudflare-workers-ai", "@cf/cloudflare/clef");
+            assert!(
+                reject.contains("model.kind must be one of"),
+                "{bad}: {reject}"
+            );
+        }
+        // Control: every value in the vocabulary loads.
+        for kind in fusiform_protocol::MODEL_KINDS {
+            let doc = planted_in("cloudflare-workers-ai", "@cf/cloudflare/clef", |row| {
+                row["facts"]["model.kind"] = (*kind).into()
+            });
+            let (rows, rejects) = load_reporting_rejects(&doc);
+            assert!(rejects.is_empty(), "{kind}: {rejects:?}");
+            assert_eq!(rows.len(), SHIPPED.len());
+        }
+    }
+
+    #[test]
+    fn planted_rate_outside_the_served_shape_is_rejected() {
+        let priced = serde_json::json!({"state":"priced", "units":42000000, "exponent":9,
+            "currency":"USD", "unit_provenance":{"kind":"stated"}});
+        let mut assumed = priced.clone();
+        assumed["unit_provenance"] = serde_json::json!({"kind":"assumed_by_policy",
+            "policy":"models-dev-usd-v1"});
+        let mut no_provenance = priced.clone();
+        no_provenance
+            .as_object_mut()
+            .unwrap()
+            .remove("unit_provenance");
+        let mut extra = priced.clone();
+        extra["floor"] = serde_json::json!({"kind":"unknown"});
+        let mut zero_units = priced.clone();
+        zero_units["units"] = 0.into();
+        let borrowed_zero = serde_json::json!({"state":"stated_zero", "inherited_from":
+            {"provider_id":"x", "family":"y", "basis":"alias"}});
+        for bad in [
+            assumed,
+            no_provenance,
+            extra,
+            zero_units,
+            borrowed_zero,
+            serde_json::json!({"state":"unpriced", "reason":"missing_rate"}),
+            serde_json::json!(0.042),
+        ] {
+            let doc = planted_in("typesafe", "jev-1.13.0", |row| {
+                row["facts"]["rate.input"] = bad.clone()
+            });
+            let reject = single_reject(&doc, "typesafe", "jev-1.13.0");
+            assert!(
+                reject.contains("rate.input: must be a priced rate"),
+                "{bad}: {reject}"
+            );
+        }
+        // Control: the shipped shape itself loads.
+        let doc = planted_in("typesafe", "jev-1.13.0", |row| {
+            row["facts"]["rate.input"] = priced
+        });
+        assert!(load_reporting_rejects(&doc).1.is_empty());
     }
 
     #[test]
@@ -209,7 +401,7 @@ mod tests {
             .unwrap()
             .extend([duplicate, serde_json::json!({})]);
         let (rows, rejects) = load_reporting_rejects(&doc.to_string());
-        assert_eq!(rows.len(), 1);
+        assert_eq!(rows.len(), SHIPPED.len());
         assert_eq!(rejects.len(), 2);
         assert!(rejects[0].contains("duplicate"));
         assert!(rejects[1].contains("did not parse"));
