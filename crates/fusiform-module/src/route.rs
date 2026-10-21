@@ -33,6 +33,10 @@ mod paging_tests;
 #[path = "route/canonical_link_tests.rs"]
 mod canonical_link_tests;
 
+#[cfg(test)]
+#[path = "route/curated_withdrawn_tests.rs"]
+mod curated_withdrawn_tests;
+
 // The served contract lives in `fusiform-protocol` so a consumer can compile
 // against it without taking this module's store, network or runtime. Re-exported
 // here because this file is where the contract is USED, and a reader following
@@ -203,14 +207,16 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
     // Reached only when the read found nothing, so the ordinary path pays no
     // extra query.
     if rows.is_empty() {
-        if let Some(row) = crate::curated_models::models()
-            .get(&(request.provider_id.clone(), request.model_id.clone()))
+        // Same rule as `catalog.get`: a curated row is in effect when upstream
+        // does not currently publish the model, including after upstream
+        // withdrew it. A fact the withdrawn upstream row recorded still has
+        // eras and is answered with them below, unchanged; this branch is
+        // reached only for a fact with no eras, such as `model.kind`, which
+        // `catalog.get` serves from the curated row.
+        if let Some(row) =
+            curated_in_effect(store, source, &request.provider_id, &request.model_id)?
         {
-            if !store
-                .model_is_known(source, &request.provider_id, &request.model_id)
-                .map_err(|e| store_error(&e))?
-                && row.facts.contains_key(&request.fact_key)
-            {
+            if row.facts.contains_key(&request.fact_key) {
                 return Ok(HistoryResponse {
                     source: source.as_str().to_string(),
                     provider_id: request.provider_id,
@@ -807,7 +813,7 @@ fn serve_catalog_get_with_limits(
     let named = request.provider_id.is_some() && request.model_id.is_some();
     let mut curated = Vec::new();
     if at.is_none() {
-        for ((provider, model), row) in crate::curated_models::models() {
+        for (provider, model) in crate::curated_models::models().keys() {
             if request
                 .provider_id
                 .as_deref()
@@ -816,15 +822,12 @@ fn serve_catalog_get_with_limits(
             {
                 continue;
             }
-            // Any upstream observation, including a retirement, supersedes the
-            // curated claim. Check the store, not the filtered response.
-            if store
-                .model_is_known(source, provider, model)
-                .map_err(|e| store_error(&e))?
-            {
-                continue;
+            // Upstream wins only while it currently publishes the model; a
+            // withdrawn upstream row gives way. Check the store, not the
+            // filtered response.
+            if let Some(row) = curated_in_effect(store, source, provider, model)? {
+                curated.push(row);
             }
-            curated.push(row);
         }
     }
     // Alias ids fusiform used to serve, reported as retired on current reads.
@@ -980,6 +983,18 @@ fn serve_catalog_get_with_limits(
         )?;
     }
     for row in curated {
+        let id = format!("{}/{}", row.provider_id, row.model_id);
+        // The curated row replaces a withdrawn upstream row whole. A
+        // retired-inclusive read rendered that row and its disclosures above;
+        // drop them so no stored fact or disclosure of the withdrawn row
+        // survives beside the curated one, even when a login or fact filter
+        // then leaves the curated row out.
+        response.models.remove(&id);
+        response.withheld.retain(|w| w.model != id);
+        response
+            .uncertain
+            .retain(|u| u.provider_id != row.provider_id || u.model_id != row.model_id);
+        response.canonical_links.retain(|link| link.model != id);
         // A plain read lists availability; a plane read must respect the login
         // restriction even when the provider has other unrestricted rows.
         if request
@@ -2052,6 +2067,56 @@ fn provider_is_served(
     store
         .provider_is_known(source, provider_id)
         .map_err(|e| store_error(&e))
+}
+
+/// Whether models.dev currently publishes this model: the store's current row
+/// for it says `existence: present`.
+///
+/// Asked through `read_model`, the read the named path uses to decide whether
+/// a model is retired, so "present" means here exactly what it means to every
+/// other current read, corrections included. A model the store has never
+/// recorded and a model upstream listed and later withdrew both answer false.
+fn upstream_publishes_now(
+    store: &CatalogStore,
+    source: SourceId,
+    provider_id: &str,
+    model_id: &str,
+) -> Result<bool, RouteError> {
+    let (current, _) = store
+        .read_model(source, provider_id, model_id, None)
+        .map_err(|e| store_error(&e))?;
+    Ok(current.is_some_and(|model| model.is_present()))
+}
+
+/// The curated row for this id, when it is served on a current read.
+///
+/// Upstream wins only while it currently publishes the model. A model
+/// models.dev listed and then withdrew is still known to the store, as a
+/// retired row, but upstream no longer offers it, so the curated row is served
+/// in its place, whole: none of the withdrawn row's stored facts are mixed in.
+/// Measured on the live store: models.dev listed
+/// `cloudflare-workers-ai/@cf/cloudflare/clef` for five hours and withdrew it,
+/// and asking only "has the store ever seen this id" hid the curated row on
+/// every read from then on. When upstream lists the model again, this answers
+/// `None` and the upstream row is served, with no edit to the curated file.
+///
+/// Every route that decides whether a curated row applies asks here, so the
+/// rule has one statement.
+fn curated_in_effect(
+    store: &CatalogStore,
+    source: SourceId,
+    provider_id: &str,
+    model_id: &str,
+) -> Result<Option<&'static crate::curated_models::CuratedModel>, RouteError> {
+    let Some(row) =
+        crate::curated_models::models().get(&(provider_id.to_string(), model_id.to_string()))
+    else {
+        return Ok(None);
+    };
+    if upstream_publishes_now(store, source, provider_id, model_id)? {
+        return Ok(None);
+    }
+    Ok(Some(row))
 }
 
 /// One statement of the unknown-model refusal, for the two routes that ask it.
@@ -5046,9 +5111,9 @@ mod curated_tests {
     }
 
     #[test]
-    fn a_stored_upstream_row_supersedes_curated_facts_and_disclosure() {
+    fn a_present_upstream_row_supersedes_curated_facts_and_a_withdrawn_one_gives_way() {
         let (store, _dir) = store();
-        for state in ["present", "retired"] {
+        for state in ["present", "absent"] {
             let mut existence = era(MODEL, "existence", json!(state));
             existence.boundary_at = Timestamp(if state == "present" { 1000 } else { 2000 });
             let mut limit = era(MODEL, "limit.context", json!(42));
@@ -5059,12 +5124,20 @@ mod curated_tests {
                 json!({"provider_id":"meta", "model_id":MODEL}),
             ] {
                 let response = get(&store, args);
-                assert!(response.curated.is_empty());
                 if state == "present" {
+                    // Upstream currently publishes the model, so it wins.
+                    assert!(response.curated.is_empty());
                     assert_eq!(response.models[ID]["limit.context"], 42);
                     assert!(!response.models[ID].contains_key("model.canonical_id"));
                 } else {
-                    assert!(!response.models.contains_key(ID));
+                    // Upstream withdrew it: the curated row is served whole.
+                    assert_eq!(response.curated.len(), 1);
+                    assert_eq!(response.models[ID]["limit.context"], 1048576);
+                    assert_eq!(
+                        response.models[ID]["model.canonical_id"],
+                        "meta/muse-wonder-full"
+                    );
+                    assert!(response.retired.is_empty());
                 }
             }
         }

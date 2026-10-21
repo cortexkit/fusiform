@@ -967,25 +967,35 @@ build_timeout_s = 1800
 
 [[control]]
 id = "curated-upstream-wins-call-site"
-guards = "any upstream observation for the provider/model makes the curated row stand down, including a retired row"
+guards = "an upstream row models.dev currently publishes makes the curated row and its disclosure stand down, and wins again at read time after a withdrawal and re-listing"
 file = "crates/fusiform-module/src/route.rs"
-old = """
-Check the store, not the filtered response.
-            if store
-                .model_is_known(source, provider, model)
-                .map_err(|e| store_error(&e))?"""
-new = """
-Check the store, not the filtered response.
-            if false /* NON-VACUITY BREAK */ && store
-                .model_is_known(source, provider, model)
-                .map_err(|e| store_error(&e))?"""
+old = "    Ok(current.is_some_and(|model| model.is_present()))"
+new = "    Ok({ let _ = current; false }) /* NON-VACUITY BREAK */"
 edits = []
 test_file = "crates/fusiform-module/src/route.rs"
 runner = "cargo"
 package = "fusiform-module"
 target = "--lib"
 select = "expected"
-expect_red = ["route::curated_tests::a_stored_upstream_row_supersedes_curated_facts_and_disclosure"]
+expect_red = ["route::curated_tests::a_present_upstream_row_supersedes_curated_facts_and_a_withdrawn_one_gives_way", "route::curated_withdrawn_tests::an_upstream_relisting_wins_over_the_curated_row_again"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "curated-replaces-withdrawn-upstream-row"
+guards = "a curated row is served in place of an upstream row models.dev withdrew; reverting to 'skip the curated row whenever the store knows the id at all' hides it"
+file = "crates/fusiform-module/src/route.rs"
+old = "    Ok(current.is_some_and(|model| model.is_present()))"
+new = "    Ok(current.is_some()) /* NON-VACUITY BREAK */"
+edits = []
+test_file = "crates/fusiform-module/src/route/curated_withdrawn_tests.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+select = "expected"
+expect_red = ["route::curated_tests::a_present_upstream_row_supersedes_curated_facts_and_a_withdrawn_one_gives_way", "route::curated_withdrawn_tests::a_withdrawn_upstream_row_gives_way_to_the_curated_row", "route::curated_withdrawn_tests::an_upstream_relisting_wins_over_the_curated_row_again"]
 only = false
 timeout_s = 600
 build_timeout_s = 1800

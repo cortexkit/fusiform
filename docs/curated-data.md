@@ -30,8 +30,10 @@ the source file of the same name under `crates/fusiform-module/src/`.
    curated rows, canonical links and billing planes are applied when a read is served, so a
    point-in-time read replays what the upstream published and never today's
    curation (see [`data-model.md`](data-model.md) §8).
-2. **An upstream row wins.** When models.dev publishes the same identity, the
-   observed row is served and the curated claim is not.
+2. **An upstream row wins while upstream publishes it.** When models.dev
+   currently publishes the same identity, the observed row is served and the
+   curated claim is not. A curated model row also returns when upstream
+   withdraws the identity (§4).
 3. **Every claim carries provenance**: a source reference, and for most files
    who established it, when, and when it must be reviewed.
 4. **Malformed rows are counted, not fatal.** Each loader returns the rows it
@@ -169,9 +171,28 @@ Serving rules, tested in `crates/fusiform-module/src/route.rs`
    `every_served_curated_row_discloses_its_allowlist_and_source`).
 2. A read with an unlisted method never serves it
    (`unlisted_login_method_never_serves_a_curated_row`).
-3. Any stored upstream observation of the same identity, including a
-   retirement, supersedes the row and its disclosure
-   (`a_stored_upstream_row_supersedes_curated_facts_and_disclosure`).
+3. Upstream wins only while models.dev currently publishes the identity: when
+   the store's current row for it says `existence: present`, that row is
+   served and the curated row and its disclosure are not
+   (`a_present_upstream_row_supersedes_curated_facts_and_a_withdrawn_one_gives_way`).
+   A row models.dev listed and later withdrew does not suppress the curated
+   row. On current reads (bulk, provider-filtered, paged, plane and named,
+   with or without `include_retired`) the curated row replaces the withdrawn
+   upstream row whole: its facts are the curated file's, none of the stored
+   row's facts or disclosures are mixed in, a named read does not list the id
+   in `retired`, and a retired-inclusive read shows the one curated row. If
+   models.dev lists the identity again, the upstream row is served again with
+   no edit to the file. Point-in-time reads still serve only stored history,
+   so at an instant when upstream listed the model they serve its upstream
+   row. `catalog.history` serves the stored eras for any fact the upstream row
+   recorded; a fact with no eras that the curated row carries, such as
+   `model.kind`, names the curated source. One predicate in `route.rs`
+   (`curated_in_effect`) decides this for every route
+   (`curated_withdrawn_tests::a_withdrawn_upstream_row_gives_way_to_the_curated_row`,
+   `curated_withdrawn_tests::an_upstream_relisting_wins_over_the_curated_row_again`).
+   This is a live case, not a hypothetical: models.dev listed
+   `@cf/cloudflare/clef` and `clef-flash` for five hours on 2026-10-01 and
+   `clairic` for about ten hours on 2026-10-19, then withdrew them.
 4. Provider and fact filters apply; a named read keeps the row and its
    disclosure even when the fact filter matches nothing, and a bulk read drops
    it (`curated_rows_respect_fact_and_provider_filters`).
