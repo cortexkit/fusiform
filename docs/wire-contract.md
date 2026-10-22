@@ -143,17 +143,22 @@ the token rates with no unit, so the key alone establishes nothing. It is
 served only for a provider listed in
 `crates/fusiform-module/data/input-audio-per-token.json`, whose own pricing
 page, quoted in that file, prices audio input per million tokens (see
-[`curated-data.md`](curated-data.md) §8). Elsewhere the key stays
-`unknown_charge_basis` internally and no fact is served: **an absent
-`rate.input_audio` means the unit is not established, never that audio is
-free.** Only the unconditional rate is served; a provider that prices audio
+[`curated-data.md`](curated-data.md) §8); a listed provider may exclude single
+models its page does not support. Today only `google` is listed. Elsewhere
+the key stays `unknown_charge_basis` internally and no fact is served: **an
+absent `rate.input_audio` means the unit is not established, never that audio
+is free.** Only the unconditional rate is served; a provider that prices audio
 inside a context tier serves no audio rate, and a mode that prices audio is
 refused whole, as before
 (`models_dev_normalization::an_evidenced_provider_prices_input_audio_per_token`,
 `models_dev_normalization::evidence_for_one_provider_does_not_attribute_another`,
 `models_dev_normalization::tiered_audio_is_not_served_even_with_evidence`).
 The rate is stored as eras like every other models.dev rate, so `at_ms` reads
-before it was first stored lack it. Added in `fusiform-protocol` 0.40.0.
+before it was first stored lack it, and a curated alias carries it marked
+`inherited_from` with basis `alias`, like its other rates
+(`input_audio_rates::a_point_in_time_read_before_the_fact_existed_lacks_it`,
+`input_audio_rates::the_alias_carries_its_targets_input_audio_marked`). Added
+in `fusiform-protocol` 0.40.0.
 
 - **byte-affecting**: a consumer renders the value into a provider request,
   directly or indirectly, so a wrong value changes request bytes with nothing

@@ -1328,3 +1328,20 @@ only = false
 timeout_s = 600
 build_timeout_s = 1800
 
+
+[[control]]
+id = "input-audio-evidence-reaches-poll-normalization"
+guards = "a poll normalizes with the shipped input-audio evidence, so an evidenced provider's rate.input_audio reaches the store"
+file = "crates/fusiform-module/src/loop_.rs"
+old = "normalize_models_dev_with(&bytes, &crate::input_audio::evidence());"
+new = "normalize_models_dev_with(&bytes, &fusiform_core::ChargeUnitEvidence::none()); // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/tests/it/tick.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["tick::a_poll_stores_input_audio_for_an_evidenced_provider"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
