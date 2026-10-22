@@ -263,10 +263,15 @@ pub enum NormalizeError {
     /// A cost key whose charge unit cannot be established.
     ///
     /// `input_audio` sits in the same flat namespace as per-token rates with
-    /// nothing to say whether it bills per token, per second or per minute.
-    /// This is not fatal: the rate is recorded as `Unpriced(UnknownChargeBasis)`
-    /// and the model still normalizes. The variant exists so the count is
-    /// reportable.
+    /// nothing in the payload to say whether it bills per token, per second or
+    /// per minute. This is not fatal: the rate is recorded as
+    /// `Unpriced(UnknownChargeBasis)` and the model still normalizes. The
+    /// variant exists so the count is reportable.
+    ///
+    /// Not reported for `input_audio` on a provider named in the
+    /// [`ChargeUnitEvidence`] passed to [`normalize_models_dev_with`]: there
+    /// the provider's own pricing documentation settles the unit, and the key
+    /// becomes a priced `rate.input_audio`.
     UnattributableChargeUnit { model: String, key: String },
     /// A named mode under `experimental.modes` whose price could not be served.
     ///
@@ -356,8 +361,82 @@ pub struct NormalizeOutcome {
     pub findings: Vec<NormalizeError>,
 }
 
-/// Normalize a models.dev document.
+/// Which providers' own documentation settles the charge unit of a cost key
+/// that models.dev publishes without one.
+///
+/// The payload's key name is never the evidence. models.dev puts
+/// `input_audio` beside the per-token rates on rows whose providers bill audio
+/// in different units, so the key alone cannot say what a number charges
+/// for. A provider joins this set only when its OWN pricing page states that
+/// audio input is priced per million tokens; that decision is curated and
+/// reviewed outside this crate (the module's `input-audio-per-token.json`),
+/// and handed in here as data so normalization stays free of file IO.
+///
+/// The empty set is today's behaviour everywhere: every `input_audio` is
+/// `Unpriced(UnknownChargeBasis)` and counted. A listed provider may still
+/// exclude single models whose audio price its page does not support.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChargeUnitEvidence {
+    input_audio_per_token: std::collections::BTreeSet<String>,
+    /// `(provider_id, model_id)` rows left unattributed although the provider
+    /// is listed.
+    input_audio_excluded: std::collections::BTreeSet<(String, String)>,
+}
+
+impl ChargeUnitEvidence {
+    /// No provider has established any unit: the strictest reading.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Providers whose pricing documentation states audio input is billed per
+    /// million tokens.
+    pub fn input_audio_per_token<I, S>(providers: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            input_audio_per_token: providers.into_iter().map(Into::into).collect(),
+            input_audio_excluded: Default::default(),
+        }
+    }
+
+    /// Leave one model's `input_audio` unattributed even though its provider
+    /// is listed.
+    pub fn excluding_input_audio_of(
+        mut self,
+        provider_id: impl Into<String>,
+        model_id: impl Into<String>,
+    ) -> Self {
+        self.input_audio_excluded
+            .insert((provider_id.into(), model_id.into()));
+        self
+    }
+
+    /// Whether this row's `cost.input_audio` is a per-million-token rate.
+    pub fn bills_input_audio_per_token(&self, provider_id: &str, model_id: &str) -> bool {
+        self.input_audio_per_token.contains(provider_id)
+            && !self
+                .input_audio_excluded
+                .contains(&(provider_id.to_string(), model_id.to_string()))
+    }
+}
+
+/// Normalize a models.dev document with no charge-unit evidence.
+///
+/// Every `input_audio` stays unpriced. Production ingest uses
+/// [`normalize_models_dev_with`] and the curated evidence.
 pub fn normalize_models_dev(bytes: &[u8]) -> Result<NormalizeOutcome, NormalizeError> {
+    normalize_models_dev_with(bytes, &ChargeUnitEvidence::none())
+}
+
+/// Normalize a models.dev document, attributing `input_audio` as a per-token
+/// rate on the providers `evidence` names.
+pub fn normalize_models_dev_with(
+    bytes: &[u8],
+    evidence: &ChargeUnitEvidence,
+) -> Result<NormalizeOutcome, NormalizeError> {
     let doc: BTreeMap<String, RawProvider> =
         serde_json::from_slice(bytes).map_err(|_| NormalizeError::NotAProviderMap)?;
 
@@ -371,6 +450,7 @@ pub fn normalize_models_dev(bytes: &[u8]) -> Result<NormalizeOutcome, NormalizeE
                 &provider_id,
                 model_id,
                 raw_model,
+                evidence.bills_input_audio_per_token(&provider_id, model_id),
                 &mut findings,
             )?);
         }
@@ -395,6 +475,7 @@ fn normalize_model(
     provider_id: &str,
     model_id: &str,
     raw: &RawModel,
+    input_audio_per_token: bool,
     findings: &mut Vec<NormalizeError>,
 ) -> Result<NormalizedModel, NormalizeError> {
     let label = format!("{provider_id}/{model_id}");
@@ -495,7 +576,7 @@ fn normalize_model(
     };
 
     let mut rates = match cost.as_ref() {
-        Some(cost) => normalize_rates(&label, cost, findings)?,
+        Some(cost) => normalize_rates(&label, cost, input_audio_per_token, findings)?,
         // No cost object at all. Measured on 420 models. Recording nothing here
         // is correct: the absence is expressed by there being no rate rows, and
         // a consumer asking for a rate gets `NoCatalogCoverage` from the store
@@ -555,6 +636,7 @@ fn absent_if_zero(value: Option<u64>) -> Option<u64> {
 fn normalize_rates(
     label: &str,
     cost: &raw::RawCost,
+    input_audio_per_token: bool,
     findings: &mut Vec<NormalizeError>,
 ) -> Result<Vec<NormalizedRate>, NormalizeError> {
     let mut rates = Vec::new();
@@ -574,6 +656,27 @@ fn normalize_rates(
     // unpriced so a consumer refuses rather than pricing audio as text, and
     // reported so the count is visible.
     for key in cost.unattributable_keys() {
+        // Audio input on a provider whose own pricing page prices it per
+        // million tokens: the unit is established, so it is a token rate in
+        // the same representation as `input`.
+        //
+        // Only the unconditional rate. If the same cost block also prices
+        // audio inside a context tier, serving the base rate alone would
+        // understate every request above the threshold, and tiered audio has
+        // no served key, so the whole key stays unattributed instead.
+        if key == INPUT_AUDIO_COST_KEY
+            && input_audio_per_token
+            && !cost.prices_input_audio_conditionally()
+        {
+            rates.push(NormalizedRate {
+                basis: ChargeBasis::PerMillionTokens {
+                    class: TokenClass::InputAudio,
+                },
+                condition: RateCondition::Always,
+                value: rate_value(label, key, &cost.scalars[key.as_str()])?,
+            });
+            continue;
+        }
         findings.push(NormalizeError::UnattributableChargeUnit {
             model: label.to_string(),
             key: key.clone(),
@@ -726,6 +829,10 @@ fn normalize_mode_rates(
     }
     rates
 }
+
+/// The models.dev cost key for audio input, whose unit only a provider's own
+/// documentation can establish (see [`ChargeUnitEvidence`]).
+const INPUT_AUDIO_COST_KEY: &str = "input_audio";
 
 /// The cost keys whose charge unit is established: per million tokens.
 const TOKEN_COST_KEYS: &[(&str, TokenClass)] = &[

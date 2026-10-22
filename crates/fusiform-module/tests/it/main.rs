@@ -14,6 +14,7 @@ mod failure_path;
 mod golden_payload;
 mod health_detail;
 mod http_stub;
+mod input_audio_rates;
 mod live;
 mod manifest_probe;
 mod mode_rates;

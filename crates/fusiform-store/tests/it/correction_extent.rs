@@ -166,6 +166,9 @@ fn every_served_fact_has_a_field_id() {
         FieldId::Rate {
             class: TokenClass::Reasoning,
         },
+        FieldId::Rate {
+            class: TokenClass::InputAudio,
+        },
         FieldId::Limit {
             limit: LimitId::Context,
         },
@@ -231,12 +234,19 @@ fn every_served_fact_has_a_field_id() {
 /// asserting against it would keep passing.
 #[test]
 fn the_closed_vocabulary_matches_the_normalizer() {
-    use fusiform_core::normalize::normalize_models_dev;
+    use fusiform_core::normalize::normalize_models_dev_with;
+    use fusiform_core::ChargeUnitEvidence;
     use fusiform_store::ingest::{fact_keys_of, SERVED_FACT_NAMESPACE};
 
     const FIXTURE: &[u8] =
         include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
-    let outcome = normalize_models_dev(FIXTURE).unwrap();
+    // With evidence for the fixture's google provider, as the module's shipped
+    // input-audio table states, so `rate.input_audio` is produced.
+    let outcome = normalize_models_dev_with(
+        FIXTURE,
+        &ChargeUnitEvidence::input_audio_per_token(["google"]),
+    )
+    .unwrap();
 
     let mut produced: Vec<String> = Vec::new();
     for model in outcome.catalog.models() {

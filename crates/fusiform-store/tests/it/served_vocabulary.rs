@@ -12,7 +12,8 @@
 //! repriced 20-40% on 2026-08-11 with `last_updated` unchanged). Answering
 //! "no, and here is what stops it" required something that stops it.
 
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::{normalize_models_dev, normalize_models_dev_with};
+use fusiform_core::ChargeUnitEvidence;
 use fusiform_store::ingest::fact_keys_of;
 use fusiform_store::FactKey;
 
@@ -43,6 +44,10 @@ const SERVED_FACT_KEYS: &[&str] = &[
     "rate.cache_read",
     "rate.cache_write",
     "rate.reasoning",
+    // Audio input per million tokens, admitted deliberately and only for
+    // providers whose own pricing page bills audio per token. Absent
+    // elsewhere, which means the unit is not established, never free.
+    "rate.input_audio",
     // What the model IS, as upstream states it, independent of who serves it.
     // Admitted deliberately: `family` is published identically by every
     // provider serving the same weights, and `open_weights` marks the
@@ -80,7 +85,15 @@ const NEVER_SERVED: &[&str] = &[
 
 #[test]
 fn the_served_fact_set_is_exactly_this() {
-    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
+    // With evidence that the fixture's google provider bills audio per token,
+    // as the module's shipped table states, so every served key is produced.
+    // The store crate cannot read the module's table; the module-side
+    // `wire_fact_table` test normalizes with the shipped table itself.
+    let outcome = normalize_models_dev_with(
+        FIXTURE,
+        &ChargeUnitEvidence::input_audio_per_token(["google"]),
+    )
+    .expect("fixture normalizes");
 
     let mut produced: Vec<String> = Vec::new();
     for model in outcome.catalog.models() {

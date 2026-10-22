@@ -28,7 +28,10 @@ pub mod normalize;
 use serde::{Deserialize, Serialize};
 
 pub use money::{Amount, CurrencyCode, MoneyError, PolicyId, UnitProvenance};
-pub use normalize::{normalize_models_dev, NormalizeError, NormalizeOutcome, NormalizedCatalog};
+pub use normalize::{
+    normalize_models_dev, normalize_models_dev_with, ChargeUnitEvidence, NormalizeError,
+    NormalizeOutcome, NormalizedCatalog,
+};
 
 /// A declared upstream.
 ///
@@ -322,9 +325,9 @@ pub enum CapabilityId {
 /// The token classes an LLM bills in.
 ///
 /// These are the LLM special case, not the general shape of billing: video
-/// bills per second, audio per minute, images per image at a size and quality.
-/// Fusing those into "tokens" is the same failure as fusing currencies, which
-/// is why [`ChargeBasis`] carries the unit explicitly.
+/// can bill per second, audio per minute, images per image at a size and
+/// quality. Fusing those into "tokens" is the same failure as fusing
+/// currencies, which is why [`ChargeBasis`] carries the unit explicitly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TokenClass {
@@ -333,6 +336,11 @@ pub enum TokenClass {
     CacheRead,
     CacheWrite,
     Reasoning,
+    /// Audio input billed per token. Only produced for a provider whose own
+    /// pricing documentation states that audio input is priced per million
+    /// tokens (see [`normalize::ChargeUnitEvidence`]); models.dev's
+    /// `cost.input_audio` key alone does not establish the unit.
+    InputAudio,
 }
 
 /// A provider's named quality level for a generated artifact.

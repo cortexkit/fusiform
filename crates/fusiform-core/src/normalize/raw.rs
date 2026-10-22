@@ -231,6 +231,22 @@ impl RawCost {
             .filter(|k| !KNOWN_TOKEN_KEYS.contains(&k.as_str()))
             .collect()
     }
+
+    /// Whether a context tier, or the legacy `context_over_200k` block,
+    /// carries its own `input_audio` price.
+    ///
+    /// Tier rows parse only the known token keys, so an audio price inside a
+    /// tier is otherwise invisible to the normalizer. This is how it is
+    /// asked about.
+    pub fn prices_input_audio_conditionally(&self) -> bool {
+        self.tiers
+            .iter()
+            .any(|tier| tier.scalars.contains_key("input_audio"))
+            || self
+                .context_over_200k
+                .as_ref()
+                .is_some_and(|legacy| legacy.contains_key("input_audio"))
+    }
 }
 
 const KNOWN_TOKEN_KEYS: &[&str] = &["input", "output", "cache_read", "cache_write", "reasoning"];

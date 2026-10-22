@@ -136,6 +136,24 @@ value would do to a consumer:
 | `rate.cache_read` | money | per million cached-read tokens |
 | `rate.cache_write` | money | per million cache-write tokens |
 | `rate.reasoning` | money | per million reasoning tokens |
+| `rate.input_audio` | money | per million audio input tokens, only for providers whose docs establish per-token audio billing |
+
+The `rate.input_audio` rule: models.dev publishes `cost.input_audio` beside
+the token rates with no unit, so the key alone establishes nothing. It is
+served only for a provider listed in
+`crates/fusiform-module/data/input-audio-per-token.json`, whose own pricing
+page, quoted in that file, prices audio input per million tokens (see
+[`curated-data.md`](curated-data.md) §8). Elsewhere the key stays
+`unknown_charge_basis` internally and no fact is served: **an absent
+`rate.input_audio` means the unit is not established, never that audio is
+free.** Only the unconditional rate is served; a provider that prices audio
+inside a context tier serves no audio rate, and a mode that prices audio is
+refused whole, as before
+(`models_dev_normalization::an_evidenced_provider_prices_input_audio_per_token`,
+`models_dev_normalization::evidence_for_one_provider_does_not_attribute_another`,
+`models_dev_normalization::tiered_audio_is_not_served_even_with_evidence`).
+The rate is stored as eras like every other models.dev rate, so `at_ms` reads
+before it was first stored lack it. Added in `fusiform-protocol` 0.40.0.
 
 - **byte-affecting**: a consumer renders the value into a provider request,
   directly or indirectly, so a wrong value changes request bytes with nothing

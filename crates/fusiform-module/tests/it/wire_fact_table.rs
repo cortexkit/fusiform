@@ -38,7 +38,7 @@
 //! determination, and why the standing question to consumers is whether the
 //! byte-affecting set is still complete rather than whether it looks right.
 
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::normalize_models_dev_with;
 use fusiform_store::ingest::fact_keys_of;
 
 const FIXTURE: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
@@ -61,7 +61,11 @@ const FIXTURE: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-de
 fn the_wire_fact_table_matches_what_the_producer_emits() {
     use fusiform_protocol::{FactClass, SERVED_FACTS};
 
-    let outcome = normalize_models_dev(FIXTURE).expect("the fixture must normalize");
+    // Normalized with the shipped input-audio evidence, as production ingest
+    // does, so `rate.input_audio` is produced where the deployed producer
+    // would produce it.
+    let outcome = normalize_models_dev_with(FIXTURE, &fusiform_module::input_audio::evidence())
+        .expect("the fixture must normalize");
 
     let mut produced: Vec<String> = Vec::new();
     for model in outcome.catalog.models() {

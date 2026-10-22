@@ -1150,6 +1150,9 @@ fn every_field_id() -> Vec<fusiform_core::FieldId> {
         FieldId::Rate {
             class: TokenClass::Reasoning,
         },
+        FieldId::Rate {
+            class: TokenClass::InputAudio,
+        },
         // One representative: mode names are the upstream's and cannot be
         // enumerated, so the list names the variant rather than every key.
         FieldId::ModeRate {
@@ -2264,6 +2267,9 @@ fn status_names_served_keys_no_model_in_this_store_carries() {
         "rate.cache_read",
         "rate.cache_write",
         "rate.reasoning",
+        // Served only for providers whose docs establish per-token audio
+        // billing, so most stores carry it on few rows or none.
+        "rate.input_audio",
     ] {
         assert!(
             status.served_facts.iter().any(|k| k == key),

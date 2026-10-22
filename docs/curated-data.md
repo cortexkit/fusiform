@@ -13,6 +13,7 @@ that keep them honest.
 | `curated-models.json` | provider rows models.dev does not carry | at read time, current reads only |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
+| `input-audio-per-token.json` | providers whose own pricing page bills audio input per token | at ingest: decides whether upstream `cost.input_audio` is stored as `rate.input_audio` (§8) |
 | `plan-prices.json` | subscription list prices | written to `plan_price_era` at start |
 | `models-dev-seed.json` | a copy of the upstream catalog for offline first boot | written as seed eras into an empty store |
 | `engram-catalog.json` | the backup enrollment descriptor | written beside `store.db` at start; not otherwise read |
@@ -29,7 +30,10 @@ the source file of the same name under `crates/fusiform-module/src/`.
 1. **Curated facts are never stored as observations.** Creators, aliases,
    curated rows, canonical links and billing planes are applied when a read is served, so a
    point-in-time read replays what the upstream published and never today's
-   curation (see [`data-model.md`](data-model.md) §8).
+   curation (see [`data-model.md`](data-model.md) §8). The one exception is
+   `input-audio-per-token.json` (§8), which adds no value of its own: it
+   decides whether an upstream number has an established unit, so the
+   upstream's number is stored as an observation like any other rate.
 2. **An upstream row wins while upstream publishes it.** When models.dev
    currently publishes the same identity, the observed row is served and the
    curated claim is not. A curated model row also returns when upstream
@@ -328,8 +332,8 @@ its MIT license; see `THIRD-PARTY-NOTICES.md`.
 
 ## 7. When a review gate fires
 
-Plan prices, quota values, billing planes and rules, aliases, canonical links
-and curated model rows each carry a review date, and a test fails once any date has
+Plan prices, quota values, billing planes and rules, aliases, canonical links,
+input-audio sources and curated model rows each carry a review date, and a test fails once any date has
 passed. These are time-triggered: they fail on a day nobody changed anything,
 and CI's scheduled run exists so they fire then. The plan-price, billing-plane
 and seed gates' failure messages begin "NOT A BUILD FAILURE" and name what
@@ -341,7 +345,7 @@ To clear one:
 2. If the claim changed, update it (or remove the row).
 3. Whether or not it changed, record who looked (`established_by` where the
    file has it), when (`established_at_ms`), and a new `review_by_ms`: 60 days
-   later for billing planes, aliases, canonical links and curated model rows; the file's stated
+   later for billing planes, aliases, canonical links, input-audio sources and curated model rows; the file's stated
    interval for plan prices.
 4. Commit the file. Confirming a claim unchanged is a real result; the diff is
    the provenance change alone.
@@ -350,3 +354,57 @@ To refresh the seed, run `scripts/refresh-seed.sh` and commit both seed files.
 
 Extending a date without reading the source is possible, as with any gate; the
 commit then records who made that decision.
+
+## 8. Input audio per token (`input-audio-per-token.json`)
+
+Schema `input-audio-per-token/v1`. models.dev publishes `cost.input_audio`
+beside the token rates, in the same "$ per million" convention, but nothing in
+the payload says whether a provider bills audio per token, per second or per
+minute. So the normalizer leaves the key unattributed (`unknown_charge_basis`,
+counted as `UnattributableChargeUnit`, no fact served) unless this file lists
+the provider. For a listed provider the key is stored and served as
+`rate.input_audio`, per million audio input tokens (rules in
+[`wire-contract.md`](wire-contract.md) §4.1).
+
+Each row in `providers`:
+
+| Field | Meaning |
+| --- | --- |
+| `provider_id` | the models.dev provider |
+| `source_ref` | the provider's OWN pricing page, as an `https` URL |
+| `quote` | verbatim text from that page stating audio input is priced per million tokens; it must name the per-million-token unit |
+| `established_at_ms`, `review_by_ms` | when the page was read; exactly 60 days later |
+| `excluded_models` | models of this provider whose published `input_audio` the page does not support, each with `model_id` and `reason` |
+
+`declined` records providers whose page was read and did not establish the
+unit (`provider_id`, `source_ref`, `quote`, `reason`). It changes nothing that
+is served; it keeps the decision from being remade without its source. A
+provider cannot be both listed and declined.
+
+How to add a provider: read its own pricing page, not another provider's
+(the bill belongs to whoever charges it). List it only if the page prices
+audio input per million tokens and nowhere contradicts that. For each of its
+models whose `input_audio` differs from its `input`, check that the page's
+explicit audio row gives that number; exclude any model the page does not
+support, with the reason.
+
+This file is applied at ingest rather than at read time (§1, rule 1): it adds
+no value of its own and only decides whether the upstream's number has a
+known unit. Listing a provider makes the next poll write one
+`rate.input_audio` era per listed model that publishes the key; removing one
+withdraws those facts on the next poll. Point-in-time reads replay what was
+stored then. The table is passed to `fusiform_core::normalize_models_dev_with`
+as data, so the core crate does no file IO.
+
+Gates (`input_audio.rs`): the shipped table loads without rejects
+(`shipped_sources_load_without_rejects`); malformed rows, duplicates, bad
+exclusions and bad declined rows are rejected
+(`malformed_and_duplicate_rows_are_counted_as_rejects`,
+`malformed_fields_are_rejected`,
+`malformed_exclusions_and_declined_rows_are_rejected`); every listed provider
+and every exclusion matches rows in the embedded seed
+(`every_source_has_input_audio_rows_in_the_embedded_seed`,
+`planted_provider_without_audio_rows_is_named`,
+`planted_stale_exclusion_is_named`); and no row is past its review date
+(`input_audio_sources_are_within_their_review_dates`,
+`planted_overdue_source_requires_rereading_or_removal`).

@@ -1,0 +1,26 @@
+{
+  "schema": "input-audio-per-token/v1",
+  "providers": [
+    {
+      "provider_id": "google",
+      "source_ref": "https://ai.google.dev/gemini-api/docs/pricing",
+      "quote": "Every paid price column is headed \"Paid Tier, per 1M tokens in USD\". Gemini 2.5 Flash, Input price: \"$0.30 (text / image / video)   $1.00 (audio)\". Gemini 3.1 Flash-Lite, Input price: \"$0.25 (text / image / video)   $0.50 (audio)\". Audio is tokenized at a fixed rate (https://ai.google.dev/gemini-api/docs/audio): \"Tokens: 32 tokens per second of audio (1 minute = 1,920 tokens)\".",
+      "established_at_ms": 1792627200000,
+      "review_by_ms": 1797811200000,
+      "excluded_models": [
+        {
+          "model_id": "gemini-3.1-flash-lite-preview",
+          "reason": "The pricing page has no row for the preview model (only the GA Gemini 3.1 Flash-Lite), and models.dev's input_audio (0.5) differs from its input (0.25), so neither an explicit audio row nor a single unsplit input price supports the number."
+        }
+      ]
+    }
+  ],
+  "declined": [
+    {
+      "provider_id": "google-vertex",
+      "source_ref": "https://cloud.google.com/vertex-ai/generative-ai/pricing",
+      "quote": "All Gemini models other than Gemini 2.0 or Gemini 2.5 are billed based on modalities such as characters, images, video/audio seconds.",
+      "reason": "The page contradicts itself: its Gemini 3 and 4 model tables price \"Input (text, image, video, audio)\" under \"Price (/1M tokens)\", while this sentence says those models bill audio by seconds. A source that contradicts itself does not establish the unit."
+    }
+  ]
+}

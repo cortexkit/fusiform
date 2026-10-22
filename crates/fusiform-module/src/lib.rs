@@ -16,6 +16,7 @@ pub mod curated_models;
 pub mod enrollment;
 pub mod fetch;
 pub mod health;
+pub mod input_audio;
 pub mod loop_;
 pub mod plan_prices;
 pub mod route;

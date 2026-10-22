@@ -27,13 +27,21 @@
 //! before/after in the payload a consumer parses, at review time.
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{
     BoundaryKind, Correction, FieldId, ObservationOutcome, SourceId, Timestamp, TokenClass,
 };
 use fusiform_module::route::serve_tool_call;
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, FactKey, NewEra, NewObservation};
+
+/// Normalize as production ingest does: with the shipped input-audio
+/// evidence, so the pinned bytes are the bytes a deployed store serves, and
+/// a second ingest in a case does not withdraw a rate the first one wrote.
+fn normalize_models_dev(
+    bytes: &[u8],
+) -> Result<fusiform_core::NormalizeOutcome, fusiform_core::NormalizeError> {
+    fusiform_core::normalize_models_dev_with(bytes, &fusiform_module::input_audio::evidence())
+}
 
 const UPSTREAM: &str = include_str!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
@@ -1462,6 +1470,14 @@ fn cases() -> Vec<(&'static str, String)> {
             // pins that the served row is unchanged by include_retired.
             "catalog.get — a curated-only provider read including retired rows",
             r#"{"name":"catalog.get","arguments":{"provider_id":"typesafe","include_retired":true}}"#.to_string(),
+        ),
+        (
+            // A provider whose own pricing page bills audio input per token:
+            // its published `input_audio` is served as `rate.input_audio`,
+            // unmarked, on a rate-filtered read. The row is the real excerpt's
+            // google entry, not a splice.
+            "catalog.get — rate.input_audio on a provider whose docs bill audio per token",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"google","model_id":"gemini-flash-latest","fact_prefixes":["rate."]}}"#.to_string(),
         ),
     ]
 }

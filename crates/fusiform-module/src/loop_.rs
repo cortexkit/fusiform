@@ -30,7 +30,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::normalize_models_dev_with;
 use fusiform_core::{BoundaryKind, FailureClass, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::{catalog_digest, plan_ingest};
 use fusiform_store::serve::{CatalogQuery, CatalogSnapshot};
@@ -258,7 +258,9 @@ fn apply_with_catalog_reader(
             duration,
         } => {
             let raw_hash = hash_bytes(&bytes);
-            let outcome_parse = normalize_models_dev(&bytes);
+            // With the curated input-audio evidence, so a provider whose own
+            // pricing page bills audio per token gets `rate.input_audio`.
+            let outcome_parse = normalize_models_dev_with(&bytes, &crate::input_audio::evidence());
 
             let catalog = match outcome_parse {
                 Ok(outcome) => outcome.catalog,

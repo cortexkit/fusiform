@@ -1146,6 +1146,13 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         class: FactClass::Money,
         note: "per million reasoning tokens",
     },
+    ServedFact {
+        key: "rate.input_audio",
+        class: FactClass::Money,
+        note: "per million audio input tokens, served only for providers whose \
+               docs establish per-token audio billing; absent elsewhere means \
+               not established, never free",
+    },
 ];
 
 /// Every value `model.kind` can carry, as a closed set.

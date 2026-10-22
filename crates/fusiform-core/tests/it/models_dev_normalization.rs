@@ -9,9 +9,10 @@
 //! exercises a shape the real document actually contains. Inline synthetic
 //! payloads separately exercise unpublished fields and future string values.
 
-use fusiform_core::normalize::{normalize_models_dev, NormalizedModel};
+use fusiform_core::normalize::{normalize_models_dev, normalize_models_dev_with, NormalizedModel};
 use fusiform_core::{
-    ChargeBasis, Modality, NormalizeError, RateCondition, RateValue, TokenClass, UnpricedReason,
+    ChargeBasis, ChargeUnitEvidence, Modality, NormalizeError, RateCondition, RateValue,
+    TokenClass, UnpricedReason,
 };
 use fusiform_testkit::mutate;
 
@@ -361,6 +362,145 @@ fn an_unattributable_charge_key_is_unpriced_and_reported() {
 
 fn model_by<'a>(outcome: &'a fusiform_core::NormalizeOutcome, key: &str) -> &'a NormalizedModel {
     model(outcome, key)
+}
+
+fn audio_rate(m: &NormalizedModel) -> Option<&fusiform_core::normalize::NormalizedRate> {
+    m.rates.iter().find(|r| {
+        r.basis
+            == ChargeBasis::PerMillionTokens {
+                class: TokenClass::InputAudio,
+            }
+    })
+}
+
+fn unattributed_audio(outcome: &fusiform_core::NormalizeOutcome, label: &str) -> bool {
+    outcome.findings.iter().any(|f| {
+        matches!(f, NormalizeError::UnattributableChargeUnit { model, key }
+            if model == label && key == "input_audio")
+    })
+}
+
+/// A provider whose own pricing page bills audio per token has its
+/// `input_audio` served as a priced per-million-token rate, in the same
+/// representation as `input`, and nothing else about the model moves.
+#[test]
+fn an_evidenced_provider_prices_input_audio_per_token() {
+    let evidence = ChargeUnitEvidence::input_audio_per_token(["google"]);
+    let with = normalize_models_dev_with(FIXTURE, &evidence).unwrap();
+    let without = catalog();
+
+    let gemini = model(&with, "google/gemini-flash-latest");
+    let audio = audio_rate(gemini).expect("an evidenced provider serves input_audio");
+    assert_eq!(audio.condition, RateCondition::Always);
+    let RateValue::Priced { amount, .. } = &audio.value else {
+        panic!("input_audio must be priced, got {:?}", audio.value);
+    };
+    // $1.50 per million audio tokens, as published.
+    assert_eq!(amount.units, 1_500_000_000);
+    assert_eq!(amount.exponent, 9);
+    assert_eq!(amount.currency.as_str(), "USD");
+    assert!(matches!(
+        amount.unit_provenance,
+        fusiform_core::UnitProvenance::AssumedByPolicy { .. }
+    ));
+    assert!(!unattributed_audio(&with, "google/gemini-flash-latest"));
+    assert!(!gemini.rates.iter().any(|r| matches!(
+        r.value,
+        RateValue::Unpriced {
+            reason: UnpricedReason::UnknownChargeBasis,
+            ..
+        }
+    )));
+
+    // Every other rate is identical to the strict reading.
+    let others = |m: &NormalizedModel| -> Vec<fusiform_core::normalize::NormalizedRate> {
+        m.rates
+            .iter()
+            .filter(|r| {
+                r.basis != ChargeBasis::PerRequest
+                    && r.basis
+                        != ChargeBasis::PerMillionTokens {
+                            class: TokenClass::InputAudio,
+                        }
+            })
+            .cloned()
+            .collect()
+    };
+    let strict = model(&without, "google/gemini-flash-latest");
+    assert_eq!(others(gemini), others(strict));
+    assert!(audio_rate(strict).is_none());
+    assert_eq!(
+        with.catalog.model_count(),
+        without.catalog.model_count(),
+        "evidence changes rates, never which models exist"
+    );
+}
+
+/// Evidence is per provider: the same model id and the same number on a
+/// provider whose documentation was never read stays unattributed.
+#[test]
+fn evidence_for_one_provider_does_not_attribute_another() {
+    let doc = serde_json::json!({
+        "google": {"models": {"gemini-3.8-flash": {
+            "cost": {"input": 0.75, "output": 4.5, "input_audio": 0.75}}}},
+        "aihubmix": {"models": {"gemini-3.8-flash": {
+            "cost": {"input": 0.75, "output": 4.5, "input_audio": 0.75}}}},
+    });
+    let evidence = ChargeUnitEvidence::input_audio_per_token(["google"]);
+    let outcome = normalize_models_dev_with(&serde_json::to_vec(&doc).unwrap(), &evidence).unwrap();
+
+    let google = model(&outcome, "google/gemini-3.8-flash");
+    let RateValue::Priced { amount, .. } = &audio_rate(google).unwrap().value else {
+        panic!("google's input_audio must be priced");
+    };
+    assert_eq!(amount.units, 750_000_000);
+    assert!(!unattributed_audio(&outcome, "google/gemini-3.8-flash"));
+
+    let aihubmix = model(&outcome, "aihubmix/gemini-3.8-flash");
+    assert!(audio_rate(aihubmix).is_none());
+    assert!(unattributed_audio(&outcome, "aihubmix/gemini-3.8-flash"));
+
+    // A model excluded inside a listed provider stays unattributed too.
+    let evidence = evidence.excluding_input_audio_of("google", "gemini-3.8-flash");
+    let outcome = normalize_models_dev_with(&serde_json::to_vec(&doc).unwrap(), &evidence).unwrap();
+    assert!(audio_rate(model(&outcome, "google/gemini-3.8-flash")).is_none());
+    assert!(unattributed_audio(&outcome, "google/gemini-3.8-flash"));
+}
+
+/// An audio price inside a context tier keeps the key unattributed even for an
+/// evidenced provider: serving the base rate alone would underprice every
+/// request above the threshold, and tiered audio has no served key.
+#[test]
+fn tiered_audio_is_not_served_even_with_evidence() {
+    let base = serde_json::json!({"input": 0.08, "input_audio": 1.269});
+    let tier = serde_json::json!({
+        "input": 0.13, "input_audio": 1.902, "tier": {"type": "context", "size": 32000}});
+    let evidence = ChargeUnitEvidence::input_audio_per_token(["p"]);
+
+    for cost in [
+        {
+            let mut c = base.clone();
+            c["tiers"] = serde_json::json!([tier.clone()]);
+            c
+        },
+        {
+            let mut c = base.clone();
+            c["tiers"] = serde_json::json!([tier.clone()]);
+            c["context_over_200k"] = serde_json::json!({"input": 0.13, "input_audio": 1.902});
+            c
+        },
+    ] {
+        let doc = serde_json::json!({"p": {"models": {"m": {"cost": cost}}}});
+        let outcome =
+            normalize_models_dev_with(&serde_json::to_vec(&doc).unwrap(), &evidence).unwrap();
+        assert!(audio_rate(model(&outcome, "p/m")).is_none(), "{cost}");
+        assert!(unattributed_audio(&outcome, "p/m"), "{cost}");
+    }
+
+    // The control: without the tier the same base is served.
+    let doc = serde_json::json!({"p": {"models": {"m": {"cost": base}}}});
+    let outcome = normalize_models_dev_with(&serde_json::to_vec(&doc).unwrap(), &evidence).unwrap();
+    assert!(audio_rate(model(&outcome, "p/m")).is_some());
 }
 
 /// Renderer-selecting fields are recorded as quarantined and never as data.

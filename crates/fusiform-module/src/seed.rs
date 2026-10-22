@@ -31,7 +31,7 @@
 //! window where a real one exists. That is what this module's absence produced,
 //! found by a probe before the seed was built.
 
-use fusiform_core::normalize::{normalize_models_dev, NormalizedCatalog};
+use fusiform_core::normalize::{normalize_models_dev_with, NormalizedCatalog};
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::{catalog_digest, plan_ingest};
 use fusiform_store::{CatalogError, CatalogStore, NewObservation};
@@ -111,9 +111,11 @@ pub fn meta() -> Result<SeedMeta, SeedError> {
     serde_json::from_str(SNAPSHOT_META).map_err(|e| SeedError::Meta(e.to_string()))
 }
 
-/// Normalize the compiled-in snapshot.
+/// Normalize the compiled-in snapshot, with the same charge-unit evidence a
+/// live poll uses, so the first real fetch of an unchanged document finds
+/// nothing to change.
 pub fn catalog() -> Result<NormalizedCatalog, SeedError> {
-    normalize_models_dev(SNAPSHOT)
+    normalize_models_dev_with(SNAPSHOT, &crate::input_audio::evidence())
         .map(|outcome| outcome.catalog)
         .map_err(|e| SeedError::Snapshot(e.to_string()))
 }

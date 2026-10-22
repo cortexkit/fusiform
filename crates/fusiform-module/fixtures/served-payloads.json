@@ -594,6 +594,22 @@
             },
             "units": 750000000
           },
+          "rate.input_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 750000000
+          },
           "rate.output": {
             "currency": "USD",
             "exponent": 9,
@@ -1652,6 +1668,67 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — rate.input_audio on a provider whose docs bill audio per token": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "rate."
+        ],
+        "model_id": "gemini-flash-latest",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "google/gemini-flash-latest": {
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 150000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1500000000
+          },
+          "rate.input_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1500000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 9000000000
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.history — a corrected fact": {
     "request": {
       "arguments": {
@@ -1767,7 +1844,7 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 328,
+      "era_count": 330,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
@@ -1822,7 +1899,8 @@
         "rate.output",
         "rate.cache_read",
         "rate.cache_write",
-        "rate.reasoning"
+        "rate.reasoning",
+        "rate.input_audio"
       ],
       "source": "models.dev"
     }
