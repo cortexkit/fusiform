@@ -1307,3 +1307,24 @@ only = false
 timeout_s = 600
 build_timeout_s = 1800
 
+
+[[control]]
+id = "input-audio-needs-provider-evidence"
+guards = "cost.input_audio becomes a priced rate.input_audio only on a provider (and model) the curated input-audio evidence names; every other row keeps it unattributed"
+file = "crates/fusiform-core/src/normalize/mod.rs"
+old = """
+            && input_audio_per_token
+"""
+new = """
+            && true /* NON-VACUITY BREAK */
+"""
+edits = []
+test_file = "crates/fusiform-core/tests/it/models_dev_normalization.rs"
+runner = "cargo"
+package = "fusiform-core"
+target = "--test it"
+expect_red = ["models_dev_normalization::evidence_for_one_provider_does_not_attribute_another", "models_dev_normalization::an_unattributable_charge_key_is_unpriced_and_reported", "models_dev_normalization::an_evidenced_provider_prices_input_audio_per_token"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+

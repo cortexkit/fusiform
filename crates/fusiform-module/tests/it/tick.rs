@@ -108,6 +108,30 @@ fn the_first_tick_seeds() {
     assert_eq!(row.observation_window(), None);
 }
 
+/// A poll normalizes with the shipped input-audio evidence: the fixture's
+/// google row stores `rate.input_audio` through the real tick path. Without
+/// the evidence at this call site, the rate never reaches the store.
+#[test]
+fn a_poll_stores_input_audio_for_an_evidenced_provider() {
+    let f = fixture();
+    run(&f, body(FIXTURE, None), 1_000);
+    let audio = f
+        .store
+        .value_at(
+            SourceId::ModelsDev,
+            "google",
+            "gemini-flash-latest",
+            &fusiform_store::FactKey::rate(fusiform_core::TokenClass::InputAudio),
+            Timestamp(2_000),
+        )
+        .unwrap()
+        .known()
+        .cloned()
+        .expect("the polled google row must store rate.input_audio");
+    let value: serde_json::Value = serde_json::from_str(&audio.value_json).unwrap();
+    assert_eq!(value["units"], 1_500_000_000, "{value}");
+}
+
 #[test]
 fn a_changed_poll_updates_model_count() {
     let f = fixture();

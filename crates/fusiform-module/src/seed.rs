@@ -325,3 +325,32 @@ mod freshness_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod input_audio_tests {
+    use super::*;
+
+    /// The seed normalizes with the same input-audio evidence a poll uses.
+    /// If it did not, a fresh install would serve no audio rate until its
+    /// first poll, and that poll would open an era for every audio rate on a
+    /// document that had not changed.
+    #[test]
+    fn the_seed_carries_input_audio_for_an_evidenced_provider() {
+        let catalog = catalog().expect("the snapshot normalizes");
+        let audio = fusiform_core::ChargeBasis::PerMillionTokens {
+            class: fusiform_core::TokenClass::InputAudio,
+        };
+        let has_audio = |provider: &str, model: &str| {
+            catalog
+                .models()
+                .find(|m| m.key.provider_id == provider && m.key.model_id == model)
+                .unwrap_or_else(|| panic!("{provider}/{model} is in the seed"))
+                .rates
+                .iter()
+                .any(|r| r.basis == audio)
+        };
+        assert!(has_audio("google", "gemini-3.8-flash"));
+        // Control: a provider with no evidence publishes the key and gets none.
+        assert!(!has_audio("google-vertex", "gemini-3.8-flash"));
+    }
+}
