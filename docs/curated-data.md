@@ -13,7 +13,7 @@ that keep them honest.
 | `curated-models.json` | provider rows models.dev does not carry | at read time, current reads only |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
-| `input-audio-per-token.json` | providers whose own pricing page bills audio input per token | at ingest: decides whether upstream `cost.input_audio` is stored as `rate.input_audio` (§8) |
+| `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio` (§8) |
 | `plan-prices.json` | subscription list prices | written to `plan_price_era` at start |
 | `models-dev-seed.json` | a copy of the upstream catalog for offline first boot | written as seed eras into an empty store |
 | `engram-catalog.json` | the backup enrollment descriptor | written beside `store.db` at start; not otherwise read |
@@ -30,10 +30,11 @@ the source file of the same name under `crates/fusiform-module/src/`.
 1. **Curated facts are never stored as observations.** Creators, aliases,
    curated rows, canonical links and billing planes are applied when a read is served, so a
    point-in-time read replays what the upstream published and never today's
-   curation (see [`data-model.md`](data-model.md) §8). The one exception is
-   `input-audio-per-token.json` (§8), which adds no value of its own: it
-   decides whether an upstream number has an established unit, so the
-   upstream's number is stored as an observation like any other rate.
+   curation (see [`data-model.md`](data-model.md) §8). For model facts the
+   exception is `input-audio-per-token.json` (§8), which adds no value of its
+   own: it supplies evidence for interpreting an upstream `cost.input_audio`
+   during normalization, and an eligible upstream price is then stored as an
+   observed rate like any other.
 2. **An upstream row wins while upstream publishes it.** When models.dev
    currently publishes the same identity, the observed row is served and the
    curated claim is not. A curated model row also returns when upstream
@@ -361,8 +362,10 @@ Schema `input-audio-per-token/v1`. models.dev publishes `cost.input_audio`
 beside the token rates, in the same "$ per million" convention, but nothing in
 the payload says whether a provider bills audio per token, per second or per
 minute. So the normalizer leaves the key unattributed (`unknown_charge_basis`,
-counted as `UnattributableChargeUnit`, no fact served) unless this file lists
-the provider. For a listed provider the key is stored and served as
+counted as `UnattributableChargeUnit`, no fact served) unless the provider is
+listed, the model is not excluded, and the cost block has no audio price in a
+context tier or the legacy `context_over_200k` block. Eligible values are
+stored and served as
 `rate.input_audio`, per million audio input tokens (rules in
 [`wire-contract.md`](wire-contract.md) §4.1).
 

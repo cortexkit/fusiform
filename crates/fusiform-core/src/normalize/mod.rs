@@ -268,10 +268,11 @@ pub enum NormalizeError {
     /// `Unpriced(UnknownChargeBasis)` and the model still normalizes. The
     /// variant exists so the count is reportable.
     ///
-    /// Not reported for `input_audio` on a provider named in the
-    /// [`ChargeUnitEvidence`] passed to [`normalize_models_dev_with`]: there
-    /// the provider's own pricing documentation settles the unit, and the key
-    /// becomes a priced `rate.input_audio`.
+    /// Not reported for `input_audio` when the [`ChargeUnitEvidence`] passed
+    /// to [`normalize_models_dev_with`] covers this provider and model and the
+    /// cost block has no conditional audio price: there the provider's own
+    /// pricing documentation settles the unit, and the key becomes a priced
+    /// `rate.input_audio`.
     UnattributableChargeUnit { model: String, key: String },
     /// A named mode under `experimental.modes` whose price could not be served.
     ///
@@ -372,9 +373,10 @@ pub struct NormalizeOutcome {
 /// reviewed outside this crate (the module's `input-audio-per-token.json`),
 /// and handed in here as data so normalization stays free of file IO.
 ///
-/// The empty set is today's behaviour everywhere: every `input_audio` is
-/// `Unpriced(UnknownChargeBasis)` and counted. A listed provider may still
-/// exclude single models whose audio price its page does not support.
+/// With no evidence supplied, every `input_audio` stays
+/// `Unpriced(UnknownChargeBasis)` and is counted. Poll and seed normalization
+/// supply the curated evidence; a listed provider can still exclude single
+/// models whose audio price its page does not support.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChargeUnitEvidence {
     input_audio_per_token: std::collections::BTreeSet<String>,
@@ -431,8 +433,10 @@ pub fn normalize_models_dev(bytes: &[u8]) -> Result<NormalizeOutcome, NormalizeE
     normalize_models_dev_with(bytes, &ChargeUnitEvidence::none())
 }
 
-/// Normalize a models.dev document, attributing `input_audio` as a per-token
-/// rate on the providers `evidence` names.
+/// Normalize a models.dev document, using `evidence` to attribute eligible
+/// `input_audio` values as per-token rates. Excluded models, and cost blocks
+/// that also price audio in a context tier or the legacy `context_over_200k`
+/// block, stay unattributed.
 pub fn normalize_models_dev_with(
     bytes: &[u8],
     evidence: &ChargeUnitEvidence,
@@ -656,14 +660,15 @@ fn normalize_rates(
     // unpriced so a consumer refuses rather than pricing audio as text, and
     // reported so the count is visible.
     for key in cost.unattributable_keys() {
-        // Audio input on a provider whose own pricing page prices it per
-        // million tokens: the unit is established, so it is a token rate in
-        // the same representation as `input`.
+        // Audio input on a provider whose own pricing page establishes
+        // per-million-token billing: a token rate in the same representation
+        // as `input`.
         //
-        // Only the unconditional rate. If the same cost block also prices
-        // audio inside a context tier, serving the base rate alone would
-        // understate every request above the threshold, and tiered audio has
-        // no served key, so the whole key stays unattributed instead.
+        // Only the unconditional rate, and only when the cost block has no
+        // audio price in a context tier or the legacy `context_over_200k`
+        // block. Otherwise the base rate alone would understate every request
+        // above the threshold, and tiered audio has no served key, so the
+        // whole key stays unattributed instead.
         if key == INPUT_AUDIO_COST_KEY
             && input_audio_per_token
             && !cost.prices_input_audio_conditionally()

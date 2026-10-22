@@ -235,9 +235,9 @@ impl RawCost {
     /// Whether a context tier, or the legacy `context_over_200k` block,
     /// carries its own `input_audio` price.
     ///
-    /// Tier rows parse only the known token keys, so an audio price inside a
-    /// tier is otherwise invisible to the normalizer. This is how it is
-    /// asked about.
+    /// Tier rows parse only the known token keys, so this method checks those
+    /// structures for an audio price that would otherwise be invisible to the
+    /// normalizer.
     pub fn prices_input_audio_conditionally(&self) -> bool {
         self.tiers
             .iter()

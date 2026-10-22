@@ -1,21 +1,21 @@
-//! Providers whose own pricing documentation bills audio input per token.
+//! Providers whose own pricing documentation establishes per-token audio
+//! billing.
 //!
 //! models.dev publishes `cost.input_audio` beside the per-token rates, in the
-//! same "$ per million" convention, with nothing in the payload to say what
-//! unit the number charges for. The normalizer therefore refuses it
-//! everywhere by default. A provider listed in `input-audio-per-token.json`
-//! has a pricing page that states audio input is priced per million tokens,
-//! quoted in the row; for that provider the key is served as
-//! `rate.input_audio`.
+//! same "$ per million" convention, without saying whether the number is per
+//! token, second or minute. Without evidence the normalizer leaves the key
+//! unpriced. A provider listed in `input-audio-per-token.json` has a pricing
+//! page that states audio input is priced per million tokens, quoted in the
+//! row; its eligible models are served as `rate.input_audio`.
 //!
-//! Unlike the other curated files this one is applied at INGEST, not at read
-//! time, because it does not add a claim of fusiform's own to a row: the
-//! number is still the upstream's observation. The file only decides whether
-//! the upstream number has an established unit, so the resulting fact is
-//! stored as an era like every other models.dev rate, and a point-in-time read
-//! replays what was served then. The table is handed to
-//! `fusiform_core::normalize_models_dev_with` as data, keeping file IO out of
-//! the core crate.
+//! The table is used while normalizing a poll or the embedded seed, not when
+//! serving a read, because it adds no value of fusiform's own: the number is
+//! still the upstream's observation, and the file only decides whether it has
+//! an established unit. The resulting fact is stored as an era like every
+//! other models.dev rate, so a point-in-time read replays what was recorded
+//! then. The module converts the rows to `ChargeUnitEvidence` and passes that
+//! to `fusiform_core::normalize_models_dev_with`, so the core crate does no
+//! file IO.
 
 use std::collections::BTreeMap;
 
@@ -169,8 +169,9 @@ pub fn load_reporting_rejects(doc: &str) -> (InputAudioSources, Vec<String>) {
     (rows, rejects)
 }
 
-/// The shipped table, rejects dropped. A reject in the shipped file fails the
-/// build through `shipped_sources_load_without_rejects`.
+/// The embedded provider rows, with the reject list discarded. A test
+/// (`shipped_sources_load_without_rejects`) asserts the shipped file produces
+/// no rejects.
 pub fn sources() -> &'static InputAudioSources {
     static ROWS: std::sync::OnceLock<InputAudioSources> = std::sync::OnceLock::new();
     ROWS.get_or_init(|| load_reporting_rejects(DOCUMENT).0)

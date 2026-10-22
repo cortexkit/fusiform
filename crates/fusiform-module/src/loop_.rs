@@ -258,8 +258,9 @@ fn apply_with_catalog_reader(
             duration,
         } => {
             let raw_hash = hash_bytes(&bytes);
-            // With the curated input-audio evidence, so a provider whose own
-            // pricing page bills audio per token gets `rate.input_audio`.
+            // Pass the curated input-audio evidence, so an eligible row with an
+            // unconditional per-token audio price normalizes as
+            // `rate.input_audio`.
             let outcome_parse = normalize_models_dev_with(&bytes, &crate::input_audio::evidence());
 
             let catalog = match outcome_parse {
