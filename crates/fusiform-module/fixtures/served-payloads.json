@@ -4093,6 +4093,252 @@
       "source": "models.dev"
     }
   },
+  "opencode go — bulk quota weights": {
+    "request": {
+      "arguments": {
+        "auth_method": "apikey",
+        "provider_id": "opencode-go"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "opencode-go/deepseek-v4-flash": {
+          "capability.attachment": false,
+          "capability.input_modalities": [
+            "text"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "high",
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1000000,
+          "limit.output": 384000,
+          "model.canonical_id": null,
+          "model.family": "deepseek-flash",
+          "model.open_weights": true,
+          "model.status": null,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "deepseek-flash",
+              "provider_id": "opencode-go"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1400000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "deepseek-flash",
+              "provider_id": "opencode-go"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 70000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "deepseek-flash",
+              "provider_id": "opencode-go"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 140000000
+          }
+        },
+        "opencode-go/qwen3.7-plus": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "toggle"
+            },
+            {
+              "max": 262144,
+              "type": "budget_tokens"
+            }
+          ],
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1000000,
+          "limit.output": 65536,
+          "model.canonical_id": null,
+          "model.family": "qwen3.7-plus",
+          "model.open_weights": false,
+          "model.status": null,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "qwen3.7-plus",
+              "provider_id": "opencode-go"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 40000000
+          },
+          "rate.cache_read.above_context.256000": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "qwen3.7-plus",
+              "provider_id": "opencode-go"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 120000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "qwen3.7-plus",
+              "provider_id": "opencode-go"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 500000000
+          },
+          "rate.cache_write.above_context.256000": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "qwen3.7-plus",
+              "provider_id": "opencode-go"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1500000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "qwen3.7-plus",
+              "provider_id": "opencode-go"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 400000000
+          },
+          "rate.input.above_context.256000": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "qwen3.7-plus",
+              "provider_id": "opencode-go"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1200000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "qwen3.7-plus",
+              "provider_id": "opencode-go"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1600000000
+          },
+          "rate.output.above_context.256000": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "qwen3.7-plus",
+              "provider_id": "opencode-go"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4800000000
+          }
+        }
+      },
+      "plane": {
+        "auth_method": "apikey",
+        "kind": "quota_proxy",
+        "provider_id": "opencode-go",
+        "review_by_ms": 1797811200000,
+        "source_ref": "https://opencode.ai/v2/docs/console/go/"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "plan.prices — every curated row": {
     "request": {
       "arguments": {},
@@ -4293,6 +4539,26 @@
           "review_by_ms": 1797552000000,
           "source_ref": "https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers",
           "tier": "pro_500"
+        },
+        {
+          "boundary_at_ms": 1792627200000,
+          "established_at_ms": 1792627200000,
+          "established_by": "fusiform",
+          "price": {
+            "currency": "USD",
+            "exponent": 2,
+            "minor_units": 1000,
+            "period": "month"
+          },
+          "provider_id": "opencode-go",
+          "quota_value": {
+            "refusal_reason": "No OpenCode Go account is measured yet; astrocyte has no Go readings. The operator can state a figure.",
+            "review_by_ms": 1797811200000,
+            "state": "not_established"
+          },
+          "review_by_ms": 1797811200000,
+          "source_ref": "https://opencode.ai/v2/docs/console/go/",
+          "tier": "go"
         }
       ],
       "resolved_at_ms": -1,

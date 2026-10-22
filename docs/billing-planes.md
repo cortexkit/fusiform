@@ -39,7 +39,7 @@ A `catalog.get` request selects a plane with `auth_method`:
 | `kind` | Meaning | Allowed on |
 | --- | --- | --- |
 | `upstream` | the provider's published rows are the bill; rules may fill classes the provider did not publish | any login method |
-| `quota_proxy` | a subscription billed as a flat fee against usage limits: API prices are relative quota stand-ins, not amounts billed or an established quota conversion formula | every method; `apikey` requires an explicit `rates_from_provider` |
+| `quota_proxy` | a subscription billed as a flat fee against usage limits: API prices are relative quota stand-ins, not amounts billed or an established quota conversion formula | every method; `apikey` requires an explicit `rates_from_provider`, which may name the plane's own provider |
 
 On a `quota_proxy` plane:
 
@@ -58,6 +58,34 @@ On a `quota_proxy` plane:
 
 A `quota_proxy` declaration on `apikey` without an explicit price provider is rejected when the file loads
 (`billing_planes.rs`: `a_quota_proxy_on_apikey_without_a_price_provider_is_rejected_with_position`).
+The price provider may be the plane's own provider: then nothing is borrowed,
+and the row's own rates are marked as in item 1 above, exactly as on the
+Anthropic `oauth` plane (`billing_planes.rs`:
+`an_apikey_quota_proxy_may_name_its_own_provider_as_the_price_source`;
+`billing_plane_tests::an_own_provider_price_source_marks_its_own_rates_and_borrows_nothing`).
+
+### Own-rate quota cards: OpenCode Go
+
+The `(opencode-go, apikey)` plane declares `rates_from_provider: "opencode-go"`.
+OpenCode Go is a subscription sold as an API key, and its docs value usage at
+the per-model token prices models.dev publishes for `opencode-go`. Each
+`rate.*` fact keeps its published value and gains `inherited_from` with
+`provider_id: "opencode-go"`, the row's `model.family`, `basis: "quota_proxy"`
+and no `model_id`. `model.canonical_id` is not followed. Mode rates are dropped
+as on every quota proxy
+(`golden_payload::opencode_go_apikey_serves_its_own_rates_as_quota_weights`).
+
+The [Go docs](https://opencode.ai/v2/docs/console/go/) state: “Usage limits
+are defined as monthly dollar amounts. The table below shows the monthly limit
+for each plan and the token costs for each model. Token pricing is the same for
+Go and Go Plus.” and “Each model has the following usage limits: 5-hour — 20%
+of the monthly limit; weekly — 50%; and monthly — 100%.” The per-model monthly
+limits ($15 for GPT 6 Luna, $60 for Kimi K2.7 Code, unlimited for the free
+models, and so on) are quota limits, not prices, and are not curated as rates.
+With Extra usage turned on, Go falls back to the account's pay-as-you-go
+balance once a limit is reached; this plane cannot tell those billed calls
+apart. No class rule is curated. Established 2026-10-22; review due 2026-12-21
+(60 days).
 
 ### Cross-provider quota cards: Kimi Code
 
@@ -161,7 +189,7 @@ plane:
 | `provider_id` | yes | a models.dev provider slug |
 | `auth_method` | yes | one of the four methods |
 | `kind` | yes | `upstream` or `quota_proxy` |
-| `rates_from_provider` | no | non-empty provider slug; only valid on `quota_proxy`; replace rates with the exact canonical row's non-mode rate card |
+| `rates_from_provider` | no | non-empty provider slug; only valid on `quota_proxy`; replace rates with the exact canonical row's non-mode rate card, unless it names the plane's own provider, which keeps the row's own rates |
 | `source_ref` | yes | the source that states how this login method bills |
 | `established_by`, `established_at_ms` | yes | who established the claim and when |
 | `review_by_ms` | yes | when it must be re-verified |

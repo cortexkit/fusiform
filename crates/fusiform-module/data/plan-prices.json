@@ -181,6 +181,22 @@
       "established_at_ms": 1791849600000,
       "review_by_ms": 1797033600000,
       "source_ref": "https://dev.meta.ai/products/muse-code"
+    },
+    {
+      "provider_id": "opencode-go",
+      "tier": "go",
+      "price": {"minor_units": 1000, "exponent": 2, "currency": "USD", "period": "month"},
+      "quota_value": {
+        "state": "not_established",
+        "refusal_reason": "No OpenCode Go account is measured yet; astrocyte has no Go readings. The operator can state a figure.",
+        "review_by_ms": 1797811200000
+      },
+      "note": "'Go $10 per month', read 2026-10-22 from https://opencode.ai/go, which also says 'OpenCode Go is a low cost $10/month subscription.' The docs at the source_ref list 'Go | $10/month' and 'Go Plus | $40/month'. Only Go is curated, because it is the tier the operator holds. The pages show '$' with no currency code and list monthly plans only, so USD and month follow the US web listing this plane prices. Usage is metered as per-model monthly dollar limits valued at the listed token prices (see the opencode-go apikey billing plane); those limits are quota, not price, and are not a quota_value measurement.",
+      "boundary_at_ms": 1792627200000,
+      "established_by": "fusiform",
+      "established_at_ms": 1792627200000,
+      "review_by_ms": 1797811200000,
+      "source_ref": "https://opencode.ai/v2/docs/console/go/"
     }
   ],
   "why_this_basis": "US list price, MONTHLY-BILLED basis. Recorded rather than assumed, and the basis is chosen for its FAILURE DIRECTION rather than for consistency: a higher denominator produces a lower multiplier, so recording the monthly-billed price makes a subscription look WORSE than it is for an annual subscriber. Every other known residual in the consuming calculation biases toward 'keep paying', so the one term that errs pessimistic is the one pushing back. Do not 'correct' this to the annual figure: it would remove the only conservative term. anthropic/pro is $17 billed annually against $20 monthly, a 15% spread, and that difference is deliberately not modelled here \u2014 an operator on an annual term or a grandfathered rate overrides this plane on their own credential record, which is where a fact about one account belongs. WEB-SUBSCRIPTION prices, additionally: the Max help centre states 'these prices are for web subscriptions only. Mobile pricing may vary depending on your app platform.' An operator who subscribed through an app store may pay an app-store markup this plane cannot see, which is a third basis axis beyond country and billing term. Same remedy as the others \u2014 the credential override carries what one account actually pays.",

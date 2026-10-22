@@ -15,6 +15,18 @@
       "rules": []
     },
     {
+      "provider_id": "opencode-go",
+      "auth_method": "apikey",
+      "kind": "quota_proxy",
+      "rates_from_provider": "opencode-go",
+      "source_ref": "https://opencode.ai/v2/docs/console/go/",
+      "established_by": "fusiform",
+      "established_at_ms": 1792627200000,
+      "review_by_ms": 1797811200000,
+      "note": "OpenCode Go is a subscription sold as an API key: 'You subscribe to OpenCode Go and get your API key.' The docs list 'Go | $10/month' and 'Go Plus | $40/month', and state: 'Usage limits are defined as monthly dollar amounts. The table below shows the monthly limit for each plan and the token costs for each model. Token pricing is the same for Go and Go Plus.' and 'Each model has the following usage limits: 5-hour \u2014 20% of the monthly limit; weekly \u2014 50%; and monthly \u2014 100%.' https://opencode.ai/go says the same: 'enforced across rolling windows: 20% of the monthly allowance per 5 hours, 50% per week, and 100% per month.' Usage is therefore valued per model at the listed token prices, which are the opencode-go rates models.dev publishes (read 2026-10-22: GLM-5.3 $1.40 input, $4.40 output, $0.26 cached read per 1M on both). Those rates are relative quota weights against a flat subscription, not amounts billed, so rates_from_provider names opencode-go itself and nothing is borrowed. The Go plan's per-model monthly limits (for example $15 for GPT 6 Luna and Kimi K3, $60 for Kimi K2.7 Code and GLM-5.3-Flash, Unlimited for LongCat 2.5 Preview Free and Beam Free) are quota limits, not prices, and are not encoded as rates. With Extra usage turned on, Go 'will fall back to your pay-as-you-go balance after you've reached your usage limits'; those calls are billed, and this plane cannot tell them apart. The pricing table's Cached Write column shows '-' for most models and states no billing rule, so no class rule is curated.",
+      "rules": []
+    },
+    {
       "provider_id": "meta",
       "auth_method": "oauth",
       "kind": "quota_proxy",

@@ -67,6 +67,23 @@ pub struct Plane {
     pub rules: Vec<BillingRule>,
 }
 
+impl Plane {
+    /// The different provider whose canonical API card this plane uses in place
+    /// of its own rates, if one is configured. Where a row has no matching card
+    /// there, the route serves its rates as unpriced instead.
+    ///
+    /// A `rates_from_provider` that names the plane's own provider borrows
+    /// nothing: it states explicitly that the provider's own published rates
+    /// are the quota weights. An `apikey` quota proxy must say where its prices
+    /// come from, and for a subscription sold as an API key (OpenCode Go) the
+    /// answer is the provider itself.
+    pub fn borrows_rates_from(&self) -> Option<&str> {
+        self.rates_from_provider
+            .as_deref()
+            .filter(|provider| *provider != self.provider_id)
+    }
+}
+
 /// How one token class (cache writes, say) is billed on a plane. It carries
 /// its own source and review date, because a plane can be right about its
 /// prices while one class rule rests on a different page.
@@ -409,7 +426,7 @@ mod tests {
             rejects.is_empty(),
             "the shipped file must parse: {rejects:?}"
         );
-        assert_eq!(table.len(), 6, "an empty or truncated table must not pass");
+        assert_eq!(table.len(), 7, "an empty or truncated table must not pass");
         assert_eq!(&table, planes());
         assert!(std::ptr::eq(planes(), planes()), "the table is parsed once");
     }
@@ -419,6 +436,7 @@ mod tests {
         let plane = &planes()[&("kimi-code-plan-global".into(), "apikey".into())];
         assert_eq!(plane.kind, PlaneKind::QuotaProxy);
         assert_eq!(plane.rates_from_provider.as_deref(), Some("moonshotai"));
+        assert_eq!(plane.borrows_rates_from(), Some("moonshotai"));
         assert!(plane.rules.is_empty());
         assert_eq!(
             plane.source_ref,
@@ -427,6 +445,25 @@ mod tests {
         assert_eq!(plane.established_by, "fusiform");
         assert_eq!(plane.established_at_ms, 1_792_368_000_000);
         assert_eq!(plane.review_by_ms, 1_797_552_000_000);
+        assert_eq!(
+            plane.review_by_ms - plane.established_at_ms,
+            60 * 86_400_000
+        );
+    }
+
+    #[test]
+    fn opencode_go_apikey_is_a_sourced_own_rate_quota_stand_in() {
+        let plane = &planes()[&("opencode-go".into(), "apikey".into())];
+        assert_eq!(plane.kind, PlaneKind::QuotaProxy);
+        // The apikey guard needs an explicit price source; naming the plane's
+        // own provider states that its own rates are the weights.
+        assert_eq!(plane.rates_from_provider.as_deref(), Some("opencode-go"));
+        assert_eq!(plane.borrows_rates_from(), None);
+        assert!(plane.rules.is_empty());
+        assert_eq!(plane.source_ref, "https://opencode.ai/v2/docs/console/go/");
+        assert_eq!(plane.established_by, "fusiform");
+        assert_eq!(plane.established_at_ms, 1_792_627_200_000); // 2026-10-22 UTC
+        assert_eq!(plane.review_by_ms, 1_797_811_200_000); // 2026-12-21 UTC
         assert_eq!(
             plane.review_by_ms - plane.established_at_ms,
             60 * 86_400_000
@@ -488,7 +525,7 @@ mod tests {
                 1,
             ),
         ];
-        assert_eq!(planes().len(), expected.len() + 2);
+        assert_eq!(planes().len(), expected.len() + 3);
         for (provider, auth, kind, source, count) in expected {
             let p = &planes()[&(provider.into(), auth.into())];
             assert_eq!(
@@ -608,6 +645,26 @@ mod tests {
                 .unwrap()
                 .rates_from_provider
                 .as_deref(),
+            Some("moonshotai")
+        );
+    }
+
+    #[test]
+    fn an_apikey_quota_proxy_may_name_its_own_provider_as_the_price_source() {
+        let mut own = plane("own", vec![]);
+        own["auth_method"] = json!("apikey");
+        own["rates_from_provider"] = json!("own");
+        let mut other = plane("other", vec![]);
+        other["auth_method"] = json!("apikey");
+        other["rates_from_provider"] = json!("moonshotai");
+        let (table, rejects) = load(vec![own, other]);
+        assert!(rejects.is_empty(), "{rejects:?}");
+        assert_eq!(
+            table[&("own".into(), "apikey".into())].borrows_rates_from(),
+            None
+        );
+        assert_eq!(
+            table[&("other".into(), "apikey".into())].borrows_rates_from(),
             Some("moonshotai")
         );
     }

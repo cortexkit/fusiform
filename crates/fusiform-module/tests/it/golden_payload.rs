@@ -291,6 +291,10 @@ fn plane_cases(cuts: &[(String, String)]) -> Vec<(String, serde_json::Value)> {
             "catalog.get — meta apikey excludes the curated row".into(),
             serde_json::json!({"provider_id":"meta", "auth_method":"apikey"}),
         ),
+        (
+            "opencode go — bulk quota weights".into(),
+            serde_json::json!({"provider_id":"opencode-go", "auth_method":"apikey"}),
+        ),
     ];
     for id in [
         "k3",
@@ -946,6 +950,62 @@ fn anthropic_oauth_marks_every_served_rate_and_drops_modes() {
         }
     }
     assert!(rates > 0, "oauth must serve real quota weights");
+}
+
+/// OpenCode Go's subscription is sold as an API key. Its plane must serve the
+/// provider's own published rates marked as quota weights, borrow nothing, and
+/// leave the plain read untouched: stripping the markers from the plane case
+/// must give back exactly what a read without a login method serves.
+#[test]
+fn opencode_go_apikey_serves_its_own_rates_as_quota_weights() {
+    let doc: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
+    let response = &doc["opencode go — bulk quota weights"]["response"];
+    assert_eq!(
+        response["plane"],
+        serde_json::json!({
+            "provider_id":"opencode-go", "auth_method":"apikey", "kind":"quota_proxy",
+            "source_ref":"https://opencode.ai/v2/docs/console/go/",
+            "review_by_ms":1797811200000_i64
+        })
+    );
+    assert!(response.get("billing_rules").is_none());
+
+    let (store, _dir, _cuts) = plane_store();
+    let request =
+        serde_json::json!({"name":"catalog.get", "arguments":{"provider_id":"opencode-go"}});
+    let plain = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+    let plain = serde_json::to_value(plain).unwrap();
+    assert!(plain.get("plane").is_none());
+
+    let mut unmarked = response["models"].clone();
+    let (mut priced, mut tiered) = (0, 0);
+    for row in unmarked.as_object_mut().unwrap().values_mut() {
+        let family = row["model.family"].clone();
+        for (key, value) in row.as_object_mut().unwrap() {
+            if !key.starts_with("rate.") {
+                continue;
+            }
+            assert!(!key.contains(".mode."), "{key}");
+            assert_eq!(
+                value["inherited_from"],
+                serde_json::json!({
+                    "provider_id":"opencode-go", "family":family, "basis":"quota_proxy"
+                }),
+                "{key}: the marker names the row's own provider and no borrowed model"
+            );
+            value.as_object_mut().unwrap().remove("inherited_from");
+            if value["state"] == "priced" {
+                priced += 1;
+                if key.contains(".above_context.") {
+                    tiered += 1;
+                }
+            }
+        }
+    }
+    // Controls: the fixture must hold priced base and tier rates, or the
+    // equality below would pass over rows with nothing to mark.
+    assert!(priced > 0 && tiered > 0, "priced {priced}, tiered {tiered}");
+    assert_eq!(unmarked, plain["models"]);
 }
 
 #[test]

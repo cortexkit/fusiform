@@ -1488,7 +1488,7 @@ fn finish_plane_view(
     response.plane = Some(plane.wire);
     for (identity, facts) in &mut response.models {
         if let Some(declared) = plane.declared {
-            if let Some(provider) = &declared.rates_from_provider {
+            if let Some(provider) = declared.borrows_rates_from() {
                 borrow_plane_rates(store, source, response.resolved_at_ms, facts, provider)?;
             }
             response
@@ -1594,7 +1594,7 @@ fn apply_billing_plane(
         // would claim a charge for a mode whose availability is not established.
         facts.retain(|key, _| !fusiform_store::rate_key::is_mode_rate(key));
     }
-    if plane.kind == PlaneKind::QuotaProxy && plane.rates_from_provider.is_none() {
+    if plane.kind == PlaneKind::QuotaProxy && plane.borrows_rates_from().is_none() {
         let marker = serde_json::to_value(fusiform_protocol::money::InheritedFrom {
             provider_id: plane.provider_id.clone(),
             family: facts
@@ -3938,6 +3938,99 @@ mod billing_plane_tests {
             control.models["moonshotai/kimi-k3"]["rate.output.mode.fast.above_context.272000"]
                 ["units"],
             800
+        );
+    }
+
+    /// OpenCode Go sells its subscription as an API key, and its plane names
+    /// its own provider in `rates_from_provider`. That must mark the row's own
+    /// published rates in place, exactly as the Anthropic oauth plane does,
+    /// and never follow `model.canonical_id` to another provider's card. The
+    /// Kimi plane, whose `rates_from_provider` names a different provider, is
+    /// the control that still borrows.
+    #[test]
+    fn an_own_provider_price_source_marks_its_own_rates_and_borrows_nothing() {
+        let (store, _dir) = store();
+        let provider = "opencode-go";
+        let mut extra = card();
+        extra.push(("model.canonical_id", json!("zai/test-model")));
+        seed(&store, provider, "test-model", extra);
+        // A present card at the canonical target, priced differently, so a
+        // borrow would show up as different units and a model_id marker.
+        seed(&store, "zai", "test-model", vec![("rate.input", priced(9))]);
+        seed(
+            &store,
+            "moonshotai",
+            "kimi-k3",
+            vec![("rate.input", priced(7))],
+        );
+        seed(
+            &store,
+            "kimi-code-plan-global",
+            "k3",
+            vec![
+                ("model.canonical_id", json!("moonshotai/kimi-k3")),
+                ("rate.input", json!({"state":"stated_zero"})),
+            ],
+        );
+        let plain = || {
+            let mut response = get(&store, json!({"provider_id":provider})).unwrap();
+            response.resolved_at_ms = 0;
+            serde_json::to_vec(&response).unwrap()
+        };
+        let before = plain();
+        let marker = json!({"provider_id":provider, "family":"real-family", "basis":"quota_proxy"});
+        for model in [None, Some("test-model")] {
+            for prefix in [None, Some("rate.")] {
+                let response = get(&store, request(provider, model, "apikey", prefix)).unwrap();
+                assert_eq!(
+                    serde_json::to_value(response.plane.as_ref().unwrap()).unwrap(),
+                    json!({
+                        "provider_id":provider, "auth_method":"apikey", "kind":"quota_proxy",
+                        "source_ref":"https://opencode.ai/v2/docs/console/go/",
+                        "review_by_ms":1797811200000_i64
+                    })
+                );
+                assert!(response.billing_rules.is_empty());
+                let facts = &response.models["opencode-go/test-model"];
+                let mut count = 0;
+                for (key, mut expected) in card() {
+                    if key.contains(".mode.") {
+                        assert!(!facts.contains_key(key), "{key}");
+                        continue;
+                    }
+                    expected["inherited_from"] = marker.clone();
+                    assert_eq!(facts[key], expected, "{key}");
+                    count += 1;
+                }
+                assert_eq!(
+                    facts.keys().filter(|k| k.starts_with("rate.")).count(),
+                    count
+                );
+            }
+        }
+        assert_eq!(before, plain(), "a plain read must keep its bytes");
+        let control = get(
+            &store,
+            json!({"provider_id":provider, "model_id":"test-model"}),
+        )
+        .unwrap();
+        for (key, value) in card() {
+            assert_eq!(control.models["opencode-go/test-model"][key], value);
+        }
+
+        let kimi = get(
+            &store,
+            request("kimi-code-plan-global", Some("k3"), "apikey", Some("rate.")),
+        )
+        .unwrap();
+        let rate = &kimi.models["kimi-code-plan-global/k3"]["rate.input"];
+        assert_eq!(rate["units"], 7);
+        assert_eq!(
+            rate["inherited_from"],
+            json!({
+                "provider_id":"moonshotai", "model_id":"kimi-k3",
+                "family":"real-family", "basis":"quota_proxy"
+            })
         );
     }
 

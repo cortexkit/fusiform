@@ -136,7 +136,7 @@ fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
             }
         }
     }
-    assert_eq!(responses, 21, "every successful plane case must decode");
+    assert_eq!(responses, 22, "every successful plane case must decode");
     assert!(
         no_api_card > 0 && cross_provider > 0,
         "Kimi's missing API cards and canonical target markers must decode"
