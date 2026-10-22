@@ -5325,8 +5325,8 @@ mod system_one_tests {
         ("typesafe", "jev-1.13.0", "decision", 42_000_000, None),
     ];
 
-    /// The shipped curated file with nothing held, so these rows are served.
-    /// The shipped file holds them; `curated_held_tests` covers that.
+    /// The shipped curated file with nothing held, so these rows are served
+    /// whatever the shipped file holds; `curated_held_tests` covers holding.
     fn served() -> crate::curated_models::Planted {
         crate::curated_models::plant(&crate::curated_models::document_without_held())
     }

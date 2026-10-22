@@ -134,30 +134,5 @@
       "review_by_ms": 1797724800000
     }
   ],
-  "held": [
-    {
-      "provider_id": "cloudflare-workers-ai",
-      "model_id": "@cf/cloudflare/clef",
-      "held_since_ms": 1792614600000,
-      "reason": "broca's catalog assembly refuses its whole refresh when a present row lacks limit.context, capability.attachment, capability.reasoning or capability.tool_call, and this row omits some of them because the vendor does not state them. Held, not deleted, so the id stays reported as retired; re-listed (this entry removed) once broca's fix is placed."
-    },
-    {
-      "provider_id": "cloudflare-workers-ai",
-      "model_id": "@cf/cloudflare/clef-flash",
-      "held_since_ms": 1792614600000,
-      "reason": "broca's catalog assembly refuses its whole refresh when a present row lacks limit.context, capability.attachment, capability.reasoning or capability.tool_call, and this row omits some of them because the vendor does not state them. Held, not deleted, so the id stays reported as retired; re-listed (this entry removed) once broca's fix is placed."
-    },
-    {
-      "provider_id": "cloudflare-workers-ai",
-      "model_id": "@cf/cloudflare/clairic",
-      "held_since_ms": 1792614600000,
-      "reason": "broca's catalog assembly refuses its whole refresh when a present row lacks limit.context, capability.attachment, capability.reasoning or capability.tool_call, and this row omits some of them because the vendor does not state them. Held, not deleted, so the id stays reported as retired; re-listed (this entry removed) once broca's fix is placed."
-    },
-    {
-      "provider_id": "typesafe",
-      "model_id": "jev-1.13.0",
-      "held_since_ms": 1792614600000,
-      "reason": "broca's catalog assembly refuses its whole refresh when a present row lacks limit.context, capability.attachment, capability.reasoning or capability.tool_call, and this row omits some of them because the vendor does not state them. Held, not deleted, so the id stays reported as retired; re-listed (this entry removed) once broca's fix is placed."
-    }
-  ]
+  "held": []
 }

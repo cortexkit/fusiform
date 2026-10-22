@@ -3,8 +3,9 @@
 //! A held row keeps its data in the file but is not served. On current reads
 //! its id is reported the way a retired alias is: absent on a retired-inclusive
 //! read and listed in `retired` on a named read, so a consumer that tracks
-//! identities never sees it vanish. These tests read the shipped file, which
-//! holds the four System One rows, against a store that knows none of them.
+//! identities never sees it vanish. These tests plant a copy of the shipped
+//! file that holds the four System One rows, whatever the shipped file holds
+//! today, against a store that knows none of them.
 //! `curated_withdrawn_tests` covers a held id the store holds as a withdrawn
 //! upstream row.
 
@@ -20,10 +21,16 @@ const HELD: &[(&str, &str)] = &[
     ("typesafe", "jev-1.13.0"),
 ];
 
-/// The shipped `held_since_ms`, 2026-10-21T20:30:00Z.
-const HELD_SINCE_MS: i64 = 1_792_614_600_000;
+/// The planted `held_since_ms`, 2026-10-21T20:30:00Z.
+const HELD_SINCE_MS: i64 = crate::curated_models::TEST_HELD_SINCE_MS;
 
-fn store() -> (CatalogStore, tempfile::TempDir) {
+/// An empty store, with the holding document planted for the guard's life.
+fn store() -> (
+    CatalogStore,
+    tempfile::TempDir,
+    crate::curated_models::Planted,
+) {
+    let held = crate::curated_models::plant(&crate::curated_models::document_holding_system_one());
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -34,7 +41,7 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
         },
     })
     .unwrap();
-    (store, dir)
+    (store, dir, held)
 }
 
 fn try_get(store: &CatalogStore, args: Value) -> Result<CatalogGetResponse, RouteError> {
@@ -119,7 +126,7 @@ fn assert_absent_once(responses: &[CatalogGetResponse], ids: &[(&str, &str)], re
 
 #[test]
 fn held_rows_are_not_served_on_current_reads() {
-    let (store, _dir) = store();
+    let (store, _dir, _held) = store();
     let bulk = get(&store, json!({}));
     assert_not_listed(&bulk, "bulk");
     // Control: the read serves curated rows at all, so the absence above is
@@ -151,7 +158,7 @@ fn held_rows_are_not_served_on_current_reads() {
 
 #[test]
 fn held_rows_are_absent_identities_on_retired_inclusive_reads() {
-    let (store, _dir) = store();
+    let (store, _dir, _held) = store();
     assert_absent_once(
         &[get(&store, json!({"include_retired":true}))],
         HELD,
@@ -193,7 +200,7 @@ fn held_rows_are_absent_identities_on_retired_inclusive_reads() {
 
 #[test]
 fn a_named_read_of_a_held_id_reports_it_retired() {
-    let (store, _dir) = store();
+    let (store, _dir, _held) = store();
     for held in HELD {
         let (provider, model) = held;
         let id = id(held);
@@ -227,7 +234,7 @@ fn a_named_read_of_a_held_id_reports_it_retired() {
 /// a plain provider read answers with zero models, not a refusal.
 #[test]
 fn a_provider_whose_only_row_is_held_stays_known() {
-    let (store, _dir) = store();
+    let (store, _dir, _held) = store();
     let plain = get(&store, json!({"provider_id":"typesafe"}));
     assert!(plain.models.is_empty(), "{:?}", plain.models);
     assert!(plain.curated.is_empty() && plain.retired.is_empty());
@@ -260,7 +267,7 @@ fn a_provider_whose_only_row_is_held_stays_known() {
 /// store has no eras for the id, so history refuses it as an unknown model.
 #[test]
 fn history_of_a_held_id_names_no_curated_source() {
-    let (store, _dir) = store();
+    let (store, _dir, _held) = store();
     for (provider, model) in HELD {
         let refused = serve_history(
             &store,
@@ -279,11 +286,11 @@ fn history_of_a_held_id_names_no_curated_source() {
     }
 }
 
-/// Control: removing one held entry from the file serves that row as curated
+/// Control: removing one held entry from the document serves that row as curated
 /// again, and only that row.
 #[test]
 fn releasing_a_held_entry_serves_the_row_as_curated_again() {
-    let (store, _dir) = store();
+    let (store, _dir, _held) = store();
     for released in HELD {
         let _planted =
             crate::curated_models::plant(&crate::curated_models::document_releasing(&[*released]));

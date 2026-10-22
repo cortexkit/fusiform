@@ -308,15 +308,50 @@ impl Drop for Planted {
     }
 }
 
-/// The shipped document with the held entries for these ids removed, so
-/// those rows are served as curated again wherever upstream does not
+/// The four System One rows, as (provider, model): the rows the held tests
+/// hold. They were held in the shipped file from 2026-10-21 until broca's
+/// catalog assembly accepted rows missing a context or capability fact.
+#[cfg(test)]
+pub(crate) const TEST_HELD: &[(&str, &str)] = &[
+    ("cloudflare-workers-ai", "@cf/cloudflare/clairic"),
+    ("cloudflare-workers-ai", "@cf/cloudflare/clef"),
+    ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
+    ("typesafe", "jev-1.13.0"),
+];
+
+/// The `held_since_ms` the held tests use, 2026-10-21T20:30:00Z.
+#[cfg(test)]
+pub(crate) const TEST_HELD_SINCE_MS: i64 = 1_792_614_600_000;
+
+/// The shipped document with `TEST_HELD` held, whatever the shipped file
+/// holds today. The held tests plant this so they test the mechanism, not
+/// whichever rows happen to be held when they run.
+#[cfg(test)]
+pub(crate) fn document_holding_system_one() -> String {
+    let mut doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
+    doc["held"] = TEST_HELD
+        .iter()
+        .map(|(provider, model)| {
+            serde_json::json!({
+                "provider_id": provider,
+                "model_id": model,
+                "held_since_ms": TEST_HELD_SINCE_MS,
+                "reason": "held by a test: a consumer's catalog assembly refused this row; re-listed once it accepts it",
+            })
+        })
+        .collect();
+    serde_json::to_string(&doc).unwrap()
+}
+
+/// `document_holding_system_one` with the held entries for these ids removed,
+/// so those rows are served as curated again wherever upstream does not
 /// currently publish them.
 #[cfg(test)]
 pub(crate) fn document_releasing(ids: &[(&str, &str)]) -> String {
-    let mut doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
+    let mut doc: serde_json::Value = serde_json::from_str(&document_holding_system_one()).unwrap();
     let held = doc["held"]
         .as_array_mut()
-        .expect("the shipped file holds rows");
+        .expect("the test document holds rows");
     let before = held.len();
     held.retain(|entry| {
         !ids.iter().any(|(provider, model)| {
@@ -326,7 +361,7 @@ pub(crate) fn document_releasing(ids: &[(&str, &str)]) -> String {
     assert_eq!(
         before - held.len(),
         ids.len(),
-        "every released id must be held in the shipped file"
+        "every released id must be held in the test document"
     );
     serde_json::to_string(&doc).unwrap()
 }
@@ -390,28 +425,28 @@ mod tests {
         planted_in("meta", "muse-wonder-full-1.0", edit)
     }
 
-    /// The rows the shipped file holds: the four System One rows a consumer's
-    /// catalog assembly refuses while they lack context or capability facts.
-    const SHIPPED_HELD: &[(&str, &str)] = &[
-        ("cloudflare-workers-ai", "@cf/cloudflare/clairic"),
-        ("cloudflare-workers-ai", "@cf/cloudflare/clef"),
-        ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
-        ("typesafe", "jev-1.13.0"),
-    ];
+    const SHIPPED_HELD: &[(&str, &str)] = TEST_HELD;
+    const HELD_SINCE_MS: i64 = TEST_HELD_SINCE_MS;
 
-    /// 2026-10-21T20:30:00Z.
-    const HELD_SINCE_MS: i64 = 1_792_614_600_000;
-
-    /// The shipped document with one edit applied to its `held` array.
+    /// The holding test document with one edit applied to its `held` array.
     fn planted_held(edit: impl FnOnce(&mut Vec<serde_json::Value>)) -> String {
-        let mut doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
+        let mut doc: serde_json::Value =
+            serde_json::from_str(&document_holding_system_one()).unwrap();
         edit(doc["held"].as_array_mut().unwrap());
         serde_json::to_string(&doc).unwrap()
     }
 
     #[test]
-    fn shipped_held_entries_load_and_keep_their_rows() {
-        let (table, rejects) = load_table_reporting_rejects(DOCUMENT);
+    fn the_shipped_file_loads_and_its_held_list_names_rows() {
+        // What the shipped file holds changes over time, so this checks only
+        // that whatever it holds is valid.
+        let (_, rejects) = load_table_reporting_rejects(DOCUMENT);
+        assert!(rejects.is_empty(), "{rejects:?}");
+    }
+
+    #[test]
+    fn held_entries_load_and_keep_their_rows() {
+        let (table, rejects) = load_table_reporting_rejects(&document_holding_system_one());
         assert!(rejects.is_empty(), "{rejects:?}");
         let ids: Vec<(&str, &str)> = table
             .held
@@ -421,8 +456,6 @@ mod tests {
         assert_eq!(ids, SHIPPED_HELD);
         for entry in table.held.values() {
             assert_eq!(entry.held_since_ms, HELD_SINCE_MS);
-            assert!(entry.reason.contains("broca"), "{}", entry.reason);
-            assert!(entry.reason.contains("re-listed"), "{}", entry.reason);
         }
         // A held row keeps its full data in `models`.
         let ids: Vec<(&str, &str)> = table

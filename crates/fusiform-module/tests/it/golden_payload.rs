@@ -1440,10 +1440,9 @@ fn cases() -> Vec<(&'static str, String)> {
             r#"{"name":"catalog.history","arguments":{"provider_id":"meta","model_id":"muse-wonder-full-1.0","fact_key":"limit.context"}}"#.to_string(),
         ),
         (
-            // A typed decision model. While the shipped file holds it, and the
-            // fixture's store has never seen the id, a named read reports it
-            // in `retired` at its `held_since_ms`; served, it states
-            // `model.kind` and a stated-zero output rate beside a priced input.
+            // A typed decision model: it states `model.kind` and a stated-zero
+            // output rate beside a priced input. If the shipped file ever
+            // holds it, this case shows the id in `retired` instead.
             "catalog.get — a curated decision model",
             r#"{"name":"catalog.get","arguments":{"provider_id":"cloudflare-workers-ai","model_id":"@cf/cloudflare/clef"}}"#.to_string(),
         ),
@@ -1453,16 +1452,15 @@ fn cases() -> Vec<(&'static str, String)> {
         ),
         (
             // models.dev does not list this provider at all, so every row a
-            // provider read returns is curated. Its only row is held, so a
-            // plain read answers with zero models rather than refusing.
+            // provider read returns is curated.
             "catalog.get — a provider served only through curated rows",
             r#"{"name":"catalog.get","arguments":{"provider_id":"typesafe"}}"#.to_string(),
         ),
         (
-            // The shipped file holds typesafe's only row. A retired-inclusive
-            // read still lists its id, marked absent, so a consumer tracking
-            // identities does not see it vanish.
-            "catalog.get — a held curated row stays an absent identity",
+            // A retired-inclusive read of the same provider. While a curated
+            // row is held this pins its absent identity; with none held it
+            // pins that the served row is unchanged by include_retired.
+            "catalog.get — a curated-only provider read including retired rows",
             r#"{"name":"catalog.get","arguments":{"provider_id":"typesafe","include_retired":true}}"#.to_string(),
         ),
     ]

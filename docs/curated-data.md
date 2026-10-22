@@ -173,9 +173,12 @@ alias file's `retired` list.
 Load rules: a held entry naming no row in `models`, an id held twice, and an
 entry without a reason or a positive `held_since_ms` are rejects
 (`planted_held_entry_naming_no_row_is_rejected`,
-`planted_duplicate_or_malformed_held_entry_is_rejected`); the shipped entries
-load (`shipped_held_entries_load_and_keep_their_rows`). Serving is tested in
-`route/curated_held_tests.rs`, including the control that removing a held
+`planted_duplicate_or_malformed_held_entry_is_rejected`), and held entries
+load (`held_entries_load_and_keep_their_rows`). These tests, and the serving
+tests in
+`route/curated_held_tests.rs`, plant a copy of the file that holds the four
+System One rows, so they test the mechanism whatever the shipped file holds.
+They include the control that removing a held
 entry serves the row as curated again
 (`releasing_a_held_entry_serves_the_row_as_curated_again`), and for a held id
 the store holds as a withdrawn upstream row in
@@ -183,6 +186,10 @@ the store holds as a withdrawn upstream row in
 The serving tests in `system_one_tests` and `curated_withdrawn_tests` that
 cover these rows as served plant the shipped file with its `held` array
 removed.
+
+The four System One rows were held from 2026-10-21 20:30Z until broca's
+catalog assembly accepted rows missing a context or capability fact (broca
+0.3.247, placed 2026-10-22); the shipped file now holds nothing.
 
 Load rules:
 

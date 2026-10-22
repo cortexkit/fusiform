@@ -93,7 +93,6 @@ fn ingest(store: &CatalogStore, at: i64, lists_clef: bool) {
 
 /// The shipped curated file with nothing held, so clef is served as curated
 /// whenever upstream does not currently publish it.
-/// The shipped file holds clef; the held tests below read it that way.
 fn served() -> crate::curated_models::Planted {
     crate::curated_models::plant(&crate::curated_models::document_without_held())
 }
@@ -313,11 +312,12 @@ fn an_upstream_relisting_wins_over_the_curated_row_again() {
     assert!(kind.curated.is_none(), "upstream wins on history too");
 }
 
-/// The shipped file holds clef. With clef withdrawn upstream, the store's own
+/// With clef held and withdrawn upstream, the store's own
 /// withdrawn row is what every current read reports: no curated row, no
 /// second row for the id, and on a named read the store's retirement.
 #[test]
 fn a_held_row_leaves_the_withdrawn_upstream_row_to_report_itself() {
+    let _held = crate::curated_models::plant(&crate::curated_models::document_holding_system_one());
     let (store, _dir) = empty_store();
     ingest(&store, LISTED_AT, true);
     ingest(&store, WITHDRAWN_AT, false);
