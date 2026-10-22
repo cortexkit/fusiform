@@ -28,3 +28,13 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# Dependencies only (not workspace members) build optimised in the dev and test
+# profile. The suites spend most of their time inside serde_json and SQLite:
+# loading the ~9,000-model seed and querying the store. Measured on the Linux
+# runner (4 vCPU), the `it` test binary ran in 18.0 s unoptimised and 10.2 s
+# with this. Workspace crates stay unoptimised, so an edit recompiles as fast
+# as before; the cost is a slower first build of the dependency tree, which CI
+# caches.
+[profile.dev.package."*"]
+opt-level = 2
