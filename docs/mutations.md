@@ -62,13 +62,22 @@ and then:
 - on a push to `master`: rows whose files changed since the previous master tip;
 - on pull requests and pushes to `train/**`: rows the change touches, against
   the pull-request base or train branch's merge base, respectively;
-- on the nightly schedule: every row with `--broad`. A catch outside the
-  expected target is graded `CAUGHT_BROADLY` unless the row is marked `hub`,
-  which declares that the mutated code is shared and is expected to redden
-  other targets too. The full replay remains nightly because a changed helper
-  or fixture can weaken a proof without changing the row's files.
+- on the nightly schedule: every row with `--broad`, split across four
+  parallel shards. A catch outside the expected target is graded
+  `CAUGHT_BROADLY` unless the row is marked `hub`, which declares that the
+  mutated code is shared and is expected to redden other targets too. The full
+  replay remains nightly because a changed helper or fixture can weaken a
+  proof without changing the row's files.
 
-The run's report is uploaded as the `mutations` artifact.
+Push and pull-request replays run with `--narrow`: each row runs only the tests
+it names instead of its whole test target, so a row is still CAUGHT or
+SURVIVED but cannot be graded WRONG_TEST or show collateral failures. Hub rows
+keep their full scope. Most rows name tests in the `it` binary, whose full run
+takes about 80 seconds on the CI runner, so a broad push replay spent that on
+every selected row.
+
+Each run's report is uploaded as a `mutations-<shard>` artifact
+(`mutations-1` for pushes and pull requests).
 
 ## 4. Adding a row
 
