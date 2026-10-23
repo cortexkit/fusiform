@@ -28,5 +28,6 @@ mod served_corrections;
 mod shrink_guard;
 mod structured_output;
 mod tick;
+mod wire_claims;
 mod wire_fact_table;
 mod wire_types_decode_the_wire;

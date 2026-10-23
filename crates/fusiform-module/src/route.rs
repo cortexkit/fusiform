@@ -1938,6 +1938,11 @@ fn render(
                 // instead of presenting as an absent fact.
                 serde_json::Value::String(raw.clone())
             });
+            // A withdrawn connection claim stays in history as a null era,
+            // but catalog absence must still mean the connection claim is unknown.
+            if key.as_str().starts_with(fusiform_store::prefix::WIRE) && value.is_null() {
+                continue;
+            }
             name_the_provenance_of_a_pre_0_11_row(&mut value);
             facts.insert(key.as_str().to_string(), value);
         }
@@ -3288,6 +3293,38 @@ mod alias_tests {
         seed_model(&store, "antigravity-gemini-3.7-flash", 1);
         let bulk = get(&store, r#"{"provider_id":"google","include_retired":true}"#).unwrap();
         assert_eq!(bulk.models[RETIRED]["existence"], "present");
+    }
+
+    #[test]
+    fn wire_facts_are_not_projected_onto_an_alias() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-3.8-flash", 300_000_000);
+        for key in ["wire.npm", "wire.api", "wire.shape"] {
+            store
+                .append_eras(&[era_at(
+                    "gemini-3.8-flash",
+                    key,
+                    r#"{"value":"target-only","from":"model"}"#,
+                    2_000,
+                )])
+                .unwrap();
+        }
+        // Both named and bulk reads must keep the alias's backend unknown.
+        for args in [named(""), r#"{"provider_id":"google"}"#.to_owned()] {
+            let response = get(&store, &args).unwrap();
+            assert!(response.models.contains_key(ALIAS));
+            for key in ["wire.npm", "wire.api", "wire.shape"] {
+                assert!(!response.models[ALIAS].contains_key(key), "alias has {key}");
+            }
+        }
+        let target = get(
+            &store,
+            r#"{"provider_id":"google","model_id":"gemini-3.8-flash"}"#,
+        )
+        .unwrap();
+        for key in ["wire.npm", "wire.api", "wire.shape"] {
+            assert_eq!(target.models[TARGET][key]["value"], "target-only");
+        }
     }
 
     #[test]
@@ -4994,11 +5031,16 @@ fn aliased_response(
     Ok(Some(response))
 }
 
-/// A model capability does not necessarily survive routing through an alias.
+/// Route-dependent claims do not necessarily survive routing through an alias.
 /// Whether a route enforces JSON schema depends on the route's own behavior,
 /// which the target model's structured-output claim cannot establish.
+/// Its client package, endpoint and request shape likewise describe the target
+/// backend, not the backend reached through the alias.
 fn omit_route_dependent_alias_facts(facts: &mut BTreeMap<String, serde_json::Value>) {
     facts.remove("capability.structured_output");
+    facts.remove("wire.npm");
+    facts.remove("wire.api");
+    facts.remove("wire.shape");
 }
 
 /// Mark every rate on an aliased entry as the target's, not the route's.

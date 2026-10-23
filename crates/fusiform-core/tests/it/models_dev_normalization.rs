@@ -503,13 +503,12 @@ fn tiered_audio_is_not_served_even_with_evidence() {
     assert!(audio_rate(model(&outcome, "p/m")).is_some());
 }
 
-/// Renderer-selecting fields are recorded as quarantined and never as data.
+/// Legacy presence flags remain available alongside served connection claims.
 #[test]
 fn renderer_selecting_fields_are_quarantined() {
     let outcome = catalog();
 
-    // A per-model provider override carrying literal headers and body
-    // parameters. Both models come from the same provider, so the flag is
+    // A per-model provider override. Both models come from the same provider, so the flag is
     // proven to track the model's own field rather than its provider's.
     let qwen = model(&outcome, "opencode-go/qwen3.7-plus");
     assert!(
@@ -529,21 +528,8 @@ fn renderer_selecting_fields_are_quarantined() {
         vec!["fast".to_string()]
     );
 
-    // The provider's API base URL is flagged, never carried as a value.
-    //
-    // A base URL decides which company receives the request, with credentials
-    // attached, so a wrong one is not a degraded answer. It was previously
-    // normalized into `api_base: Option<String>` and read by nothing — UNREAD
-    // rather than quarantined, which is one refactor away from a wire it must
-    // never reach.
-    //
-    // Asserted as a flag rather than by checking the value is absent, because
-    // "the value is not there" would also pass if the field were dropped
-    // entirely, and the flag is what tells a consumer the upstream HAS one.
-    // Both directions, because a flag that is always true says nothing. The
-    // fixture happens to carry both kinds, which is what caught the first
-    // version of this assertion: I reached for `openai` and it publishes no
-    // `api` at all.
+    // The flags describe provider defaults, independently of model overrides.
+    // Both directions matter because a flag that is always true says nothing.
     let provider = |id: &str| {
         outcome
             .catalog
@@ -562,7 +548,7 @@ fn renderer_selecting_fields_are_quarantined() {
          cannot tell a consumer anything"
     );
 
-    // The provider's npm adapter is flagged, never served as a field.
+    // The provider's npm default is still flagged.
     let anthropic = outcome
         .catalog
         .providers
@@ -772,10 +758,8 @@ fn a_zero_limit_and_an_absent_limit_are_both_unknown() {
 /// The normalized provider carries only what fusiform decided to keep.
 ///
 /// An unread field is a decision nobody made. `name`, `doc` and `env` were all
-/// normalized into the domain type and read by nothing, which is the state that
-/// produced the `api_base` hazard: a value sitting in a serializable struct is
-/// one refactor from a wire, and nothing about its name warns the person doing
-/// the refactor.
+/// normalized into the domain type and read by nothing. Connection defaults,
+/// unlike that metadata, are now deliberately resolved into served model claims.
 ///
 /// This test is a FENCE at the producer rather than a value check. It fails
 /// when a field is added, which is the moment the decision has to be made —
@@ -796,32 +780,6 @@ fn a_normalized_provider_carries_no_undecided_fields() {
         api_base_quarantined: _,
         models: _,
     } = p;
-
-    // And the quarantined values are not reachable from the whole catalog by
-    // ANY rendering. Checked against the debug output rather than a serialized
-    // one, because `NormalizedCatalog` does not implement `Serialize` at all --
-    // which is a stronger property than this test first assumed and worth
-    // stating: the domain type cannot be handed to serde by accident, so a wire
-    // leak would take a deliberate mapping step.
-    //
-    // Debug is the widest rendering available, so a value absent from it is
-    // absent from the type.
-    let rendered = format!("{:?}", outcome.catalog);
-    assert!(
-        !rendered.contains("api.anyapi.ai"),
-        "a quarantined base URL must not be reachable from the catalog at all"
-    );
-    assert!(
-        !rendered.contains("@ai-sdk/"),
-        "a quarantined npm adapter must not be reachable either"
-    );
-
-    // The control: a value that SHOULD be there is, so the two assertions above
-    // are not passing because the rendering is empty.
-    assert!(
-        rendered.contains("claude-sonnet-4-5"),
-        "the rendering must actually contain the catalog"
-    );
 }
 
 /// Every tier the upstream publishes is a CONTEXT tier, and a tier that is not
@@ -954,4 +912,70 @@ fn structured_output_preserves_absence_and_published_booleans() {
     assert_eq!(read(r#","structured_output":null"#), None);
     assert_eq!(read(r#","structured_output":true"#), Some(true));
     assert_eq!(read(r#","structured_output":false"#), Some(false));
+}
+#[test]
+fn wire_claims_preserve_values_precedence_provenance_and_absence() {
+    use fusiform_core::normalize::{WireClaim, WireFacts, WireOrigin};
+    let outcome = normalize_models_dev(br#"{
+        "p": {"npm": "@sdk/provider", "api": "https://provider/v1/", "models": {
+            "model": {"provider": {"npm": "@sdk/model", "api": "https://model/v1//", "shape": "future-shape"}},
+            "provider": {},
+            "partial": {"provider": {"npm": ""}}
+        }},
+        "unknown": {"models": {"none": {}}}
+    }"#).unwrap();
+    let claims = |provider, model| {
+        &outcome
+            .catalog
+            .models()
+            .find(|m| m.key.provider_id == provider && m.key.model_id == model)
+            .unwrap()
+            .wire
+    };
+    assert_eq!(
+        claims("p", "model"),
+        &WireFacts {
+            npm: Some(WireClaim {
+                value: "@sdk/model".into(),
+                from: WireOrigin::Model
+            }),
+            api: Some(WireClaim {
+                value: "https://model/v1//".into(),
+                from: WireOrigin::Model
+            }),
+            shape: Some(WireClaim {
+                value: "future-shape".into(),
+                from: WireOrigin::Model
+            }),
+        }
+    );
+    assert_eq!(
+        claims("p", "provider"),
+        &WireFacts {
+            npm: Some(WireClaim {
+                value: "@sdk/provider".into(),
+                from: WireOrigin::Provider
+            }),
+            api: Some(WireClaim {
+                value: "https://provider/v1/".into(),
+                from: WireOrigin::Provider
+            }),
+            shape: None,
+        }
+    );
+    assert_eq!(
+        claims("p", "partial"),
+        &WireFacts {
+            npm: Some(WireClaim {
+                value: "".into(),
+                from: WireOrigin::Model
+            }),
+            api: Some(WireClaim {
+                value: "https://provider/v1/".into(),
+                from: WireOrigin::Provider
+            }),
+            shape: None,
+        }
+    );
+    assert_eq!(claims("unknown", "none"), &WireFacts::default());
 }

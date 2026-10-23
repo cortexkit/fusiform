@@ -1198,6 +1198,15 @@ fn every_field_id() -> Vec<fusiform_core::FieldId> {
         FieldId::Model {
             attribute: fusiform_core::ModelAttributeId::Status,
         },
+        FieldId::Wire {
+            attribute: fusiform_core::WireAttributeId::Npm,
+        },
+        FieldId::Wire {
+            attribute: fusiform_core::WireAttributeId::Api,
+        },
+        FieldId::Wire {
+            attribute: fusiform_core::WireAttributeId::Shape,
+        },
     ]
 }
 

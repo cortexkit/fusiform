@@ -12,8 +12,8 @@
 //! at the door, because every type below is shaped by one of them:
 //!
 //! - **Fusiform describes; it never dispatches.** It may say what a model is,
-//!   never how to speak to it. Fields that select a renderer are parsed, kept
-//!   as provenance, and never served.
+//!   including published connection claims. Consumers interpret client packages
+//!   and request shapes; fusiform never chooses a renderer or transport policy.
 //! - **Upstreams are data, never authority.** Every fact carries its source,
 //!   when it was observed, and how its boundary was determined, so a consumer
 //!   can always answer "why does the catalog say this".
@@ -276,6 +276,17 @@ pub enum FieldId {
     /// another's, so a misread here produces a confident wrong answer about a
     /// DIFFERENT provider's model, which is the worst direction available.
     Model { attribute: ModelAttributeId },
+    /// A published connection claim, independently correctable per field.
+    Wire { attribute: WireAttributeId },
+}
+
+/// Which upstream connection claim a [`FieldId::Wire`] names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WireAttributeId {
+    Npm,
+    Api,
+    Shape,
 }
 
 /// Which upstream model attribute a [`FieldId::Model`] names.

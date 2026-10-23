@@ -285,14 +285,9 @@ pub fn catalog_digest(catalog: &NormalizedCatalog) -> String {
 /// and because era comparison is then string equality on a canonical rendering
 /// rather than a per-type comparison that must be written for each new fact.
 ///
-/// Only served facts appear here. Fields that decide HOW a request is spoken to
-/// a provider — the SDK adapter, per-model header and body overrides, the body
-/// parameters and headers that switch on an experimental mode — are
-/// deliberately absent (a mode's PRICE is served, as a mode rate), because fusiform describes what
-/// models are and never how to talk to them. Their absence is structural rather
-/// than a rule someone must remember: they are not in this function, so no code
-/// path can write them into an era, and a field added to the normalizer later
-/// does not silently acquire history.
+/// Published connection claims are served verbatim. Header and body overrides
+/// remain absent; consumers own transport behavior, including how to select a
+/// mode whose price is served as a mode rate.
 /// The complete set of fact keys a model contributes to the store.
 ///
 /// Public so a test can assert the SET rather than spot-check members. The fact
@@ -329,6 +324,9 @@ pub const SERVED_FACT_NAMESPACE: &[&str] = &[
     // A lifecycle label is upstream's claim about this row, not proof that
     // sibling providers have the same availability or lifecycle.
     "model.status",
+    "wire.npm",
+    "wire.api",
+    "wire.shape",
     "limit.context",
     "limit.output",
     "capability.reasoning",
@@ -438,6 +436,18 @@ fn facts_of(model: &NormalizedModel) -> Vec<(FactKey, String)> {
             FactKey::capability("structured_output"),
             json_opt_bool(Some(supported)),
         ));
+    }
+
+    // Total destructuring keeps a new domain connection field from silently
+    // disappearing at the storage boundary. Unpublished values create no fact.
+    let fusiform_core::normalize::WireFacts { npm, api, shape } = &model.wire;
+    for (name, claim) in [("npm", npm), ("api", api), ("shape", shape)] {
+        if let Some(claim) = claim {
+            facts.push((
+                FactKey::wire(name),
+                serde_json::to_string(claim).expect("a wire claim is JSON strings"),
+            ));
+        }
     }
 
     // Rates, keyed per token class and condition. A rate row's key carries

@@ -90,16 +90,21 @@ const UNKNOWN_REASONING: &str = r#"{
 /// The pair also publishes a shared canonical identity and differing lifecycle
 /// labels, including an unknown value, so these upstream strings reach the wire
 /// without being confused with the row ids or a closed status vocabulary.
+/// Connection claims cover provider defaults and model overrides without
+/// changing the pair's artifact identity or price relationship.
 const INHERITANCE_PAIR: &str = r#"{
   "zai": {
     "id": "zai",
     "name": "Synthetic zai entry (models are synthetic, the id is real)",
+    "npm": "@sdk/provider",
+    "api": "https://provider.example/v1/",
     "models": {
       "synthetic-glm": {
         "id": "synthetic-glm",
         "name": "A model whose weights the creator publishes and prices",
         "canonical_model_id": "zai/synthetic-glm-1.0",
         "status": "future-preview",
+        "provider": { "npm": "@sdk/model", "api": "https://model.example/v1//", "shape": "responses" },
         "family": "glm",
         "open_weights": true,
         "limit": { "context": 128000, "output": 8192 },

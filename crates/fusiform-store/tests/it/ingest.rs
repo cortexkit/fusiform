@@ -871,7 +871,7 @@ fn the_digest_moves_exactly_when_the_diff_does() {
 
 /// The digest ignores fields fusiform does not serve.
 ///
-/// A renderer-selecting field changing is a real upstream event and an operator
+/// Credential metadata changing is a real upstream event and an operator
 /// may want to see it, but it is not a change to anything fusiform serves.
 /// Waking every consumer for it would train them to ignore the channel.
 #[test]
@@ -881,25 +881,21 @@ fn the_digest_ignores_quarantined_fields() {
     let base = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
     let before = catalog_digest(&base);
 
-    // Change the provider's SDK adapter — the single most renderer-selecting
-    // fact in the document.
+    // Credential environment names remain unread, unlike connection claims.
     let doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
     let mut doc = doc.as_object().unwrap().clone();
     doc.get_mut("anthropic")
         .unwrap()
         .as_object_mut()
         .unwrap()
-        .insert(
-            "npm".to_string(),
-            serde_json::json!("@ai-sdk/something-else"),
-        );
+        .insert("env".to_string(), serde_json::json!(["ANOTHER_API_KEY"]));
     let mutated = serde_json::to_vec(&doc).unwrap();
 
     let changed = normalize_models_dev(&mutated).unwrap().catalog;
     assert_eq!(
         catalog_digest(&changed),
         before,
-        "a renderer-selecting field must not move the served digest"
+        "unserved credential metadata must not move the served digest"
     );
 }
 

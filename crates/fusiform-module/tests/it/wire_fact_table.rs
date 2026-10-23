@@ -64,8 +64,15 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
     // Normalized with the shipped input-audio evidence, as production ingest
     // does, so `rate.input_audio` is produced where the deployed producer
     // would produce it.
-    let outcome = normalize_models_dev_with(FIXTURE, &fusiform_module::input_audio::evidence())
-        .expect("the fixture must normalize");
+    // The older excerpt predates model-level request shapes.
+    let mut fixture: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
+    fixture["anthropic"]["models"]["claude-sonnet-4-5"]["provider"] =
+        serde_json::json!({"shape": "responses"});
+    let outcome = normalize_models_dev_with(
+        &serde_json::to_vec(&fixture).unwrap(),
+        &fusiform_module::input_audio::evidence(),
+    )
+    .expect("the fixture must normalize");
 
     let mut produced: Vec<String> = Vec::new();
     for model in outcome.catalog.models() {
@@ -153,6 +160,17 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
         FactClass::Advisory,
         "the upstream model claim does not establish route-specific enforcement"
     );
+    for key in ["wire.npm", "wire.api", "wire.shape"] {
+        assert_eq!(
+            SERVED_FACTS
+                .iter()
+                .find(|fact| fact.key == key)
+                .unwrap()
+                .class,
+            FactClass::Advisory,
+            "connection claims leave transport interpretation to the consumer"
+        );
+    }
 
     // Every rate is money. A rate classified as advisory would tell a consumer
     // that a wrong value cannot cost anything.

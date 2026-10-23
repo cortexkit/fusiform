@@ -192,6 +192,11 @@ impl FactKey {
                 fusiform_core::ModelAttributeId::CanonicalId => "canonical_id",
                 fusiform_core::ModelAttributeId::Status => "status",
             }),
+            FieldId::Wire { attribute } => FactKey::wire(match attribute {
+                fusiform_core::WireAttributeId::Npm => "npm",
+                fusiform_core::WireAttributeId::Api => "api",
+                fusiform_core::WireAttributeId::Shape => "shape",
+            }),
             // A tiered rate's fact key carries a threshold that the FieldId
             // does not know, so these two cannot be mapped to a single key.
             // `None` rather than a guess: the alternative is returning the
@@ -226,6 +231,8 @@ pub mod prefix {
     /// serving the same weights agree on these and disagree on rates, which is
     /// exactly what makes them useful for relating rows across providers.
     pub const MODEL: &str = "model.";
+    /// Published connection claims, not a transport implementation.
+    pub const WIRE: &str = "wire.";
 }
 
 /// The infixes that make a rate key conditional, and the one question every
@@ -249,6 +256,10 @@ pub mod rate_key {
 }
 
 impl FactKey {
+    pub fn wire(name: &str) -> Self {
+        Self(format!("{}{name}", prefix::WIRE))
+    }
+
     /// The key for a rate, per token class — never one key for "rates".
     pub fn rate(class: fusiform_core::TokenClass) -> Self {
         Self(format!("{}{}", prefix::RATE, token_class_str(class)))

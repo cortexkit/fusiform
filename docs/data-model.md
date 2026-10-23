@@ -289,7 +289,9 @@ are:
   replays what the upstream published, not a rule fusiform holds today.
 - The currency provenance of a rate is attached when it is served, not stored
   (`served_vocabulary::a_stored_rate_carries_no_annotation_fusiform_invented`).
-- Renderer-selecting upstream fields are never stored as facts
+- Request header/body overrides and experimental mode selectors are never
+  stored as facts. Published client packages, endpoints and request shapes are
+  stored verbatim as `wire.*` claims; renderer mapping remains the consumer's
   (`served_vocabulary::unreliable_and_renderer_selecting_fields_are_not_facts`).
 
 ## 9. Concurrency

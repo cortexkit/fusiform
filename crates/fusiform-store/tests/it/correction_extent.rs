@@ -208,6 +208,15 @@ fn every_served_fact_has_a_field_id() {
         FieldId::Model {
             attribute: ModelAttributeId::Status,
         },
+        FieldId::Wire {
+            attribute: fusiform_core::WireAttributeId::Npm,
+        },
+        FieldId::Wire {
+            attribute: fusiform_core::WireAttributeId::Api,
+        },
+        FieldId::Wire {
+            attribute: fusiform_core::WireAttributeId::Shape,
+        },
     ]
     .into_iter()
     .filter_map(FactKey::for_field)
@@ -242,8 +251,11 @@ fn the_closed_vocabulary_matches_the_normalizer() {
         include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
     // With evidence for the fixture's google provider, as the module's shipped
     // input-audio table states, so `rate.input_audio` is produced.
+    let mut fixture: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
+    fixture["anthropic"]["models"]["claude-sonnet-4-5"]["provider"] =
+        serde_json::json!({"shape": "responses"});
     let outcome = normalize_models_dev_with(
-        FIXTURE,
+        &serde_json::to_vec(&fixture).unwrap(),
         &ChargeUnitEvidence::input_audio_per_token(["google"]),
     )
     .unwrap();

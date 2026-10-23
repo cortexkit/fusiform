@@ -26,16 +26,14 @@ pub struct RawProvider {
     pub name: Option<String>,
     /// Documentation URL. Declared, not carried, per `name`.
     pub doc: Option<String>,
-    /// The provider's API base URL. Renderer-selection: it decides which host
-    /// receives the request. Quarantined as a flag, never carried as a value.
+    /// The provider's published API base URL, preserved verbatim.
     pub api: Option<String>,
     /// The credential environment variable a provider conventionally uses.
     /// Declared, not carried — credential-adjacent, so it is the last field
     /// that should sit unread in a serializable type.
     #[serde(default)]
     pub env: Vec<String>,
-    /// Which SDK adapter speaks to this provider. Quarantined: this is the
-    /// single most renderer-selecting fact in the document.
+    /// The provider's published client package, preserved verbatim.
     pub npm: Option<String>,
     #[serde(default)]
     pub models: BTreeMap<String, RawModel>,
@@ -67,11 +65,17 @@ pub struct RawModel {
     pub limit: Option<RawLimit>,
     pub modalities: Option<RawModalities>,
     pub cost: Option<RawCost>,
-    /// A per-model override carrying literal headers and body parameters.
-    /// Quarantined: this decides how a request is spoken.
-    pub provider: Option<serde_json::Value>,
+    /// Per-model connection claims; other request overrides remain unread.
+    pub provider: Option<RawModelProvider>,
     /// Named modes with their own rates and their own wire shaping.
     pub experimental: Option<RawExperimental>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RawModelProvider {
+    pub npm: Option<String>,
+    pub api: Option<String>,
+    pub shape: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

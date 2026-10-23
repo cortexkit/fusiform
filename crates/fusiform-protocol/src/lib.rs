@@ -976,23 +976,36 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// deliberately does not encode it: a catalog that guessed which of its
 /// consumers held a flat-rate plan would be wrong for every other consumer.
 ///
-/// # What fusiform never serves, and why it is the highest-stakes entry here
+/// # Connection claims are not transport policy
 ///
-/// Renderer-selection fields — `provider.npm`, per-model provider overrides,
-/// and `experimental` — are parsed, flagged, and never emitted. Fusiform says
-/// WHAT exists; it never says HOW to speak to it.
-/// `crates/fusiform-store/tests/it/served_vocabulary.rs` fails if one appears.
-///
-/// **This is not merely an omission, and a consumer supplied the reason from
-/// its own render path.** The field the rule excludes is `provider.wire_family`,
-/// which SELECTS THE RENDERER — so it does not affect one field of a request,
-/// it decides every byte of it. Every other entry in this table is a value a
-/// consumer may render; that one would be fusiform choosing how a consumer
-/// speaks. It stays hand-tabled on the consumer's side permanently.
-///
-/// So the most consequential classification in this table is about a field that
-/// is not in it.
+/// `wire.*` carries models.dev's published client package, endpoint and request
+/// shape verbatim. The consumer owns package-to-renderer mapping and transport
+/// quirks. Fusiform never infers a wire family or serves header/body overrides.
 pub const SERVED_FACTS: &[ServedFact] = &[
+    ServedFact {
+        key: "wire.npm",
+        class: FactClass::Advisory,
+        note: "verbatim models.dev client package as {value, from}; a model override \
+               wins over the provider default. from is model or provider. Absent \
+               means unknown, never a default. Renderer mapping is the consumer's. \
+               Not projected onto aliases or curated rows.",
+    },
+    ServedFact {
+        key: "wire.api",
+        class: FactClass::Advisory,
+        note: "verbatim models.dev base URL as {value, from}; a model override \
+               wins over the provider default. from is model or provider. No URL \
+               normalization. Absent means unknown. Not projected onto aliases \
+               or curated rows.",
+    },
+    ServedFact {
+        key: "wire.shape",
+        class: FactClass::Advisory,
+        note: "verbatim models.dev request shape as {value, from}; published only \
+               at model level, so from is always model. Absent means unknown, \
+               never an inferred request family. Not projected onto aliases \
+               or curated rows.",
+    },
     ServedFact {
         key: "existence",
         class: FactClass::Advisory,

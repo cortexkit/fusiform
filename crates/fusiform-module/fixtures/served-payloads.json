@@ -75,6 +75,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/anthropic"
           }
         }
       },
@@ -186,6 +190,14 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 600000000
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.deepseek.com"
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
           }
         }
       },
@@ -364,6 +376,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 2400000000
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai"
           }
         }
       },
@@ -498,6 +514,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 5000000000
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/xai"
           }
         }
       },
@@ -897,6 +917,14 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 150000000000
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.anyapi.ai/v1"
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
           }
         }
       },
@@ -1343,6 +1371,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/anthropic"
           }
         }
       },
@@ -1661,6 +1693,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/anthropic"
           }
         }
       },
@@ -1844,7 +1880,7 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 330,
+      "era_count": 360,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
@@ -1880,6 +1916,9 @@
         }
       ],
       "served_facts": [
+        "wire.npm",
+        "wire.api",
+        "wire.shape",
         "existence",
         "limit.context",
         "limit.output",
@@ -1951,6 +1990,10 @@
           "rate.cache_write": {
             "reason": "not_established",
             "state": "unpriced"
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai"
           }
         }
       },
@@ -2442,6 +2485,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 1800000000
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai"
           }
         },
         "openai/gpt-image-1": {
@@ -2466,6 +2513,10 @@
           "rate.cache_write": {
             "reason": "not_established",
             "state": "unpriced"
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai"
           }
         }
       },
@@ -2906,6 +2957,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 1800000000
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai"
           }
         }
       },
@@ -2964,6 +3019,18 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 250000000
+          },
+          "wire.api": {
+            "from": "model",
+            "value": "https://model.example/v1//"
+          },
+          "wire.npm": {
+            "from": "model",
+            "value": "@sdk/model"
+          },
+          "wire.shape": {
+            "from": "model",
+            "value": "responses"
           }
         }
       },
@@ -3046,6 +3113,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/anthropic"
           }
         }
       },
@@ -3258,6 +3329,14 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.kimi.ai/coding/v1"
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
           }
         },
         "kimi-code-plan-global/k3-256k": {
@@ -3352,6 +3431,14 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.kimi.ai/coding/v1"
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
           }
         },
         "kimi-code-plan-global/kimi-for-coding": {
@@ -3405,6 +3492,14 @@
           "rate.reasoning": {
             "reason": "no_api_card",
             "state": "unpriced"
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.kimi.ai/coding/v1"
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
           }
         },
         "kimi-code-plan-global/kimi-for-coding-highspeed": {
@@ -3475,6 +3570,14 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 8000000000
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.kimi.ai/coding/v1"
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
           }
         }
       },
@@ -3855,6 +3958,14 @@
           },
           "rate.output": {
             "state": "stated_zero"
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.kimi.ai/coding/v1"
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
           }
         },
         "kimi-code-plan-global/k3-256k": {
@@ -3897,6 +4008,14 @@
           },
           "rate.output": {
             "state": "stated_zero"
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.kimi.ai/coding/v1"
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
           }
         },
         "kimi-code-plan-global/kimi-for-coding": {
@@ -3942,6 +4061,14 @@
           },
           "rate.output": {
             "state": "stated_zero"
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.kimi.ai/coding/v1"
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
           }
         },
         "kimi-code-plan-global/kimi-for-coding-highspeed": {
@@ -3976,6 +4103,14 @@
           },
           "rate.output": {
             "state": "stated_zero"
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.kimi.ai/coding/v1"
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
           }
         }
       },
@@ -4079,6 +4214,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/anthropic"
           }
         }
       },
@@ -4176,6 +4315,14 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 140000000
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://opencode.ai/zen/go/v1"
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
           }
         },
         "opencode-go/qwen3.7-plus": {
@@ -4325,6 +4472,14 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 4800000000
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://opencode.ai/zen/go/v1"
+          },
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/anthropic"
           }
         }
       },

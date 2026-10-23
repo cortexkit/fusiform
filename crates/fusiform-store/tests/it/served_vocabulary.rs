@@ -57,15 +57,18 @@ const SERVED_FACT_KEYS: &[&str] = &[
     "model.open_weights",
     "model.canonical_id",
     "model.status",
+    "wire.npm",
+    "wire.api",
+    "wire.shape",
 ];
 
 /// Fields the normalizer parses that must NEVER become facts.
 ///
 /// Two different reasons, and the distinction matters:
 ///
-/// - **Renderer-selecting** (`provider` overrides, `experimental`, provider
-///   `npm`): serving them would let fusiform decide how a request is spoken,
-///   which is the one thing it must never do.
+/// - **Transport overrides** (`provider` headers/body, `experimental`): these
+///   bytes remain the consumer's responsibility. Published connection strings
+///   are served separately as `wire.*` claims, not as transport policy.
 /// - **Unreliable** (`last_updated`): serving it would hand consumers a
 ///   change-detection shortcut that does not work. Measured on 2026-08-11:
 ///   three models repriced by 20-40% with this field unchanged, and separately
@@ -78,7 +81,6 @@ const NEVER_SERVED: &[&str] = &[
     "last_updated",
     "provider",
     "experimental",
-    "npm",
     "release_date",
     "knowledge",
 ];
@@ -89,8 +91,11 @@ fn the_served_fact_set_is_exactly_this() {
     // as the module's shipped table states, so every served key is produced.
     // The store crate cannot read the module's table; the module-side
     // `wire_fact_table` test normalizes with the shipped table itself.
+    let mut fixture: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
+    fixture["anthropic"]["models"]["claude-sonnet-4-5"]["provider"] =
+        serde_json::json!({"shape": "responses"});
     let outcome = normalize_models_dev_with(
-        FIXTURE,
+        &serde_json::to_vec(&fixture).unwrap(),
         &ChargeUnitEvidence::input_audio_per_token(["google"]),
     )
     .expect("fixture normalizes");
@@ -353,6 +358,7 @@ fn every_namespace_prefix_selects_real_facts() {
         fusiform_store::prefix::RATE,
         fusiform_store::prefix::CAPABILITY,
         fusiform_store::prefix::LIMIT,
+        fusiform_store::prefix::WIRE,
     ] {
         let matched = produced.iter().filter(|k| k.starts_with(prefix)).count();
         assert!(
@@ -373,6 +379,7 @@ fn every_namespace_prefix_selects_real_facts() {
             fusiform_store::prefix::CAPABILITY,
             fusiform_store::prefix::LIMIT,
             fusiform_store::prefix::MODEL,
+            fusiform_store::prefix::WIRE,
         ]
         .iter()
         .any(|p| key.starts_with(p));
@@ -769,6 +776,8 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
     let row = &mut fixture["anthropic"]["models"]["claude-sonnet-4-5"];
     row["canonical_model_id"] = serde_json::json!("anthropic/claude-sonnet-4-5");
     row["status"] = serde_json::json!("future-preview");
+    row["provider"] =
+        serde_json::json!({"npm": "@sdk/model", "api": "https://model/", "shape": "responses"});
     let outcome =
         normalize_models_dev(&serde_json::to_vec(&fixture).unwrap()).expect("fixture normalizes");
     let model = outcome
@@ -789,6 +798,7 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
         capabilities: _,
         limits: _,
         rates: _,
+        wire,
 
         // Declared unread, with the reason each is not served.
         //
@@ -812,11 +822,11 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
         // the offering. Nothing in the served contract branches on it, and it
         // is not a capacity, a price, or a capability.
         knowledge_cutoff: _,
-        // Recorded so an operator can see these exist; never served. Serving a
-        // renderer-selecting field would invite a consumer to select a renderer
-        // from the catalog, which is the one thing this catalog must not decide.
+        // Presence flags for request overrides, not their values.
         quarantined: _,
     } = model;
+    let fusiform_core::normalize::WireFacts { npm, api, shape } = wire;
+    assert!(npm.is_some() && api.is_some() && shape.is_some());
 
     let keys: Vec<String> = fact_keys_of(model)
         .into_iter()
@@ -828,6 +838,9 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
         (open_weights.is_some(), "model.open_weights"),
         (canonical_id.is_some(), "model.canonical_id"),
         (status.is_some(), "model.status"),
+        (npm.is_some(), "wire.npm"),
+        (api.is_some(), "wire.api"),
+        (shape.is_some(), "wire.shape"),
     ] {
         assert!(
             !present || keys.iter().any(|k| k == key),

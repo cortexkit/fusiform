@@ -131,12 +131,24 @@ value would do to a consumer:
 | `model.canonical_id` | advisory | upstream canonical model id, or `null` |
 | `model.status` | advisory | upstream lifecycle label verbatim, or `null` |
 | `model.kind` | advisory | `"decision"` or `"extraction"`, on curated rows only; otherwise no fact (§4.6) |
+| `wire.npm` | advisory | `{"value": "<published client package>", "from": "model" or "provider"}`; otherwise no fact |
+| `wire.api` | advisory | `{"value": "<published base URL>", "from": "model" or "provider"}`; otherwise no fact |
+| `wire.shape` | advisory | `{"value": "<published request shape>", "from": "model"}`; otherwise no fact |
 | `rate.input` | money | rate value (§4.3), per million input tokens |
 | `rate.output` | money | per million output tokens |
 | `rate.cache_read` | money | per million cached-read tokens |
 | `rate.cache_write` | money | per million cache-write tokens |
 | `rate.reasoning` | money | per million reasoning tokens |
 | `rate.input_audio` | money | per million audio input tokens, only for providers whose docs establish per-token audio billing |
+
+The `wire.*` values are models.dev's claims, not fusiform's transport policy.
+For each field independently, a model's `provider.npm` or `provider.api` wins
+over its provider's `npm` or `api` default; `from` names the level that supplied
+the value. `provider.shape` exists only on models. Missing fields create **no
+fact**: absence means unknown, never an inferred default. Strings pass through
+verbatim, including empty strings, URL spelling and trailing slashes. Consumers
+own package-to-renderer mapping and all transport quirks. Alias rows do not
+inherit these backend-specific claims (§5.5), and curated rows carry none.
 
 The `rate.input_audio` rule: models.dev publishes `cost.input_audio` beside
 the token rates with no unit, so the key alone establishes nothing. It is
@@ -489,7 +501,8 @@ alias (see [`curated-data.md`](curated-data.md)) serves the target row's facts
 under the alias id and names it in `aliased` with `target_provider_id`,
 `target_model_id` and `source_ref`. The target's `capability.structured_output`
 claim is not projected: whether JSON Schema is enforced depends on the route,
-which a model-level fact cannot establish. Rules, tested in
+which a model-level fact cannot establish. The target's `wire.*` claims are
+also omitted because an alias reaches a different backend. Rules, tested in
 `crates/fusiform-module/src/route.rs`:
 
 1. Current reads only; a point-in-time read never aliases
@@ -501,6 +514,8 @@ which a model-level fact cannot establish. Rules, tested in
    including mode rates (`mode_rates::an_alias_carries_its_targets_mode_rates_marked`).
 4. Structured-output claims are omitted from aliases while remaining on the
    target row (`alias_tests::structured_output_is_not_projected_onto_an_alias`).
+   The same holds for `wire.npm`, `wire.api` and `wire.shape`
+   (`alias_tests::wire_facts_are_not_projected_onto_an_alias`).
 5. A retired or absent target serves nothing
    (`alias_tests::a_retired_target_serves_nothing`,
    `alias_tests::an_absent_target_serves_nothing_and_names_it`).

@@ -10,12 +10,11 @@
 //!
 //! # What this module refuses to do
 //!
-//! - **Serve a renderer-selecting field.** `provider.npm`, per-model `provider`
-//!   overrides and a mode's `provider` block under `experimental` decide how a
-//!   request is spoken, not what a model is. They are parsed only far enough
-//!   to be quarantined. A mode's `cost` block is the exception inside
-//!   `experimental`: it is a price, and it is served as mode rates while the
-//!   bytes that select the mode are dropped at the parse boundary.
+//! - **Choose a transport.** Published client packages, endpoints and request
+//!   shapes are served verbatim as upstream claims, not interpreted as renderer
+//!   families. Consumers own that mapping and all transport quirks. Other
+//!   request overrides, including a mode's `provider` block, remain unread;
+//!   mode prices are served separately from the bytes that select the mode.
 //! - **Infer a semantic from a field's name.** `tier.size` is read as a
 //!   threshold only where `tier.type` says `context`; anywhere else it is a
 //!   parse error rather than a guess.
@@ -97,6 +96,28 @@ pub struct Limits {
     pub output_tokens: Option<u64>,
 }
 
+/// A published connection claim and the level that supplied it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct WireClaim {
+    pub value: String,
+    pub from: WireOrigin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WireOrigin {
+    Model,
+    Provider,
+}
+
+/// Connection claims, with no inferred defaults or transport interpretation.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WireFacts {
+    pub npm: Option<WireClaim>,
+    pub api: Option<WireClaim>,
+    pub shape: Option<WireClaim>,
+}
+
 /// One model, normalized.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedModel {
@@ -113,9 +134,9 @@ pub struct NormalizedModel {
     pub open_weights: Option<bool>,
     pub capabilities: Capabilities,
     pub limits: Limits,
+    pub wire: WireFacts,
     pub rates: Vec<NormalizedRate>,
-    /// Renderer-selecting facts found on this model, recorded so an operator
-    /// can see they exist and never exposed on the served surface.
+    /// Presence of request overrides, distinct from the served connection claims.
     pub quarantined: Quarantine,
 }
 
@@ -161,42 +182,17 @@ pub struct Quarantine {
 ///   behind it is the last one that should sit in a serializable type on the
 ///   chance it turns out useful.
 ///
-/// Contrast the two fields that ARE here as flags. `npm` and `api` are
-/// renderer-selection: they decide which adapter speaks and which host
-/// receives the request. Those are quarantined — recorded as present, never
-/// carried — because fusiform must be able to say it never serves them.
-///
-/// So the disposition splits three ways rather than two: quarantine what
-/// decides bytes, serve what a consumer has asked for, and do not parse the
-/// rest. All three are recoverable in one line from `raw.rs` when someone has
-/// an actual use; what is not recoverable is the refactor that quietly plumbs
-/// an unread value onto a wire.
+/// The `npm` and `api` defaults are resolved into each model's `wire` claims.
+/// The legacy presence flags remain for operator inspection; they do not
+/// supply or interpret a connection value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedProvider {
     pub provider_id: String,
 
-    /// Whether the provider publishes an `api` base URL, WITHOUT its value.
-    ///
-    /// The value is deliberately not carried, for the same reason `npm` is not.
-    /// A base URL decides which company receives the request, so serving a
-    /// wrong one is not a degraded answer — it is a request sent to the wrong
-    /// host, with credentials attached. That is renderer selection, which is a
-    /// consumer's to author and never fusiform's to supply.
-    ///
-    /// It was previously carried as `api_base: Option<String>` and read by
-    /// nothing. That is an UNREAD field rather than a quarantined one, and the
-    /// difference is not academic: a quarantine is a promise the code makes, an
-    /// unread field is an accident of parsing. A base URL sitting in a
-    /// serializable domain type is one refactor away from a wire it must never
-    /// reach, and nothing about its name would have warned the person doing it.
-    ///
-    /// Found 2026-08-13 when BROCA measured that 156 of 183 providers depend on
-    /// this field for their endpoint and discovered they had it on the
-    /// stays-mine side of a split while not authoring it.
+    /// Whether the provider publishes an `api` default.
     pub api_base_quarantined: bool,
     pub models: Vec<NormalizedModel>,
-    /// The provider's `npm` field: which SDK adapter speaks to it. The single
-    /// most renderer-selecting fact in the document, and never served.
+    /// Whether the provider publishes an `npm` default.
     pub npm_quarantined: bool,
 }
 
@@ -448,19 +444,30 @@ pub fn normalize_models_dev_with(
     let mut providers = Vec::with_capacity(doc.len());
 
     for (provider_id, raw_provider) in doc {
-        let mut models = Vec::with_capacity(raw_provider.models.len());
-        for (model_id, raw_model) in &raw_provider.models {
+        let RawProvider {
+            id: _,
+            name: _,
+            doc: _,
+            env: _,
+            npm,
+            api,
+            models: raw_models,
+        } = raw_provider;
+        let mut models = Vec::with_capacity(raw_models.len());
+        for (model_id, raw_model) in &raw_models {
             models.push(normalize_model(
                 &provider_id,
                 model_id,
                 raw_model,
+                npm.as_deref(),
+                api.as_deref(),
                 evidence.bills_input_audio_per_token(&provider_id, model_id),
                 &mut findings,
             )?);
         }
         providers.push(NormalizedProvider {
-            api_base_quarantined: raw_provider.api.is_some(),
-            npm_quarantined: raw_provider.npm.is_some(),
+            api_base_quarantined: api.is_some(),
+            npm_quarantined: npm.is_some(),
             provider_id,
             models,
         });
@@ -479,6 +486,8 @@ fn normalize_model(
     provider_id: &str,
     model_id: &str,
     raw: &RawModel,
+    provider_npm: Option<&str>,
+    provider_api: Option<&str>,
     input_audio_per_token: bool,
     findings: &mut Vec<NormalizeError>,
 ) -> Result<NormalizedModel, NormalizeError> {
@@ -508,6 +517,18 @@ fn normalize_model(
         provider,
         experimental,
     } = raw;
+
+    let (npm, api, shape) = match provider {
+        Some(raw::RawModelProvider { npm, api, shape }) => {
+            (npm.as_deref(), api.as_deref(), shape.as_deref())
+        }
+        None => (None, None, None),
+    };
+    let wire = WireFacts {
+        npm: wire_claim(npm, provider_npm),
+        api: wire_claim(api, provider_api),
+        shape: wire_claim(shape, None),
+    };
 
     // Modalities are `None` when the upstream publishes no block, and an empty
     // Vec only when it publishes an empty list.
@@ -618,9 +639,20 @@ fn normalize_model(
         open_weights: *open_weights,
         capabilities,
         limits,
+        wire,
         rates,
         quarantined,
     })
+}
+
+fn wire_claim(model: Option<&str>, provider: Option<&str>) -> Option<WireClaim> {
+    model
+        .map(|value| (value, WireOrigin::Model))
+        .or_else(|| provider.map(|value| (value, WireOrigin::Provider)))
+        .map(|(value, from)| WireClaim {
+            value: value.to_owned(),
+            from,
+        })
 }
 
 /// A declared zero capacity is absence, not a capacity of zero.

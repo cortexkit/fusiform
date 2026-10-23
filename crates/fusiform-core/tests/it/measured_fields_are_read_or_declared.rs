@@ -13,12 +13,26 @@ const RAW: &str = include_str!("../../src/normalize/raw.rs");
 /// presence, but none of its contents are a model fact. Prefixes cover the whole
 /// unread subtree, including arbitrary request headers and body parameters.
 const DECLARED_UNREAD: &[(&str, &str)] = &[
-    ("model.description", "human-facing prose, not a served capacity, price or capability"),
-    ("model.type", "sparse model-kind labels with no consumer contract; not served"),
-    ("model.provider", "SDK adapter and endpoint overrides select request rendering and destination; only presence is quarantined"),
-    ("model.temperature", "request knob acceptance, not a model capacity; no served consumer contract"),
-    ("model.interleaved", "bool or field-selector object whose request-shaping meaning is unestablished"),
-    ("model.experimental.modes.*.provider", "request body and header overrides that switch modes on; dropped at the parse boundary"),
+    (
+        "model.description",
+        "human-facing prose, not a served capacity, price or capability",
+    ),
+    (
+        "model.type",
+        "sparse model-kind labels with no consumer contract; not served",
+    ),
+    (
+        "model.temperature",
+        "request knob acceptance, not a model capacity; no served consumer contract",
+    ),
+    (
+        "model.interleaved",
+        "bool or field-selector object whose request-shaping meaning is unestablished",
+    ),
+    (
+        "model.experimental.modes.*.provider",
+        "request body and header overrides that switch modes on; dropped at the parse boundary",
+    ),
 ];
 
 /// Each path records whether every occurrence is numeric, for the raw cost maps
@@ -103,6 +117,7 @@ fn fields_the_parser_reads(raw: &str) -> BTreeSet<String> {
     for (path, name) in [
         ("provider", "RawProvider"),
         ("model", "RawModel"),
+        ("model.provider", "RawModelProvider"),
         ("model.limit", "RawLimit"),
         ("model.modalities", "RawModalities"),
         ("model.experimental", "RawExperimental"),
@@ -112,7 +127,10 @@ fn fields_the_parser_reads(raw: &str) -> BTreeSet<String> {
         ("model.cost.tiers.tier", "RawTierSpec"),
     ] {
         for field in struct_fields(raw, name) {
-            if field != "scalars" && field != "malformed" && field != "provider" {
+            if field != "scalars"
+                && field != "malformed"
+                && (field != "provider" || name == "RawModel")
+            {
                 read.insert(format!("{path}.{field}"));
             }
         }
@@ -179,6 +197,11 @@ fn every_seed_key_is_read_or_declared_unread() {
     );
     for path in [
         "provider.models",
+        "provider.npm",
+        "provider.api",
+        "model.provider.npm",
+        "model.provider.api",
+        "model.provider.shape",
         "model.canonical_model_id",
         "model.status",
         "model.limit.input",
@@ -201,7 +224,7 @@ fn planted_unknown_payload_key_is_reported() {
 
 #[test]
 fn planted_unknown_nested_payload_keys_are_reported() {
-    let payload = br#"{"p":{"lost":true,"models":{"m":{"limit":{"lost":1},"modalities":{"lost":[]},"cost":{"lost":{}},"experimental":{"modes":{"fast":{"lost":true}}}}}}}"#;
+    let payload = br#"{"p":{"lost":true,"models":{"m":{"provider":{"lost":true},"limit":{"lost":1},"modalities":{"lost":[]},"cost":{"lost":{}},"experimental":{"modes":{"fast":{"lost":true}}}}}}}"#;
     assert_eq!(
         unaccounted_fields(payload, RAW),
         [
@@ -209,6 +232,7 @@ fn planted_unknown_nested_payload_keys_are_reported() {
             "model.experimental.modes.*.lost",
             "model.limit.lost",
             "model.modalities.lost",
+            "model.provider.lost",
             "provider.lost",
         ]
     );
@@ -216,7 +240,7 @@ fn planted_unknown_nested_payload_keys_are_reported() {
 
 #[test]
 fn opaque_and_quarantined_values_are_not_closed_vocabularies() {
-    let payload = br#"{"p":{"models":{"m":{"provider":{"new_endpoint_hint":true},"reasoning_options":[{"future_setting":true}],"experimental":{"modes":{"fast":{"provider":{"future_header":true},"cost":{"future_rate":1}}}}}}}}"#;
+    let payload = br#"{"p":{"models":{"m":{"reasoning_options":[{"future_setting":true}],"experimental":{"modes":{"fast":{"provider":{"future_header":true},"cost":{"future_rate":1}}}}}}}}"#;
     assert!(unaccounted_fields(payload, RAW).is_empty());
 }
 

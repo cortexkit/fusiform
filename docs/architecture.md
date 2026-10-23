@@ -23,7 +23,7 @@ tools over the supervisor's route.
 models.dev/api.json
         │  conditional GET every 30 minutes (fusiform-module: fetch, loop_)
         ▼
-  normalize (fusiform-core) ── renderer-selecting fields quarantined
+  normalize (fusiform-core) ── connection claims preserved; transport not inferred
         │
         ▼
   ingest (fusiform-store) ── diff against facts in force; write one era per

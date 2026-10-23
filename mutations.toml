@@ -1345,3 +1345,75 @@ only = false
 timeout_s = 600
 build_timeout_s = 1800
 
+
+[[control]]
+id = "wire-shape-raw-to-domain-mapping"
+guards = "a published request shape survives raw-to-domain conversion verbatim with model provenance"
+file = "crates/fusiform-core/src/normalize/mod.rs"
+old = "        shape: wire_claim(shape, None),"
+new = "        shape: None, // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-core/tests/it/models_dev_normalization.rs"
+runner = "cargo"
+package = "fusiform-core"
+target = "--test it"
+select = "expected"
+expect_red = ["models_dev_normalization::wire_claims_preserve_values_precedence_provenance_and_absence"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "wire-model-precedence"
+guards = "model connection claims override provider defaults per field and retain model provenance"
+file = "crates/fusiform-core/src/normalize/mod.rs"
+old = "        npm: wire_claim(npm, provider_npm),"
+new = "        npm: wire_claim(provider_npm, npm), // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-core/tests/it/models_dev_normalization.rs"
+runner = "cargo"
+package = "fusiform-core"
+target = "--test it"
+select = "expected"
+expect_red = ["models_dev_normalization::wire_claims_preserve_values_precedence_provenance_and_absence"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "wire-alias-exclusion"
+guards = "alias projections omit wire claims about the target backend"
+file = "crates/fusiform-module/src/route.rs"
+old = '    facts.remove("wire.npm");'
+new = "    // NON-VACUITY BREAK: do not remove the target client package"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+select = "expected"
+expect_red = ["route::alias_tests::wire_facts_are_not_projected_onto_an_alias"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+
+[[control]]
+id = "wire-withdrawal-is-unknown"
+guards = "withdrawn wire claims remain eras in history but are absent from catalog reads"
+file = "crates/fusiform-module/src/route.rs"
+old = "            if key.as_str().starts_with(fusiform_store::prefix::WIRE) && value.is_null() {"
+new = "            if false && key.as_str().starts_with(fusiform_store::prefix::WIRE) && value.is_null() { // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/tests/it/wire_claims.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+select = "expected"
+expect_red = ["wire_claims::withdrawn_wire_claims_are_absent_from_catalog_but_kept_in_history"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
