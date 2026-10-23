@@ -592,6 +592,130 @@
       ]
     }
   },
+  "catalog.get — Claude Sonnet alias tier wire ids": {
+    "request": {
+      "arguments": {
+        "model_id": "antigravity-claude-sonnet-5-5",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "aliased": [
+        {
+          "model": "google/antigravity-claude-sonnet-5-5",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/d17ca2e88fe033f54f745faf31f6b815a75c32e1/packages/core/src/model-registry.ts#L188-L216 (vertexModelId: 'claude-sonnet-5-5@default' on all three tiers), #L327-L340 (variants and limits), #L472 (public id); packages/core/src/transform/model-resolver.ts#L205-L211 (actualModel: `${modelWithoutQuota}-low`, tier: 'low') at the same revision",
+          "target_model_id": "claude-sonnet-5-5",
+          "target_provider_id": "anthropic"
+        }
+      ],
+      "catalog_version": 0,
+      "models": {
+        "google/antigravity-claude-sonnet-5-5": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "pdf",
+            "text"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          ],
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1000000,
+          "limit.output": 128000,
+          "model.canonical_id": "anthropic/claude-sonnet-5-5",
+          "model.family": "claude-sonnet",
+          "model.open_weights": false,
+          "model.status": null,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "claude-sonnet",
+              "model_id": "claude-sonnet-5-5",
+              "provider_id": "anthropic"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 100000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "claude-sonnet",
+              "model_id": "claude-sonnet-5-5",
+              "provider_id": "anthropic"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2500000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "claude-sonnet",
+              "model_id": "claude-sonnet-5-5",
+              "provider_id": "anthropic"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "claude-sonnet",
+              "model_id": "claude-sonnet-5-5",
+              "provider_id": "anthropic"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 10000000000
+          },
+          "route.reasoning_default": "low",
+          "route.reasoning_wire_ids": {
+            "high": "claude-sonnet-5-5-high",
+            "low": "claude-sonnet-5-5-low",
+            "medium": "claude-sonnet-5-5-medium"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — a curated alias": {
     "request": {
       "arguments": {

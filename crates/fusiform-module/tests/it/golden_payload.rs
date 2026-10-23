@@ -487,6 +487,10 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
             serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-3.8-flash"}),
         ),
         (
+            "catalog.get — Claude Sonnet alias tier wire ids",
+            serde_json::json!({"provider_id":"google","model_id":"antigravity-claude-sonnet-5-5"}),
+        ),
+        (
             "catalog.get — retired alias successor",
             serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-3.7-flash","include_retired":true}),
         ),

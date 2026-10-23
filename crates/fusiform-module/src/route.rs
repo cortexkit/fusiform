@@ -3286,6 +3286,43 @@ mod alias_tests {
 
     const RETIRED: &str = "google/antigravity-gemini-3.7-flash";
 
+    #[test]
+    fn alias_effort_restriction_preserves_option_shapes_and_order() {
+        let mut alias = crate::aliases::aliases()[&(
+            "google".to_string(),
+            "antigravity-gemini-3.8-flash".to_string(),
+        )]
+            .clone();
+        alias.reasoning_wire_ids = BTreeMap::from([
+            ("low".to_string(), "custom-low".to_string()),
+            ("high".to_string(), "custom-high".to_string()),
+        ]);
+        alias.reasoning_default = Some("low".to_string());
+        let original = serde_json::json!([
+            {"type":"effort","values":["max","high","medium","low","xhigh"]},
+            {"type":"budget_tokens","min":1024,"max":8192},
+            {"type":"toggle","values":[true,false]},
+        ]);
+        let mut facts =
+            BTreeMap::from([("capability.reasoning_options".to_string(), original.clone())]);
+        emit_alias_route_facts(&mut facts, &alias);
+        assert_eq!(
+            facts["capability.reasoning_options"],
+            serde_json::json!([
+                {"type":"effort","values":["high","low"]},
+                {"type":"budget_tokens","min":1024,"max":8192},
+                {"type":"toggle","values":[true,false]},
+            ])
+        );
+
+        // Without a tier map the route makes no narrower effort claim.
+        alias.reasoning_wire_ids.clear();
+        alias.reasoning_default = None;
+        facts.insert("capability.reasoning_options".to_string(), original.clone());
+        emit_alias_route_facts(&mut facts, &alias);
+        assert_eq!(facts["capability.reasoning_options"], original);
+    }
+
     /// A retired alias stays an identity on retired-inclusive reads. A consumer
     /// that tracks identities refuses a refresh where a known one vanished, so
     /// deleting the row instead stalled that consumer on a stale catalog.
@@ -5043,8 +5080,8 @@ fn serve_named_alias(
 /// target is absent or retired.
 ///
 /// Runs the same named read the target would get, including inheritance,
-/// so an alias can never serve something different from what a caller
-/// asking for the target directly receives, apart from the rate markers.
+/// then removes route-dependent claims, restricts reasoning efforts to the
+/// alias's tier map and marks borrowed rates. Other model facts stay intact.
 ///
 /// The fact filter is widened exactly as `widened_for_inheritance` widens it:
 /// the rate markers name the target's `model.family`, and a `--rates` read
@@ -5139,6 +5176,26 @@ fn emit_alias_route_facts(
     alias: &crate::aliases::Alias,
 ) {
     if !alias.reasoning_wire_ids.is_empty() {
+        // A target may offer more efforts than this route can send. Retain its
+        // option shape and value order, but never advertise an unmapped effort.
+        if let Some(options) = facts
+            .get_mut("capability.reasoning_options")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            for option in options {
+                if option["type"] != "effort" {
+                    continue;
+                }
+                let Some(values) = option["values"].as_array_mut() else {
+                    continue;
+                };
+                values.retain(|value| {
+                    value
+                        .as_str()
+                        .is_some_and(|effort| alias.reasoning_wire_ids.contains_key(effort))
+                });
+            }
+        }
         facts.insert(
             "route.reasoning_wire_ids".to_string(),
             serde_json::json!(alias.reasoning_wire_ids),

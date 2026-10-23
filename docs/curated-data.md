@@ -113,6 +113,20 @@ The live 3.8 Flash and Argon aliases carry tier maps for `low`, `medium` and
 that same check with an unsupported effort. The loader rejects a missing or
 unknown default and empty wire ids.
 
+When an alias carries `reasoning_wire_ids`, its served
+`capability.reasoning_options` effort values are restricted to the map's keys,
+preserving the option type and the target's value order. A target can offer
+more efforts than the route accepts; those extra efforts must not be offered
+to a consumer of the alias. This is a current-read projection only: the target's
+own reads and stored history remain unchanged. Other option types are preserved;
+an effort-to-wire-id map makes no claim about budget or toggle controls.
+The Gemini 3.8 Flash and Argon targets already list exactly `low`, `medium`
+and `high`, so their aliases' reasoning options do not change.
+The Sonnet 5.5 and Opus 5.5 aliases expose only `low`, `medium` and `high`,
+defaulting to `low`, rather than the Anthropic targets' additional `xhigh` and
+`max`. Both cite plugin revision `d17ca2e8`: each model's three native routes
+share one `vertexModelId`, and the resolver selects `-low` for a bare id.
+
 Retiring an alias moves its identity to `retired`; never delete a served id.
 An optional `successor` is a full `provider/model` identity, accompanied by
 `successor_source_ref`. It must name a row fusiform currently serves

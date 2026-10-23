@@ -7,6 +7,42 @@
   "aliases": [
     {
       "provider_id": "google",
+      "model_id": "antigravity-claude-sonnet-5-5",
+      "target": {
+        "provider_id": "anthropic",
+        "model_id": "claude-sonnet-5-5"
+      },
+      "basis": "ALL_MODEL_DEFINITIONS exposes antigravity-claude-sonnet-5-5 with low, medium and high variants and limits context: 1000000, output: 128000; ANTIGRAVITY_OPENCODE_MODEL_IDS includes it. The native claude-sonnet-5-5-low, -medium and -high entries all declare vertexModelId: 'claude-sonnet-5-5@default', so every tier reaches the same Anthropic model and the suffix selects only its thinking level. resolveModelWithTier maps the bare id to actualModel: `${modelWithoutQuota}-low`, tier: 'low'.",
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/d17ca2e88fe033f54f745faf31f6b815a75c32e1/packages/core/src/model-registry.ts#L188-L216 (vertexModelId: 'claude-sonnet-5-5@default' on all three tiers), #L327-L340 (variants and limits), #L472 (public id); packages/core/src/transform/model-resolver.ts#L205-L211 (actualModel: `${modelWithoutQuota}-low`, tier: 'low') at the same revision",
+      "established_at_ms": 1792713600000,
+      "review_by_ms": 1797897600000,
+      "reasoning_wire_ids": {
+        "low": "claude-sonnet-5-5-low",
+        "medium": "claude-sonnet-5-5-medium",
+        "high": "claude-sonnet-5-5-high"
+      },
+      "reasoning_default": "low"
+    },
+    {
+      "provider_id": "google",
+      "model_id": "antigravity-claude-opus-5-5",
+      "target": {
+        "provider_id": "anthropic",
+        "model_id": "claude-opus-5-5"
+      },
+      "basis": "ALL_MODEL_DEFINITIONS exposes antigravity-claude-opus-5-5 with low, medium and high variants and limits context: 1000000, output: 128000; ANTIGRAVITY_OPENCODE_MODEL_IDS includes it. The native claude-opus-5-5-low, -medium and -high entries all declare vertexModelId: 'claude-opus-5-5@default', so every tier reaches the same Anthropic model and the suffix selects only its thinking level. resolveModelWithTier maps the bare id to actualModel: `${modelWithoutQuota}-low`, tier: 'low'.",
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/d17ca2e88fe033f54f745faf31f6b815a75c32e1/packages/core/src/model-registry.ts#L158-L187 (vertexModelId: 'claude-opus-5-5@default' on all three tiers), #L341-L351 (variants and limits), #L473 (public id); packages/core/src/transform/model-resolver.ts#L205-L211 (actualModel: `${modelWithoutQuota}-low`, tier: 'low') at the same revision",
+      "established_at_ms": 1792713600000,
+      "review_by_ms": 1797897600000,
+      "reasoning_wire_ids": {
+        "low": "claude-opus-5-5-low",
+        "medium": "claude-opus-5-5-medium",
+        "high": "claude-opus-5-5-high"
+      },
+      "reasoning_default": "low"
+    },
+    {
+      "provider_id": "google",
       "model_id": "antigravity-gemini-4-argon",
       "target": {
         "provider_id": "google",

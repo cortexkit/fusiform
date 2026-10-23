@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 
 const FLASH: &str = "google/antigravity-gemini-3.8-flash";
 const ARGON: &str = "google/antigravity-gemini-4-argon";
+const SONNET: &str = "google/antigravity-claude-sonnet-5-5";
+const OPUS: &str = "google/antigravity-claude-opus-5-5";
 const RETIRED: &str = "google/antigravity-gemini-3.7-flash";
 const UNROUTED_ID: &str = "kimi-k3.1-pro";
 const UNROUTED: &str = "opencode-go/kimi-k3.1-pro";
@@ -39,7 +41,7 @@ fn store_with_anthropic_api(api: Option<&str>) -> (CatalogStore, tempfile::TempD
             ],
         ),
         ("openai", vec!["gpt-6.1-sol"]),
-        ("anthropic", vec!["claude-opus-5-5"]),
+        ("anthropic", vec!["claude-opus-5-5", "claude-sonnet-5-5"]),
         ("xai", vec!["grok-4.7"]),
     ] {
         upstream[provider] = seed[provider].clone();
@@ -445,7 +447,7 @@ fn alias_tier_wire_ids_are_route_local_and_obey_filters() {
         );
         assert_eq!(row["route.reasoning_default"], "medium");
         for (id, facts) in &response.models {
-            if id != FLASH && id != ARGON {
+            if !matches!(id.as_str(), FLASH | ARGON | SONNET | OPUS) {
                 assert!(!facts.keys().any(|key| key.starts_with("route.")), "{id}");
             }
         }
@@ -459,6 +461,22 @@ fn alias_tier_wire_ids_are_route_local_and_obey_filters() {
         json!({"low":"gemini-4-argon-low","medium":"gemini-4-argon-medium","high":"gemini-4-argon-high"})
     );
     assert_eq!(argon.models[ARGON]["route.reasoning_default"], "medium");
+    for (alias, target) in [(FLASH, "gemini-3.8-flash"), (ARGON, "gemini-4-argon")] {
+        let aliased = get(&store, json!({"provider_id":"google"}));
+        assert_eq!(
+            aliased.models[alias]["capability.reasoning_options"],
+            json!([
+                {"type":"effort","values":["low","medium","high"]}
+            ])
+        );
+        let direct = get(&store, json!({"provider_id":"google","model_id":target}));
+        assert_eq!(
+            direct.models[&format!("google/{target}")]["capability.reasoning_options"],
+            json!([
+                {"type":"effort","values":["low","medium","high"]}
+            ])
+        );
+    }
     let filtered = get(
         &store,
         json!({"provider_id":"google","model_id":"antigravity-gemini-3.8-flash","fact_prefixes":["capability."]}),
@@ -468,6 +486,85 @@ fn alias_tier_wire_ids_are_route_local_and_obey_filters() {
         .any(|key| key.starts_with("route.")));
     let historical = get(&store, json!({"provider_id":"google","at_ms":1_000}));
     assert!(!historical.models.contains_key(FLASH));
+}
+
+#[test]
+fn claude_aliases_restrict_efforts_without_changing_the_targets() {
+    let (store, _dir) = store();
+    for (alias, model) in [(SONNET, "claude-sonnet-5-5"), (OPUS, "claude-opus-5-5")] {
+        let target = format!("anthropic/{model}");
+        let full_options =
+            json!([{"type":"effort","values":["low","medium","high","xhigh","max"]}]);
+        let direct = get(&store, json!({"provider_id":"anthropic","model_id":model}));
+        assert_eq!(
+            direct.models[&target]["capability.reasoning_options"],
+            full_options
+        );
+
+        for arguments in [
+            json!({}),
+            json!({"provider_id":"google"}),
+            json!({"provider_id":"google","model_id":alias.strip_prefix("google/").unwrap()}),
+            json!({"provider_id":"google","fact_prefixes":["capability.reasoning_options"]}),
+        ] {
+            let response = get(&store, arguments);
+            let facts = &response.models[alias];
+            assert_eq!(
+                facts["capability.reasoning_options"],
+                json!([{"type":"effort","values":["low","medium","high"]}]),
+                "{alias} must advertise only efforts the route can send"
+            );
+            if let Some(wire_ids) = facts.get("route.reasoning_wire_ids") {
+                assert_eq!(
+                    wire_ids,
+                    &json!({
+                        "low":format!("{model}-low"),
+                        "medium":format!("{model}-medium"),
+                        "high":format!("{model}-high"),
+                    })
+                );
+                assert_eq!(facts["route.reasoning_default"], "low");
+                assert_eq!(facts["limit.context"], 1_000_000);
+                assert_eq!(facts["limit.output"], 128_000);
+                assert_eq!(facts["rate.input"]["state"], "priced");
+                assert_eq!(
+                    facts["rate.input"]["units"],
+                    direct.models[&target]["rate.input"]["units"]
+                );
+                for (key, value) in facts.iter().filter(|(key, _)| key.starts_with("rate.")) {
+                    assert_eq!(value["inherited_from"]["basis"], "alias", "{key}");
+                    assert_eq!(value["inherited_from"]["provider_id"], "anthropic", "{key}");
+                    assert_eq!(value["inherited_from"]["model_id"], model, "{key}");
+                }
+            } else {
+                assert_eq!(facts.len(), 1, "the capability filter must be applied last");
+            }
+        }
+
+        // Direct current and historical reads still expose the target's full
+        // option list: narrowing belongs only to the alias's served view.
+        for arguments in [
+            json!({"provider_id":"anthropic","model_id":model}),
+            json!({"provider_id":"anthropic","model_id":model,"at_ms":1_000}),
+        ] {
+            let response = get(&store, arguments);
+            assert_eq!(
+                response.models[&target]["capability.reasoning_options"],
+                full_options
+            );
+            assert!(!response.models[&target].contains_key("route.reasoning_wire_ids"));
+        }
+        assert!(!store
+            .model_is_known(
+                SourceId::ModelsDev,
+                "google",
+                alias.strip_prefix("google/").unwrap()
+            )
+            .unwrap());
+    }
+    let historical = get(&store, json!({"provider_id":"google","at_ms":1_000}));
+    assert!(!historical.models.contains_key(SONNET));
+    assert!(!historical.models.contains_key(OPUS));
 }
 
 #[test]

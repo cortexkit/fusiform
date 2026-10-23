@@ -1475,7 +1475,7 @@ test_file = "crates/fusiform-module/tests/it/curated_wire.rs"
 runner = "cargo"
 package = "fusiform-module"
 target = "--test it"
-expect_red = ["curated_wire::alias_tier_wire_ids_are_route_local_and_obey_filters"]
+expect_red = ["curated_wire::alias_tier_wire_ids_are_route_local_and_obey_filters", "curated_wire::claude_aliases_restrict_efforts_without_changing_the_targets"]
 only = false
 timeout_s = 600
 build_timeout_s = 1800
@@ -1607,4 +1607,22 @@ build_timeout_s = 1800
 
 [control.select]
 filter = "curated_wire::"
+
+[[control]]
+id = "alias-efforts-restricted-to-wire-map"
+guards = "an alias advertises only the target efforts its curated route can send, preserving option types and order"
+file = "crates/fusiform-module/src/route.rs"
+old = ".is_some_and(|effort| alias.reasoning_wire_ids.contains_key(effort))"
+new = ".is_some_and(|effort| { let _ = effort; true /* NON-VACUITY BREAK */ })"
+edits = []
+test_file = "crates/fusiform-module/src/route.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::alias_tests::alias_effort_restriction_preserves_option_shapes_and_order"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+[control.select]
+filter = "route::alias_tests::"
 
