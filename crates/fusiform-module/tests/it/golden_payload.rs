@@ -461,8 +461,16 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
     let (store, _dir) = super::curated_wire::store();
     for (label, arguments) in [
         (
+            "catalog.get — provider default endpoint",
+            serde_json::json!({"provider_id":"openai","model_id":"gpt-6.1-sol"}),
+        ),
+        (
             "catalog.get — pi corrected endpoint",
             serde_json::json!({"provider_id":"opencode-go","model_id":"claude-haiku-5-5"}),
+        ),
+        (
+            "catalog.get — pi Anthropic effective endpoint",
+            serde_json::json!({"provider_id":"opencode-go","model_id":"minimax-m3"}),
         ),
         (
             "catalog.get — pi withheld endpoint",

@@ -450,8 +450,11 @@ The sources read were `earendil-works/pi@74f46864`'s
 [`@earendil-works/pi-ai` 1.4.0 catalog](https://unpkg.com/@earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json),
 keyed by API group and `chat:<model-id>`. Compared with models.dev on
 2026-10-23, all 29 shared rows had matching API-kind/npm families and differing
-base URLs: five Anthropic rows use `https://opencode.ai/inference/go`; all
-other shared rows, including Google, use `https://opencode.ai/inference/go/v1`.
+base URLs: pi gives five Anthropic rows the raw base
+`https://opencode.ai/inference/go`; its Anthropic SDK appends `/v1/messages`.
+Fusiform serves their effective base `https://opencode.ai/inference/go/v1`,
+so consumers append only `/messages`, as with observed models.dev endpoints.
+All other shared rows, including Google, already include `/v1` in pi's base.
 The five upstream-only models (`cat-jam-free`, `minimax-m2.7`,
 `minimax-m3.1-flash`, `space-bunny`, `step-5-preview-free`) withhold `wire.api`
 because pi publishes no route for them.
@@ -464,3 +467,13 @@ disclosures with their provider, including a withheld-only provider. Tests in
 `tests/it/curated_wire.rs` drive named, bulk, filtered and paged reads plus
 uncorrected history; mutation controls remove the application call and the
 withholding operation independently.
+
+Provider defaults use `model: "*"`, a nonempty `quote` from the provider's
+official documentation, and a non-withheld value. The source reference records
+the documentation URL and access date rather than a repository revision.
+OpenAI, Anthropic, Google Gemini API (not Vertex), and xAI defaults fill only
+missing observed endpoints; a model-specific correction or withholding wins.
+Disclosures still name each affected model, preserving the existing protocol
+and provider paging. The loader rejects defaults without a value or quote;
+planted violations exercise that guard and the OpenCode Anthropic version-path
+check against the normalized embedded seed's observed `wire.npm`.

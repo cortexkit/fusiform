@@ -155,7 +155,12 @@ inherit these backend-specific claims (§5.5), and curated rows carry none.
 
 Current reads correct OpenCode Go's `wire.api` to the per-model base in
 `@earendil-works/pi-ai` 1.4.0's catalog, verified against its provider code at
-`earendil-works/pi@74f46864`. Rows curated as unsupported by that catalog have no `wire.api`.
+`earendil-works/pi@74f46864`, including the version path that its SDK adds.
+Rows curated as unsupported by that catalog have no `wire.api`.
+Current upstream rows of `openai`, `anthropic`, `google` (Gemini API, not Vertex),
+and `xai` also receive a sourced provider default when neither the model nor
+the provider publishes an observed `wire.api`. Observed endpoints always win.
+Aliases and curated model rows receive no default.
 Each applied or withheld endpoint is disclosed in response-level
 `wire_corrections`: `provider`, `model` (separate identity components), `field`
 (`wire.api`), `withheld`, `source_ref` (`repo`, `commit`, `file`),

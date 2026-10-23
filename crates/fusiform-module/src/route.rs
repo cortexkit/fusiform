@@ -1981,6 +1981,14 @@ fn render(
             ) {
                 wire_corrections.push(correction);
             }
+            if let Some(correction) = crate::wire_corrections::apply_provider_api(
+                &model.provider_id,
+                &model.model_id,
+                &mut facts,
+                requested_prefixes,
+            ) {
+                wire_corrections.push(correction);
+            }
             if let Some(link) = apply_canonical_link(
                 &model.provider_id,
                 &model.model_id,
@@ -4483,6 +4491,20 @@ mod billing_plane_tests {
             // method served before billing planes existed.
             response.resolved_at_ms = 1_000;
             response.catalog_version = 1;
+            // Provider endpoint defaults are the only additions to the old
+            // plain-read bytes; the billing plane must still change nothing.
+            assert_eq!(
+                response
+                    .models
+                    .get_mut("openai/test-model")
+                    .unwrap()
+                    .remove("wire.api"),
+                Some(json!({"value":"https://api.openai.com/v1","from":"curated"}))
+            );
+            assert_eq!(response.wire_corrections.len(), 1);
+            assert_eq!(response.wire_corrections[0].provider, "openai");
+            assert_eq!(response.wire_corrections[0].model, "test-model");
+            response.wire_corrections.clear();
             assert_eq!(
                 serde_json::to_string(&response).unwrap(),
                 r#"{"source":"models.dev","resolved_at_ms":1000,"catalog_version":1,"models":{"openai/test-model":{"capability.reasoning":true,"existence":"present","model.family":"real-family","model.open_weights":false,"rate.input":{"currency":"USD","exponent":9,"state":"priced","unit_provenance":"source","units":100}}}}"#
@@ -4691,9 +4713,11 @@ fn admits_rates(prefixes: &[String]) -> bool {
 /// [`narrow_to_requested`] if the caller did not ask for them.
 fn widened_for_inheritance(prefixes: &[String]) -> Vec<String> {
     let mut out = prefixes.to_vec();
-    // Keep an existing model readable even when its canonical-id fact is absent.
-    // Rendering can supply a sourced identity, then drops this extra presence fact.
-    if prefixes.iter().any(|p| "model.canonical_id".starts_with(p))
+    // Keep an existing model readable when a sourced identity or endpoint can
+    // fill an absent fact. Rendering drops this extra presence fact afterward.
+    if prefixes
+        .iter()
+        .any(|p| "model.canonical_id".starts_with(p) || "wire.api".starts_with(p))
         && !out.iter().any(|p| "existence".starts_with(p))
     {
         out.push("existence".to_string());

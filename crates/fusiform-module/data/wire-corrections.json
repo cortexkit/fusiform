@@ -1,5 +1,70 @@
 {
+  "notes": "wire.api follows models.dev's base-URL convention: include the version path so consumers append only the operation (/messages, /chat/completions, or /models/{id}:streamGenerateContent). Curated and observed bases are therefore interchangeable. Provider entries (model *) fill only missing observed endpoints on current upstream rows; disclosures name each affected model.",
   "corrections": [
+    {
+      "provider": "openai",
+      "model": "*",
+      "field": "wire.api",
+      "value": "https://api.openai.com/v1",
+      "withheld": false,
+      "source_ref": {
+        "repo": "https://platform.openai.com",
+        "commit": "accessed 2026-10-23",
+        "file": "https://platform.openai.com/docs/api-reference/responses/create?lang=csharp#example"
+      },
+      "quote": "curl https://api.openai.com/v1/responses",
+      "established_by": "fusiform",
+      "established_at_ms": 1792713600000,
+      "review_by_ms": 1797897600000
+    },
+    {
+      "provider": "anthropic",
+      "model": "*",
+      "field": "wire.api",
+      "value": "https://api.anthropic.com/v1",
+      "withheld": false,
+      "source_ref": {
+        "repo": "https://docs.anthropic.com",
+        "commit": "accessed 2026-10-23",
+        "file": "https://docs.anthropic.com/claude/reference/getting-started-with-the-api; https://docs.anthropic.com/en/api/messages#messages-create"
+      },
+      "quote": "The Claude API is a RESTful API at https://api.anthropic.com; POST /v1/messages",
+      "established_by": "fusiform",
+      "established_at_ms": 1792713600000,
+      "review_by_ms": 1797897600000
+    },
+    {
+      "provider": "google",
+      "model": "*",
+      "field": "wire.api",
+      "value": "https://generativelanguage.googleapis.com/v1beta",
+      "withheld": false,
+      "source_ref": {
+        "repo": "https://ai.google.dev",
+        "commit": "accessed 2026-10-23",
+        "file": "https://ai.google.dev/gemini-api/docs/generate-content/text-generation#rest"
+      },
+      "quote": "curl \"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent\"",
+      "established_by": "fusiform",
+      "established_at_ms": 1792713600000,
+      "review_by_ms": 1797897600000
+    },
+    {
+      "provider": "xai",
+      "model": "*",
+      "field": "wire.api",
+      "value": "https://api.x.ai/v1",
+      "withheld": false,
+      "source_ref": {
+        "repo": "https://docs.x.ai",
+        "commit": "accessed 2026-10-23",
+        "file": "https://docs.x.ai/developers/quickstart#step-4-make-your-first-request"
+      },
+      "quote": "base_url=\"https://api.x.ai/v1\"",
+      "established_by": "fusiform",
+      "established_at_ms": 1792713600000,
+      "review_by_ms": 1797897600000
+    },
     {
       "provider": "opencode-go",
       "model": "beam-free",
@@ -19,7 +84,8 @@
       "provider": "opencode-go",
       "model": "claude-haiku-5-5",
       "field": "wire.api",
-      "value": "https://opencode.ai/inference/go",
+      "value": "https://opencode.ai/inference/go/v1",
+      "notes": "pi's Anthropic base omits /v1 because its SDK appends /v1/messages; this value is pi's effective base.",
       "withheld": false,
       "source_ref": {
         "repo": "https://github.com/earendil-works/pi",
@@ -319,7 +385,8 @@
       "provider": "opencode-go",
       "model": "minimax-m3",
       "field": "wire.api",
-      "value": "https://opencode.ai/inference/go",
+      "value": "https://opencode.ai/inference/go/v1",
+      "notes": "pi's Anthropic base omits /v1 because its SDK appends /v1/messages; this value is pi's effective base.",
       "withheld": false,
       "source_ref": {
         "repo": "https://github.com/earendil-works/pi",
@@ -379,7 +446,8 @@
       "provider": "opencode-go",
       "model": "qwen3.7-plus",
       "field": "wire.api",
-      "value": "https://opencode.ai/inference/go",
+      "value": "https://opencode.ai/inference/go/v1",
+      "notes": "pi's Anthropic base omits /v1 because its SDK appends /v1/messages; this value is pi's effective base.",
       "withheld": false,
       "source_ref": {
         "repo": "https://github.com/earendil-works/pi",
@@ -394,7 +462,8 @@
       "provider": "opencode-go",
       "model": "qwen3.8-flash",
       "field": "wire.api",
-      "value": "https://opencode.ai/inference/go",
+      "value": "https://opencode.ai/inference/go/v1",
+      "notes": "pi's Anthropic base omits /v1 because its SDK appends /v1/messages; this value is pi's effective base.",
       "withheld": false,
       "source_ref": {
         "repo": "https://github.com/earendil-works/pi",
@@ -409,7 +478,8 @@
       "provider": "opencode-go",
       "model": "qwen3.8-max",
       "field": "wire.api",
-      "value": "https://opencode.ai/inference/go",
+      "value": "https://opencode.ai/inference/go/v1",
+      "notes": "pi's Anthropic base omits /v1 because its SDK appends /v1/messages; this value is pi's effective base.",
       "withheld": false,
       "source_ref": {
         "repo": "https://github.com/earendil-works/pi",

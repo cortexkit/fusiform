@@ -17,6 +17,8 @@ pub struct WireCorrection {
     pub value: Option<String>,
     pub withheld: bool,
     pub source_ref: fusiform_protocol::WireSourceRef,
+    pub quote: Option<String>,
+    pub notes: Option<String>,
     pub established_by: String,
     pub established_at_ms: i64,
     pub review_by_ms: i64,
@@ -67,6 +69,14 @@ pub fn load_reporting_rejects(doc: &str) -> (WireCorrections, Vec<String>) {
             || row.value.as_ref().is_some_and(|v| v.trim().is_empty())
         {
             Some("withheld requires no value; a correction requires a nonempty value")
+        } else if row.model == "*"
+            && (row.withheld
+                || row
+                    .quote
+                    .as_ref()
+                    .is_none_or(|quote| quote.trim().is_empty()))
+        {
+            Some("provider defaults require a value and a source quote")
         } else if row.established_by != "fusiform" {
             Some("established_by must be fusiform")
         } else if row.established_at_ms <= 0
@@ -105,6 +115,31 @@ pub fn apply(
     prefixes: Option<&Vec<String>>,
 ) -> Option<fusiform_protocol::WireCorrectionWire> {
     let row = corrections().get(&(provider.to_string(), model.to_string()))?;
+    apply_row(row, model, facts, prefixes)
+}
+
+/// Fill a missing endpoint only; upstream claims and per-model corrections win.
+pub fn apply_provider_api(
+    provider: &str,
+    model: &str,
+    facts: &mut BTreeMap<String, serde_json::Value>,
+    prefixes: Option<&Vec<String>>,
+) -> Option<fusiform_protocol::WireCorrectionWire> {
+    if facts.contains_key("wire.api")
+        || corrections().contains_key(&(provider.to_string(), model.to_string()))
+    {
+        return None;
+    }
+    let row = corrections().get(&(provider.to_string(), "*".to_string()))?;
+    apply_row(row, model, facts, prefixes)
+}
+
+fn apply_row(
+    row: &WireCorrection,
+    model: &str,
+    facts: &mut BTreeMap<String, serde_json::Value>,
+    prefixes: Option<&Vec<String>>,
+) -> Option<fusiform_protocol::WireCorrectionWire> {
     if prefixes.is_some_and(|p| !p.iter().any(|p| row.field.starts_with(p))) {
         return None;
     }
@@ -118,7 +153,7 @@ pub fn apply(
     }
     Some(fusiform_protocol::WireCorrectionWire {
         provider: row.provider.clone(),
-        model: row.model.clone(),
+        model: model.to_string(),
         field: row.field.clone(),
         withheld: row.withheld,
         source_ref: row.source_ref.clone(),
@@ -137,7 +172,7 @@ mod tests {
     fn shipped_corrections_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 34);
+        assert_eq!(rows.len(), 38);
         assert_eq!(rows.values().filter(|row| row.withheld).count(), 5);
     }
 
@@ -187,6 +222,91 @@ mod tests {
             .unwrap()
             .as_millis() as i64;
         assert!(overdue_at(corrections(), now).is_empty());
+    }
+
+    #[test]
+    fn planted_provider_default_without_value_or_quote_is_rejected() {
+        let doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
+        let provider = doc["corrections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["model"] == "*")
+            .unwrap();
+        for quote in [json!(null), json!(" ")] {
+            let mut row = provider.clone();
+            row["quote"] = quote;
+            let (rows, rejects) = load_reporting_rejects(&json!({"corrections":[row]}).to_string());
+            assert!(rows.is_empty());
+            assert_eq!(rejects.len(), 1);
+            assert!(rejects[0].contains("provider defaults require"));
+        }
+        let mut row = provider.clone();
+        row["value"] = json!(null);
+        row["withheld"] = json!(true);
+        let (rows, rejects) = load_reporting_rejects(&json!({"corrections":[row]}).to_string());
+        assert!(rows.is_empty());
+        assert_eq!(rejects.len(), 1);
+        assert!(rejects[0].contains("provider defaults require"));
+    }
+
+    fn opencode_anthropic_models() -> Vec<String> {
+        let catalog = crate::seed::catalog().unwrap();
+        let provider = catalog
+            .providers
+            .iter()
+            .find(|provider| provider.provider_id == "opencode-go")
+            .unwrap();
+        let mut models: Vec<_> = provider
+            .models
+            .iter()
+            .filter(|model| {
+                model
+                    .wire
+                    .npm
+                    .as_ref()
+                    .is_some_and(|npm| npm.value == "@ai-sdk/anthropic")
+            })
+            .map(|model| model.key.model_id.clone())
+            .collect();
+        models.sort();
+        models
+    }
+
+    fn unversioned_anthropic_bases(rows: &WireCorrections) -> Vec<String> {
+        opencode_anthropic_models()
+            .into_iter()
+            .filter(|model| {
+                rows.get(&("opencode-go".into(), model.clone()))
+                    .and_then(|row| row.value.as_ref())
+                    .is_some_and(|api| !api.ends_with("/v1"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn opencode_anthropic_bases_include_the_version_path() {
+        assert_eq!(
+            opencode_anthropic_models(),
+            [
+                "claude-haiku-5-5",
+                "minimax-m2.7",
+                "minimax-m3",
+                "qwen3.7-plus",
+                "qwen3.8-flash",
+                "qwen3.8-max"
+            ]
+        );
+        assert!(unversioned_anthropic_bases(corrections()).is_empty());
+    }
+
+    #[test]
+    fn planted_unversioned_anthropic_base_is_reported() {
+        let mut rows = corrections().clone();
+        rows.get_mut(&("opencode-go".into(), "claude-haiku-5-5".into()))
+            .unwrap()
+            .value = Some("https://opencode.ai/inference/go".into());
+        assert_eq!(unversioned_anthropic_bases(&rows), ["claude-haiku-5-5"]);
     }
 
     #[test]

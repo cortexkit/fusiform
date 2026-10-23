@@ -1523,3 +1523,68 @@ build_timeout_s = 1800
 [control.select]
 filter = "curated_wire::"
 
+
+[[control]]
+id = "curated-provider-api-call"
+guards = "current reads reach provider defaults only for missing endpoints"
+file = "crates/fusiform-module/src/route.rs"
+old = """
+            if let Some(correction) = crate::wire_corrections::apply_provider_api(
+                &model.provider_id,
+                &model.model_id,
+                &mut facts,
+                requested_prefixes,
+            ) {"""
+new = "            if let Some(correction) = None::<fusiform_protocol::WireCorrectionWire> { // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/tests/it/curated_wire.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["curated_wire::provider_api_defaults_fill_only_missing_current_endpoints"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+[control.select]
+filter = "curated_wire::"
+
+
+[[control]]
+id = "curated-provider-api-evidence"
+guards = "provider defaults require a source quote and cannot withhold endpoints"
+file = "crates/fusiform-module/src/wire_corrections.rs"
+old = '        } else if row.model == "*"'
+new = '        } else if false && row.model == "*" // NON-VACUITY BREAK'
+edits = []
+test_file = "crates/fusiform-module/src/wire_corrections.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["wire_corrections::tests::planted_provider_default_without_value_or_quote_is_rejected"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+[control.select]
+filter = "wire_corrections::"
+
+
+[[control]]
+id = "opencode-anthropic-effective-api"
+guards = "OpenCode Go Anthropic bases include the SDK-added version path"
+file = "crates/fusiform-module/src/wire_corrections.rs"
+old = '                    .is_some_and(|api| !api.ends_with("/v1"))'
+new = '                    .is_some_and(|api| false && !api.ends_with("/v1")) // NON-VACUITY BREAK'
+edits = []
+test_file = "crates/fusiform-module/src/wire_corrections.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["wire_corrections::tests::planted_unversioned_anthropic_base_is_reported"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+[control.select]
+filter = "wire_corrections::"
