@@ -649,6 +649,11 @@ pub struct CatalogGetResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub canonical_links: Vec<CanonicalLinkWire>,
 
+    /// Current-only endpoint corrections and intentional endpoint withholding.
+    /// Omitted when no requested wire field was corrected or withheld.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wire_corrections: Vec<WireCorrectionWire>,
+
     /// The billing plane selected by `auth_method`. Absent on ordinary reads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plane: Option<PlaneWire>,
@@ -983,6 +988,21 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// quirks. Fusiform never infers a wire family or serves header/body overrides.
 pub const SERVED_FACTS: &[ServedFact] = &[
     ServedFact {
+        key: "route.reasoning_wire_ids",
+        class: FactClass::ByteAffecting,
+        note: "curated effort-to-backend-model-id object on live alias routes only; not projected from a target. Consumers send the chosen id on the wire.",
+    },
+    ServedFact {
+        key: "route.reasoning_default",
+        class: FactClass::ByteAffecting,
+        note: "curated effort selected by a bare alias slug; a key in route.reasoning_wire_ids. Absent when not curated.",
+    },
+    ServedFact {
+        key: "successor",
+        class: FactClass::Advisory,
+        note: "sourced replacement provider/model identity on retired alias rows only; absent when no replacement has been established.",
+    },
+    ServedFact {
         key: "wire.npm",
         class: FactClass::Advisory,
         note: "verbatim models.dev client package as {value, from}; a model override \
@@ -994,9 +1014,10 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         key: "wire.api",
         class: FactClass::Advisory,
         note: "verbatim models.dev base URL as {value, from}; a model override \
-               wins over the provider default. from is model or provider. No URL \
-               normalization. Absent means unknown. Not projected onto aliases \
-               or curated rows.",
+               wins over the provider default. from is model or provider, except \
+               sourced current-read corrections use curated and are disclosed in \
+               wire_corrections. Withheld endpoints are absent and disclosed there. \
+               No URL normalization. Not projected onto aliases or curated rows.",
     },
     ServedFact {
         key: "wire.shape",
@@ -1294,6 +1315,30 @@ pub struct RetiredModelWire {
     /// ending here. `catalog.history` on `existence` carries the bounding
     /// window for a consumer that needs the interval rather than the edge.
     pub retired_at_ms: i64,
+    /// Sourced replacement catalog identity, when one is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub successor: Option<String>,
+}
+
+/// Pinned routing code and catalog establishing a wire correction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WireSourceRef {
+    pub repo: String,
+    pub commit: String,
+    pub file: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireCorrectionWire {
+    pub provider: String,
+    pub model: String,
+    pub field: String,
+    pub withheld: bool,
+    pub source_ref: WireSourceRef,
+    pub established_by: String,
+    pub established_at_ms: i64,
+    pub review_by_ms: i64,
 }
 
 /// What a served tool call produced.

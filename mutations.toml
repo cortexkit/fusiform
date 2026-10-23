@@ -1417,3 +1417,109 @@ only = false
 timeout_s = 600
 build_timeout_s = 1800
 
+
+[[control]]
+id = "curated-wire-correction-call"
+guards = "current reads reach the sourced endpoint correction layer"
+file = "crates/fusiform-module/src/route.rs"
+old = """
+            if let Some(correction) = crate::wire_corrections::apply(
+                &model.provider_id,
+                &model.model_id,
+                &mut facts,
+                requested_prefixes,
+            ) {"""
+new = "            if let Some(correction) = None::<fusiform_protocol::WireCorrectionWire> { // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/tests/it/curated_wire.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["curated_wire::pi_endpoints_correct_current_reads_without_changing_observed_facts_or_history", "curated_wire::unsupported_pi_routes_withhold_only_the_endpoint_and_disclose_it"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+[control.select]
+filter = "curated_wire::"
+
+
+[[control]]
+id = "curated-wire-withholding"
+guards = "a model without a pi route never receives an endpoint guess"
+file = "crates/fusiform-module/src/wire_corrections.rs"
+old = '        facts.remove("wire.api");'
+new = "        // NON-VACUITY BREAK: retain the unsupported upstream endpoint"
+edits = []
+test_file = "crates/fusiform-module/tests/it/curated_wire.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["curated_wire::unsupported_pi_routes_withhold_only_the_endpoint_and_disclose_it"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+[control.select]
+filter = "curated_wire::"
+
+
+[[control]]
+id = "alias-tier-wire-emission"
+guards = "live aliases emit only their own curated tier ids and default"
+file = "crates/fusiform-module/src/route.rs"
+old = "    emit_alias_route_facts(&mut facts, alias);"
+new = "    // NON-VACUITY BREAK: omit alias tier wire facts"
+edits = []
+test_file = "crates/fusiform-module/tests/it/curated_wire.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["curated_wire::alias_tier_wire_ids_are_route_local_and_obey_filters"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+[control.select]
+filter = "curated_wire::"
+
+
+[[control]]
+id = "retired-alias-successor-fact"
+guards = "retired-inclusive reads keep the sourced successor on the absent identity"
+file = "crates/fusiform-module/src/route.rs"
+old = '                facts.insert("successor".to_string(), serde_json::json!(successor));'
+new = "                let _ = successor; // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/tests/it/curated_wire.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["curated_wire::retired_alias_successors_survive_named_bulk_and_filtered_reads"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+[control.select]
+filter = "curated_wire::"
+
+
+[[control]]
+id = "retired-alias-successor-disclosure"
+guards = "a named read excluding a retired alias still discloses its successor"
+file = "crates/fusiform-module/src/route.rs"
+old = "                successor: successor.cloned(),"
+new = "                successor: None, // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/tests/it/curated_wire.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["curated_wire::retired_alias_successors_survive_named_bulk_and_filtered_reads"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+[control.select]
+filter = "curated_wire::"
+

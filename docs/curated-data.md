@@ -12,6 +12,7 @@ that keep them honest.
 | `model-aliases.json` | route-specific ids and the published row each one is | at read time, current reads only |
 | `curated-models.json` | provider rows models.dev does not carry | at read time, current reads only |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
+| `wire-corrections.json` | sourced per-model endpoint corrections or withholding | at read time, current reads only (§9) |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
 | `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio` (§8) |
 | `plan-prices.json` | subscription list prices | written to `plan_price_era` at start |
@@ -80,6 +81,7 @@ published row:
 | `basis` | why the id is that model, in a sentence |
 | `source_ref` | the file and pinned revision of the routing code that was read |
 | `established_at_ms`, `review_by_ms` | when it was read; when it must be read again |
+| `reasoning_wire_ids`, `reasoning_default` | optional effort → backend model id map and default effort used when no tier is specified, read from the pinned plugin |
 
 How to add a row: read the routing code at a pinned revision. Include the
 alias only if every tier of the id resolves to the target's own backend model
@@ -102,6 +104,25 @@ Gates (`aliases.rs`):
   alias is rejected (`a_duplicate_alias_id_is_reported_rather_than_resolved`,
   `a_chained_alias_is_refused`);
 - no alias is past its review date (`no_alias_is_past_its_review_date`).
+
+The live 3.8 Flash and Argon aliases carry tier maps for `low`, `medium` and
+`high`, defaulting to `medium`. The source is each alias's own plugin pin
+(Flash `44eb8fa0`, Argon `48919aa7`), not a consumer's routing table.
+`reasoning_option_drift` checks every effort against the target's
+`capability.reasoning_options`; `planted_tier_effort_drift_is_reported` calls
+that same check with an unsupported effort. The loader rejects a missing or
+unknown default and empty wire ids.
+
+Retiring an alias moves its identity to `retired`; never delete a served id.
+An optional `successor` is a full `provider/model` identity, accompanied by
+`successor_source_ref`. It must name a row fusiform currently serves
+(`invalid_successors`, also exercised by a planted missing/unsourced successor).
+The 3.6 and 3.7 Flash aliases name `google/antigravity-gemini-3.8-flash`, citing
+broca `2770908`'s record of AGAUTH's two `fetchAvailableModels` captures before
+2026-10-14T13:11Z (clients 1.3.3 and 1.3.5). No successor is established for
+`antigravity-claude-sonnet-4-6-thinking`. On current `include_retired` reads the
+absent row carries `successor`; a named read excluding the row carries it in
+the `retired` disclosure instead. Point-in-time reads do not apply this list.
 
 Serving rules are in [`wire-contract.md`](wire-contract.md) §5.5.
 
@@ -333,7 +354,7 @@ its MIT license; see `THIRD-PARTY-NOTICES.md`.
 
 ## 7. When a review gate fires
 
-Plan prices, quota values, billing planes and rules, aliases, canonical links,
+Plan prices, quota values, billing planes and rules, aliases, canonical links, wire corrections,
 input-audio sources and curated model rows each carry a review date, and a test fails once any date has
 passed. These are time-triggered: they fail on a day nobody changed anything,
 and CI's scheduled run exists so they fire then. The plan-price, billing-plane
@@ -346,7 +367,7 @@ To clear one:
 2. If the claim changed, update it (or remove the row).
 3. Whether or not it changed, record who looked (`established_by` where the
    file has it), when (`established_at_ms`), and a new `review_by_ms`: 60 days
-   later for billing planes, aliases, canonical links, input-audio sources and curated model rows; the file's stated
+   later for billing planes, aliases, canonical links, wire corrections, input-audio sources and curated model rows; the file's stated
    interval for plan prices.
 4. Commit the file. Confirming a claim unchanged is a real result; the diff is
    the provenance change alone.
@@ -411,3 +432,35 @@ and every exclusion matches rows in the embedded seed
 `planted_stale_exclusion_is_named`); and no row is past its review date
 (`input_audio_sources_are_within_their_review_dates`,
 `planted_overdue_source_requires_rereading_or_removal`).
+
+## 9. Wire corrections (`wire-corrections.json`)
+
+Each `corrections` row names `provider`, `model`, `field` (currently only
+`wire.api`), and either a nonempty `value` with `withheld: false`, or no value
+with `withheld: true`. `source_ref` is an object containing `repo`, `commit`
+and `file`; `established_by` is `fusiform`, with `established_at_ms` and a
+`review_by_ms` exactly 60 days later. The file is embedded and parsed once;
+malformed rows and duplicate identities are counted as rejects, never silently
+resolved by ordering. `overdue_at` enforces review dates, with a planted overdue
+row driving the same check as the shipped-data gate.
+
+OpenCode Go follows the pi coding agent, not models.dev's endpoint spelling.
+The sources read were `earendil-works/pi@74f46864`'s
+`packages/ai/src/providers/opencode-go.ts` and the built
+[`@earendil-works/pi-ai` 1.4.0 catalog](https://unpkg.com/@earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json),
+keyed by API group and `chat:<model-id>`. Compared with models.dev on
+2026-10-23, all 29 shared rows had matching API-kind/npm families and differing
+base URLs: five Anthropic rows use `https://opencode.ai/inference/go`; all
+other shared rows, including Google, use `https://opencode.ai/inference/go/v1`.
+The five upstream-only models (`cat-jam-free`, `minimax-m2.7`,
+`minimax-m3.1-flash`, `space-bunny`, `step-5-preview-free`) withhold `wire.api`
+because pi publishes no route for them.
+
+The current-read overlay replaces only that field with `{value, from: curated}`
+or removes it when withheld, and discloses each change in `wire_corrections`
+([wire contract](wire-contract.md) §4.1). It does not touch `wire.npm`,
+`wire.shape`, stored eras or historical `at_ms` reads. Filters and paging keep
+disclosures with their provider, including a withheld-only provider. Tests in
+`tests/it/curated_wire.rs` drive named, bulk, filtered and paged reads plus
+uncorrected history; mutation controls remove the application call and the
+withholding operation independently.

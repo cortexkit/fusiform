@@ -213,6 +213,7 @@ fn a_named_read_of_a_held_id_reports_it_retired() {
             [fusiform_protocol::RetiredModelWire {
                 model: id.clone(),
                 retired_at_ms: HELD_SINCE_MS,
+                successor: None,
             }],
             "{id}"
         );

@@ -13,9 +13,15 @@
         "model_id": "gemini-4-argon"
       },
       "basis": "The resolver recognises the id as Argon and resolves every tier through getGeminiArgonAntigravityModel: low, medium and high go to gemini-4-argon-low, -medium and -high, and a missing or unknown tier defaults to gemini-4-argon-medium. RESOLVER_ALIASES maps each of those back to gemini-4-argon, so the suffix spells a reasoning level and every request reaches Google's gemini-4-argon.",
-      "source_ref": "antigravity-auth@48919aa7ae9378ea19af17e7d9da5b986395f00a packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS, RESOLVER_ALIASES, getGeminiArgonAntigravityModel), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, isGeminiArgonModel)",
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS, RESOLVER_ALIASES, getGeminiArgonAntigravityModel), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, isGeminiArgonModel)",
       "established_at_ms": 1792108800000,
-      "review_by_ms": 1797292800000
+      "review_by_ms": 1797292800000,
+      "reasoning_wire_ids": {
+        "low": "gemini-4-argon-low",
+        "medium": "gemini-4-argon-medium",
+        "high": "gemini-4-argon-high"
+      },
+      "reasoning_default": "medium"
     },
     {
       "provider_id": "google",
@@ -25,9 +31,15 @@
         "model_id": "gemini-3.8-flash"
       },
       "basis": "The plugin resolves every tier of this id through GEMINI_38_FLASH_ROUTES: low, medium and high go to gemini-3.8-flash-low, -medium and -high, and a missing or unknown tier defaults to gemini-3.8-flash-medium. The suffix is how Code Assist spells a reasoning level, so every request reaches Google's gemini-3.8-flash.",
-      "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
       "established_at_ms": 1790294400000,
-      "review_by_ms": 1795478400000
+      "review_by_ms": 1795478400000,
+      "reasoning_wire_ids": {
+        "low": "gemini-3.8-flash-low",
+        "medium": "gemini-3.8-flash-medium",
+        "high": "gemini-3.8-flash-high"
+      },
+      "reasoning_default": "medium"
     },
     {
       "provider_id": "google",
@@ -53,13 +65,17 @@
       "provider_id": "google",
       "model_id": "antigravity-gemini-3.6-flash",
       "retired_at_ms": 1792191135000,
-      "reason": "Google withdrew the gemini-3.6-flash-low/-medium/-high routes on the daily Code Assist endpoint (absent from fetchAvailableModels just before 2026-10-14T13:11Z), so the alias stopped being served."
+      "reason": "Google withdrew the gemini-3.6-flash-low/-medium/-high routes on the daily Code Assist endpoint (absent from fetchAvailableModels just before 2026-10-14T13:11Z), so the alias stopped being served.",
+      "successor": "google/antigravity-gemini-3.8-flash",
+      "successor_source_ref": "https://github.com/cortexkit/broca/blob/2770908578e89807ccc19deeeb8f464b5687c078/crates/broca-catalog/src/live.rs#L92-L123 (AGAUTH fetchAvailableModels captures before 2026-10-14T13:11Z, clients 1.3.3 and 1.3.5)"
     },
     {
       "provider_id": "google",
       "model_id": "antigravity-gemini-3.7-flash",
       "retired_at_ms": 1792191135000,
-      "reason": "Google withdrew the gemini-3.7-flash-low/-medium/-high routes on the daily Code Assist endpoint (absent from fetchAvailableModels just before 2026-10-14T13:11Z), so the alias stopped being served."
+      "reason": "Google withdrew the gemini-3.7-flash-low/-medium/-high routes on the daily Code Assist endpoint (absent from fetchAvailableModels just before 2026-10-14T13:11Z), so the alias stopped being served.",
+      "successor": "google/antigravity-gemini-3.8-flash",
+      "successor_source_ref": "https://github.com/cortexkit/broca/blob/2770908578e89807ccc19deeeb8f464b5687c078/crates/broca-catalog/src/live.rs#L92-L123 (AGAUTH fetchAvailableModels captures before 2026-10-14T13:11Z, clients 1.3.3 and 1.3.5)"
     }
   ]
 }

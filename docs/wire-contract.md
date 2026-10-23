@@ -132,8 +132,11 @@ value would do to a consumer:
 | `model.status` | advisory | upstream lifecycle label verbatim, or `null` |
 | `model.kind` | advisory | `"decision"` or `"extraction"`, on curated rows only; otherwise no fact (§4.6) |
 | `wire.npm` | advisory | `{"value": "<published client package>", "from": "model" or "provider"}`; otherwise no fact |
-| `wire.api` | advisory | `{"value": "<published base URL>", "from": "model" or "provider"}`; otherwise no fact |
+| `wire.api` | advisory | `{"value": "<base URL>", "from": "model", "provider" or "curated"}`; otherwise no fact; corrections/withholding disclosed in `wire_corrections` |
 | `wire.shape` | advisory | `{"value": "<published request shape>", "from": "model"}`; otherwise no fact |
+| `route.reasoning_wire_ids` | byte-affecting | curated effort → backend model id object on live aliases only; otherwise no fact |
+| `route.reasoning_default` | byte-affecting | default effort selected when the alias is requested without a tier suffix; a key in `route.reasoning_wire_ids`; otherwise no fact |
+| `successor` | advisory | sourced replacement `provider/model` identity on retired aliases; otherwise no fact |
 | `rate.input` | money | rate value (§4.3), per million input tokens |
 | `rate.output` | money | per million output tokens |
 | `rate.cache_read` | money | per million cached-read tokens |
@@ -141,7 +144,7 @@ value would do to a consumer:
 | `rate.reasoning` | money | per million reasoning tokens |
 | `rate.input_audio` | money | per million audio input tokens, only for providers whose docs establish per-token audio billing |
 
-The `wire.*` values are models.dev's claims, not fusiform's transport policy.
+Except for explicitly disclosed corrections, the `wire.*` values are models.dev's claims, not fusiform's transport policy.
 For each field independently, a model's `provider.npm` or `provider.api` wins
 over its provider's `npm` or `api` default; `from` names the level that supplied
 the value. `provider.shape` exists only on models. Missing fields create **no
@@ -149,6 +152,19 @@ fact**: absence means unknown, never an inferred default. Strings pass through
 verbatim, including empty strings, URL spelling and trailing slashes. Consumers
 own package-to-renderer mapping and all transport quirks. Alias rows do not
 inherit these backend-specific claims (§5.5), and curated rows carry none.
+
+Current reads correct OpenCode Go's `wire.api` to the per-model base in
+`@earendil-works/pi-ai` 1.4.0's catalog, verified against its provider code at
+`earendil-works/pi@74f46864`. Rows curated as unsupported by that catalog have no `wire.api`.
+Each applied or withheld endpoint is disclosed in response-level
+`wire_corrections`: `provider`, `model` (separate identity components), `field`
+(`wire.api`), `withheld`, `source_ref` (`repo`, `commit`, `file`),
+`established_by`, `established_at_ms`, and `review_by_ms` (60 days later).
+The array is omitted when empty and follows provider paging and fact-prefix
+filters, including disclosure-only pages when an endpoint is withheld.
+`wire.npm` and `wire.shape` are not corrected. Neither corrections nor
+withholding change stored facts or `catalog.history`; `at_ms` reads retain the
+uncorrected upstream claims.
 
 The `rate.input_audio` rule: models.dev publishes `cost.input_audio` beside
 the token rates with no unit, so the key alone establishes nothing. It is
@@ -392,6 +408,7 @@ Every field is optional; `{}` reads the current catalog.
 | `uncertain` | when non-empty | §5.4 |
 | `aliased` | when non-empty | §5.5 |
 | `curated` | when non-empty | §5.6 |
+| `wire_corrections` | when non-empty | sourced current-read corrections/withholding of `wire.api` (§4.1) |
 | `plane` | on a billing-plane read | [`billing-planes.md`](billing-planes.md) |
 | `billing_rules` | on a billing-plane read, when non-empty | [`billing-planes.md`](billing-planes.md) |
 
@@ -414,7 +431,7 @@ frame limit. A single provider exceeding 3 MiB is returned alone, never dropped;
 a provider exceeding 4 MiB would require model-level paging.
 
 All model-scoped disclosures (`withheld`, `uncertain`, `curated`, `aliased`,
-`retired`, `billing_rules`) are scoped to that page's providers. Providers with
+`retired`, `billing_rules`, `wire_corrections`) are scoped to that page's providers. Providers with
 only withheld facts still have a page. Bulk reads do not populate `retired`,
 and paging cannot select a billing plane, so `plane`/`billing_rules` are absent.
 `source`, `catalog_version`, and **page one's `resolved_at_ms`** repeat on every
@@ -487,6 +504,10 @@ The golden case `catalog.get — first provider page` carries a real continuatio
   way on current reads, with the instant fusiform stopped serving them, and a
   retired-inclusive read lists them marked `existence: absent` (see
   [`curated-data.md`](curated-data.md) §4, "Held rows").
+  A retired alias with a sourced replacement also carries `successor`, a full
+  `provider/model` identity: on the absent row for `include_retired` reads, or
+  on its named `retired` entry otherwise. The row fact respects fact-prefix
+  filters. No successor is inferred when none is curated.
 - **`uncertain`**: on a historical read, a fact whose value is served but sits
   inside a later era's observation window is listed with
   `superseded_after_ms` (the last instant the value was confirmed) and
@@ -516,6 +537,11 @@ also omitted because an alias reaches a different backend. Rules, tested in
    target row (`alias_tests::structured_output_is_not_projected_onto_an_alias`).
    The same holds for `wire.npm`, `wire.api` and `wire.shape`
    (`alias_tests::wire_facts_are_not_projected_onto_an_alias`).
+   Route facts never project from the target either. When the alias table
+   establishes tier routes, only that alias receives
+   `route.reasoning_wire_ids` and `route.reasoning_default`. Every effort must
+   appear in the target's served `capability.reasoning_options`. Uncurated
+   aliases carry neither fact; fact-prefix filters apply normally.
 5. A retired or absent target serves nothing
    (`alias_tests::a_retired_target_serves_nothing`,
    `alias_tests::an_absent_target_serves_nothing_and_names_it`).

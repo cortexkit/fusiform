@@ -22,6 +22,7 @@ pub mod plan_prices;
 pub mod route;
 pub mod seed;
 pub mod signals;
+pub mod wire_corrections;
 
 use std::sync::Arc;
 

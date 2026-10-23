@@ -484,6 +484,12 @@ fn candidate_reference_page(
         .chain(response.canonical_links.iter().map(|row| &row.model))
         .map(|model| model_provider(model).to_owned())
         .chain(response.uncertain.iter().map(|row| row.provider_id.clone()))
+        .chain(
+            response
+                .wire_corrections
+                .iter()
+                .map(|row| row.provider.clone()),
+        )
         .collect();
     if let Some(cursor) = cursor {
         providers.retain(|provider| provider > &cursor.provider);
@@ -539,6 +545,23 @@ fn linear_packing_matches_candidate_reference_boundaries() {
                     review_by_ms: 1_797_552_000_000,
                 });
         }
+        for provider in ["p00", "z-wire-only"] {
+            let row = crate::wire_corrections::corrections()
+                .values()
+                .next()
+                .unwrap();
+            full.wire_corrections
+                .push(fusiform_protocol::WireCorrectionWire {
+                    provider: provider.into(),
+                    model: "m".into(),
+                    field: "wire.api".into(),
+                    withheld: true,
+                    source_ref: row.source_ref.clone(),
+                    established_by: row.established_by.clone(),
+                    established_at_ms: row.established_at_ms,
+                    review_by_ms: row.review_by_ms,
+                });
+        }
         let all: BTreeSet<_> = full
             .models
             .keys()
@@ -553,6 +576,7 @@ fn linear_packing_matches_candidate_reference_boundaries() {
                     .iter()
                     .map(|row| model_provider(&row.model).to_owned()),
             )
+            .chain(full.wire_corrections.iter().map(|row| row.provider.clone()))
             .collect();
         let mut budgets = BTreeSet::from([1, 2600, 4096]);
         let mut selected = BTreeSet::new();
@@ -589,6 +613,7 @@ fn linear_packing_matches_candidate_reference_boundaries() {
                     actual.canonical_links, expected.canonical_links,
                     "canonical disclosures at budget {budget}, page {page_count}"
                 );
+                assert_eq!(actual.wire_corrections, expected.wire_corrections);
                 page_count += 1;
                 match actual.next_page_token {
                     Some(token) => cursor = Some(parse_page_token(&token).unwrap()),

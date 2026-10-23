@@ -843,13 +843,18 @@ fn serve_catalog_get_with_limits(
     // how a login is billed.
     let mut retired_ids = Vec::new();
     if at.is_none() && plane.is_none() {
-        let retired_alias_ids = crate::aliases::retired_aliases()
-            .values()
-            .map(|row| (&row.provider_id, &row.model_id, row.retired_at_ms));
+        let retired_alias_ids = crate::aliases::retired_aliases().values().map(|row| {
+            (
+                &row.provider_id,
+                &row.model_id,
+                row.retired_at_ms,
+                row.successor.as_ref(),
+            )
+        });
         let held_ids = crate::curated_models::held()
             .values()
-            .map(|row| (&row.provider_id, &row.model_id, row.held_since_ms));
-        for (provider, model, retired_at_ms) in retired_alias_ids.chain(held_ids) {
+            .map(|row| (&row.provider_id, &row.model_id, row.held_since_ms, None));
+        for (provider, model, retired_at_ms, successor) in retired_alias_ids.chain(held_ids) {
             if request
                 .provider_id
                 .as_deref()
@@ -864,7 +869,7 @@ fn serve_catalog_get_with_limits(
             {
                 continue;
             }
-            retired_ids.push((provider, model, retired_at_ms));
+            retired_ids.push((provider, model, retired_at_ms, successor));
         }
     }
     if let (Some(provider_id), Some(model_id)) =
@@ -1028,7 +1033,7 @@ fn serve_catalog_get_with_limits(
     }
     let mut response =
         finish_plane_view(store, source, response, plane, requested_prefixes.as_ref())?;
-    for (provider, model, retired_at_ms) in retired_ids {
+    for (provider, model, retired_at_ms, successor) in retired_ids {
         let id = format!("{provider}/{model}");
         if response.models.contains_key(&id) {
             continue;
@@ -1040,12 +1045,16 @@ fn serve_catalog_get_with_limits(
                 "existence".to_string(),
                 serde_json::Value::String("absent".to_string()),
             )]);
+            if let Some(successor) = successor {
+                facts.insert("successor".to_string(), serde_json::json!(successor));
+            }
             narrow_to_requested(&mut facts, requested_prefixes.as_ref());
             response.models.insert(id, facts);
         } else if named {
             response.retired.push(fusiform_protocol::RetiredModelWire {
                 model: id,
                 retired_at_ms,
+                successor: successor.cloned(),
             });
         }
     }
@@ -1165,6 +1174,9 @@ fn scope_page(response: &mut CatalogGetResponse, providers: &BTreeSet<String>) {
     response
         .canonical_links
         .retain(|row| providers.contains(model_provider(&row.model)));
+    response
+        .wire_corrections
+        .retain(|row| providers.contains(&row.provider));
 }
 
 fn page_catalog(
@@ -1194,7 +1206,7 @@ fn page_catalog(
     // including the final page, which needs no token at all.
     let mut estimate = PageEstimate {
         bytes: compact_size(&response)? + token_reserve,
-        present: [false; 8],
+        present: [false; 9],
     };
     let mut count = 0;
     for (index, (_, _, contribution, _, token_bytes)) in sized.iter().enumerate() {
@@ -1271,11 +1283,13 @@ struct ProviderRows {
     billing_rules: Vec<BillingRuleWire>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     canonical_links: Vec<fusiform_protocol::CanonicalLinkWire>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    wire_corrections: Vec<fusiform_protocol::WireCorrectionWire>,
 }
 
 // The empty models object is already in the envelope. Optional array headers
 // appear only once per page; provider payloads supply their interior JSON bytes.
-const DISCLOSURE_HEADERS: [&str; 7] = [
+const DISCLOSURE_HEADERS: [&str; 8] = [
     r#","curated":[]"#,
     r#","withheld":[]"#,
     r#","retired":[]"#,
@@ -1283,17 +1297,18 @@ const DISCLOSURE_HEADERS: [&str; 7] = [
     r#","aliased":[]"#,
     r#","billing_rules":[]"#,
     r#","canonical_links":[]"#,
+    r#","wire_corrections":[]"#,
 ];
 
 struct ProviderContribution {
     bytes: usize,
-    present: [bool; 8],
+    present: [bool; 9],
 }
 
 #[derive(Clone, Copy)]
 struct PageEstimate {
     bytes: usize,
-    present: [bool; 8],
+    present: [bool; 9],
 }
 
 impl PageEstimate {
@@ -1330,6 +1345,7 @@ impl ProviderRows {
             !self.aliased.is_empty(),
             !self.billing_rules.is_empty(),
             !self.canonical_links.is_empty(),
+            !self.wire_corrections.is_empty(),
         ];
         let headers = DISCLOSURE_HEADERS
             .iter()
@@ -1351,6 +1367,7 @@ impl ProviderRows {
         page.aliased.extend(self.aliased);
         page.billing_rules.extend(self.billing_rules);
         page.canonical_links.extend(self.canonical_links);
+        page.wire_corrections.extend(self.wire_corrections);
     }
 }
 
@@ -1418,6 +1435,13 @@ fn partition_providers(response: &mut CatalogGetResponse) -> BTreeMap<String, Pr
             .entry(model_provider(&row.model).to_owned())
             .or_default()
             .canonical_links
+            .push(row);
+    }
+    for row in std::mem::take(&mut response.wire_corrections) {
+        providers
+            .entry(row.provider.clone())
+            .or_default()
+            .wire_corrections
             .push(row);
     }
     providers
@@ -1786,6 +1810,7 @@ fn single_model_snapshot(
         if !request.include_retired && !model.is_present() {
             retired.push(fusiform_protocol::RetiredModelWire {
                 model: format!("{}/{}", model.provider_id, model.model_id),
+                successor: None,
                 // The instant fusiform NOTICED, which is the boundary of the
                 // existence era. The upstream removed it somewhere in the
                 // half-hour window ending there; `catalog.history` carries the
@@ -1928,6 +1953,7 @@ fn render(
 ) -> CatalogGetResponse {
     let mut models = BTreeMap::new();
     let mut canonical_links = Vec::new();
+    let mut wire_corrections = Vec::new();
     for model in snapshot.models {
         let identity = format!("{}/{}", model.provider_id, model.model_id);
         let mut facts = BTreeMap::new();
@@ -1947,6 +1973,14 @@ fn render(
             facts.insert(key.as_str().to_string(), value);
         }
         if at.is_none() {
+            if let Some(correction) = crate::wire_corrections::apply(
+                &model.provider_id,
+                &model.model_id,
+                &mut facts,
+                requested_prefixes,
+            ) {
+                wire_corrections.push(correction);
+            }
             if let Some(link) = apply_canonical_link(
                 &model.provider_id,
                 &model.model_id,
@@ -2020,6 +2054,7 @@ fn render(
         aliased: Vec::new(),
         curated: Vec::new(),
         canonical_links,
+        wire_corrections,
         plane: None,
         billing_rules: Vec::new(),
     }
@@ -3328,6 +3363,26 @@ mod alias_tests {
     }
 
     #[test]
+    fn planted_target_route_facts_are_not_projected_onto_an_alias() {
+        let mut projected = BTreeMap::from([
+            (
+                "route.reasoning_wire_ids".to_string(),
+                serde_json::json!({"high":"target-only"}),
+            ),
+            (
+                "route.reasoning_default".to_string(),
+                serde_json::json!("high"),
+            ),
+            ("limit.context".to_string(), serde_json::json!(1000)),
+        ]);
+        omit_route_dependent_alias_facts(&mut projected);
+        assert_eq!(
+            projected,
+            BTreeMap::from([("limit.context".to_string(), serde_json::json!(1000))])
+        );
+    }
+
+    #[test]
     fn structured_output_is_not_projected_onto_an_alias() {
         let (store, _d) = store();
         seed_model(&store, "gemini-3.8-flash", 300_000_000);
@@ -3541,6 +3596,8 @@ mod alias_tests {
             source_ref: "s".to_string(),
             established_at_ms: 1,
             review_by_ms: 2,
+            reasoning_wire_ids: BTreeMap::new(),
+            reasoning_default: None,
         };
         let original =
             serde_json::json!({"provider_id":"zai","family":"glm","basis":"open_weights"});
@@ -4548,6 +4605,8 @@ mod billing_plane_tests {
             source_ref: "routing code".into(),
             established_at_ms: 1_000,
             review_by_ms: i64::MAX,
+            reasoning_wire_ids: BTreeMap::new(),
+            reasoning_default: None,
         };
         let mut facts = BTreeMap::from([
             ("rate.input".into(), priced(100)),
@@ -5015,6 +5074,8 @@ fn aliased_response(
     };
     mark_rates_borrowed_through_alias(&mut facts, alias);
     omit_route_dependent_alias_facts(&mut facts);
+    response.wire_corrections.clear();
+    emit_alias_route_facts(&mut facts, alias);
     narrow_to_requested(&mut facts, prefixes);
     if !facts.contains_key("model.canonical_id") {
         response.canonical_links.clear();
@@ -5037,10 +5098,29 @@ fn aliased_response(
 /// Its client package, endpoint and request shape likewise describe the target
 /// backend, not the backend reached through the alias.
 fn omit_route_dependent_alias_facts(facts: &mut BTreeMap<String, serde_json::Value>) {
+    facts.retain(|key, _| !key.starts_with("route."));
     facts.remove("capability.structured_output");
     facts.remove("wire.npm");
     facts.remove("wire.api");
     facts.remove("wire.shape");
+}
+
+fn emit_alias_route_facts(
+    facts: &mut BTreeMap<String, serde_json::Value>,
+    alias: &crate::aliases::Alias,
+) {
+    if !alias.reasoning_wire_ids.is_empty() {
+        facts.insert(
+            "route.reasoning_wire_ids".to_string(),
+            serde_json::json!(alias.reasoning_wire_ids),
+        );
+    }
+    if let Some(default) = &alias.reasoning_default {
+        facts.insert(
+            "route.reasoning_default".to_string(),
+            serde_json::json!(default),
+        );
+    }
 }
 
 /// Mark every rate on an aliased entry as the target's, not the route's.

@@ -232,6 +232,20 @@ fn every_response_type_round_trips() {
     use std::collections::BTreeMap;
 
     let catalog = CatalogGetResponse {
+        wire_corrections: vec![WireCorrectionWire {
+            provider: "opencode-go".into(),
+            model: "claude-haiku-5-5".into(),
+            field: "wire.api".into(),
+            withheld: false,
+            source_ref: WireSourceRef {
+                repo: "https://github.com/earendil-works/pi".into(),
+                commit: "74f46864".into(),
+                file: "packages/ai/src/providers/opencode-go.ts".into(),
+            },
+            established_by: "fusiform".into(),
+            established_at_ms: 1_792_713_600_000,
+            review_by_ms: 1_797_897_600_000,
+        }],
         canonical_links: vec![CanonicalLinkWire {
             model: "ollama-cloud/kimi-k2.6".into(),
             canonical_id: "moonshotai/kimi-k2.6".into(),
@@ -251,6 +265,7 @@ fn every_response_type_round_trips() {
         retired: vec![fusiform_protocol::RetiredModelWire {
             model: "kimi-for-coding/k3".to_string(),
             retired_at_ms: 1_789_738_000_000,
+            successor: Some("kimi-code-plan-global/k3".into()),
         }],
         source: "models.dev".into(),
         resolved_at_ms: 1_786_488_349_024,

@@ -9,6 +9,7 @@ mod bootstrap;
 mod conditional_get;
 mod correct_route;
 mod creator_table;
+mod curated_wire;
 mod enrollment;
 mod failure_path;
 mod golden_payload;

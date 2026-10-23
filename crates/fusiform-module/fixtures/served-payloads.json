@@ -544,7 +544,7 @@
       "aliased": [
         {
           "model": "google/antigravity-gemini-3.8-flash",
-          "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
           "target_model_id": "gemini-3.8-flash",
           "target_provider_id": "google"
         }
@@ -645,6 +645,12 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 3750000000
+          },
+          "route.reasoning_default": "medium",
+          "route.reasoning_wire_ids": {
+            "high": "gemini-3.8-flash-high",
+            "low": "gemini-3.8-flash-low",
+            "medium": "gemini-3.8-flash-medium"
           }
         }
       },
@@ -1229,6 +1235,116 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — alias tier wire ids": {
+    "request": {
+      "arguments": {
+        "model_id": "antigravity-gemini-3.8-flash",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "aliased": [
+        {
+          "model": "google/antigravity-gemini-3.8-flash",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
+          "target_model_id": "gemini-3.8-flash",
+          "target_provider_id": "google"
+        }
+      ],
+      "catalog_version": 0,
+      "models": {
+        "google/antigravity-gemini-3.8-flash": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "audio",
+            "image",
+            "pdf",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          ],
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": 65536,
+          "model.canonical_id": "google/gemini-3.8-flash",
+          "model.family": "gemini-flash",
+          "model.open_weights": false,
+          "model.status": null,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 75000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 750000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3750000000
+          },
+          "route.reasoning_default": "medium",
+          "route.reasoning_wire_ids": {
+            "high": "gemini-3.8-flash-high",
+            "low": "gemini-3.8-flash-low",
+            "medium": "gemini-3.8-flash-medium"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — an instant inside an unobserved window": {
     "request": {
       "arguments": {
@@ -1617,6 +1733,28 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — named retirement successor": {
+    "request": {
+      "arguments": {
+        "model_id": "antigravity-gemini-3.7-flash",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {},
+      "resolved_at_ms": -1,
+      "retired": [
+        {
+          "model": "google/antigravity-gemini-3.7-flash",
+          "retired_at_ms": 1792191135000,
+          "successor": "google/antigravity-gemini-3.8-flash"
+        }
+      ],
+      "source": "models.dev"
+    }
+  },
   "catalog.get — one model, current": {
     "request": {
       "arguments": {
@@ -1704,6 +1842,265 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — pi corrected endpoint": {
+    "request": {
+      "arguments": {
+        "model_id": "claude-haiku-5-5",
+        "provider_id": "opencode-go"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "opencode-go/claude-haiku-5-5": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "pdf",
+            "text"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "toggle"
+            },
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1000000,
+          "limit.output": 128000,
+          "model.canonical_id": "anthropic/claude-haiku-5-5",
+          "model.family": "claude-haiku",
+          "model.open_weights": false,
+          "model.status": null,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 10000000
+          },
+          "rate.cache_read.above_context.100000": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 50000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 125000000
+          },
+          "rate.cache_write.above_context.100000": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 625000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 100000000
+          },
+          "rate.input.above_context.100000": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 500000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 500000000
+          },
+          "rate.output.above_context.100000": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2500000000
+          },
+          "wire.api": {
+            "from": "curated",
+            "value": "https://opencode.ai/inference/go"
+          },
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/anthropic"
+          },
+          "wire.shape": {
+            "from": "model",
+            "value": "observed-shape"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev",
+      "wire_corrections": [
+        {
+          "established_at_ms": 1792713600000,
+          "established_by": "fusiform",
+          "field": "wire.api",
+          "model": "claude-haiku-5-5",
+          "provider": "opencode-go",
+          "review_by_ms": 1797897600000,
+          "source_ref": {
+            "commit": "74f46864",
+            "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)",
+            "repo": "https://github.com/earendil-works/pi"
+          },
+          "withheld": false
+        }
+      ]
+    }
+  },
+  "catalog.get — pi withheld endpoint": {
+    "request": {
+      "arguments": {
+        "model_id": "minimax-m2.7",
+        "provider_id": "opencode-go"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "opencode-go/minimax-m2.7": {
+          "capability.attachment": false,
+          "capability.input_modalities": [
+            "text"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [],
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 204800,
+          "limit.output": 131072,
+          "model.canonical_id": null,
+          "model.family": "minimax-m2.7",
+          "model.open_weights": true,
+          "model.status": null,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 60000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 375000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 300000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1200000000
+          },
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/anthropic"
+          },
+          "wire.shape": {
+            "from": "model",
+            "value": "observed-shape"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev",
+      "wire_corrections": [
+        {
+          "established_at_ms": 1792713600000,
+          "established_by": "fusiform",
+          "field": "wire.api",
+          "model": "minimax-m2.7",
+          "provider": "opencode-go",
+          "review_by_ms": 1797897600000,
+          "source_ref": {
+            "commit": "74f46864",
+            "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)",
+            "repo": "https://github.com/earendil-works/pi"
+          },
+          "withheld": true
+        }
+      ]
+    }
+  },
   "catalog.get — rate.input_audio on a provider whose docs bill audio per token": {
     "request": {
       "arguments": {
@@ -1759,6 +2156,27 @@
             },
             "units": 9000000000
           }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — retired alias successor": {
+    "request": {
+      "arguments": {
+        "include_retired": true,
+        "model_id": "antigravity-gemini-3.7-flash",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "google/antigravity-gemini-3.7-flash": {
+          "existence": "absent",
+          "successor": "google/antigravity-gemini-3.8-flash"
         }
       },
       "resolved_at_ms": -1,
@@ -1916,6 +2334,9 @@
         }
       ],
       "served_facts": [
+        "route.reasoning_wire_ids",
+        "route.reasoning_default",
+        "successor",
         "wire.npm",
         "wire.api",
         "wire.shape",
@@ -4474,8 +4895,8 @@
             "units": 4800000000
           },
           "wire.api": {
-            "from": "provider",
-            "value": "https://opencode.ai/zen/go/v1"
+            "from": "curated",
+            "value": "https://opencode.ai/inference/go"
           },
           "wire.npm": {
             "from": "model",
@@ -4491,7 +4912,23 @@
         "source_ref": "https://opencode.ai/v2/docs/console/go/"
       },
       "resolved_at_ms": -1,
-      "source": "models.dev"
+      "source": "models.dev",
+      "wire_corrections": [
+        {
+          "established_at_ms": 1792713600000,
+          "established_by": "fusiform",
+          "field": "wire.api",
+          "model": "qwen3.7-plus",
+          "provider": "opencode-go",
+          "review_by_ms": 1797897600000,
+          "source_ref": {
+            "commit": "74f46864",
+            "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)",
+            "repo": "https://github.com/earendil-works/pi"
+          },
+          "withheld": false
+        }
+      ]
     }
   },
   "plan.prices — every curated row": {

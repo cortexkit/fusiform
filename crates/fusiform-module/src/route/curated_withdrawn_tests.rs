@@ -331,6 +331,7 @@ fn a_held_row_leaves_the_withdrawn_upstream_row_to_report_itself() {
             model: ID.to_string(),
             // The store's retirement instant, not the file's held_since_ms.
             retired_at_ms: WITHDRAWN_AT,
+            successor: None,
         }]
     );
 

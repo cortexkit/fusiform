@@ -121,10 +121,18 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
     // And every tabled fact must be produced, or the table promises something
     // that never arrives. A curated-only fact is produced by the curated rows
     // rather than by the normalizer; see `CURATED_ONLY`.
-    let curated: Vec<String> = fusiform_module::curated_models::models()
+    let mut curated: Vec<String> = fusiform_module::curated_models::models()
         .values()
         .flat_map(|row| row.facts.keys().cloned())
         .collect();
+    let (store, _dir) = super::curated_wire::store();
+    let response = super::curated_wire::get(&store, serde_json::json!({"include_retired":true}));
+    curated.extend(response.models.values().flat_map(|facts| {
+        facts
+            .keys()
+            .filter(|key| CURATED_ONLY.contains(&key.as_str()))
+            .cloned()
+    }));
     let unproduced = unproduced_tabled_facts(&produced, &curated, &tabled);
     assert!(unproduced.is_empty(), "{}", unproduced.join("\n"));
 
@@ -190,7 +198,12 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
 /// one: a value inferred for an upstream row would be fusiform's guess served
 /// as a statement. `model.kind` is absent on every upstream row, which means
 /// "not stated", never "chat".
-pub(crate) const CURATED_ONLY: &[&str] = &["model.kind"];
+pub(crate) const CURATED_ONLY: &[&str] = &[
+    "model.kind",
+    "route.reasoning_wire_ids",
+    "route.reasoning_default",
+    "successor",
+];
 
 /// Tabled facts nothing emits, and curated-only facts the normalizer emits.
 ///

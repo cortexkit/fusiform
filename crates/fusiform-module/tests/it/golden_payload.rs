@@ -447,9 +447,50 @@ fn render_all() -> String {
         "catalog.get — a sourced canonical identity".into(),
         render_canonical_link(),
     );
+    ordinary
+        .as_object_mut()
+        .unwrap()
+        .extend(render_curated_wire());
     let mut text = serde_json::to_string_pretty(&ordinary).unwrap();
     text.push('\n');
     text
+}
+
+fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
+    let mut cases = serde_json::Map::new();
+    let (store, _dir) = super::curated_wire::store();
+    for (label, arguments) in [
+        (
+            "catalog.get — pi corrected endpoint",
+            serde_json::json!({"provider_id":"opencode-go","model_id":"claude-haiku-5-5"}),
+        ),
+        (
+            "catalog.get — pi withheld endpoint",
+            serde_json::json!({"provider_id":"opencode-go","model_id":"minimax-m2.7"}),
+        ),
+        (
+            "catalog.get — alias tier wire ids",
+            serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-3.8-flash"}),
+        ),
+        (
+            "catalog.get — retired alias successor",
+            serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-3.7-flash","include_retired":true}),
+        ),
+        (
+            "catalog.get — named retirement successor",
+            serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-3.7-flash"}),
+        ),
+    ] {
+        let request = serde_json::json!({"name":"catalog.get","arguments":arguments});
+        let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+        let mut response = serde_json::to_value(response).unwrap();
+        response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+        cases.insert(
+            label.into(),
+            serde_json::json!({"request":request,"response":response}),
+        );
+    }
+    cases
 }
 
 /// Isolate the real unlinked seed row so it cannot change ordinary-case counts.
@@ -580,8 +621,16 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         .filter(|(_, args)| args.get("auth_method").is_none())
         .count();
     assert_eq!(plain_plane_cases, 2);
+    let curated_wire = render_curated_wire();
     for (text, expected) in [
-        (GOLDEN.to_string(), cases().len() + plain_plane_cases + 2),
+        (
+            GOLDEN.to_string(),
+            cases().len() + plain_plane_cases + 2 + curated_wire.len(),
+        ),
+        (
+            serde_json::to_string(&curated_wire).unwrap(),
+            curated_wire.len(),
+        ),
         (render(), cases().len()),
         (serde_json::json!({"paged":render_paged()}).to_string(), 1),
         (
@@ -1683,6 +1732,10 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
         // A curated alias and the marker on a price borrowed through it.
         r#""aliased""#,
         r#""curated""#,
+        r#""wire_corrections""#,
+        r#""route.reasoning_wire_ids""#,
+        r#""route.reasoning_default""#,
+        r#""successor""#,
         r#""auth_methods""#,
         r#""basis": "alias""#,
         // Current-only plane variants and both provenance disclosures.
@@ -1770,6 +1823,9 @@ fn every_read_response_field_reaches_the_fixture() {
             "CatalogGetResponse",
             "CuratedModelWire",
             "CanonicalLinkWire",
+            "WireCorrectionWire",
+            "WireSourceRef",
+            "RetiredModelWire",
             "PlaneWire",
             "BillingRuleWire",
             "HistoryResponse",

@@ -37,6 +37,9 @@ struct AliasRow {
     source_ref: String,
     established_at_ms: i64,
     review_by_ms: i64,
+    #[serde(default)]
+    reasoning_wire_ids: BTreeMap<String, String>,
+    reasoning_default: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -57,6 +60,8 @@ pub struct Alias {
     pub source_ref: String,
     pub established_at_ms: i64,
     pub review_by_ms: i64,
+    pub reasoning_wire_ids: BTreeMap<String, String>,
+    pub reasoning_default: Option<String>,
 }
 
 /// `(alias provider_id, alias model_id)` -> what it resolves to.
@@ -112,6 +117,22 @@ pub fn load_reporting_rejects(doc: &str) -> (Aliases, Vec<String>) {
             continue;
         }
         let key = (row.provider_id.clone(), row.model_id.clone());
+        if row.reasoning_wire_ids.is_empty() != row.reasoning_default.is_none()
+            || row
+                .reasoning_default
+                .as_ref()
+                .is_some_and(|default| !row.reasoning_wire_ids.contains_key(default))
+            || row
+                .reasoning_wire_ids
+                .iter()
+                .any(|(effort, wire)| effort.trim().is_empty() || wire.trim().is_empty())
+        {
+            rejects.push(format!(
+                "alias {}/{} has invalid reasoning tiers or default",
+                key.0, key.1
+            ));
+            continue;
+        }
         let alias = Alias {
             target_provider_id: row.target.provider_id,
             target_model_id: row.target.model_id,
@@ -119,6 +140,8 @@ pub fn load_reporting_rejects(doc: &str) -> (Aliases, Vec<String>) {
             source_ref: row.source_ref,
             established_at_ms: row.established_at_ms,
             review_by_ms: row.review_by_ms,
+            reasoning_wire_ids: row.reasoning_wire_ids,
+            reasoning_default: row.reasoning_default,
         };
         if let Some(existing) = out.get(&key) {
             // Two rows for one alias id is a curation mistake, not a
@@ -179,6 +202,42 @@ pub struct RetiredAlias {
     pub retired_at_ms: i64,
     /// Why it was retired, for a reader of the file.
     pub reason: String,
+    pub successor: Option<String>,
+    pub successor_source_ref: Option<String>,
+}
+
+/// Each reasoning tier exposed by an alias must also be supported by its target model.
+pub fn reasoning_option_drift(rows: &Aliases, seed: &serde_json::Value) -> Vec<String> {
+    rows.iter().filter_map(|((provider, model), alias)| {
+        let options = &seed[&alias.target_provider_id]["models"][&alias.target_model_id]["reasoning_options"];
+        let missing: Vec<_> = alias.reasoning_wire_ids.keys().filter(|effort| {
+            !options.as_array().is_some_and(|options| options.iter().any(|option| {
+                option["type"] == "effort" && option["values"].as_array().is_some_and(|values| values.iter().any(|value| value.as_str() == Some(effort.as_str())))
+            }))
+        }).cloned().collect();
+        (!missing.is_empty()).then(|| format!("{provider}/{model}: reasoning wire efforts absent from capability.reasoning_options: {missing:?}"))
+    }).collect()
+}
+
+/// A replacement must be sourced and resolve to a currently served identity.
+pub fn invalid_successors(
+    retired: &BTreeMap<(String, String), RetiredAlias>,
+    served: &std::collections::BTreeSet<String>,
+) -> Vec<String> {
+    retired
+        .values()
+        .filter(|row| match (&row.successor, &row.successor_source_ref) {
+            (None, None) => false,
+            (Some(id), Some(source)) => !served.contains(id) || source.trim().is_empty(),
+            _ => true,
+        })
+        .map(|row| {
+            format!(
+                "{}/{}: successor must name a currently served row and cite its source",
+                row.provider_id, row.model_id
+            )
+        })
+        .collect()
 }
 
 /// Alias ids that were served and then retired, keyed like the live table.
@@ -424,6 +483,108 @@ mod tests {
         for key in retired.keys() {
             assert!(!live.contains_key(key), "{key:?} is both live and retired");
         }
+    }
+
+    #[test]
+    fn tier_efforts_agree_with_served_reasoning_options() {
+        let seed = serde_json::from_str(SEED).unwrap();
+        assert!(reasoning_option_drift(aliases(), &seed).is_empty());
+    }
+
+    #[test]
+    fn planted_tier_effort_drift_is_reported() {
+        let mut rows = aliases().clone();
+        rows.get_mut(&("google".into(), "antigravity-gemini-3.8-flash".into()))
+            .unwrap()
+            .reasoning_wire_ids
+            .insert("minimal".into(), "not-supported".into());
+        let seed = serde_json::from_str(SEED).unwrap();
+        let drift = reasoning_option_drift(&rows, &seed);
+        assert_eq!(drift.len(), 1);
+        assert!(drift[0].contains("minimal"));
+        assert!(drift[0].contains("antigravity-gemini-3.8-flash"));
+    }
+
+    #[test]
+    fn invalid_tier_defaults_are_rejected() {
+        for (map, default) in [
+            (serde_json::json!({}), serde_json::json!("medium")),
+            (serde_json::json!({"low":"wire"}), serde_json::Value::Null),
+            (
+                serde_json::json!({"low":"wire"}),
+                serde_json::json!("medium"),
+            ),
+            (serde_json::json!({"low":""}), serde_json::json!("low")),
+        ] {
+            let mut doc: serde_json::Value = serde_json::from_str(ALIASES).unwrap();
+            doc["aliases"][0]["reasoning_wire_ids"] = map;
+            doc["aliases"][0]["reasoning_default"] = default;
+            let (_, rejects) = load_reporting_rejects(&doc.to_string());
+            assert_eq!(rejects.len(), 1);
+            assert!(rejects[0].contains("invalid reasoning"));
+        }
+    }
+
+    fn currently_served() -> std::collections::BTreeSet<String> {
+        use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+        use fusiform_core::{BoundaryKind, Timestamp};
+        let dir = tempfile::tempdir().unwrap();
+        let store = fusiform_store::CatalogStore::open(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().to_string(),
+            },
+        })
+        .unwrap();
+        let catalog = fusiform_core::normalize_models_dev(SEED.as_bytes())
+            .unwrap()
+            .catalog;
+        let plan = fusiform_store::ingest::plan_ingest(
+            &store,
+            &catalog,
+            Timestamp(1_000),
+            BoundaryKind::Seed,
+            None,
+        )
+        .unwrap();
+        store.append_eras(&plan.eras).unwrap();
+        let response = crate::route::serve_catalog_get(&store, br#"{"paged":true}"#).unwrap();
+        let mut ids: std::collections::BTreeSet<_> = response.models.into_keys().collect();
+        let mut token = response.next_page_token;
+        while let Some(next) = token {
+            let request = serde_json::json!({"paged":true,"page_token":next});
+            let page =
+                crate::route::serve_catalog_get(&store, &serde_json::to_vec(&request).unwrap())
+                    .unwrap();
+            ids.extend(page.models.into_keys());
+            token = page.next_page_token;
+        }
+        ids
+    }
+
+    #[test]
+    fn successors_name_currently_served_rows() {
+        let invalid = invalid_successors(retired_aliases(), &currently_served());
+        assert!(invalid.is_empty(), "{invalid:?}");
+    }
+
+    #[test]
+    fn planted_missing_or_unsourced_successor_is_reported() {
+        let mut retired = retired_aliases().clone();
+        let row = retired
+            .get_mut(&("google".into(), "antigravity-gemini-3.7-flash".into()))
+            .unwrap();
+        row.successor = Some("google/not-served".into());
+        let served = currently_served();
+        assert_eq!(invalid_successors(&retired, &served).len(), 1);
+        let row = retired
+            .get_mut(&("google".into(), "antigravity-gemini-3.7-flash".into()))
+            .unwrap();
+        row.successor = Some("google/antigravity-gemini-3.8-flash".into());
+        row.successor_source_ref = None;
+        assert_eq!(invalid_successors(&retired, &served).len(), 1);
     }
 
     #[test]
