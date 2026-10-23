@@ -533,13 +533,35 @@ where
             }
             let next = page.next_page_token.take();
             if let Some(merged) = &mut merged {
-                merged.models.extend(page.models);
-                merged.withheld.extend(page.withheld);
-                merged.uncertain.extend(page.uncertain);
-                merged.curated.extend(page.curated);
-                merged.retired.extend(page.retired);
-                merged.aliased.extend(page.aliased);
-                merged.billing_rules.extend(page.billing_rules);
+                // Total destructuring: a list field added to the response must
+                // be merged here or this stops compiling. Naming the merged
+                // fields one by one dropped `canonical_links` and
+                // `wire_corrections` from every page after the first.
+                let fusiform_protocol::CatalogGetResponse {
+                    source: _,
+                    next_page_token: _,
+                    resolved_at_ms: _,
+                    catalog_version: _,
+                    models,
+                    curated,
+                    withheld,
+                    retired,
+                    uncertain,
+                    aliased,
+                    canonical_links,
+                    wire_corrections,
+                    plane: _,
+                    billing_rules,
+                } = page;
+                merged.models.extend(models);
+                merged.curated.extend(curated);
+                merged.withheld.extend(withheld);
+                merged.retired.extend(retired);
+                merged.uncertain.extend(uncertain);
+                merged.aliased.extend(aliased);
+                merged.canonical_links.extend(canonical_links);
+                merged.wire_corrections.extend(wire_corrections);
+                merged.billing_rules.extend(billing_rules);
             } else {
                 merged = Some(page);
             }
@@ -3360,6 +3382,32 @@ mod paging_tests {
         );
         assert_eq!(result["curated"].as_array().unwrap().len(), 2);
         assert!(result.get("next_page_token").is_none());
+    }
+
+    #[tokio::test]
+    async fn paging_loop_keeps_disclosures_from_later_pages() {
+        // Disclosures are scoped to the providers on each page, so a later page
+        // carries entries the first one does not. Losing them would print a
+        // corrected or linked row without saying why.
+        let mut second = page(2, "b", None);
+        second["canonical_links"] = json!([{
+            "model":"b/m", "canonical_id":"lab/m", "source_ref":"s", "quote":"q",
+            "lab_source_ref":"l", "lab_quote":"lq", "review_by_ms":2000
+        }]);
+        second["wire_corrections"] = json!([{
+            "provider":"b", "model":"m", "field":"wire.api", "withheld":false,
+            "source_ref":{"repo":"r","commit":"c","file":"f"},
+            "established_by":"e", "established_at_ms":1000, "review_by_ms":2000
+        }]);
+        let mut pages = VecDeque::from([Ok(page(2, "a", Some("next"))), Ok(second)]);
+        let result = read_catalog_pages(json!({"paged":true}), |_| {
+            std::future::ready(pages.pop_front().unwrap())
+        })
+        .await
+        .unwrap();
+        assert_eq!(result["canonical_links"][0]["model"], "b/m");
+        assert_eq!(result["wire_corrections"][0]["provider"], "b");
+        assert_eq!(result["curated"].as_array().unwrap().len(), 2);
     }
 
     #[tokio::test]
