@@ -2207,6 +2207,106 @@
       ]
     }
   },
+  "catalog.get — pi unrouted new model": {
+    "request": {
+      "arguments": {
+        "model_id": "kimi-k3.1-pro",
+        "provider_id": "opencode-go"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "opencode-go/kimi-k3.1-pro": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": 131072,
+          "model.canonical_id": "moonshotai/kimi-k3",
+          "model.family": "kimi-k3",
+          "model.open_weights": true,
+          "model.status": null,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 300000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 15000000000
+          },
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
+          },
+          "wire.shape": {
+            "from": "model",
+            "value": "observed-shape"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev",
+      "wire_corrections": [
+        {
+          "established_at_ms": 1792713600000,
+          "established_by": "fusiform",
+          "field": "wire.api",
+          "model": "kimi-k3.1-pro",
+          "notes": "not routed by pi at 74f46864",
+          "provider": "opencode-go",
+          "review_by_ms": 1797897600000,
+          "source_ref": {
+            "commit": "74f46864",
+            "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)",
+            "repo": "https://github.com/earendil-works/pi"
+          },
+          "withheld": true
+        }
+      ]
+    }
+  },
   "catalog.get — pi withheld endpoint": {
     "request": {
       "arguments": {
@@ -2294,6 +2394,7 @@
           "established_by": "fusiform",
           "field": "wire.api",
           "model": "minimax-m2.7",
+          "notes": "not routed by pi at 74f46864",
           "provider": "opencode-go",
           "review_by_ms": 1797897600000,
           "source_ref": {
@@ -5293,10 +5394,6 @@
             },
             "units": 140000000
           },
-          "wire.api": {
-            "from": "provider",
-            "value": "https://opencode.ai/zen/go/v1"
-          },
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai-compatible"
@@ -5470,6 +5567,21 @@
       "resolved_at_ms": -1,
       "source": "models.dev",
       "wire_corrections": [
+        {
+          "established_at_ms": 1792713600000,
+          "established_by": "fusiform",
+          "field": "wire.api",
+          "model": "deepseek-v4-flash",
+          "notes": "not routed by pi at 74f46864",
+          "provider": "opencode-go",
+          "review_by_ms": 1797897600000,
+          "source_ref": {
+            "commit": "74f46864",
+            "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)",
+            "repo": "https://github.com/earendil-works/pi"
+          },
+          "withheld": true
+        },
         {
           "established_at_ms": 1792713600000,
           "established_by": "fusiform",

@@ -1,5 +1,5 @@
 {
-  "notes": "wire.api follows models.dev's base-URL convention: include the version path so consumers append only the operation (/messages, /chat/completions, or /models/{id}:streamGenerateContent). Curated and observed bases are therefore interchangeable. Provider entries (model *) fill only missing observed endpoints on current upstream rows; disclosures name each affected model.",
+  "notes": "wire.api follows models.dev's base-URL convention: include the version path so consumers append only the operation (/messages, /chat/completions, or /models/{id}:streamGenerateContent). Curated and observed bases are therefore interchangeable. Provider entries (model *) fill only missing observed endpoints on current upstream rows; disclosures name each affected model. A complete_providers entry declares that the provider's per-model corrections list every model its source routes: any other model of that provider has wire.api withheld on current reads, disclosed with the entry's source and notes.",
   "corrections": [
     {
       "provider": "openai",
@@ -504,73 +504,18 @@
       "established_by": "fusiform",
       "established_at_ms": 1792713600000,
       "review_by_ms": 1797897600000
-    },
+    }
+  ],
+  "complete_providers": [
     {
       "provider": "opencode-go",
-      "model": "cat-jam-free",
       "field": "wire.api",
-      "withheld": true,
       "source_ref": {
         "repo": "https://github.com/earendil-works/pi",
         "commit": "74f46864",
         "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)"
       },
-      "established_by": "fusiform",
-      "established_at_ms": 1792713600000,
-      "review_by_ms": 1797897600000
-    },
-    {
-      "provider": "opencode-go",
-      "model": "minimax-m2.7",
-      "field": "wire.api",
-      "withheld": true,
-      "source_ref": {
-        "repo": "https://github.com/earendil-works/pi",
-        "commit": "74f46864",
-        "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)"
-      },
-      "established_by": "fusiform",
-      "established_at_ms": 1792713600000,
-      "review_by_ms": 1797897600000
-    },
-    {
-      "provider": "opencode-go",
-      "model": "minimax-m3.1-flash",
-      "field": "wire.api",
-      "withheld": true,
-      "source_ref": {
-        "repo": "https://github.com/earendil-works/pi",
-        "commit": "74f46864",
-        "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)"
-      },
-      "established_by": "fusiform",
-      "established_at_ms": 1792713600000,
-      "review_by_ms": 1797897600000
-    },
-    {
-      "provider": "opencode-go",
-      "model": "space-bunny",
-      "field": "wire.api",
-      "withheld": true,
-      "source_ref": {
-        "repo": "https://github.com/earendil-works/pi",
-        "commit": "74f46864",
-        "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)"
-      },
-      "established_by": "fusiform",
-      "established_at_ms": 1792713600000,
-      "review_by_ms": 1797897600000
-    },
-    {
-      "provider": "opencode-go",
-      "model": "step-5-preview-free",
-      "field": "wire.api",
-      "withheld": true,
-      "source_ref": {
-        "repo": "https://github.com/earendil-works/pi",
-        "commit": "74f46864",
-        "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)"
-      },
+      "notes": "not routed by pi at 74f46864",
       "established_by": "fusiform",
       "established_at_ms": 1792713600000,
       "review_by_ms": 1797897600000

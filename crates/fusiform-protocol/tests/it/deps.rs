@@ -245,6 +245,7 @@ fn every_response_type_round_trips() {
             established_by: "fusiform".into(),
             established_at_ms: 1_792_713_600_000,
             review_by_ms: 1_797_897_600_000,
+            notes: Some("not routed by pi at 74f46864".into()),
         }],
         canonical_links: vec![CanonicalLinkWire {
             model: "ollama-cloud/kimi-k2.6".into(),

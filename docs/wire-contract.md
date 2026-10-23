@@ -156,7 +156,9 @@ inherit these backend-specific claims (§5.5), and curated rows carry none.
 Current reads correct OpenCode Go's `wire.api` to the per-model base in
 `@earendil-works/pi-ai` 1.4.0's catalog, verified against its provider code at
 `earendil-works/pi@74f46864`, including the version path that its SDK adds.
-Rows curated as unsupported by that catalog have no `wire.api`.
+Pi's route list is treated as complete for OpenCode Go: every OpenCode Go
+model it does not route, including models upstream adds later, has no
+`wire.api` on current reads, whatever upstream publishes for it.
 Current upstream rows of `openai`, `anthropic`, `google` (Gemini API, not Vertex),
 and `xai` also receive a sourced provider default when neither the model nor
 the provider publishes an observed `wire.api`. Observed endpoints always win.
@@ -165,6 +167,9 @@ Each applied or withheld endpoint is disclosed in response-level
 `wire_corrections`: `provider`, `model` (separate identity components), `field`
 (`wire.api`), `withheld`, `source_ref` (`repo`, `commit`, `file`),
 `established_by`, `established_at_ms`, and `review_by_ms` (60 days later).
+A disclosure withheld because the model is absent from a complete route list
+also carries `notes`, naming the source and commit that do not route it (for
+OpenCode Go, `"not routed by pi at 74f46864"`); other disclosures omit it.
 The array is omitted when empty and follows provider paging and fact-prefix
 filters, including disclosure-only pages when an endpoint is withheld.
 `wire.npm` and `wire.shape` are not corrected. Neither corrections nor

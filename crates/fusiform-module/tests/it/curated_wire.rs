@@ -8,6 +8,8 @@ use serde_json::{json, Value};
 const FLASH: &str = "google/antigravity-gemini-3.8-flash";
 const ARGON: &str = "google/antigravity-gemini-4-argon";
 const RETIRED: &str = "google/antigravity-gemini-3.7-flash";
+const UNROUTED_ID: &str = "kimi-k3.1-pro";
+const UNROUTED: &str = "opencode-go/kimi-k3.1-pro";
 
 pub(crate) fn store() -> (CatalogStore, tempfile::TempDir) {
     store_with_anthropic_api(None)
@@ -54,6 +56,18 @@ fn store_with_anthropic_api(api: Option<&str>) -> (CatalogStore, tempfile::TempD
     for id in ["claude-haiku-5-5", "minimax-m2.7"] {
         upstream["opencode-go"]["models"][id]["provider"]["shape"] = json!("observed-shape");
     }
+    // A synthetic stand-in for an OpenCode Go model upstream added after pi's
+    // route list was read, publishing its own model-level endpoint. The
+    // embedded seed predates `kimi-k3.1-pro`, so it is cloned from `kimi-k3`.
+    let mut unrouted = seed["opencode-go"]["models"]["kimi-k3"].clone();
+    assert!(unrouted.is_object(), "missing seed row opencode-go/kimi-k3");
+    unrouted["id"] = json!(UNROUTED_ID);
+    unrouted["name"] = json!("Kimi K3.1 Pro");
+    unrouted["provider"] = json!({
+        "api": "https://opencode.ai/inference/go/openai/v1",
+        "shape": "observed-shape",
+    });
+    upstream["opencode-go"]["models"][UNROUTED_ID] = unrouted;
     // Exercise upstream endpoint precedence without relying on seed omissions.
     let mut observed = upstream["openai"]["models"]["gpt-6.1-sol"].clone();
     observed["id"] = json!("observed-api");
@@ -315,6 +329,102 @@ fn unsupported_pi_routes_withhold_only_the_endpoint_and_disclose_it() {
         json!({"provider_id":"opencode-go","model_id":"minimax-m2.7","at_ms":1_000}),
     );
     assert!(historical.models["opencode-go/minimax-m2.7"].contains_key("wire.api"));
+    assert!(historical.wire_corrections.is_empty());
+}
+
+#[test]
+fn models_missing_from_a_complete_route_list_withhold_only_the_endpoint() {
+    let (store, _dir) = store();
+    for arguments in [
+        json!({}),
+        json!({"provider_id":"opencode-go"}),
+        json!({"provider_id":"opencode-go","model_id":UNROUTED_ID}),
+        json!({"fact_prefixes":["wire.api"]}),
+        json!({"paged":true}),
+    ] {
+        let response = get(&store, arguments.clone());
+        // A bulk read filtered to wire.api leaves this model with no facts, so
+        // only its disclosure remains.
+        if let Some(row) = response.models.get(UNROUTED) {
+            assert!(!row.contains_key("wire.api"), "{arguments}");
+        }
+        let disclosure = response
+            .wire_corrections
+            .iter()
+            .find(|row| row.provider == "opencode-go" && row.model == UNROUTED_ID)
+            .unwrap_or_else(|| panic!("no disclosure for {UNROUTED} in {arguments}"));
+        assert!(disclosure.withheld);
+        assert_eq!(disclosure.field, "wire.api");
+        assert_eq!(
+            disclosure.source_ref.repo,
+            "https://github.com/earendil-works/pi"
+        );
+        assert_eq!(disclosure.source_ref.commit, "74f46864");
+        assert_eq!(
+            disclosure.notes.as_deref(),
+            Some("not routed by pi at 74f46864")
+        );
+        assert_eq!(disclosure.established_by, "fusiform");
+        assert_eq!(
+            disclosure.review_by_ms - disclosure.established_at_ms,
+            60 * 86_400_000
+        );
+        // Only the completeness rule writes a note; other providers get none.
+        assert!(response
+            .wire_corrections
+            .iter()
+            .filter(|row| row.notes.is_some())
+            .all(|row| row.provider == "opencode-go" && row.withheld));
+    }
+
+    let named = get(
+        &store,
+        json!({"provider_id":"opencode-go","model_id":UNROUTED_ID}),
+    );
+    let facts = &named.models[UNROUTED];
+    assert_eq!(
+        facts["wire.npm"],
+        json!({"value":"@ai-sdk/openai-compatible","from":"provider"})
+    );
+    assert_eq!(
+        facts["wire.shape"],
+        json!({"value":"observed-shape","from":"model"})
+    );
+
+    // A routed model keeps its curated base, disclosed without a note.
+    let provider = get(&store, json!({"provider_id":"opencode-go"}));
+    assert_eq!(
+        provider.models["opencode-go/deepseek-v4-pro"]["wire.api"],
+        json!({"value":"https://opencode.ai/inference/go/v1","from":"curated"})
+    );
+    let routed = provider
+        .wire_corrections
+        .iter()
+        .find(|row| row.model == "deepseek-v4-pro")
+        .unwrap();
+    assert!(!routed.withheld);
+    assert_eq!(routed.notes, None);
+
+    // Another provider's observed model-level endpoint is untouched.
+    let other = get(&store, json!({"provider_id":"openai"}));
+    assert_eq!(
+        other.models["openai/observed-api"]["wire.api"],
+        json!({"value":"https://observed.example/model/v1","from":"model"})
+    );
+    assert!(!other
+        .wire_corrections
+        .iter()
+        .any(|row| row.model == "observed-api"));
+
+    // History and point-in-time reads keep the upstream claim.
+    let historical = get(
+        &store,
+        json!({"provider_id":"opencode-go","model_id":UNROUTED_ID,"at_ms":1_000}),
+    );
+    assert_eq!(
+        historical.models[UNROUTED]["wire.api"],
+        json!({"value":"https://opencode.ai/inference/go/openai/v1","from":"model"})
+    );
     assert!(historical.wire_corrections.is_empty());
 }
 

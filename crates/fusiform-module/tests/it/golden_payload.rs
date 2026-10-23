@@ -477,6 +477,12 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
             serde_json::json!({"provider_id":"opencode-go","model_id":"minimax-m2.7"}),
         ),
         (
+            // Synthetic: the embedded seed predates this model, so the store
+            // carries a stand-in with its own observed endpoint.
+            "catalog.get — pi unrouted new model",
+            serde_json::json!({"provider_id":"opencode-go","model_id":"kimi-k3.1-pro"}),
+        ),
+        (
             "catalog.get — alias tier wire ids",
             serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-3.8-flash"}),
         ),
@@ -1741,6 +1747,8 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
         r#""aliased""#,
         r#""curated""#,
         r#""wire_corrections""#,
+        // An endpoint withheld because the provider's route list is complete.
+        "not routed by pi at 74f46864",
         r#""route.reasoning_wire_ids""#,
         r#""route.reasoning_default""#,
         r#""successor""#,

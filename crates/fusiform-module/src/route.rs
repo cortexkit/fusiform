@@ -1013,6 +1013,11 @@ fn serve_catalog_get_with_limits(
             .uncertain
             .retain(|u| u.provider_id != row.provider_id || u.model_id != row.model_id);
         response.canonical_links.retain(|link| link.model != id);
+        // Endpoint corrections and completeness withholding describe the
+        // withdrawn upstream row, not the curated one.
+        response
+            .wire_corrections
+            .retain(|c| c.provider != row.provider_id || c.model != row.model_id);
         // A plain read lists availability; a plane read must respect the login
         // restriction even when the provider has other unrestricted rows.
         if request

@@ -560,6 +560,7 @@ fn linear_packing_matches_candidate_reference_boundaries() {
                     established_by: row.established_by.clone(),
                     established_at_ms: row.established_at_ms,
                     review_by_ms: row.review_by_ms,
+                    notes: Some("not routed".into()),
                 });
         }
         let all: BTreeSet<_> = full

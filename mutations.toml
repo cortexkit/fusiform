@@ -1435,7 +1435,7 @@ test_file = "crates/fusiform-module/tests/it/curated_wire.rs"
 runner = "cargo"
 package = "fusiform-module"
 target = "--test it"
-expect_red = ["curated_wire::pi_endpoints_correct_current_reads_without_changing_observed_facts_or_history", "curated_wire::unsupported_pi_routes_withhold_only_the_endpoint_and_disclose_it"]
+expect_red = ["curated_wire::pi_endpoints_correct_current_reads_without_changing_observed_facts_or_history", "curated_wire::unsupported_pi_routes_withhold_only_the_endpoint_and_disclose_it", "curated_wire::models_missing_from_a_complete_route_list_withhold_only_the_endpoint"]
 only = false
 timeout_s = 600
 build_timeout_s = 1800
@@ -1455,7 +1455,7 @@ test_file = "crates/fusiform-module/tests/it/curated_wire.rs"
 runner = "cargo"
 package = "fusiform-module"
 target = "--test it"
-expect_red = ["curated_wire::unsupported_pi_routes_withhold_only_the_endpoint_and_disclose_it"]
+expect_red = ["curated_wire::unsupported_pi_routes_withhold_only_the_endpoint_and_disclose_it", "curated_wire::models_missing_from_a_complete_route_list_withhold_only_the_endpoint"]
 only = false
 timeout_s = 600
 build_timeout_s = 1800
@@ -1588,3 +1588,23 @@ build_timeout_s = 1800
 
 [control.select]
 filter = "wire_corrections::"
+
+[[control]]
+id = "opencode-go-complete-route-list-withholding"
+guards = "an OpenCode Go model absent from pi's complete route list never serves an upstream endpoint"
+file = "crates/fusiform-module/src/wire_corrections.rs"
+old = "    let complete = complete_providers().get(provider)?;"
+new = "    let complete = None::<&CompleteProvider>?; // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/tests/it/curated_wire.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+expect_red = ["curated_wire::models_missing_from_a_complete_route_list_withhold_only_the_endpoint", "curated_wire::unsupported_pi_routes_withhold_only_the_endpoint_and_disclose_it"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+[control.select]
+filter = "curated_wire::"
+

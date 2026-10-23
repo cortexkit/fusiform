@@ -12,7 +12,7 @@ that keep them honest.
 | `model-aliases.json` | route-specific ids and the published row each one is | at read time, current reads only |
 | `curated-models.json` | provider rows models.dev does not carry | at read time, current reads only |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
-| `wire-corrections.json` | sourced per-model endpoint corrections or withholding | at read time, current reads only (§9) |
+| `wire-corrections.json` | sourced per-model endpoint corrections or withholding, and providers whose routed list is complete | at read time, current reads only (§9) |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
 | `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio` (§8) |
 | `plan-prices.json` | subscription list prices | written to `plan_price_era` at start |
@@ -455,18 +455,37 @@ base URLs: pi gives five Anthropic rows the raw base
 Fusiform serves their effective base `https://opencode.ai/inference/go/v1`,
 so consumers append only `/messages`, as with observed models.dev endpoints.
 All other shared rows, including Google, already include `/v1` in pi's base.
-The five upstream-only models (`cat-jam-free`, `minimax-m2.7`,
-`minimax-m3.1-flash`, `space-bunny`, `step-5-preview-free`) withhold `wire.api`
-because pi publishes no route for them.
+
+Pi's route list is complete for OpenCode Go: the file's `complete_providers`
+array names `opencode-go` with the same pi source, and every OpenCode Go model
+without a per-model row has `wire.api` withheld on current reads. That covers
+the upstream-only models seen on 2026-10-23 (`cat-jam-free`, `minimax-m2.7`,
+`minimax-m3.1-flash`, `space-bunny`, `step-5-preview-free`) and every model
+upstream adds later, such as `kimi-k3.1-pro`, until pi routes it and a
+per-model row is added. The disclosure is marked `withheld: true`, cites the
+completeness entry's `source_ref` and dates, and carries its `notes`
+(`not routed by pi at 74f46864`); per-model rows win, so a routed model keeps
+its curated base. Which providers are complete is declared in the data, never
+named in code, which only validates and applies the declaration. A
+`complete_providers` entry has `provider`, `field` (`wire.api`), `source_ref`,
+`notes`, `established_by`, `established_at_ms` and `review_by_ms`, under the
+same review interval as corrections. The loader rejects an entry whose notes do
+not name its source commit, a provider that also has a `*` default (which would
+fill what completeness withholds), a provider with no routed per-model row, or
+a per-model row of that provider citing a different source; a rejected entry
+leaves the provider with its per-model rows alone. Explicit per-model
+withholding is still accepted, but none ships for a complete provider because
+completeness already covers it.
 
 The current-read overlay replaces only that field with `{value, from: curated}`
 or removes it when withheld, and discloses each change in `wire_corrections`
 ([wire contract](wire-contract.md) §4.1). It does not touch `wire.npm`,
-`wire.shape`, stored eras or historical `at_ms` reads. Filters and paging keep
+`wire.shape`, stored eras or historical `at_ms` reads, and never applies to
+alias or curated rows. Filters and paging keep
 disclosures with their provider, including a withheld-only provider. Tests in
 `tests/it/curated_wire.rs` drive named, bulk, filtered and paged reads plus
-uncorrected history; mutation controls remove the application call and the
-withholding operation independently.
+uncorrected history; mutation controls remove the application call, the
+withholding operation and the completeness fallback independently.
 
 Provider defaults use `model: "*"`, a nonempty `quote` from the provider's
 official documentation, and a non-withheld value. The source reference records
