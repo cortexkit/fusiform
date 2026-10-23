@@ -42,12 +42,15 @@ and tests that read a full captured models.dev document do nothing unless
 `FUSIFORM_FULL_PAYLOAD` names that file. When unset they print a skip notice
 and pass. CI sets neither.
 
-Release and packaging scripts:
+fusiform runs on Windows, Linux and macOS. Users install and update it with
+`ck setup` and `ck upgrade` on any of them; the scripts below are maintainer
+tools.
 
 - `scripts/release-build.sh` builds release binaries with the commit stamped
-  in and refuses a dirty tree. It runs anywhere.
-- `scripts/stage.sh` signs with the Apple Developer identity named in
-  `FUSIFORM_SIGNING_IDENTITY`. It is macOS-only and refuses elsewhere.
+  in and refuses a dirty tree. It runs on every platform.
+- `scripts/stage.sh` prepares a signed build for a maintainer's own macOS
+  placement, using the signing identity named in `FUSIFORM_SIGNING_IDENTITY`.
+  It refuses on other platforms, where `ck upgrade` handles installation.
 - `scripts/refresh-seed.sh` refreshes the embedded copy of the upstream
   catalog.
 
