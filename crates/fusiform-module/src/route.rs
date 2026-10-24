@@ -18,6 +18,7 @@
 //! instant and received the current catalog would have no way to notice.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Mutex;
 
 use crate::billing_planes::{self, Plane, PlaneKind, RuleState};
 use fusiform_core::{FieldId, SourceId, Timestamp};
@@ -719,6 +720,86 @@ pub fn serve_catalog_get(
 const CATALOG_PAGE_BYTES: usize = 3 * 1024 * 1024;
 const REPLY_FRAME_LIMIT_BYTES: usize = 4 * 1024 * 1024;
 
+// Only refusals are remembered, never served responses. Curated models, aliases,
+// creators, canonical links, wire corrections and billing rules are include_str!
+// inputs fixed for this process.
+// Corrections can affect at_ms reads without advancing catalog_version, so the
+// append-only era watermark also invalidates refusals. The current timestamp can
+// change its serialized width without a write, so its width is part of the key.
+static OVERSIZED_CATALOG: Mutex<Option<OversizedCatalog>> = Mutex::new(None);
+
+#[cfg(test)]
+thread_local! {
+    static CATALOG_RENDER_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[derive(PartialEq, Eq)]
+struct WholeCatalogKey {
+    store_instance: u64,
+    catalog_version: i64,
+    latest_era_id: i64,
+    source: SourceId,
+    at_ms: Option<i64>,
+    fact_prefixes: Option<Vec<String>>,
+    include_retired: bool,
+    frame_limit: usize,
+    timestamp_width: usize,
+}
+
+impl WholeCatalogKey {
+    fn new(
+        store: &CatalogStore,
+        request: &CatalogGetRequest,
+        source: SourceId,
+        frame_limit: usize,
+    ) -> Result<Option<Self>, RouteError> {
+        // Exhaustive: a new request field must be considered for cache identity.
+        let CatalogGetRequest {
+            source: _,
+            at_ms,
+            fact_prefixes,
+            include_retired,
+            model_id,
+            provider_id,
+            paged,
+            page_token: _,
+            auth_method,
+        } = request;
+        if *paged || provider_id.is_some() || model_id.is_some() || auth_method.is_some() {
+            return Ok(None);
+        }
+        let mut fact_prefixes = fact_prefixes.clone();
+        if let Some(prefixes) = &mut fact_prefixes {
+            prefixes.sort();
+            prefixes.dedup();
+        }
+        Ok(Some(Self {
+            store_instance: store.instance_id(),
+            catalog_version: store.catalog_version().map_err(|e| store_error(&e))?,
+            latest_era_id: store.latest_era_id().map_err(|e| store_error(&e))?,
+            source,
+            at_ms: *at_ms,
+            fact_prefixes,
+            include_retired: *include_retired,
+            frame_limit,
+            timestamp_width: at_ms.unwrap_or_else(now_ms).to_string().len(),
+        }))
+    }
+}
+
+struct OversizedCatalog {
+    key: WholeCatalogKey,
+    size: usize,
+}
+
+fn oversized_catalog_error(size: usize, frame_limit: usize) -> RouteError {
+    RouteError::bad_request(format!(
+        "the whole catalog is {size} bytes, over the {frame_limit}-byte reply \
+         limit; read it in pages with \"paged\": true and follow \
+         next_page_token, or name a provider_id"
+    ))
+}
+
 #[cfg(test)]
 fn serve_catalog_get_with_budget(
     store: &CatalogStore,
@@ -733,6 +814,16 @@ fn serve_catalog_get_with_limits(
     body: &[u8],
     page_budget: usize,
     frame_limit: usize,
+) -> Result<CatalogGetResponse, RouteError> {
+    serve_catalog_get_with_cache(store, body, page_budget, frame_limit, &OVERSIZED_CATALOG)
+}
+
+fn serve_catalog_get_with_cache(
+    store: &CatalogStore,
+    body: &[u8],
+    page_budget: usize,
+    frame_limit: usize,
+    oversized: &Mutex<Option<OversizedCatalog>>,
 ) -> Result<CatalogGetResponse, RouteError> {
     // An empty body is a request for everything. A consumer calling a read with
     // no arguments should not have to know that `{}` is the incantation.
@@ -805,13 +896,32 @@ fn serve_catalog_get_with_limits(
 
     let at = request.at_ms.map(Timestamp);
 
+    let whole_key = WholeCatalogKey::new(store, &request, source, frame_limit)?;
+
     // Checked ONCE, before the branch, so both read paths inherit it.
+    // Keep this ahead of cache lookup: the first observation can establish a
+    // coverage bound without changing either the version or the era watermark.
     //
     // The single-model and bulk reads have needed the same property three
     // separate times in this crate and diverged every time it was written
     // twice. Placing this above the split makes the divergence unwritable
     // rather than merely absent.
     refuse_before_the_record(store, source, at)?;
+
+    if let Some(key) = &whole_key {
+        // A short lock around one entry; no store read or render under the lock.
+        let mut cached = oversized.lock().unwrap_or_else(|e| e.into_inner());
+        if cached.as_ref().is_some_and(|entry| {
+            entry.key.store_instance != key.store_instance
+                || entry.key.catalog_version != key.catalog_version
+                || entry.key.latest_era_id != key.latest_era_id
+        }) {
+            *cached = None;
+        }
+        if let Some(entry) = cached.as_ref().filter(|entry| entry.key == *key) {
+            return Err(oversized_catalog_error(entry.size, frame_limit));
+        }
+    }
 
     let aliases = crate::aliases::aliases();
     let named = request.provider_id.is_some() && request.model_id.is_some();
@@ -972,6 +1082,9 @@ fn serve_catalog_get_with_limits(
         (snapshot, Vec::new())
     };
 
+    // Count the route's main render, not nested renders used to derive aliases.
+    #[cfg(test)]
+    CATALOG_RENDER_COUNT.with(|count| count.set(count.get() + 1));
     let mut response = render(
         source,
         snapshot,
@@ -1094,11 +1207,19 @@ fn serve_catalog_get_with_limits(
             .map_err(|e| RouteError::unavailable(e.to_string()))?
             .len();
         if size > frame_limit {
-            return Err(RouteError::bad_request(format!(
-                "the whole catalog is {size} bytes, over the {frame_limit}-byte reply \
-                 limit; read it in pages with \"paged\": true and follow \
-                 next_page_token, or name a provider_id"
-            )));
+            if let Some(key) = whole_key {
+                // Aliases and curated rows consult the store after the snapshot.
+                // Do not remember a render that straddled a version change.
+                if response.catalog_version == key.catalog_version
+                    && store.catalog_version().map_err(|e| store_error(&e))? == key.catalog_version
+                    && store.latest_era_id().map_err(|e| store_error(&e))? == key.latest_era_id
+                    && response.resolved_at_ms.to_string().len() == key.timestamp_width
+                {
+                    *oversized.lock().unwrap_or_else(|e| e.into_inner()) =
+                        Some(OversizedCatalog { key, size });
+                }
+            }
+            return Err(oversized_catalog_error(size, frame_limit));
         }
     }
     Ok(response)

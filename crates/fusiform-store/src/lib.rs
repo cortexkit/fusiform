@@ -24,6 +24,7 @@ pub mod serve;
 mod read_connections;
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use cortexkit_store::{open_sqlite, SqliteStore, StorageBackend, StorageDescriptor, StoreError};
 use fusiform_core::{
@@ -42,7 +43,10 @@ pub struct CatalogStore {
     /// enrollment descriptor) are placed by the path actually opened, not by a
     /// path re-derived from the environment that could disagree with it.
     path: std::path::PathBuf,
+    instance_id: u64,
 }
+
+static NEXT_STORE_INSTANCE: AtomicU64 = AtomicU64::new(1);
 
 /// What went wrong, at the domain's level rather than the driver's.
 #[derive(Debug)]
@@ -399,12 +403,20 @@ impl CatalogStore {
             inner,
             readers,
             path: std::path::PathBuf::from(path),
+            instance_id: NEXT_STORE_INSTANCE.fetch_add(1, Ordering::Relaxed),
         })
     }
 
     /// The database file this store opened.
     pub fn path(&self) -> &std::path::Path {
         &self.path
+    }
+
+    /// Process-local identity for caches tied to this open store, not its path.
+    /// Reopening or replacing a database must not reuse cached reads even when
+    /// its path and catalog version happen to match an earlier open.
+    pub fn instance_id(&self) -> u64 {
+        self.instance_id
     }
 
     /// The fence epoch of the held single-writer lease.
@@ -1372,6 +1384,15 @@ impl CatalogStore {
             )
         })?;
         Ok(v)
+    }
+
+    /// Append-only era watermark for invalidating derived reads. Corrections
+    /// and standalone era appends need not advance the public catalog version.
+    /// MAX on the integer primary key visits only the last entry, not all eras.
+    pub fn latest_era_id(&self) -> Result<i64, CatalogError> {
+        self.raw_conn(|conn| {
+            conn.query_row("SELECT COALESCE(MAX(id), 0) FROM era", [], |r| r.get(0))
+        })
     }
 
     /// Advance the catalog version to a restore-invariant value.

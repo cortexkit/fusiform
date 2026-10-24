@@ -340,6 +340,200 @@ fn an_unpaged_whole_catalog_over_the_frame_limit_is_refused_never_truncated() {
     assert!(call(json!({"paged": true}), 1).is_ok());
 }
 
+fn cached_get(
+    store: &CatalogStore,
+    cache: &Mutex<Option<OversizedCatalog>>,
+    args: Value,
+    limit: usize,
+) -> Result<CatalogGetResponse, RouteError> {
+    serve_catalog_get_with_cache(
+        store,
+        &serde_json::to_vec(&args).unwrap(),
+        CATALOG_PAGE_BYTES,
+        limit,
+        cache,
+    )
+}
+
+fn render_count() -> usize {
+    CATALOG_RENDER_COUNT.with(|count| count.get())
+}
+
+#[test]
+fn repeated_oversized_catalog_refusal_skips_rendering() {
+    let (store, _dir) = fixture();
+    let cache = Mutex::new(None);
+    let before = render_count();
+    let first = cached_get(&store, &cache, json!({}), 1).unwrap_err();
+    assert_eq!(render_count(), before + 1);
+    let second = cached_get(&store, &cache, json!({"source":"models.dev"}), 1).unwrap_err();
+    assert_eq!(second.code, first.code);
+    assert_eq!(second.message.as_bytes(), first.message.as_bytes());
+    assert_eq!(render_count(), before + 1, "a retry must not render again");
+
+    let full = cached_get(&store, &cache, json!({}), usize::MAX).unwrap();
+    let size = serde_json::to_vec(&full).unwrap().len();
+    assert_eq!(first.code, fusiform_protocol::CODE_BAD_REQUEST);
+    assert_eq!(
+        first.message,
+        format!(
+            "the whole catalog is {size} bytes, over the 1-byte reply \
+             limit; read it in pages with \"paged\": true and follow \
+             next_page_token, or name a provider_id"
+        )
+    );
+
+    let prefixes = json!({"fact_prefixes":["rate.","limit."]});
+    cached_get(&store, &cache, prefixes, 1).unwrap_err();
+    let before = render_count();
+    let equivalent = json!({"fact_prefixes":["limit.","rate.","rate."]});
+    cached_get(&store, &cache, equivalent, 1).unwrap_err();
+    assert_eq!(render_count(), before);
+}
+
+#[test]
+fn different_whole_catalog_filters_are_measured_separately() {
+    let (store, _dir) = fixture();
+    for different in [
+        json!({"fact_prefixes":["rate."]}),
+        json!({"include_retired":true}),
+        json!({"at_ms":1000}),
+    ] {
+        let cache = Mutex::new(None);
+        cached_get(&store, &cache, json!({}), 1).unwrap_err();
+        let before = render_count();
+        cached_get(&store, &cache, different, 1).unwrap_err();
+        assert_eq!(render_count(), before + 1);
+    }
+    let cache = Mutex::new(None);
+    cached_get(&store, &cache, json!({"at_ms":1000}), 1).unwrap_err();
+    let before = render_count();
+    cached_get(&store, &cache, json!({"at_ms":2000}), 1).unwrap_err();
+    assert_eq!(render_count(), before + 1);
+}
+
+#[test]
+fn version_changes_remeasure_current_and_point_in_time_refusals() {
+    let (store, _dir) = fixture();
+    for args in [json!({}), json!({"at_ms":1000})] {
+        let cache = Mutex::new(None);
+        cached_get(&store, &cache, args.clone(), 1).unwrap_err();
+        let version = store.catalog_version().unwrap();
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "new".into(),
+                model_id: format!("m{version}"),
+                fact_key: FactKey::existence(),
+                value_json: r#""present""#.into(),
+                boundary_at: Timestamp(1000),
+                boundary_kind: BoundaryKind::Seed,
+                observation_id: None,
+            }])
+            .unwrap();
+        let obs = observation(&store, 9000);
+        store.advance_catalog_version(obs, Timestamp(9000)).unwrap();
+        assert!(store.catalog_version().unwrap() > version);
+        let before = render_count();
+        cached_get(&store, &cache, args, 1).unwrap_err();
+        assert_eq!(render_count(), before + 1);
+    }
+}
+
+#[test]
+fn corrections_remeasure_refusals_even_without_a_version_change() {
+    let (store, _dir) = fixture();
+    for (i, args) in [json!({}), json!({"at_ms":1500})].into_iter().enumerate() {
+        let cache = Mutex::new(None);
+        cached_get(&store, &cache, args.clone(), 1).unwrap_err();
+        let version = store.catalog_version().unwrap();
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: format!("p{i:02}"),
+                model_id: "m".into(),
+                fact_key: FactKey::rate(TokenClass::Input),
+                value_json: r#"{"state":"stated_zero"}"#.into(),
+                boundary_at: Timestamp(9000),
+                boundary_kind: BoundaryKind::Corrected(Correction {
+                    fields: vec![FieldId::Rate {
+                        class: TokenClass::Input,
+                    }],
+                    affected_from: Timestamp(1000),
+                    affected_until: Timestamp(8000),
+                    reason: "synthetic correction without a public version change".into(),
+                }),
+                observation_id: None,
+            }])
+            .unwrap();
+        assert_eq!(store.catalog_version().unwrap(), version);
+        let before = render_count();
+        let refreshed = cached_get(&store, &cache, args.clone(), 1).unwrap_err();
+        assert_eq!(render_count(), before + 1);
+        let uncached = cached_get(&store, &Mutex::new(None), args, 1).unwrap_err();
+        assert_eq!(refreshed.message, uncached.message);
+    }
+}
+
+#[test]
+fn fitting_catalogs_and_other_read_forms_are_never_cached_as_refusals() {
+    let (store, _dir) = fixture();
+    let cache = Mutex::new(None);
+    let args = json!({"at_ms":1000});
+    let full = cached_get(&store, &cache, args.clone(), usize::MAX).unwrap();
+    assert!(cache.lock().unwrap().is_none());
+    let bytes = serde_json::to_vec(&full).unwrap();
+    cached_get(&store, &cache, args.clone(), bytes.len() - 1).unwrap_err();
+    let before = render_count();
+    for _ in 0..2 {
+        let fits = cached_get(&store, &cache, args.clone(), bytes.len()).unwrap();
+        assert_eq!(serde_json::to_vec(&fits).unwrap(), bytes);
+    }
+    assert_eq!(render_count(), before + 2);
+
+    let filtered = json!({"at_ms":1000,"fact_prefixes":[]});
+    let filtered_size =
+        serde_json::to_vec(&cached_get(&store, &cache, filtered.clone(), usize::MAX).unwrap())
+            .unwrap()
+            .len();
+    assert!(filtered_size < bytes.len() - 1);
+    cached_get(&store, &cache, filtered, bytes.len() - 1).unwrap();
+    assert!(cached_get(&store, &cache, json!({"provider_id":"p00"}), 1).is_ok());
+    assert!(cached_get(&store, &cache, json!({"paged":true}), 1).is_ok());
+    let invalid = cached_get(&store, &cache, json!({"auth_method":"apikey"}), 1).unwrap_err();
+    assert_eq!(invalid.message, "auth_method requires provider_id");
+}
+
+#[test]
+fn oversized_refusals_do_not_cross_store_instances() {
+    let (store, _dir) = fixture();
+    let cache = Mutex::new(None);
+    cached_get(&store, &cache, json!({}), 1).unwrap_err();
+    let (other, _other_dir) = fixture();
+    assert_eq!(
+        store.catalog_version().unwrap(),
+        other.catalog_version().unwrap()
+    );
+    let before = render_count();
+    cached_get(&other, &cache, json!({}), 1).unwrap_err();
+    assert_eq!(render_count(), before + 1);
+}
+
+#[test]
+fn historical_coverage_is_checked_even_when_a_refusal_is_cached() {
+    let (store, _dir) = empty_store();
+    let cache = Mutex::new(None);
+    let args = json!({"at_ms":500});
+    cached_get(&store, &cache, args.clone(), 1).unwrap_err();
+    let version = store.catalog_version().unwrap();
+    observation(&store, 1000);
+    assert_eq!(store.catalog_version().unwrap(), version);
+    let before = render_count();
+    let error = cached_get(&store, &cache, args, 1).unwrap_err();
+    assert_eq!(error.code, fusiform_protocol::CODE_NO_COVERAGE);
+    assert_eq!(render_count(), before);
+}
+
 #[test]
 fn invalid_paging_requests_are_bad_requests() {
     let (store, _dir) = fixture();

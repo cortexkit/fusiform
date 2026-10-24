@@ -1626,3 +1626,18 @@ build_timeout_s = 1800
 [control.select]
 filter = "route::alias_tests::"
 
+[[control]]
+id = "oversized-whole-catalog-refusal-cache-lookup"
+guards = "a repeated oversized unpaged whole-catalog request at the same version refuses without rendering again"
+file = "crates/fusiform-module/src/route.rs"
+old = "        if let Some(entry) = cached.as_ref().filter(|entry| entry.key == *key) {"
+new = "        if let Some(entry) = cached.as_ref().filter(|_| false) { // NON-VACUITY BREAK"
+edits = []
+test_file = "crates/fusiform-module/src/route/paging_tests.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--lib"
+expect_red = ["route::paging_tests::repeated_oversized_catalog_refusal_skips_rendering"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
