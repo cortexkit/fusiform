@@ -197,6 +197,22 @@
       "established_at_ms": 1792627200000,
       "review_by_ms": 1797811200000,
       "source_ref": "https://opencode.ai/v2/docs/console/go/"
+    },
+    {
+      "provider_id": "google",
+      "tier": "ultra_5x",
+      "price": {"minor_units": 9999, "exponent": 2, "currency": "USD", "period": "month"},
+      "quota_value": {
+        "state": "not_established",
+        "refusal_reason": "No AI Ultra 5x account is measured yet; astrocyte has no Antigravity multiplier readings. The operator can state a figure.",
+        "review_by_ms": 1798070400000
+      },
+      "note": "'Google AI Ultra 5x $99.99/month', read 2026-10-25 from Google One's plan comparison, which lists AI Plus $4.99, AI Pro $19.99, AI Ultra 5x $99.99 and AI Ultra 20x $199.99. Google's I/O 2026 announcement (https://blog.google/products-and-platforms/products/google-one/google-ai-subscriptions/) says 'We're launching a $100/month AI Ultra plan' with 'a 5X higher usage limit in the Gemini app and Google Antigravity than our Pro plan', so the operator's '$100 AI Ultra pack' is this tier. Only Ultra 5x is curated, because it is the tier the operator holds on the one Antigravity account in use. Google says Gemini Code Assist stopped serving consumer, AI Pro and AI Ultra accounts on 2026-06-18, so this plan's coding quota is Antigravity's. The price is the US monthly listing; Google tells members to check the price shown at checkout.",
+      "boundary_at_ms": 1792886400000,
+      "established_by": "fusiform",
+      "established_at_ms": 1792886400000,
+      "review_by_ms": 1798070400000,
+      "source_ref": "https://one.google.com/about/google-ai-plans/"
     }
   ],
   "why_this_basis": "US list price, MONTHLY-BILLED basis. Recorded rather than assumed, and the basis is chosen for its FAILURE DIRECTION rather than for consistency: a higher denominator produces a lower multiplier, so recording the monthly-billed price makes a subscription look WORSE than it is for an annual subscriber. Every other known residual in the consuming calculation biases toward 'keep paying', so the one term that errs pessimistic is the one pushing back. Do not 'correct' this to the annual figure: it would remove the only conservative term. anthropic/pro is $17 billed annually against $20 monthly, a 15% spread, and that difference is deliberately not modelled here \u2014 an operator on an annual term or a grandfathered rate overrides this plane on their own credential record, which is where a fact about one account belongs. WEB-SUBSCRIPTION prices, additionally: the Max help centre states 'these prices are for web subscriptions only. Mobile pricing may vary depending on your app platform.' An operator who subscribed through an app store may pay an app-store markup this plane cannot see, which is a third basis axis beyond country and billing term. Same remedy as the others \u2014 the credential override carries what one account actually pays.",

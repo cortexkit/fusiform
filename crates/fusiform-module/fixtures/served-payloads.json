@@ -5803,6 +5803,26 @@
           "tier": "pro"
         },
         {
+          "boundary_at_ms": 1792886400000,
+          "established_at_ms": 1792886400000,
+          "established_by": "fusiform",
+          "price": {
+            "currency": "USD",
+            "exponent": 2,
+            "minor_units": 9999,
+            "period": "month"
+          },
+          "provider_id": "google",
+          "quota_value": {
+            "refusal_reason": "No AI Ultra 5x account is measured yet; astrocyte has no Antigravity multiplier readings. The operator can state a figure.",
+            "review_by_ms": 1798070400000,
+            "state": "not_established"
+          },
+          "review_by_ms": 1798070400000,
+          "source_ref": "https://one.google.com/about/google-ai-plans/",
+          "tier": "ultra_5x"
+        },
+        {
           "boundary_at_ms": 1791849600000,
           "established_at_ms": 1791849600000,
           "established_by": "fusiform",
