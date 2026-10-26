@@ -988,6 +988,16 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// quirks. Fusiform never infers a wire family or serves header/body overrides.
 pub const SERVED_FACTS: &[ServedFact] = &[
     ServedFact {
+        key: "model.name",
+        class: FactClass::Advisory,
+        note: "human display label, verbatim upstream or sourced curation. Absent when missing or empty; aliases use only their own sourced route label, never the target's name. Consumer display only.",
+    },
+    ServedFact {
+        key: "provider.name",
+        class: FactClass::Advisory,
+        note: "human display label of the row's provider, verbatim upstream or sourced curation for an unlisted provider. Absent when missing or empty. Consumer display only, not the model's creator.",
+    },
+    ServedFact {
         key: "route.reasoning_wire_ids",
         class: FactClass::ByteAffecting,
         note: "curated effort-to-backend-model-id object on live alias routes only; not projected from a target. Consumers send the chosen id on the wire.",

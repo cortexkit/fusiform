@@ -263,8 +263,13 @@ publishes no token count, so `typesafe/jev-1.13.0` carries no
 `limit.context`. Where sources conflict, the fact is left out: TypeSafe's models
 page lists text input while its images page says Jev accepts images, so the
 row carries no `capability.attachment`.
-Names, release dates and other provenance stay in `source_ref` rather than
-being invented as new fact keys.
+`model.name` is the vendor's exact human display label, with its page cited in
+`source_ref`: Muse Wonder Full, Clef, Clef-flash, Clairic and Jev 1.13. The
+spellings `Clef-flash` and `Jev 1.13` follow vendor prose, not a prettified model id. Provider
+names come from stored upstream claims for Meta and Cloudflare Workers AI;
+`typesafe` is unlisted upstream, so its row sources `provider.name: "TypeSafe"`
+from https://docs.typesafe.ai/models. Release dates and other provenance remain
+in `source_ref` rather than being invented as new fact keys.
 
 Serving rules, tested in `crates/fusiform-module/src/route.rs`
 (`curated_tests::…`):

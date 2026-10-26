@@ -281,6 +281,14 @@ are:
 
 ## 8. What is not stored
 
+On upstream rows, `model.name` and `provider.name` are stored per model as ordinary
+eras, not derived at serve time. A rename opens a new era; a missing or empty name
+is absent from the catalog, with a null withdrawal era if previously published.
+The `provider.` namespace describes the offering's provider, not the creator
+of the weights. Curated model names and alias labels are served only on current
+reads, not written to era history. Their provider labels are joined from current
+upstream model eras, or sourced in curation for a provider absent upstream.
+
 - Billing-plane rules, curated model rows, aliases and open-weight rate
   inheritance are applied when a read is served and are never written as eras
   (`ingest::ingested_eras_never_carry_serve_only_billing_states`,

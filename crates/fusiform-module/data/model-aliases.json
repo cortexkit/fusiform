@@ -8,6 +8,7 @@
     {
       "provider_id": "google",
       "model_id": "antigravity-claude-sonnet-5-5",
+      "model_name": "Claude Sonnet 5.5 (Antigravity)",
       "target": {
         "provider_id": "anthropic",
         "model_id": "claude-sonnet-5-5"
@@ -26,6 +27,7 @@
     {
       "provider_id": "google",
       "model_id": "antigravity-claude-opus-5-5",
+      "model_name": "Claude Opus 5.5 (Antigravity)",
       "target": {
         "provider_id": "anthropic",
         "model_id": "claude-opus-5-5"
@@ -44,6 +46,7 @@
     {
       "provider_id": "google",
       "model_id": "antigravity-gemini-4-argon",
+      "model_name": "Gemini 4 Argon (Antigravity)",
       "target": {
         "provider_id": "google",
         "model_id": "gemini-4-argon"
@@ -62,6 +65,7 @@
     {
       "provider_id": "google",
       "model_id": "antigravity-gemini-3.8-flash",
+      "model_name": "Gemini 3.8 Flash (Antigravity)",
       "target": {
         "provider_id": "google",
         "model_id": "gemini-3.8-flash"
@@ -80,6 +84,7 @@
     {
       "provider_id": "google",
       "model_id": "antigravity-gemini-3.1-flash-image",
+      "model_name": "Gemini 3.1 Flash Image (Antigravity)",
       "target": {
         "provider_id": "google",
         "model_id": "gemini-3.1-flash-image"

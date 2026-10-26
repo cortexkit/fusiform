@@ -588,7 +588,7 @@ mod tests {
 
     #[test]
     fn planted_unknown_fact_is_rejected() {
-        let doc = planted(|row| row["facts"]["model.name"] = "Muse Wonder Full".into());
+        let doc = planted(|row| row["facts"]["model.unpublished"] = "unpublished".into());
         let reject = single_reject(&doc, "meta", "muse-wonder-full-1.0");
         assert!(reject.contains("not in SERVED_FACTS"));
     }

@@ -276,6 +276,8 @@ pub enum FieldId {
     /// another's, so a misread here produces a confident wrong answer about a
     /// DIFFERENT provider's model, which is the worst direction available.
     Model { attribute: ModelAttributeId },
+    /// The provider label displayed to a person, independently correctable.
+    ProviderName,
     /// A published connection claim, independently correctable per field.
     Wire { attribute: WireAttributeId },
 }
@@ -293,6 +295,7 @@ pub enum WireAttributeId {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelAttributeId {
+    Name,
     Family,
     OpenWeights,
     CanonicalId,

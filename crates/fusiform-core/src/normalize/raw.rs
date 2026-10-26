@@ -19,12 +19,9 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 pub struct RawProvider {
     pub id: Option<String>,
-    /// Display label. Declared so the upstream's shape is enumerated here, and
-    /// deliberately NOT carried into the normalized type — see
-    /// [`super::NormalizedProvider`] for why an unread field is a decision
-    /// nobody made.
+    /// Published display label, carried into each model's `provider.name` fact.
     pub name: Option<String>,
-    /// Documentation URL. Declared, not carried, per `name`.
+    /// Documentation URL. Declared, not carried into the domain.
     pub doc: Option<String>,
     /// The provider's published API base URL, preserved verbatim.
     pub api: Option<String>,

@@ -26,6 +26,8 @@ const FIXTURE: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-de
 /// adding a field to a struct.
 const SERVED_FACT_KEYS: &[&str] = &[
     "existence",
+    "model.name",
+    "provider.name",
     "limit.context",
     "limit.output",
     "capability.reasoning",
@@ -199,7 +201,7 @@ fn the_served_fact_set_is_exactly_this() {
     }
 }
 
-/// No upstream field name that must never be served appears in any fact key.
+/// Quarantined or unreliable fields do not become facts under their own names.
 ///
 /// A weaker check than it looks — it catches a field becoming a fact under its
 /// own name, which is how it would actually happen. A field smuggled in under a
@@ -209,10 +211,18 @@ fn unreliable_and_renderer_selecting_fields_are_not_facts() {
     let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
 
     for model in outcome.catalog.models() {
-        for key in fact_keys_of(model) {
+        for (key, value) in fusiform_store::ingest::facts_with_values(model) {
+            // The provider display label is not the model's quarantined
+            // `provider` request-override block. Admit only this exact string
+            // fact; every other occurrence remains forbidden.
+            let provider_label = key.as_str() == "provider.name";
+            if provider_label {
+                assert!(serde_json::from_str::<String>(&value).is_ok());
+            }
             for forbidden in NEVER_SERVED {
                 assert!(
-                    !key.as_str().contains(forbidden),
+                    (provider_label && *forbidden == "provider")
+                        || !key.as_str().contains(forbidden),
                     "{}: fact key {:?} contains {forbidden:?}, which must never be served",
                     model.key,
                     key.as_str()
@@ -355,6 +365,7 @@ fn every_namespace_prefix_selects_real_facts() {
     assert!(!produced.is_empty(), "the fixture must produce facts");
 
     for prefix in [
+        fusiform_store::prefix::PROVIDER,
         fusiform_store::prefix::RATE,
         fusiform_store::prefix::CAPABILITY,
         fusiform_store::prefix::LIMIT,
@@ -375,6 +386,7 @@ fn every_namespace_prefix_selects_real_facts() {
             continue;
         }
         let reachable = [
+            fusiform_store::prefix::PROVIDER,
             fusiform_store::prefix::RATE,
             fusiform_store::prefix::CAPABILITY,
             fusiform_store::prefix::LIMIT,
@@ -791,6 +803,8 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
     let fusiform_core::normalize::NormalizedModel {
         // Reaches a fact.
         key: _,
+        display_name,
+        provider_name,
         family,
         open_weights,
         canonical_id,
@@ -802,10 +816,6 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
 
         // Declared unread, with the reason each is not served.
         //
-        // `display_name` — prose for humans. Nothing branches on it, and a
-        // consumer rendering a name should use the id it queried by, which is
-        // stable, rather than a label the upstream may reword.
-        display_name: _,
         // `release_date` — the MODEL's release, identical across every
         // provider serving it. Measured 2026-09-06 while testing whether the
         // creator of an open-weight family is derivable: it is not, precisely
@@ -834,6 +844,8 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
         .collect();
 
     for (present, key) in [
+        (display_name.is_some(), "model.name"),
+        (provider_name.is_some(), "provider.name"),
         (family.is_some(), "model.family"),
         (open_weights.is_some(), "model.open_weights"),
         (canonical_id.is_some(), "model.canonical_id"),

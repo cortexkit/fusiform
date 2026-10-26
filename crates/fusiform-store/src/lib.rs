@@ -177,6 +177,7 @@ impl FactKey {
                 Self::rate_in_mode(class, &mode)
             }
             FieldId::Existence => Self::existence(),
+            FieldId::ProviderName => Self::provider("name"),
             FieldId::Limit { limit } => Self::limit(match limit {
                 LimitId::Context => "context",
                 LimitId::Output => "output",
@@ -191,6 +192,7 @@ impl FactKey {
                 CapabilityId::OutputModalities => "output_modalities",
             }),
             FieldId::Model { attribute } => FactKey::model(match attribute {
+                fusiform_core::ModelAttributeId::Name => "name",
                 fusiform_core::ModelAttributeId::Family => "family",
                 fusiform_core::ModelAttributeId::OpenWeights => "open_weights",
                 fusiform_core::ModelAttributeId::CanonicalId => "canonical_id",
@@ -235,6 +237,8 @@ pub mod prefix {
     /// serving the same weights agree on these and disagree on rates, which is
     /// exactly what makes them useful for relating rows across providers.
     pub const MODEL: &str = "model.";
+    /// Claims about the provider offering the row, not the model's creator.
+    pub const PROVIDER: &str = "provider.";
     /// Published connection claims, not a transport implementation.
     pub const WIRE: &str = "wire.";
 }
@@ -260,6 +264,10 @@ pub mod rate_key {
 }
 
 impl FactKey {
+    pub fn provider(name: &str) -> Self {
+        Self(format!("{}{name}", prefix::PROVIDER))
+    }
+
     pub fn wire(name: &str) -> Self {
         Self(format!("{}{name}", prefix::WIRE))
     }

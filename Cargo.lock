@@ -311,7 +311,7 @@ dependencies = [
 
 [[package]]
 name = "fusiform-protocol"
-version = "0.43.0"
+version = "0.44.0"
 dependencies = [
  "serde",
  "serde_json",

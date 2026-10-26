@@ -152,9 +152,15 @@ fn assert_curated_clef(response: &CatalogGetResponse, read: &str) {
         .unwrap_or_else(|| panic!("{read}: {ID} must be served"));
     assert_eq!(facts["model.kind"], "decision", "{read}");
     assert_eq!(facts["existence"], "present", "{read}");
-    // Equal to the curated row, so no stored upstream fact is mixed in: the
-    // upstream row's family, output limit and reasoning flag would show here.
-    assert_eq!(facts, &curated_facts(), "{read}");
+    // Only the provider label is joined from upstream. Model-specific claims
+    // remain exactly curated: no withdrawn family, output limit or reasoning
+    // flag may survive beside them.
+    let mut expected = curated_facts();
+    expected.insert(
+        "provider.name".to_string(),
+        Value::from("Cloudflare Workers AI"),
+    );
+    assert_eq!(facts, &expected, "{read}");
     let disclosures: Vec<_> = response.curated.iter().filter(|c| c.model == ID).collect();
     assert_eq!(disclosures.len(), 1, "{read}: one curated disclosure");
     assert_eq!(disclosures[0].auth_methods, ["apikey"], "{read}");

@@ -123,6 +123,8 @@ pub struct WireFacts {
 pub struct NormalizedModel {
     pub key: ModelKey,
     pub display_name: Option<String>,
+    /// The provider's published display label, repeated on each model row.
+    pub provider_name: Option<String>,
     pub family: Option<String>,
     /// The upstream's cross-provider model identity, never inferred from row ids.
     pub canonical_id: Option<String>,
@@ -165,17 +167,10 @@ pub struct Quarantine {
 ///
 /// # Why the operator-metadata fields are not here
 ///
-/// The upstream publishes `name`, `doc` and `env` per provider. They were
-/// carried here as values and read by nothing, which is the state this type now
-/// refuses: **an unread field is a decision nobody made.**
+/// The upstream provider `name` is carried on each model as `provider.name`.
+/// Operator metadata without a served use stays out of the domain:
 ///
-/// Each of the three needed a decision rather than a rule applied to all of
-/// them, and the decision was "do not parse it into the domain":
-///
-/// - `name` is a display label, harmless and unused. If a consumer wants it, it
-///   becomes a served fact with a name and a test, not a field that is already
-///   in the struct waiting to be plumbed.
-/// - `doc` is a documentation URL, same disposition.
+/// - `doc` is a documentation URL, not a served fact.
 /// - `env` names the credential environment variable a provider conventionally
 ///   uses. Not a secret, and not renderer selection either — but it is
 ///   credential-ADJACENT, and a credential-adjacent field with no decision
@@ -446,7 +441,7 @@ pub fn normalize_models_dev_with(
     for (provider_id, raw_provider) in doc {
         let RawProvider {
             id: _,
-            name: _,
+            name,
             doc: _,
             env: _,
             npm,
@@ -455,7 +450,7 @@ pub fn normalize_models_dev_with(
         } = raw_provider;
         let mut models = Vec::with_capacity(raw_models.len());
         for (model_id, raw_model) in &raw_models {
-            models.push(normalize_model(
+            let mut model = normalize_model(
                 &provider_id,
                 model_id,
                 raw_model,
@@ -463,7 +458,9 @@ pub fn normalize_models_dev_with(
                 api.as_deref(),
                 evidence.bills_input_audio_per_token(&provider_id, model_id),
                 &mut findings,
-            )?);
+            )?;
+            model.provider_name = name.clone().filter(|name| !name.is_empty());
+            models.push(model);
         }
         providers.push(NormalizedProvider {
             api_base_quarantined: api.is_some(),
@@ -629,7 +626,8 @@ fn normalize_model(
 
     Ok(NormalizedModel {
         key,
-        display_name: (*name).clone(),
+        display_name: (*name).clone().filter(|name| !name.is_empty()),
+        provider_name: None,
         family: (*family).clone(),
         canonical_id: (*canonical_model_id).clone(),
         status: (*status).clone(),

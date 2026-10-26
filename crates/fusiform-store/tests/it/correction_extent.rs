@@ -196,6 +196,10 @@ fn every_served_fact_has_a_field_id() {
         FieldId::Capability {
             capability: CapabilityId::OutputModalities,
         },
+        FieldId::ProviderName,
+        FieldId::Model {
+            attribute: ModelAttributeId::Name,
+        },
         FieldId::Model {
             attribute: ModelAttributeId::Family,
         },

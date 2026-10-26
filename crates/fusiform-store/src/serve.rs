@@ -796,6 +796,57 @@ impl CatalogStore {
         Ok(rows)
     }
 
+    /// The current upstream provider label, read from one published model.
+    ///
+    /// Provider labels are repeated on model eras. Curated rows and aliases
+    /// need their own provider's label without reading the entire catalog or
+    /// borrowing a target model's provider. All models in a poll receive the
+    /// same provider claim, so any published model can supply it. Reading through
+    /// `value_at` keeps corrections and withdrawals authoritative; an unknown or
+    /// corrected label is omitted rather than borrowed from another row.
+    pub fn provider_display_name(
+        &self,
+        source: SourceId,
+        provider_id: &str,
+    ) -> Result<Option<String>, CatalogError> {
+        let at = Timestamp(now_ms());
+        let model_id = self.raw_conn(|conn| {
+            conn.query_row(
+                "SELECT e.model_id FROM era e \
+                 WHERE e.source = ?1 AND e.provider_id = ?2 AND e.fact_key = 'existence' \
+                   AND e.boundary_at_ms = ( \
+                     SELECT MAX(e2.boundary_at_ms) FROM era e2 \
+                     WHERE e2.source = e.source AND e2.provider_id = e.provider_id \
+                       AND e2.model_id = e.model_id AND e2.fact_key = 'existence' \
+                       AND e2.boundary_at_ms <= ?3) \
+                   AND e.value_json = '\"present\"' \
+                 ORDER BY e.model_id LIMIT 1",
+                params![source.as_str(), provider_id, at.0],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+        })?;
+        let Some(model_id) = model_id else {
+            return Ok(None);
+        };
+        let existence = self.value_at(source, provider_id, &model_id, &FactKey::existence(), at)?;
+        if existence.value_json() != Some("\"present\"") {
+            return Ok(None);
+        }
+        let label = self.value_at(
+            source,
+            provider_id,
+            &model_id,
+            &FactKey::provider("name"),
+            at,
+        )?;
+        Ok(label.value_json().and_then(|raw| {
+            serde_json::from_str::<String>(raw)
+                .ok()
+                .filter(|name| !name.is_empty())
+        }))
+    }
+
     /// How many models the store currently holds as present.
     ///
     /// Counts existence facts whose latest era says present, which is the same

@@ -315,6 +315,8 @@ pub fn fact_keys_of(model: &NormalizedModel) -> Vec<FactKey> {
 /// enumerate.
 pub const SERVED_FACT_NAMESPACE: &[&str] = &[
     "existence",
+    "model.name",
+    "provider.name",
     // Artefact facts: what the model IS, independent of who serves it. Two
     // providers serving the same weights agree on these and disagree on rates,
     // which is what makes them the join a consumer needs to relate rows.
@@ -428,6 +430,17 @@ fn facts_of(model: &NormalizedModel) -> Vec<(FactKey, String)> {
             json_modalities(&model.capabilities.output_modalities),
         ),
     ];
+
+    // Missing or empty labels make no display claim. A later withdrawal is
+    // stored as a null era, so point-in-time reads still return prior names.
+    for (key, name) in [
+        (FactKey::model("name"), model.display_name.as_deref()),
+        (FactKey::provider("name"), model.provider_name.as_deref()),
+    ] {
+        if let Some(name) = name {
+            facts.push((key, json_opt_str(Some(name))));
+        }
+    }
 
     // Whether models.dev says the model supports structured output.
     // No fact is written when the source omits the key; silence is unknown.

@@ -1141,6 +1141,7 @@ fn serve_catalog_get_with_cache(
             continue;
         }
         let mut facts = row.facts.clone();
+        add_provider_name(store, source, &row.provider_id, &mut facts)?;
         narrow_to_requested(&mut facts, requested_prefixes.as_ref());
         if !named && facts.is_empty() {
             continue;
@@ -2090,9 +2091,12 @@ fn render(
                 // instead of presenting as an absent fact.
                 serde_json::Value::String(raw.clone())
             });
-            // A withdrawn connection claim stays in history as a null era,
-            // but catalog absence must still mean the connection claim is unknown.
+            // Withdrawn connection claims and display names stay in history as
+            // null eras, but a catalog read must not advertise an unknown value.
             if key.as_str().starts_with(fusiform_store::prefix::WIRE) && value.is_null() {
+                continue;
+            }
+            if matches!(key.as_str(), "model.name" | "provider.name") && value.is_null() {
                 continue;
             }
             name_the_provenance_of_a_pre_0_11_row(&mut value);
@@ -2203,6 +2207,23 @@ fn curated_disclosure(
         source_ref: row.source_ref.clone(),
         review_by_ms: row.review_by_ms,
     }
+}
+
+fn add_provider_name(
+    store: &CatalogStore,
+    source: SourceId,
+    provider_id: &str,
+    facts: &mut BTreeMap<String, serde_json::Value>,
+) -> Result<(), RouteError> {
+    if !facts.contains_key("provider.name") {
+        if let Some(name) = store
+            .provider_display_name(source, provider_id)
+            .map_err(|e| store_error(&e))?
+        {
+            facts.insert("provider.name".to_string(), serde_json::json!(name));
+        }
+    }
+    Ok(())
 }
 
 /// Fill a null or absent `model.canonical_id` and return its source disclosure.
@@ -3405,6 +3426,43 @@ mod alias_tests {
             .is_none());
     }
 
+    #[test]
+    fn an_alias_without_a_sourced_name_never_inherits_the_target_name() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-3.8-flash", 300_000_000);
+        store
+            .append_eras(&[era_at(
+                "gemini-3.8-flash",
+                "model.name",
+                r#""Target label""#,
+                1_000,
+            )])
+            .unwrap();
+        let mut alias = crate::aliases::aliases()[&(
+            "google".to_string(),
+            "antigravity-gemini-3.8-flash".to_string(),
+        )]
+            .clone();
+        alias.model_name = None;
+        let got = aliased_response(
+            &store,
+            SourceId::ModelsDev,
+            "google",
+            "antigravity-gemini-3.8-flash",
+            &alias,
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!got.models[ALIAS].contains_key("model.name"));
+        let target = get(
+            &store,
+            r#"{"provider_id":"google","model_id":"gemini-3.8-flash"}"#,
+        )
+        .unwrap();
+        assert_eq!(target.models[TARGET]["model.name"], "Target label");
+    }
+
     const RETIRED: &str = "google/antigravity-gemini-3.7-flash";
 
     #[test]
@@ -3763,6 +3821,7 @@ mod alias_tests {
         let alias = crate::aliases::Alias {
             target_provider_id: "ollama-cloud".to_string(),
             target_model_id: "glm-x".to_string(),
+            model_name: None,
             basis: "b".to_string(),
             source_ref: "s".to_string(),
             established_at_ms: 1,
@@ -4786,6 +4845,7 @@ mod billing_plane_tests {
         let alias = crate::aliases::Alias {
             target_provider_id: "other-provider".into(),
             target_model_id: "target-model".into(),
+            model_name: None,
             basis: "same backend model".into(),
             source_ref: "routing code".into(),
             established_at_ms: 1_000,
@@ -5263,6 +5323,7 @@ fn aliased_response(
     omit_route_dependent_alias_facts(&mut facts);
     response.wire_corrections.clear();
     emit_alias_route_facts(&mut facts, alias);
+    add_provider_name(store, source, provider_id, &mut facts)?;
     narrow_to_requested(&mut facts, prefixes);
     if !facts.contains_key("model.canonical_id") {
         response.canonical_links.clear();
@@ -5285,6 +5346,10 @@ fn aliased_response(
 /// Its client package, endpoint and request shape likewise describe the target
 /// backend, not the backend reached through the alias.
 fn omit_route_dependent_alias_facts(facts: &mut BTreeMap<String, serde_json::Value>) {
+    // The target's labels identify a different route and possibly a different
+    // provider. Only the alias's own sourced labels can describe this row.
+    facts.remove("model.name");
+    facts.remove("provider.name");
     facts.retain(|key, _| !key.starts_with("route."));
     facts.remove("capability.structured_output");
     facts.remove("wire.npm");
@@ -5296,6 +5361,9 @@ fn emit_alias_route_facts(
     facts: &mut BTreeMap<String, serde_json::Value>,
     alias: &crate::aliases::Alias,
 ) {
+    if let Some(name) = &alias.model_name {
+        facts.insert("model.name".to_string(), serde_json::json!(name));
+    }
     if !alias.reasoning_wire_ids.is_empty() {
         // A target may offer more efforts than this route can send. Retain its
         // option shape and value order, but never advertise an unmapped effort.
@@ -5887,8 +5955,13 @@ mod system_one_tests {
             ] {
                 let response = get(&store, args.clone());
                 let facts = &response.models[&id];
-                assert_eq!(facts.len(), 1, "{args}: {facts:?}");
+                assert_eq!(facts.len(), 2, "{args}: {facts:?}");
                 assert_eq!(facts["model.kind"], *kind);
+                assert_eq!(
+                    facts["model.name"],
+                    crate::curated_models::models()[&(provider.to_string(), model.to_string())]
+                        .facts["model.name"]
+                );
             }
             for args in [
                 json!({"provider_id":provider, "model_id":model, "fact_prefixes":["rate."]}),

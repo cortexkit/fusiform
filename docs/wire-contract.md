@@ -117,6 +117,8 @@ value would do to a consumer:
 | Key | Class | Value |
 | --- | --- | --- |
 | `existence` | advisory | `"present"` or `"absent"` |
+| `model.name` | advisory | human display name as a JSON string; otherwise no fact |
+| `provider.name` | advisory | the row's provider display name as a JSON string; otherwise no fact |
 | `limit.context` | byte-affecting | integer token count, or `null` |
 | `limit.output` | byte-affecting | integer token count, or `null` |
 | `capability.reasoning` | byte-affecting | `true`, `false` or `null` |
@@ -143,6 +145,23 @@ value would do to a consumer:
 | `rate.cache_write` | money | per million cache-write tokens |
 | `rate.reasoning` | money | per million reasoning tokens |
 | `rate.input_audio` | money | per million audio input tokens, only for providers whose docs establish per-token audio billing |
+
+Names are for consumer display only, never identifiers. Names on upstream rows are
+stored as ordinary eras, so renames are preserved and `at_ms` reads return the
+name recorded then. Missing or empty names create no fact; casing and whitespace
+are otherwise unchanged, including whitespace-only labels. A withdrawn name opens a null era in history but is
+absent from catalog reads. `provider.` is its own fact namespace, selectable with
+`fact_prefixes: ["provider."]`, and billing planes preserve it like other
+non-rate facts. It identifies the row's provider, not the model's creator.
+Curated models carry vendor-sourced `model.name`; their provider name comes from
+the stored upstream provider claims, or is sourced in the curated row when the
+provider is absent upstream. Aliases never inherit the target's `model.name` or
+`provider.name`: they use their own `model_name` in `model-aliases.json` when
+stated, with the row's source citation, and their own provider's upstream name.
+Curated and alias rows, including these provider-label joins, are current-only;
+they are not served on `at_ms` reads. Retired aliases carry only their retirement
+facts, not live labels. Name eras can be corrected independently through
+`{"field":"model","attribute":"name"}` and `{"field":"provider_name"}`.
 
 Except for explicitly disclosed corrections, the `wire.*` values are models.dev's claims, not fusiform's transport policy.
 For each field independently, a model's `provider.npm` or `provider.api` wins

@@ -8,6 +8,7 @@
       "auth_methods": ["oauth"],
       "facts": {
         "existence": "present",
+        "model.name": "Muse Wonder Full",
         "limit.context": 1048576,
         "limit.output": null,
         "capability.attachment": true,
@@ -23,7 +24,7 @@
         "model.family": "muse",
         "model.open_weights": false
       },
-      "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with muse-wonder-full-1.0 among 12 ids; POST https://api.meta.ai/v1/responses with muse-wonder-full at 16:42:35Z returned 404 'The requested model was not found.'; POST with muse-wonder-full-1.0 at 16:42:45Z returned 200. Lab record meta/muse-wonder-full in https://models.dev/models.json read 2026-10-13: Muse Wonder Full, released 2026-10-12; https://research.meta.ai/blog/muse-wonder and https://research.meta.ai/static/muse-wonder-model-card. No output limit or cost published. Reasoning effort levels low, medium, high and xhigh: the operator's statement on 2026-10-16; the Muse Wonder blog shows Wonder Full at several reasoning efforts but does not name them, and the lab record carries no reasoning options.",
+      "source_ref": "Display name confirmed 2026-10-26 at https://research.meta.ai/blog/muse-wonder: 'Muse Wonder Full'. Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with muse-wonder-full-1.0 among 12 ids; POST https://api.meta.ai/v1/responses with muse-wonder-full at 16:42:35Z returned 404 'The requested model was not found.'; POST with muse-wonder-full-1.0 at 16:42:45Z returned 200. Lab record meta/muse-wonder-full in https://models.dev/models.json read 2026-10-13: Muse Wonder Full, released 2026-10-12; https://research.meta.ai/blog/muse-wonder and https://research.meta.ai/static/muse-wonder-model-card. No output limit or cost published. Reasoning effort levels low, medium, high and xhigh: the operator's statement on 2026-10-16; the Muse Wonder blog shows Wonder Full at several reasoning efforts but does not name them, and the lab record carries no reasoning options.",
       "established_at_ms": 1791849600000,
       "review_by_ms": 1797033600000
     },
@@ -33,6 +34,7 @@
       "auth_methods": ["apikey"],
       "facts": {
         "existence": "present",
+        "model.name": "Clef",
         "limit.context": 65536,
         "capability.attachment": true,
         "model.kind": "decision",
@@ -49,7 +51,7 @@
           "state": "stated_zero"
         }
       },
-      "source_ref": "Read 2026-10-21. https://developers.cloudflare.com/workers-ai/models/clef/: \"Clef is a 27B multimodal decision model that turns a state and a schema of typed questions into decisions. It reads the state as text, JSON, images, or video, and returns a probability for every allowed option of every question.\"; context window \"65,536 tokens\"; \"Optional embedded PNG, JPEG, or WebP images placed before the state (max 4; 4 MiB and 16 megapixels each, 8 MiB total decoded; whole request body max 13 MiB). Remote URLs are not accepted.\"; \"Clef models convert media inputs to input tokens and bill them at the model's input token rate. Clef models do not charge for output tokens.\" https://developers.cloudflare.com/workers-ai/platform/pricing/: \"| @cf/cloudflare/clef | $0.240 per M input tokens | 21818 neurons per M input tokens |\". Not in https://models.dev/api.json (embedded seed fetched 2026-10-13).",
+      "source_ref": "Display name 'Clef' confirmed 2026-10-26 at https://developers.cloudflare.com/workers-ai/models/clef/. Read 2026-10-21. https://developers.cloudflare.com/workers-ai/models/clef/: \"Clef is a 27B multimodal decision model that turns a state and a schema of typed questions into decisions. It reads the state as text, JSON, images, or video, and returns a probability for every allowed option of every question.\"; context window \"65,536 tokens\"; \"Optional embedded PNG, JPEG, or WebP images placed before the state (max 4; 4 MiB and 16 megapixels each, 8 MiB total decoded; whole request body max 13 MiB). Remote URLs are not accepted.\"; \"Clef models convert media inputs to input tokens and bill them at the model's input token rate. Clef models do not charge for output tokens.\" https://developers.cloudflare.com/workers-ai/platform/pricing/: \"| @cf/cloudflare/clef | $0.240 per M input tokens | 21818 neurons per M input tokens |\". Not in https://models.dev/api.json (embedded seed fetched 2026-10-13).",
       "established_by": "fusiform",
       "established_at_ms": 1792540800000,
       "review_by_ms": 1797724800000
@@ -60,6 +62,7 @@
       "auth_methods": ["apikey"],
       "facts": {
         "existence": "present",
+        "model.name": "Clef-flash",
         "limit.context": 24576,
         "capability.attachment": true,
         "model.kind": "decision",
@@ -76,7 +79,7 @@
           "state": "stated_zero"
         }
       },
-      "source_ref": "Read 2026-10-21. https://developers.cloudflare.com/workers-ai/models/clef-flash/: \"Clef-flash is a fast 9B multimodal decision model that turns a state and a schema of typed questions into decisions. It reads the state as text, JSON, images, or video, and returns a probability for every allowed option of every question.\"; context window \"24,576 tokens\"; \"Optional embedded PNG, JPEG, or WebP images placed before the state (max 4; 4 MiB and 16 megapixels each, 8 MiB total decoded; whole request body max 13 MiB). Remote URLs are not accepted.\"; \"Clef models convert media inputs to input tokens and bill them at the model's input token rate. Clef models do not charge for output tokens.\" https://developers.cloudflare.com/workers-ai/platform/pricing/: \"| @cf/cloudflare/clef-flash | $0.038 per M input tokens | 3455 neurons per M input tokens |\". Not in https://models.dev/api.json (embedded seed fetched 2026-10-13).",
+      "source_ref": "Display name 'Clef-flash' confirmed 2026-10-26 at https://developers.cloudflare.com/workers-ai/models/clef-flash/. Read 2026-10-21. https://developers.cloudflare.com/workers-ai/models/clef-flash/: \"Clef-flash is a fast 9B multimodal decision model that turns a state and a schema of typed questions into decisions. It reads the state as text, JSON, images, or video, and returns a probability for every allowed option of every question.\"; context window \"24,576 tokens\"; \"Optional embedded PNG, JPEG, or WebP images placed before the state (max 4; 4 MiB and 16 megapixels each, 8 MiB total decoded; whole request body max 13 MiB). Remote URLs are not accepted.\"; \"Clef models convert media inputs to input tokens and bill them at the model's input token rate. Clef models do not charge for output tokens.\" https://developers.cloudflare.com/workers-ai/platform/pricing/: \"| @cf/cloudflare/clef-flash | $0.038 per M input tokens | 3455 neurons per M input tokens |\". Not in https://models.dev/api.json (embedded seed fetched 2026-10-13).",
       "established_by": "fusiform",
       "established_at_ms": 1792540800000,
       "review_by_ms": 1797724800000
@@ -87,6 +90,7 @@
       "auth_methods": ["apikey"],
       "facts": {
         "existence": "present",
+        "model.name": "Clairic",
         "limit.context": 65536,
         "capability.attachment": true,
         "model.kind": "extraction",
@@ -103,7 +107,7 @@
           "state": "stated_zero"
         }
       },
-      "source_ref": "Read 2026-10-21. https://developers.cloudflare.com/workers-ai/models/clairic/: \"Clairic is a System One-style model that can extract, compute, estimate, and forecast values from inputs. It is strongly typed and outputs confidence scores and probabilities against its outputs.\"; context window \"65,536 tokens\"; \"Vision | Yes\"; \"Optional embedded PNG, JPEG or WebP images placed before the state (max 4; 4 MiB each, 8 MiB total decoded; request body max 16 MiB). Remote URLs are not accepted.\" https://blog.cloudflare.com/clairic-extraction-model: \"Similar to a decision model, it only processes input tokens with a single forward pass, and thus has no charge for output tokens.\" https://developers.cloudflare.com/workers-ai/platform/pricing/: \"| @cf/cloudflare/clairic | $0.100 per M input tokens | 9091 neurons per M input tokens |\". Not in https://models.dev/api.json (embedded seed fetched 2026-10-13).",
+      "source_ref": "Display name 'Clairic' confirmed 2026-10-26 at https://developers.cloudflare.com/workers-ai/models/clairic/. Read 2026-10-21. https://developers.cloudflare.com/workers-ai/models/clairic/: \"Clairic is a System One-style model that can extract, compute, estimate, and forecast values from inputs. It is strongly typed and outputs confidence scores and probabilities against its outputs.\"; context window \"65,536 tokens\"; \"Vision | Yes\"; \"Optional embedded PNG, JPEG or WebP images placed before the state (max 4; 4 MiB each, 8 MiB total decoded; request body max 16 MiB). Remote URLs are not accepted.\" https://blog.cloudflare.com/clairic-extraction-model: \"Similar to a decision model, it only processes input tokens with a single forward pass, and thus has no charge for output tokens.\" https://developers.cloudflare.com/workers-ai/platform/pricing/: \"| @cf/cloudflare/clairic | $0.100 per M input tokens | 9091 neurons per M input tokens |\". Not in https://models.dev/api.json (embedded seed fetched 2026-10-13).",
       "established_by": "fusiform",
       "established_at_ms": 1792540800000,
       "review_by_ms": 1797724800000
@@ -114,6 +118,8 @@
       "auth_methods": ["apikey"],
       "facts": {
         "existence": "present",
+        "model.name": "Jev 1.13",
+        "provider.name": "TypeSafe",
         "model.kind": "decision",
         "rate.input": {
           "state": "priced",
@@ -128,7 +134,7 @@
           "state": "stated_zero"
         }
       },
-      "source_ref": "Read 2026-10-21. https://docs.typesafe.ai/models: \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\"; \"Price: You pay per input token. Output tokens are free. A Btok is a billion tokens and an Mtok is a million tokens.\"; \"| `jev-latest` | `jev-1.13.0` | The most recent stable, official release.\"; \"| Context length | 64k per-request / 32k per-question |\". https://docs.typesafe.ai/concepts/system-one: \"It returns typed decisions and probabilities rather than generated text.\"; \"System One models do not write replies, produce code, or generate explanations of their reasoning.\" No limit.context: the docs give only \"64k\", and neither https://docs.typesafe.ai/api/list-models nor https://api.typesafe.ai/openapi.json states an exact token count. No capability.attachment: the models page lists \"| Input | Text | Text |\" while https://docs.typesafe.ai/images says \"Jev 1.13 and Jev 1.14 both accept images.\" Provider typesafe is not in https://models.dev/api.json (embedded seed fetched 2026-10-13).",
+      "source_ref": "Display names confirmed 2026-10-26 at https://docs.typesafe.ai/models: the table labels model id jev-1.13.0 as 'Jev 1.13'; 'Jev is TypeSafe's flagship model'. Read 2026-10-21. https://docs.typesafe.ai/models: \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\"; \"Price: You pay per input token. Output tokens are free. A Btok is a billion tokens and an Mtok is a million tokens.\"; \"| `jev-latest` | `jev-1.13.0` | The most recent stable, official release.\"; \"| Context length | 64k per-request / 32k per-question |\". https://docs.typesafe.ai/concepts/system-one: \"It returns typed decisions and probabilities rather than generated text.\"; \"System One models do not write replies, produce code, or generate explanations of their reasoning.\" No limit.context: the docs give only \"64k\", and neither https://docs.typesafe.ai/api/list-models nor https://api.typesafe.ai/openapi.json states an exact token count. No capability.attachment: the models page lists \"| Input | Text | Text |\" while https://docs.typesafe.ai/images says \"Jev 1.13 and Jev 1.14 both accept images.\" Provider typesafe is not in https://models.dev/api.json (embedded seed fetched 2026-10-13).",
       "established_by": "fusiform",
       "established_at_ms": 1792540800000,
       "review_by_ms": 1797724800000

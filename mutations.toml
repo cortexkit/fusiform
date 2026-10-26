@@ -6,6 +6,23 @@
 # section for how to add one. Prefer `ckdev-mutate prove`, which appends a row only
 # when the named tests actually fail.
 [[control]]
+id = "upstream-model-display-name-mapping"
+guards = "a published model display name reaches catalog reads verbatim rather than disappearing during normalization"
+file = "crates/fusiform-core/src/normalize/mod.rs"
+old = '        display_name: (*name).clone().filter(|name| !name.is_empty()),'
+new = '        display_name: { let _ = name; None }, // NON-VACUITY BREAK'
+edits = []
+test_file = "crates/fusiform-module/tests/it/display_names.rs"
+runner = "cargo"
+package = "fusiform-module"
+target = "--test it"
+select = "expected"
+expect_red = ["display_names::upstream_display_names_are_served_verbatim"]
+only = false
+timeout_s = 600
+build_timeout_s = 1800
+
+[[control]]
 id = "kimi-plan-canonical-api-borrow-call-site"
 guards = "the Kimi coding quota plane replaces subscription zeros only with its exact canonical API card or an explicit no_api_card refusal"
 file = "crates/fusiform-module/src/route.rs"
