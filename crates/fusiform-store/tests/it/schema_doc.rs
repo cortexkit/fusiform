@@ -134,8 +134,8 @@ fn tables_in_a_real_store() -> Vec<String> {
     names
 }
 
-// Named for the design note this list used to live in. The name is kept
-// because `mutations.toml` cites the test by this path.
+// Named for the design note this list used to live in; the table list now
+// lives in docs/data-model.md.
 #[test]
 fn the_design_note_names_the_tables_that_exist() {
     let note = std::fs::read_to_string(
@@ -153,9 +153,9 @@ fn the_design_note_names_the_tables_that_exist() {
     // collection asserts nothing at all. So both collections are checked for
     // content first: an extraction that stops matching would otherwise pass this
     // test in silence, which is the same asymmetry that produced seven
-    // misreports in this repository's former mutation script (since replaced by
-    // `ckdev-mutate`) — a failure path returning the same type as the success
-    // path, so failure-to-measure arrives dressed as evidence.
+    // misreports in this repository's former mutation script: a failure path
+    // returning the same type as the success path, so failure-to-measure
+    // arrives dressed as evidence.
     //
     // The floors are deliberately low: the store creates seven tables
     // (observation, era, catalog_version, observation_artifact_event,

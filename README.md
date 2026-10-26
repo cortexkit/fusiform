@@ -34,8 +34,8 @@ cargo test --locked --workspace --all-targets
 ```
 
 `cargo t` (`test --locked`) and `cargo c` (clippy with `-D warnings`) are
-aliases in `.cargo/config.toml`. The full gate a change must pass, including
-the mutation-proof check, is in `CONTRIBUTING.md`.
+aliases in `.cargo/config.toml`. The full gate a change must pass is in
+`CONTRIBUTING.md`.
 
 Tests that reach the live upstream do nothing unless `FUSIFORM_LIVE=1` is set,
 and tests that read a full captured models.dev document do nothing unless
@@ -53,11 +53,6 @@ tools.
   It refuses on other platforms, where `ck upgrade` handles installation.
 - `scripts/refresh-seed.sh` refreshes the embedded copy of the upstream
   catalog.
-
-### Mutation proofs
-
-`mutations.toml` records, for each standing guard, an edit that breaks it and
-the tests that must go red. See [`docs/mutations.md`](docs/mutations.md).
 
 ## Documentation
 

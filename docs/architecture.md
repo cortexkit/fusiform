@@ -113,6 +113,5 @@ applied to `plan_price_era` on every start and served by `plan.prices`.
 - [`billing-planes.md`](billing-planes.md), [`plan-prices.md`](plan-prices.md),
   [`curated-data.md`](curated-data.md): the curated planes.
 - [`operations.md`](operations.md): operator tasks with `ck models`.
-- [`mutations.md`](mutations.md): the mutation-proof catalogue.
 - [`backup-and-restore.md`](backup-and-restore.md): backup enrollment and what
   a restore does.

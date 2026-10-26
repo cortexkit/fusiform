@@ -247,10 +247,9 @@ fn no_write_escapes_the_fence() {
     // The loop above asserts nothing when `write_lines` finds nothing, so a
     // detector that stops matching passes this test in total silence — an empty
     // match arriving as a pass, which is the same asymmetry that produced seven
-    // separate misreports in this repository's former mutation script (since
-    // replaced by `ckdev-mutate`): a harness's failure path
-    // returns the SAME TYPE as its success path, so failure-to-measure arrives
-    // pre-dressed in evidence's clothes.
+    // separate misreports in this repository's former mutation script: a
+    // harness's failure path returns the SAME TYPE as its success path, so
+    // failure-to-measure arrives pre-dressed in evidence's clothes.
     //
     // Not hypothetical here. This checker has already had one detection hole
     // shaped like the crate's own formatting: a write whose SQL keyword

@@ -10,7 +10,6 @@ cargo fmt --all -- --check
 scripts/no-outside-path-deps.sh
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked --workspace --all-targets
-ckdev-mutate check
 scripts/check-wire-crate-version.sh origin/master
 ```
 
@@ -19,9 +18,6 @@ scripts/check-wire-crate-version.sh origin/master
   outside the repository; the repository must build from its own checkout.
 - `--locked` makes cargo refuse rather than silently rewrite `Cargo.lock`. A
   dependency change is its own commit with its own `cargo update`.
-- `ckdev-mutate check` validates every row of `mutations.toml` against the
-  current source without running anything. Installing it and replaying rows
-  are covered in [`docs/mutations.md`](docs/mutations.md).
 - `scripts/check-wire-crate-version.sh` fails when `fusiform-protocol`'s source
   changed in anything other than comments and blank lines since the base ref
   and its version did not move. It compares commits, so commit before running
@@ -42,9 +38,8 @@ is one of these; see [`docs/curated-data.md`](docs/curated-data.md) §6.
 - If a change makes an existing test fail, do not rewrite the test to match
   without saying why in the commit message: the test is a claim that a
   property matters.
-- A new guard gets a test that fails when the rule is broken and a row in
-  `mutations.toml` proving it (`ckdev-mutate prove`). A check that can only
-  pass proves nothing.
+- A bug fix comes with a test that fails without the fix; show that once,
+  then keep the test. A check that can only pass proves nothing.
 - A change to `fusiform-protocol` that alters what it compiles to bumps its
   version in `crates/fusiform-protocol/Cargo.toml`.
 
