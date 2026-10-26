@@ -120,7 +120,7 @@ value would do to a consumer:
 | `model.name` | advisory | human display name as a JSON string; otherwise no fact |
 | `provider.name` | advisory | the row's provider display name as a JSON string; otherwise no fact |
 | `limit.context` | byte-affecting | integer token count, or `null` |
-| `limit.output` | byte-affecting | integer token count, or `null` |
+| `limit.output` | byte-affecting | integer token count, or `null`; a sourced current-read override is disclosed in `fact_overrides` (§5.8) |
 | `capability.reasoning` | byte-affecting | `true`, `false` or `null` |
 | `capability.reasoning_options` | byte-affecting | the upstream's `reasoning_options` array verbatim, or `null` |
 | `capability.structured_output` | advisory | `true` or `false` only when published by models.dev; otherwise no fact |
@@ -438,6 +438,7 @@ Every field is optional; `{}` reads the current catalog.
 | `aliased` | when non-empty | §5.5 |
 | `curated` | when non-empty | §5.6 |
 | `wire_corrections` | when non-empty | sourced current-read corrections/withholding of `wire.api` (§4.1) |
+| `fact_overrides` | when non-empty | sourced current-read values served in place of the upstream's (§5.8) |
 | `plane` | on a billing-plane read | [`billing-planes.md`](billing-planes.md) |
 | `billing_rules` | on a billing-plane read, when non-empty | [`billing-planes.md`](billing-planes.md) |
 
@@ -460,7 +461,7 @@ frame limit. A single provider exceeding 3 MiB is returned alone, never dropped;
 a provider exceeding 4 MiB would require model-level paging.
 
 All model-scoped disclosures (`withheld`, `uncertain`, `curated`, `aliased`,
-`retired`, `billing_rules`, `wire_corrections`) are scoped to that page's providers. Providers with
+`retired`, `billing_rules`, `wire_corrections`, `fact_overrides`) are scoped to that page's providers. Providers with
 only withheld facts still have a page. Bulk reads do not populate `retired`,
 and paging cannot select a billing plane, so `plane`/`billing_rules` are absent.
 `source`, `catalog_version`, and **page one's `resolved_at_ms`** repeat on every
@@ -605,6 +606,47 @@ filters still apply: `model.` and `model.canonical_id`
 include the value and disclosure; `rate.` alone includes neither. Neither the
 stored fact nor its history changes. Sources and review rules are in
 [`curated-data.md`](curated-data.md) §5.
+
+### 5.8 Fact overrides
+
+`fact_overrides` discloses each fact whose served value is a sourced curated
+value rather than the upstream's. It is an array, omitted when empty, whose
+entries have `model` (the `provider/model` entry in `models` carrying the
+value), `provider_id` and `model_id` (the row the override is declared for),
+`fact_key`, `value` (what `models` serves), `replaces` (the upstream value it
+replaces), `reason`, `source_ref`, `quote`, optional `notes`,
+`established_by`, `established_at_ms` and `review_by_ms`.
+
+For example, a current `google/gemini-4-argon` read serves
+`limit.output: 65536` where models.dev publishes 32,768, Google's cap for a
+non-streaming request; Google's streaming cap is 65,536. The disclosure names
+both values and quotes Google's model page and latest-model guide
+(`golden_payload`: `catalog.get — sourced output override`).
+
+1. **Current reads only.** `at_ms` reads serve the recorded value with no
+   disclosure, and `catalog.history` lists only stored eras; nothing is
+   written to the store
+   (`fact_overrides::an_at_ms_read_serves_the_stored_value_without_disclosure`).
+2. **Only while upstream publishes `replaces`.** When the stored upstream
+   value is anything else, including the override's own value, or the fact is
+   absent or withheld by a correction, the upstream value is served and
+   nothing is disclosed. An override can never hide a later upstream change
+   (`fact_overrides::an_upstream_value_other_than_replaces_is_served_as_published`).
+3. **Named, bulk and paged reads alike**, and billing-plane (`auth_method`)
+   reads, which are current-only and change only rates
+   (`fact_overrides::a_current_read_serves_the_override_and_discloses_it`).
+   Paging keeps each entry with the provider of its `model`.
+4. **Aliases carry it.** An alias entry is built from its target's served
+   facts, so it serves the overridden value too, and its disclosure has the
+   alias id in `model` and the target in `provider_id`/`model_id`
+   (`fact_overrides::the_antigravity_alias_serves_the_overridden_value`).
+   A curated row (§5.6) is fusiform's own data and replaces no upstream value,
+   so no override applies to it.
+5. **Filters apply.** A fact-prefix filter that excludes the fact excludes the
+   disclosure too
+   (`fact_overrides::a_filter_excluding_the_fact_serves_and_discloses_nothing`).
+
+Rules for the data are in [`curated-data.md`](curated-data.md) §10.
 
 ## 6. `catalog.history`
 

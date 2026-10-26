@@ -13,6 +13,7 @@ that keep them honest.
 | `curated-models.json` | provider rows models.dev does not carry | at read time, current reads only |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
 | `wire-corrections.json` | sourced per-model endpoint corrections or withholding, and providers whose routed list is complete | at read time, current reads only (§9) |
+| `fact-overrides.json` | sourced values replacing one current upstream fact, while upstream still publishes the value they replace | at read time, current reads only (§10) |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
 | `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio` (§8) |
 | `plan-prices.json` | subscription list prices | written to `plan_price_era` at start |
@@ -29,7 +30,7 @@ the source file of the same name under `crates/fusiform-module/src/`.
 ## 1. Rules every curated file follows
 
 1. **Curated facts are never stored as observations.** Creators, aliases,
-   curated rows, canonical links and billing planes are applied when a read is served, so a
+   curated rows, canonical links, fact overrides and billing planes are applied when a read is served, so a
    point-in-time read replays what the upstream published and never today's
    curation (see [`data-model.md`](data-model.md) §8). For model facts the
    exception is `input-audio-per-token.json` (§8), which adds no value of its
@@ -373,7 +374,7 @@ its MIT license; see `THIRD-PARTY-NOTICES.md`.
 
 ## 7. When a review gate fires
 
-Plan prices, quota values, billing planes and rules, aliases, canonical links, wire corrections,
+Plan prices, quota values, billing planes and rules, aliases, canonical links, wire corrections, fact overrides,
 input-audio sources and curated model rows each carry a review date, and a test fails once any date has
 passed. These are time-triggered: they fail on a day nobody changed anything,
 and CI's scheduled run exists so they fire then. The plan-price, billing-plane
@@ -386,7 +387,7 @@ To clear one:
 2. If the claim changed, update it (or remove the row).
 3. Whether or not it changed, record who looked (`established_by` where the
    file has it), when (`established_at_ms`), and a new `review_by_ms`: 60 days
-   later for billing planes, aliases, canonical links, wire corrections, input-audio sources and curated model rows; the file's stated
+   later for billing planes, aliases, canonical links, wire corrections, fact overrides, input-audio sources and curated model rows; the file's stated
    interval for plan prices.
 4. Commit the file. Confirming a claim unchanged is a real result; the diff is
    the provenance change alone.
@@ -515,3 +516,53 @@ Disclosures still name each affected model, preserving the existing protocol
 and provider paging. The loader rejects defaults without a value or quote;
 planted violations exercise that guard and the OpenCode Anthropic version-path
 check against the normalized embedded seed's observed `wire.npm`.
+
+## 10. Fact overrides (`fact-overrides.json`)
+
+A row serves a sourced value for one upstream fact in place of the value
+models.dev publishes, for the case where models.dev records a number that is
+true for one way of calling a model and wrong for the way consumers call it.
+It is not `catalog.correct`, which withholds a past window of recorded values;
+an override changes what a current read serves and leaves the record alone.
+
+Each row in `overrides` has `provider_id`, `model_id`, `fact_key`, `value`,
+`replaces` (the exact upstream value it corrects), `reason`, `source_ref`,
+`quote` (the source sentences establishing the value), optional `notes`,
+`established_by` (`fusiform`), `established_at_ms` and a `review_by_ms`
+exactly 60 days later. Only `limit.context` and `limit.output` may be
+overridden: other facts have their own curated mechanism or serve-time
+derivation (rates: inheritance and billing planes; `wire.*`: §9;
+`model.canonical_id`: §5), and two mechanisms writing one fact would make the
+served value depend on which ran last. `value` and `replaces` must be
+different positive integers. The file is embedded and parsed once; malformed
+rows and duplicate `(provider_id, model_id, fact_key)` identities are counted
+as rejects.
+
+The row applies on current reads only, and only while the stored upstream
+value equals `replaces`. Once models.dev publishes anything else, the row
+stops applying and the upstream value is served, so an override can never
+hide a later upstream change. Nothing is stored, `at_ms` reads and
+`catalog.history` serve the recorded values, and every applied row is
+disclosed in the response's `fact_overrides` list
+([wire contract](wire-contract.md) §5.8). Alias entries are built from their
+target's served facts, so an alias of an overridden row serves the overridden
+value, disclosed under the alias id. Curated model rows (§4) are fusiform's own
+data and are never overridden.
+
+The one shipped row serves `limit.output` 65,536 for `google/gemini-4-argon`.
+models.dev changed it from 65,536 to 32,768 on 2026-10-13; 32,768 is Google's
+cap for a non-streaming request, while a streaming request returns up to
+65,536 ([model page](https://ai.google.dev/gemini-api/docs/models/gemini-4-argon),
+[latest-model guide](https://ai.google.dev/gemini-api/docs/generate-content/latest-model)).
+Its alias `google/antigravity-gemini-4-argon` serves 65,536 through the target,
+which matches the route's own declaration in the Antigravity plugin's
+[`model-registry.ts`](https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts).
+
+Gates in `fact_overrides.rs` check rejects, review dates
+(`fact_overrides_are_within_their_review_dates`, with a planted overdue row in
+`planted_overdue_override_fails_the_review_gate`), and that the embedded seed
+still publishes each row's `replaces`
+(`overrides_replace_what_the_embedded_seed_publishes`): a seed refresh that
+moves the value names the row to re-source or remove. Route tests in
+`tests/it/fact_overrides.rs` cover named, bulk, paged, filtered, plane, alias,
+historical and upstream-moved reads.

@@ -1442,6 +1442,54 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — alias serves the sourced override": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "limit."
+        ],
+        "model_id": "antigravity-gemini-4-argon",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "aliased": [
+        {
+          "model": "google/antigravity-gemini-4-argon",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS, RESOLVER_ALIASES, getGeminiArgonAntigravityModel), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, isGeminiArgonModel)",
+          "target_model_id": "gemini-4-argon",
+          "target_provider_id": "google"
+        }
+      ],
+      "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1792972800000,
+          "established_by": "fusiform",
+          "fact_key": "limit.output",
+          "model": "google/antigravity-gemini-4-argon",
+          "model_id": "gemini-4-argon",
+          "notes": "models.dev changed this value from 65,536 to 32,768 at fusiform's 2026-10-13 17:01Z poll. The Antigravity route google/antigravity-gemini-4-argon, a curated alias of this row (model-aliases.json), serves the same value because alias entries are built from the target's served facts; the plugin declares that route as limit: { context: 1048576, output: 65536 } in https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts.",
+          "provider_id": "google",
+          "quote": "Model page: \"Max output 65,536 (default synchronous) / up to 1,048,576 (with long decode)\". Latest-model guide: \"One streaming request returns up to 65,536 tokens. One non-streaming request returns up to 32,768 tokens, down from 65,536 on Gemini 3.x.\"",
+          "reason": "models.dev records 32,768, which is Google's cap for a non-streaming request. A streaming request returns up to 65,536 tokens, so a consumer that streams and caps output at the catalog value would stop every answer at half the length the model can produce.",
+          "replaces": 32768,
+          "review_by_ms": 1798156800000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/models/gemini-4-argon (accessed 2026-10-26); https://ai.google.dev/gemini-api/docs/generate-content/latest-model (accessed 2026-10-26)",
+          "value": 65536
+        }
+      ],
+      "models": {
+        "google/antigravity-gemini-4-argon": {
+          "limit.context": 1048576,
+          "limit.output": 65536
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — alias tier wire ids": {
     "request": {
       "arguments": {
@@ -2882,6 +2930,46 @@
         "google/antigravity-gemini-3.7-flash": {
           "existence": "absent",
           "successor": "google/antigravity-gemini-3.8-flash"
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — sourced output override": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "limit."
+        ],
+        "model_id": "gemini-4-argon",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1792972800000,
+          "established_by": "fusiform",
+          "fact_key": "limit.output",
+          "model": "google/gemini-4-argon",
+          "model_id": "gemini-4-argon",
+          "notes": "models.dev changed this value from 65,536 to 32,768 at fusiform's 2026-10-13 17:01Z poll. The Antigravity route google/antigravity-gemini-4-argon, a curated alias of this row (model-aliases.json), serves the same value because alias entries are built from the target's served facts; the plugin declares that route as limit: { context: 1048576, output: 65536 } in https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts.",
+          "provider_id": "google",
+          "quote": "Model page: \"Max output 65,536 (default synchronous) / up to 1,048,576 (with long decode)\". Latest-model guide: \"One streaming request returns up to 65,536 tokens. One non-streaming request returns up to 32,768 tokens, down from 65,536 on Gemini 3.x.\"",
+          "reason": "models.dev records 32,768, which is Google's cap for a non-streaming request. A streaming request returns up to 65,536 tokens, so a consumer that streams and caps output at the catalog value would stop every answer at half the length the model can produce.",
+          "replaces": 32768,
+          "review_by_ms": 1798156800000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/models/gemini-4-argon (accessed 2026-10-26); https://ai.google.dev/gemini-api/docs/generate-content/latest-model (accessed 2026-10-26)",
+          "value": 65536
+        }
+      ],
+      "models": {
+        "google/gemini-4-argon": {
+          "limit.context": 1048576,
+          "limit.output": 65536
         }
       },
       "resolved_at_ms": -1,
