@@ -977,9 +977,8 @@ fn render_fact_value(value: &serde_json::Value) -> String {
 /// nobody looks. So each override names the value it replaces and its source,
 /// on every read that served one, single-model and bulk alike.
 ///
-/// Returned rather than printed so it can be asserted as the composed text an
-/// operator reads, and because nothing in this file prints except the two
-/// entry points.
+/// Returned rather than printed so the composed text an operator reads can be
+/// asserted, and the caller prints the assembled report once.
 fn render_fact_overrides(response: &serde_json::Value) -> String {
     let mut out = String::new();
     if let Some(rows) = response.get("fact_overrides").and_then(|v| v.as_array()) {

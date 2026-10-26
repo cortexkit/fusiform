@@ -1131,8 +1131,9 @@ fn serve_catalog_get_with_cache(
         response
             .wire_corrections
             .retain(|c| c.provider != row.provider_id || c.model != row.model_id);
-        // So do fact overrides: the curated row's facts are fusiform's own
-        // and replace no upstream value.
+        // Remove fact-override disclosures too: they describe the withdrawn
+        // upstream row, while the curated row's facts are fusiform's own and
+        // replace no upstream value.
         response.fact_overrides.retain(|o| o.model != id);
         // A plain read lists availability; a plane read must respect the login
         // restriction even when the provider has other unrestricted rows.
