@@ -14,6 +14,7 @@ pub mod canonical_links;
 pub mod creators;
 pub mod curated_models;
 pub mod enrollment;
+pub mod fact_overrides;
 pub mod fetch;
 pub mod health;
 pub mod input_audio;

@@ -12,6 +12,7 @@ mod creator_table;
 mod curated_wire;
 mod display_names;
 mod enrollment;
+mod fact_overrides;
 mod failure_path;
 mod golden_payload;
 mod health_detail;

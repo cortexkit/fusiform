@@ -550,6 +550,7 @@ where
                     aliased,
                     canonical_links,
                     wire_corrections,
+                    fact_overrides,
                     plane: _,
                     billing_rules,
                 } = page;
@@ -561,6 +562,7 @@ where
                 merged.aliased.extend(aliased);
                 merged.canonical_links.extend(canonical_links);
                 merged.wire_corrections.extend(wire_corrections);
+                merged.fact_overrides.extend(fact_overrides);
                 merged.billing_rules.extend(billing_rules);
             } else {
                 merged = Some(page);
@@ -817,6 +819,7 @@ fn render_catalog_models(
     }
     out.push_str(&render_curated(response));
     out.push_str(&render_aliased(response));
+    out.push_str(&render_fact_overrides(response));
     out.push_str(&render_withheld(response));
     out.push_str(&render_uncertain(response));
     out
@@ -963,29 +966,59 @@ fn render_fact_value(value: &serde_json::Value) -> String {
     value.to_string()
 }
 
-/// Report facts whose served value differs from what the upstream published.
+/// Report facts whose served value is a sourced override, not the upstream's.
 ///
-/// # Why a silent correction is the failure this exists to prevent
+/// # Why a silent override is the failure this exists to prevent
 ///
-/// The value IS in the model list above, and it is the right one — which is
-/// exactly the problem. An operator reading `limit.context  200000` for
-/// claude-sonnet-4-5 has no way to know models.dev publishes 1,000,000 there
-/// and fusiform overrode it. If the override is ever wrong, the wrong direction
-/// is silent: a window under-used forever, nothing failing, nobody looking.
+/// The value IS in the model list above, and it is the intended one — which is
+/// exactly the problem. An operator reading `limit.output  65536` has no way to
+/// know models.dev publishes a different number there and fusiform replaced
+/// it. If the override is ever wrong, the error is silent: nothing fails and
+/// nobody looks. So each override names the value it replaces and its source,
+/// on every read that served one, single-model and bulk alike.
 ///
-/// This surface was built on the wire, tested on the wire, pinned in the golden
-/// fixture, and rendered nowhere — found by testing a peer's prediction that
-/// recent attention on an artifact makes its UNEXAMINED dimensions less visible,
-/// because the artifact as a whole feels checked. It is the second instance of
-/// exactly this defect in this file today; the first was `uncertain`.
-///
-/// Returned rather than printed so it can be asserted beside the fact value
-/// it qualifies — and, since the double-render of `c43fae3`, because nothing
-/// in this file prints except the two entry points.
-///
-/// The defect this file has already shipped once was in a COMPOSED sentence
-/// ("1 models arrived"), where every unit test of the part passed because the
-/// part was correct. So the artifact under test is the text an operator reads.
+/// Returned rather than printed so it can be asserted as the composed text an
+/// operator reads, and because nothing in this file prints except the two
+/// entry points.
+fn render_fact_overrides(response: &serde_json::Value) -> String {
+    let mut out = String::new();
+    if let Some(rows) = response.get("fact_overrides").and_then(|v| v.as_array()) {
+        for row in rows {
+            let model = row["model"].as_str().unwrap_or("?");
+            let declared = format!(
+                "{}/{}",
+                row["provider_id"].as_str().unwrap_or("?"),
+                row["model_id"].as_str().unwrap_or("?")
+            );
+            let _ = writeln!(
+                out,
+                "\noverridden: {model} {} = {} (upstream publishes {}; not stored upstream)",
+                row["fact_key"].as_str().unwrap_or("?"),
+                row["value"],
+                row["replaces"],
+            );
+            // On an alias entry the override is declared for the target row.
+            if declared != model {
+                let _ = writeln!(out, "  declared for: {declared}");
+            }
+            let _ = writeln!(out, "  reason: {}", row["reason"].as_str().unwrap_or("?"));
+            let _ = writeln!(
+                out,
+                "  source: {}",
+                row["source_ref"].as_str().unwrap_or("?")
+            );
+            let _ = writeln!(
+                out,
+                "  established by {} on {}, review by {}",
+                row["established_by"].as_str().unwrap_or("?"),
+                format_instant(row["established_at_ms"].as_i64().unwrap_or(0)),
+                format_instant(row["review_by_ms"].as_i64().unwrap_or(0)),
+            );
+        }
+    }
+    out
+}
+
 /// The failed-poll history line, or nothing when no poll has ever failed.
 ///
 /// Returned rather than printed so the COMPOSED SENTENCE is what gets tested.
@@ -1069,6 +1102,7 @@ fn render_single_model(
     }
     out.push_str(&render_curated(response));
     out.push_str(&render_aliased(response));
+    out.push_str(&render_fact_overrides(response));
     out.push_str(&render_withheld(response));
     out.push_str(&render_uncertain(response));
     // Return the assembled text so the caller can print it once.
@@ -3303,6 +3337,50 @@ mod curated_render_tests {
     }
 
     #[test]
+    fn composed_catalog_text_discloses_a_fact_override_and_its_source() {
+        let response = serde_json::json!({
+            "models": {"google/antigravity-gemini-4-argon": {"limit.output":65536}},
+            "fact_overrides": [{"model":"google/antigravity-gemini-4-argon",
+                "provider_id":"google", "model_id":"gemini-4-argon",
+                "fact_key":"limit.output", "value":65536, "replaces":32768,
+                "reason":"models.dev records the non-streaming cap",
+                "source_ref":"https://ai.google.dev/gemini-api/docs/models/gemini-4-argon",
+                "quote":"q", "established_by":"fusiform",
+                "established_at_ms":1792972800000i64, "review_by_ms":1798156800000i64}]
+        });
+        for bulk in [false, true] {
+            let mut response = response.clone();
+            if bulk {
+                response["models"]["google/other"] = serde_json::json!({"limit.output":100});
+            }
+            let text = render_catalog_models(&response, response["models"].as_object().unwrap());
+            assert_eq!(
+                text.matches(
+                    "overridden: google/antigravity-gemini-4-argon limit.output = 65536 \
+                     (upstream publishes 32768; not stored upstream)"
+                )
+                .count(),
+                1,
+                "{text}"
+            );
+            assert!(
+                text.contains("declared for: google/gemini-4-argon"),
+                "{text}"
+            );
+            assert!(text.contains("reason: models.dev records the non-streaming cap"));
+            assert!(text
+                .contains("source: https://ai.google.dev/gemini-api/docs/models/gemini-4-argon"));
+            assert!(text.contains("established by fusiform on "));
+        }
+        // Control: a read with no override prints no override line.
+        let plain = serde_json::json!({"models": {"google/gemini-4-argon": {"limit.output":1}}});
+        assert!(
+            !render_catalog_models(&plain, plain["models"].as_object().unwrap())
+                .contains("overridden:")
+        );
+    }
+
+    #[test]
     fn composed_curated_history_text_does_not_suggest_checking_the_fact_key() {
         let response = serde_json::json!({"provider_id":"meta", "model_id":"muse-wonder-full-1.0", "fact_key":"limit.context", "eras":[],
             "curated":{"source_ref":"Authenticated probes"}});
@@ -3399,6 +3477,11 @@ mod paging_tests {
             "source_ref":{"repo":"r","commit":"c","file":"f"},
             "established_by":"e", "established_at_ms":1000, "review_by_ms":2000
         }]);
+        second["fact_overrides"] = json!([{
+            "model":"b/m", "provider_id":"b", "model_id":"m", "fact_key":"limit.output",
+            "value":200, "replaces":100, "reason":"r", "source_ref":"s", "quote":"q",
+            "established_by":"e", "established_at_ms":1000, "review_by_ms":2000
+        }]);
         let mut pages = VecDeque::from([Ok(page(2, "a", Some("next"))), Ok(second)]);
         let result = read_catalog_pages(json!({"paged":true}), |_| {
             std::future::ready(pages.pop_front().unwrap())
@@ -3407,6 +3490,7 @@ mod paging_tests {
         .unwrap();
         assert_eq!(result["canonical_links"][0]["model"], "b/m");
         assert_eq!(result["wire_corrections"][0]["provider"], "b");
+        assert_eq!(result["fact_overrides"][0]["model"], "b/m");
         assert_eq!(result["curated"].as_array().unwrap().len(), 2);
     }
 

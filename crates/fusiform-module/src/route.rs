@@ -1131,6 +1131,9 @@ fn serve_catalog_get_with_cache(
         response
             .wire_corrections
             .retain(|c| c.provider != row.provider_id || c.model != row.model_id);
+        // So do fact overrides: the curated row's facts are fusiform's own
+        // and replace no upstream value.
+        response.fact_overrides.retain(|o| o.model != id);
         // A plain read lists availability; a plane read must respect the login
         // restriction even when the provider has other unrestricted rows.
         if request
@@ -1304,6 +1307,9 @@ fn scope_page(response: &mut CatalogGetResponse, providers: &BTreeSet<String>) {
     response
         .wire_corrections
         .retain(|row| providers.contains(&row.provider));
+    response
+        .fact_overrides
+        .retain(|row| providers.contains(model_provider(&row.model)));
 }
 
 fn page_catalog(
@@ -1333,7 +1339,7 @@ fn page_catalog(
     // including the final page, which needs no token at all.
     let mut estimate = PageEstimate {
         bytes: compact_size(&response)? + token_reserve,
-        present: [false; 9],
+        present: [false; 10],
     };
     let mut count = 0;
     for (index, (_, _, contribution, _, token_bytes)) in sized.iter().enumerate() {
@@ -1412,11 +1418,13 @@ struct ProviderRows {
     canonical_links: Vec<fusiform_protocol::CanonicalLinkWire>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     wire_corrections: Vec<fusiform_protocol::WireCorrectionWire>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    fact_overrides: Vec<fusiform_protocol::FactOverrideWire>,
 }
 
 // The empty models object is already in the envelope. Optional array headers
 // appear only once per page; provider payloads supply their interior JSON bytes.
-const DISCLOSURE_HEADERS: [&str; 8] = [
+const DISCLOSURE_HEADERS: [&str; 9] = [
     r#","curated":[]"#,
     r#","withheld":[]"#,
     r#","retired":[]"#,
@@ -1425,17 +1433,18 @@ const DISCLOSURE_HEADERS: [&str; 8] = [
     r#","billing_rules":[]"#,
     r#","canonical_links":[]"#,
     r#","wire_corrections":[]"#,
+    r#","fact_overrides":[]"#,
 ];
 
 struct ProviderContribution {
     bytes: usize,
-    present: [bool; 9],
+    present: [bool; 10],
 }
 
 #[derive(Clone, Copy)]
 struct PageEstimate {
     bytes: usize,
-    present: [bool; 9],
+    present: [bool; 10],
 }
 
 impl PageEstimate {
@@ -1473,6 +1482,7 @@ impl ProviderRows {
             !self.billing_rules.is_empty(),
             !self.canonical_links.is_empty(),
             !self.wire_corrections.is_empty(),
+            !self.fact_overrides.is_empty(),
         ];
         let headers = DISCLOSURE_HEADERS
             .iter()
@@ -1495,6 +1505,7 @@ impl ProviderRows {
         page.billing_rules.extend(self.billing_rules);
         page.canonical_links.extend(self.canonical_links);
         page.wire_corrections.extend(self.wire_corrections);
+        page.fact_overrides.extend(self.fact_overrides);
     }
 }
 
@@ -1571,6 +1582,13 @@ fn partition_providers(response: &mut CatalogGetResponse) -> BTreeMap<String, Pr
             .wire_corrections
             .push(row);
     }
+    for row in std::mem::take(&mut response.fact_overrides) {
+        providers
+            .entry(model_provider(&row.model).to_owned())
+            .or_default()
+            .fact_overrides
+            .push(row);
+    }
     providers
 }
 
@@ -1634,6 +1652,7 @@ fn finish_plane_view(
 ) -> Result<CatalogGetResponse, RouteError> {
     let Some(plane) = plane else {
         // Callers that did not ask for a billing claim keep the ordinary view.
+        retain_served_overrides(&mut response);
         return Ok(response);
     };
     response.plane = Some(plane.wire);
@@ -1660,7 +1679,25 @@ fn finish_plane_view(
             .get(&link.model)
             .is_some_and(|facts| facts.contains_key("model.canonical_id"))
     });
+    retain_served_overrides(&mut response);
     Ok(response)
+}
+
+/// Keep only override disclosures whose value `models` still serves under the
+/// disclosed identity.
+///
+/// Steps after rendering can remove or replace an overridden fact: the plane
+/// view's final fact filter, or a curated row standing in for a withdrawn
+/// upstream row. A disclosure left behind would claim a value the response
+/// does not carry.
+fn retain_served_overrides(response: &mut CatalogGetResponse) {
+    let models = &response.models;
+    response.fact_overrides.retain(|row| {
+        models
+            .get(&row.model)
+            .and_then(|facts| facts.get(&row.fact_key))
+            == Some(&row.value)
+    });
 }
 
 /// Replace a plan's entire rate card, never topping up its published zeros.
@@ -2081,6 +2118,7 @@ fn render(
     let mut models = BTreeMap::new();
     let mut canonical_links = Vec::new();
     let mut wire_corrections = Vec::new();
+    let mut fact_overrides = Vec::new();
     for model in snapshot.models {
         let identity = format!("{}/{}", model.provider_id, model.model_id);
         let mut facts = BTreeMap::new();
@@ -2103,6 +2141,14 @@ fn render(
             facts.insert(key.as_str().to_string(), value);
         }
         if at.is_none() {
+            // A sourced value replaces the stored upstream value only on a
+            // current read; `at` reads serve the recorded history as it was.
+            fact_overrides.extend(crate::fact_overrides::apply(
+                &model.provider_id,
+                &model.model_id,
+                &mut facts,
+                requested_prefixes,
+            ));
             if let Some(correction) = crate::wire_corrections::apply(
                 &model.provider_id,
                 &model.model_id,
@@ -2193,6 +2239,7 @@ fn render(
         curated: Vec::new(),
         canonical_links,
         wire_corrections,
+        fact_overrides,
         plane: None,
         billing_rules: Vec::new(),
     }
@@ -5330,6 +5377,16 @@ fn aliased_response(
     }
 
     let alias_key = format!("{provider_id}/{model_id}");
+    // The alias entry serves the target's facts, overridden values included,
+    // so each override disclosure now describes the alias entry. It keeps the
+    // target's provider_id and model_id, which name the row the override is
+    // declared for.
+    response
+        .fact_overrides
+        .retain(|row| facts.get(&row.fact_key) == Some(&row.value));
+    for row in &mut response.fact_overrides {
+        row.model = alias_key.clone();
+    }
     response.models.insert(alias_key.clone(), facts);
     response.aliased.push(fusiform_protocol::AliasedModelWire {
         model: alias_key,
@@ -5446,7 +5503,8 @@ fn mark_rates_borrowed_through_alias(
 ///
 /// Disclosures about the target (`withheld`, `uncertain`) are
 /// merged once each, since the bulk read may already carry them for the
-/// target's own entry.
+/// target's own entry. Fact-override disclosures already name the alias entry,
+/// so they are added as they are.
 fn add_aliases_to_bulk(
     store: &CatalogStore,
     source: SourceId,
@@ -5472,6 +5530,7 @@ fn add_aliases_to_bulk(
             withheld,
             uncertain,
             canonical_links,
+            fact_overrides,
             ..
         } = entry;
         if models.values().all(|facts| facts.is_empty()) {
@@ -5479,6 +5538,7 @@ fn add_aliases_to_bulk(
         }
         response.models.extend(models);
         response.aliased.extend(aliased);
+        response.fact_overrides.extend(fact_overrides);
         for link in canonical_links {
             if !response.canonical_links.contains(&link) {
                 response.canonical_links.push(link);

@@ -498,6 +498,14 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
             "catalog.get — named retirement successor",
             serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-3.7-flash"}),
         ),
+        (
+            "catalog.get — sourced output override",
+            serde_json::json!({"provider_id":"google","model_id":"gemini-4-argon","fact_prefixes":["limit."]}),
+        ),
+        (
+            "catalog.get — alias serves the sourced override",
+            serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-4-argon","fact_prefixes":["limit."]}),
+        ),
     ] {
         let request = serde_json::json!({"name":"catalog.get","arguments":arguments});
         let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
@@ -1751,6 +1759,9 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
         r#""aliased""#,
         r#""curated""#,
         r#""wire_corrections""#,
+        // A sourced value served in place of the upstream's, and what it replaces.
+        r#""fact_overrides""#,
+        r#""replaces": 32768"#,
         // An endpoint withheld because the provider's route list is complete.
         "not routed by pi at 74f46864",
         r#""route.reasoning_wire_ids""#,
@@ -1844,6 +1855,7 @@ fn every_read_response_field_reaches_the_fixture() {
             "CuratedModelWire",
             "CanonicalLinkWire",
             "WireCorrectionWire",
+            "FactOverrideWire",
             "WireSourceRef",
             "RetiredModelWire",
             "PlaneWire",

@@ -232,6 +232,21 @@ fn every_response_type_round_trips() {
     use std::collections::BTreeMap;
 
     let catalog = CatalogGetResponse {
+        fact_overrides: vec![FactOverrideWire {
+            model: "google/antigravity-gemini-4-argon".into(),
+            provider_id: "google".into(),
+            model_id: "gemini-4-argon".into(),
+            fact_key: "limit.output".into(),
+            value: serde_json::json!(65536),
+            replaces: serde_json::json!(32768),
+            reason: "models.dev records the non-streaming cap".into(),
+            source_ref: "https://ai.google.dev/gemini-api/docs/models/gemini-4-argon".into(),
+            quote: "One streaming request returns up to 65,536 tokens.".into(),
+            notes: Some("served through the alias too".into()),
+            established_by: "fusiform".into(),
+            established_at_ms: 1_792_972_800_000,
+            review_by_ms: 1_798_156_800_000,
+        }],
         wire_corrections: vec![WireCorrectionWire {
             provider: "opencode-go".into(),
             model: "claude-haiku-5-5".into(),

@@ -654,6 +654,18 @@ pub struct CatalogGetResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wire_corrections: Vec<WireCorrectionWire>,
 
+    /// Facts whose served value is a sourced curated value, not the upstream's.
+    ///
+    /// Current reads only: a point-in-time read serves what was recorded and
+    /// never carries one. An override applies only while the stored upstream
+    /// value equals its `replaces`, so once models.dev publishes anything else
+    /// the upstream value is served again and no entry appears. One entry per
+    /// served `models` entry carrying an overridden value, including an alias
+    /// entry serving the overridden row. Omitted when empty, and when the fact
+    /// is filtered out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fact_overrides: Vec<FactOverrideWire>,
+
     /// The billing plane selected by `auth_method`. Absent on ordinary reads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plane: Option<PlaneWire>,
@@ -1066,7 +1078,8 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                limit.context, and a consumer must not reserve that as an \
                output cap; the consumer that renders it treats those rows as \
                unknown. NULL means UNKNOWN and must not be defaulted to a \
-               number.",
+               number. A sourced current-read override is disclosed in \
+               fact_overrides.",
     },
     ServedFact {
         key: "capability.reasoning",
@@ -1354,6 +1367,33 @@ pub struct WireCorrectionWire {
     /// 74f46864". Omitted on per-model corrections and withholdings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+}
+
+/// One fact served with a curated value in place of the upstream's value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FactOverrideWire {
+    /// `provider_id/model_id` of the `models` entry carrying the value. On an
+    /// alias entry this is the alias id, and `provider_id`/`model_id` below
+    /// name the row the override is declared for.
+    pub model: String,
+    pub provider_id: String,
+    pub model_id: String,
+    pub fact_key: String,
+    /// The value served in `models`.
+    pub value: serde_json::Value,
+    /// The upstream value it replaces. The override applies only while the
+    /// stored upstream value is exactly this.
+    pub replaces: serde_json::Value,
+    /// Why the upstream value is wrong for consumers.
+    pub reason: String,
+    pub source_ref: String,
+    /// The sentences in `source_ref` that establish the value.
+    pub quote: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    pub established_by: String,
+    pub established_at_ms: i64,
+    pub review_by_ms: i64,
 }
 
 /// What a served tool call produced.
