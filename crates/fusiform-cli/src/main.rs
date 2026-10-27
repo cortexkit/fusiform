@@ -989,12 +989,18 @@ fn render_fact_overrides(response: &serde_json::Value) -> String {
                 row["provider_id"].as_str().unwrap_or("?"),
                 row["model_id"].as_str().unwrap_or("?")
             );
+            // A null `replaces` marks an addition: upstream publishes nothing for
+            // this key, which "publishes null" would misstate.
+            let upstream = if row["replaces"].is_null() {
+                "upstream publishes no value".to_owned()
+            } else {
+                format!("upstream publishes {}", row["replaces"])
+            };
             let _ = writeln!(
                 out,
-                "\noverridden: {model} {} = {} (upstream publishes {}; not stored upstream)",
+                "\noverridden: {model} {} = {} ({upstream}; not stored upstream)",
                 row["fact_key"].as_str().unwrap_or("?"),
                 row["value"],
-                row["replaces"],
             );
             // On an alias entry the override is declared for the target row.
             if declared != model {
@@ -3377,6 +3383,27 @@ mod curated_render_tests {
             !render_catalog_models(&plain, plain["models"].as_object().unwrap())
                 .contains("overridden:")
         );
+    }
+
+    #[test]
+    fn an_addition_override_says_upstream_publishes_no_value() {
+        let response = serde_json::json!({
+            "models": {"anthropic/claude-opus-5-5": {"capability.server_side_fallback":true}},
+            "fact_overrides": [{"model":"anthropic/claude-opus-5-5",
+                "provider_id":"anthropic", "model_id":"claude-opus-5-5",
+                "fact_key":"capability.server_side_fallback", "value":true, "replaces":null,
+                "reason":"r", "source_ref":"s", "quote":"q", "established_by":"fusiform",
+                "established_at_ms":1792972800000i64, "review_by_ms":1798156800000i64}]
+        });
+        let text = render_catalog_models(&response, response["models"].as_object().unwrap());
+        assert!(
+            text.contains(
+                "overridden: anthropic/claude-opus-5-5 capability.server_side_fallback = true \
+                 (upstream publishes no value; not stored upstream)"
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("publishes null"), "{text}");
     }
 
     #[test]
