@@ -524,11 +524,14 @@ pub struct CatalogGetResponse {
     /// which fusiform deliberately never serves.
     pub models: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
 
-    /// Current-only rows supplied by curation, not stored upstream observations.
-    /// `auth_methods` is an allowlist: only these login methods may serve the row.
-    /// The routing consumer must refuse a credential whose login method is not
-    /// listed. Absence of a row from `curated` means fusiform places no login
-    /// restriction on it. Omitted when empty; upstream rows always win.
+    /// Rows supplied by curation, not upstream observations. A current read
+    /// serves them from the compiled-in file; a point-in-time read serves the
+    /// curated claim in force at that instant from fusiform's stored curated
+    /// history. `auth_methods` is an allowlist: only these login methods may
+    /// serve the row. The routing consumer must refuse a credential whose login
+    /// method is not listed. Absence of a row from `curated` means fusiform
+    /// places no login restriction on it. Omitted when empty; an upstream row
+    /// present at the same instant always wins.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub curated: Vec<CuratedModelWire>,
 
