@@ -451,6 +451,10 @@ fn render_all() -> String {
         .as_object_mut()
         .unwrap()
         .extend(render_curated_wire());
+    ordinary.as_object_mut().unwrap().insert(
+        "catalog.get — a curated row at an instant".into(),
+        render_curated_history(),
+    );
     let mut text = serde_json::to_string_pretty(&ordinary).unwrap();
     text.push('\n');
     text
@@ -521,6 +525,41 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
         );
     }
     cases
+}
+
+/// A point-in-time read of a curated row, served from the history a boot
+/// records. Its own store, so the ordinary cases' counts do not move, and the
+/// shipped rows with nothing held, so the case does not depend on what the
+/// shipped file holds. Read at the row's first boundary, its curation date.
+fn render_curated_history() -> serde_json::Value {
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir
+                .path()
+                .join("curated-history.db")
+                .to_string_lossy()
+                .into(),
+        },
+    })
+    .unwrap();
+    let (mut table, rejects) = fusiform_module::curated_models::load_table_reporting_rejects(
+        include_str!("../../data/curated-models.json"),
+    );
+    assert!(rejects.is_empty(), "{rejects:?}");
+    table.held.clear();
+    let at = table.models[&("typesafe".to_string(), "jev-1.13.0".to_string())].established_at_ms;
+    fusiform_module::curated_models::apply_to_store(&store, &table, at + 86_400_000).unwrap();
+    let request = serde_json::json!({"name":"catalog.get","arguments":{
+        "provider_id":"typesafe", "model_id":"jev-1.13.0", "at_ms":at
+    }});
+    let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+    let response = serde_json::to_value(response).unwrap();
+    assert_eq!(response["resolved_at_ms"], at);
+    serde_json::json!({"request":request, "response":response})
 }
 
 /// Isolate the real unlinked seed row so it cannot change ordinary-case counts.
@@ -652,10 +691,12 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         .count();
     assert_eq!(plain_plane_cases, 2);
     let curated_wire = render_curated_wire();
+    // The three single cases rendered outside `cases()`: the first provider
+    // page, the sourced canonical identity, and the curated row at an instant.
     for (text, expected) in [
         (
             GOLDEN.to_string(),
-            cases().len() + plain_plane_cases + 2 + curated_wire.len(),
+            cases().len() + plain_plane_cases + 3 + curated_wire.len(),
         ),
         (
             serde_json::to_string(&curated_wire).unwrap(),
@@ -665,6 +706,10 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         (serde_json::json!({"paged":render_paged()}).to_string(), 1),
         (
             serde_json::json!({"canonical":render_canonical_link()}).to_string(),
+            1,
+        ),
+        (
+            serde_json::json!({"curated_history":render_curated_history()}).to_string(),
             1,
         ),
     ] {

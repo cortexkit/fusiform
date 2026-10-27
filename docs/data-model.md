@@ -13,12 +13,13 @@ in `crates/fusiform-store/tests/it/history.rs`.
 ## 1. Tables
 
 Tables, as shipped: `observation`, `era`, `catalog_version`,
-`observation_artifact_event`, `plan_price_era`, `cortexkit_schema_version`,
-`cortexkit_fence`.
+`observation_artifact_event`, `plan_price_era`, `curated_model_era`,
+`cortexkit_schema_version`, `cortexkit_fence`.
 
-- `observation`, `era`, `catalog_version`, `observation_artifact_event` and
-  `plan_price_era` are fusiform's own, created by the migration chain in
-  `crates/fusiform-store/src/schema.rs` under the namespace `catalog`.
+- `observation`, `era`, `catalog_version`, `observation_artifact_event`,
+  `plan_price_era` and `curated_model_era` are fusiform's own, created by the
+  migration chain in `crates/fusiform-store/src/schema.rs` under the namespace
+  `catalog`.
 - `cortexkit_schema_version` belongs to the store crate and records which
   migrations have been applied.
 - `cortexkit_fence` belongs to the store crate and is created on the first
@@ -40,13 +41,15 @@ does not create.
 | 4 | a first artifact table, replaced by version 5 |
 | 5 | `observation_artifact_event`, an event log of artifact marks and retractions |
 | 6 | `plan_price_era` |
+| 7 | `curated_model_era` |
 
 A store whose recorded schema version is newer than the running binary's chain
 is refused at open, and the error names the store's version
-(`schema_doc::a_store_written_by_a_newer_binary_is_refused`). Migrations 4 and
-6 are tested against stores that already hold rows
+(`schema_doc::a_store_written_by_a_newer_binary_is_refused`). Migrations 4, 6
+and 7 are tested against stores that already hold rows
 (`schema_doc::the_artifact_table_arrives_on_a_populated_store`,
-`schema_doc::the_plan_price_table_arrives_on_a_populated_store`).
+`schema_doc::the_plan_price_table_arrives_on_a_populated_store`,
+`schema_doc::the_curated_model_table_arrives_on_a_populated_store`).
 
 ## 2. Observations
 
@@ -92,7 +95,7 @@ fact is identified by `(source, provider_id, model_id, fact_key)`; the value is
 ### 3.1 Append-only
 
 The store never updates or deletes a row in `era`, `observation`,
-`observation_artifact_event` or `plan_price_era`.
+`observation_artifact_event`, `plan_price_era` or `curated_model_era`.
 
 - There is no `valid_to` column. An era ends where the next era for the same
   fact begins.
@@ -279,22 +282,62 @@ are:
    reason says the key is no longer carried, rather than left serving its old
    price (`schema_doc::a_key_dropped_from_the_file_is_tombstoned`).
 
+## 7a. Curated model rows
+
+`curated_model_era` holds the history of the hand-curated model rows in
+`crates/fusiform-module/data/curated-models.json` (rows for models models.dev
+does not list), so a point-in-time `catalog.get` can serve the curated claim
+that was in force at its instant. Current reads do not read this table: they
+serve the compiled file. The rules:
+
+1. A row is keyed `(provider_id, model_id, boundary_at_ms)` and holds the
+   whole claim: `facts_json` (the row's facts as one JSON object, in the served
+   vocabulary) and `auth_methods_json` (the login allowlist), with its
+   provenance (`source_ref`, `established_by`, `established_at_ms`,
+   `review_by_ms`). A tombstone has no facts, no allowlist and no review date,
+   and carries a `tombstone_reason` instead. `CHECK` constraints refuse every
+   other combination (`schema_doc::the_curated_model_table_arrives_on_a_populated_store`).
+2. The file is applied on every start (`CatalogStore::append_curated_models`).
+   Each served row is compared with the newest stored row for its key on the
+   facts and the allowlist (as a set) only, never on provenance, so re-reading
+   a page and re-dating the row writes nothing.
+3. Dating: a key's first row is dated at the file row's `established_at_ms`,
+   its curation date. Every later row, a changed claim or a tombstone, is
+   dated at the start of the build that carries it, the instant fusiform began
+   serving the new value. `established_at_ms` cannot date a later change: it
+   records when the row was curated or last re-read, not when a fact on it
+   changed. A start whose clock is behind the key's newest boundary writes at
+   that boundary instead, so a key's history never runs backwards.
+4. A key stored but no longer served by the file, because the row was removed
+   or is held, is tombstoned, once. A held row with no stored history is
+   tombstoned too, so releasing it later dates its first claim at the release.
+5. There is no unique key, as in `plan_price_era`: rows can share a boundary
+   (rule 3), and the row in force at T is the one with the greatest
+   `boundary_at_ms` not exceeding T, the newest `id` breaking a tie.
+6. The shipped file (five rows, none held) writes five rows on a store's
+   first start, and an unchanged file writes nothing after that. These rules
+   are tested in `crates/fusiform-module/src/route/curated_history_tests.rs`.
+
 ## 8. What is not stored
 
 On upstream rows, `model.name` and `provider.name` are stored per model as ordinary
 eras, not derived at serve time. A rename opens a new era; a missing or empty name
 is absent from the catalog, with a null withdrawal era if previously published.
 The `provider.` namespace describes the offering's provider, not the creator
-of the weights. Curated model names and alias labels are served only on current
-reads, not written to era history. Their provider labels are joined from current
-upstream model eras, or sourced in curation for a provider absent upstream.
+of the weights. Curated model names and alias labels are not written to era
+history. Alias labels are served only on current reads; curated model rows are
+recorded in their own table (§7a). Provider labels for both are joined from
+upstream model eras (on a point-in-time read of a curated row, the label in
+force at that instant), or sourced in curation for a provider absent upstream.
 
 - Billing-plane rules, curated model rows, aliases and open-weight rate
   inheritance are applied when a read is served and are never written as eras
   (`ingest::ingested_eras_never_carry_serve_only_billing_states`,
   `route::billing_plane_tests::plane_views_never_change_stored_rows_or_catalog_version`
   in `crates/fusiform-module/src/route.rs`). A point-in-time read therefore
-  replays what the upstream published, not a rule fusiform holds today.
+  replays what the upstream published, not a rule fusiform holds today. The
+  one curated addition to a point-in-time read is a curated model row, served
+  from `curated_model_era` as it stood at that instant (§7a).
 - The currency provenance of a rate is attached when it is served, not stored
   (`served_vocabulary::a_stored_rate_carries_no_annotation_fusiform_invented`).
 - Request header/body overrides and experimental mode selectors are never

@@ -993,6 +993,51 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — a curated row at an instant": {
+    "request": {
+      "arguments": {
+        "at_ms": 1792540800000,
+        "model_id": "jev-1.13.0",
+        "provider_id": "typesafe"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "curated": [
+        {
+          "auth_methods": [
+            "apikey"
+          ],
+          "model": "typesafe/jev-1.13.0",
+          "review_by_ms": 1797724800000,
+          "source_ref": "Display names confirmed 2026-10-26 at https://docs.typesafe.ai/models: the table labels model id jev-1.13.0 as 'Jev 1.13'; 'Jev is TypeSafe's flagship model'. Read 2026-10-21. https://docs.typesafe.ai/models: \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\"; \"Price: You pay per input token. Output tokens are free. A Btok is a billion tokens and an Mtok is a million tokens.\"; \"| `jev-latest` | `jev-1.13.0` | The most recent stable, official release.\"; \"| Context length | 64k per-request / 32k per-question |\". https://docs.typesafe.ai/concepts/system-one: \"It returns typed decisions and probabilities rather than generated text.\"; \"System One models do not write replies, produce code, or generate explanations of their reasoning.\" No limit.context: the docs give only \"64k\", and neither https://docs.typesafe.ai/api/list-models nor https://api.typesafe.ai/openapi.json states an exact token count. No capability.attachment: the models page lists \"| Input | Text | Text |\" while https://docs.typesafe.ai/images says \"Jev 1.13 and Jev 1.14 both accept images.\" Provider typesafe is not in https://models.dev/api.json (embedded seed fetched 2026-10-13)."
+        }
+      ],
+      "models": {
+        "typesafe/jev-1.13.0": {
+          "existence": "present",
+          "model.kind": "decision",
+          "model.name": "Jev 1.13",
+          "provider.name": "TypeSafe",
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "stated"
+            },
+            "units": 42000000
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          }
+        }
+      },
+      "resolved_at_ms": 1792540800000,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — a curated-only provider read including retired rows": {
     "request": {
       "arguments": {

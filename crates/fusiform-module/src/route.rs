@@ -42,6 +42,10 @@ mod curated_withdrawn_tests;
 #[path = "route/curated_held_tests.rs"]
 mod curated_held_tests;
 
+#[cfg(test)]
+#[path = "route/curated_history_tests.rs"]
+mod curated_history_tests;
+
 // The served contract lives in `fusiform-protocol` so a consumer can compile
 // against it without taking this module's store, network or runtime. Re-exported
 // here because this file is where the contract is USED, and a reader following
@@ -925,8 +929,37 @@ fn serve_catalog_get_with_cache(
 
     let aliases = crate::aliases::aliases();
     let named = request.provider_id.is_some() && request.model_id.is_some();
-    let mut curated = Vec::new();
-    if at.is_none() {
+    // Borrowed from the compiled file on a current read; owned when read from
+    // the store's history for a point-in-time one.
+    let mut curated: Vec<std::borrow::Cow<'static, crate::curated_models::CuratedModel>> =
+        Vec::new();
+    if let Some(at) = at {
+        // The claim in force at the instant, from the store's history of the
+        // curated file. The upstream-wins rule is asked at the same instant:
+        // a curated row stands aside wherever models.dev had the model present
+        // then, exactly as a current read stands aside while it is present now.
+        for era in store
+            .curated_models_at(at.0, request.provider_id.as_deref())
+            .map_err(|e| store_error(&e))?
+        {
+            if request
+                .model_id
+                .as_deref()
+                .is_some_and(|m| m != era.model_id)
+            {
+                continue;
+            }
+            let Some(claim) = era.claim else {
+                continue;
+            };
+            if upstream_publishes_at(store, source, &era.provider_id, &era.model_id, Some(at))? {
+                continue;
+            }
+            curated.push(std::borrow::Cow::Owned(crate::curated_models::from_store(
+                claim,
+            )));
+        }
+    } else {
         for (provider, model) in crate::curated_models::models().keys() {
             if request
                 .provider_id
@@ -940,7 +973,7 @@ fn serve_catalog_get_with_cache(
             // withdrawn upstream row gives way. Check the store, not the
             // filtered response.
             if let Some(row) = curated_in_effect(store, source, provider, model)? {
-                curated.push(row);
+                curated.push(std::borrow::Cow::Borrowed(row));
             }
         }
     }
@@ -1003,7 +1036,9 @@ fn serve_catalog_get_with_cache(
         (
             CatalogSnapshot {
                 source,
-                resolved_at: Timestamp(now_ms()),
+                // The requested instant on a point-in-time read, as on every
+                // other path, so the response says which instant it describes.
+                resolved_at: at.unwrap_or_else(|| Timestamp(now_ms())),
                 catalog_version: store.catalog_version().map_err(|e| store_error(&e))?,
                 models: Vec::new(),
                 withheld: Vec::new(),
@@ -1145,12 +1180,12 @@ fn serve_catalog_get_with_cache(
             continue;
         }
         let mut facts = row.facts.clone();
-        add_provider_name(store, source, &row.provider_id, &mut facts)?;
+        add_provider_name(store, source, &row.provider_id, at, &mut facts)?;
         narrow_to_requested(&mut facts, requested_prefixes.as_ref());
         if !named && facts.is_empty() {
             continue;
         }
-        let disclosure = curated_disclosure(row);
+        let disclosure = curated_disclosure(&row);
         response.models.insert(disclosure.model.clone(), facts);
         response.curated.push(disclosure);
     }
@@ -1949,22 +1984,21 @@ fn single_model_snapshot(
                  a model under that id"
             )));
         }
+        // A curated id at an instant with no curated claim in force: before
+        // the row's first stored era, or after its tombstone. Asked before the
+        // unknown-model check, which would call a right id a typo, and also
+        // for an id upstream once listed: at an instant before either source
+        // had the model, the curated reason is the one that says when a read
+        // would answer.
+        if let Some(at) = at {
+            if let Some(refusal) = curated_refusal_at(store, provider_id, model_id, at)? {
+                return Err(refusal);
+            }
+        }
         if !store
             .model_is_known(source, provider_id, model_id)
             .map_err(|e| store_error(&e))?
         {
-            // A curated row is added at read time and never stored, so a
-            // point-in-time read finds no record of it. Saying "unknown model,
-            // check the id" would send the caller hunting a typo in an id that
-            // is right; name the real reason and the read that does answer.
-            if at.is_some() && curated_row_exists(provider_id, model_id) {
-                return Err(RouteError::no_coverage(format!(
-                    "{provider_id}/{model_id} is a curated row, served on current \
-                     reads only: it is never stored, so fusiform has no past for \
-                     it. Read it without at_ms; the response's curated list gives \
-                     its source and established_at_ms"
-                )));
-            }
             return Err(unknown_model(provider_id, model_id));
         }
         // Known, and absent at this instant: that is a real answer about a real
@@ -2276,17 +2310,23 @@ fn curated_disclosure(
     }
 }
 
+/// Join the provider's upstream label onto a curated or alias row that does
+/// not state its own. On a point-in-time read (`at` set) the label in force at
+/// that instant is used, so a historical answer carries no present-day label.
 fn add_provider_name(
     store: &CatalogStore,
     source: SourceId,
     provider_id: &str,
+    at: Option<Timestamp>,
     facts: &mut BTreeMap<String, serde_json::Value>,
 ) -> Result<(), RouteError> {
     if !facts.contains_key("provider.name") {
-        if let Some(name) = store
-            .provider_display_name(source, provider_id)
-            .map_err(|e| store_error(&e))?
-        {
+        let name = match at {
+            None => store.provider_display_name(source, provider_id),
+            Some(at) => store.provider_display_name_at(source, provider_id, at),
+        }
+        .map_err(|e| store_error(&e))?;
+        if let Some(name) = name {
             facts.insert("provider.name".to_string(), serde_json::json!(name));
         }
     }
@@ -2348,26 +2388,32 @@ fn provider_is_served(
         .map_err(|e| store_error(&e))
 }
 
-/// Whether models.dev currently publishes this model: the store's current row
-/// for it says `existence: present`.
+/// Whether models.dev publishes this model at an instant (`None` for now): the
+/// store's row for it at that instant says `existence: present`.
 ///
 /// Asked through `read_model`, the read the named path uses to decide whether
 /// a model is retired, so "present" means here exactly what it means to every
-/// other current read, corrections included. A model the store has never
-/// recorded and a model upstream listed and later withdrew both answer false.
-fn upstream_publishes_now(
+/// other read at the same instant, corrections included. A model the store had
+/// not recorded by then and a model upstream had listed and withdrawn both
+/// answer false.
+fn upstream_publishes_at(
     store: &CatalogStore,
     source: SourceId,
     provider_id: &str,
     model_id: &str,
+    at: Option<Timestamp>,
 ) -> Result<bool, RouteError> {
-    let (current, _) = store
-        .read_model(source, provider_id, model_id, None)
+    let (found, _) = store
+        .read_model(source, provider_id, model_id, at)
         .map_err(|e| store_error(&e))?;
-    Ok(current.is_some_and(|model| model.is_present()))
+    Ok(found.is_some_and(|model| model.is_present()))
 }
 
 /// The curated row for this id, when it is served on a current read.
+///
+/// Point-in-time reads do not ask here: they read the claim in force at their
+/// instant from the store's history of the curated file, and apply the same
+/// upstream-wins rule at that instant (see `serve_catalog_get_with_cache`).
 ///
 /// Upstream wins only while it currently publishes the model. A model
 /// models.dev listed and then withdrew is still known to the store, as a
@@ -2399,19 +2445,64 @@ fn curated_in_effect(
     if crate::curated_models::held().contains_key(&key) {
         return Ok(None);
     }
-    if upstream_publishes_now(store, source, provider_id, model_id)? {
+    if upstream_publishes_at(store, source, provider_id, model_id, None)? {
         return Ok(None);
     }
     Ok(Some(row))
 }
 
-/// Whether the curated file serves this id at all (held rows excluded), with no
-/// store check: used to explain a point-in-time refusal, where the store has no
-/// record of the id by construction.
-fn curated_row_exists(provider_id: &str, model_id: &str) -> bool {
-    let key = (provider_id.to_string(), model_id.to_string());
-    crate::curated_models::models().contains_key(&key)
-        && !crate::curated_models::held().contains_key(&key)
+/// Why a point-in-time read of a curated id has no curated row to serve, as a
+/// `no_coverage` refusal. `None` when the id is not a curated row, or when a
+/// curated claim was in force at the instant (then upstream had the model
+/// present, and its row answers).
+///
+/// Without this, an id that only curation ever served would be refused as an
+/// unknown model, which sends the caller hunting a typo in an id that is right.
+fn curated_refusal_at(
+    store: &CatalogStore,
+    provider_id: &str,
+    model_id: &str,
+    at: Timestamp,
+) -> Result<Option<RouteError>, RouteError> {
+    let id = format!("{provider_id}/{model_id}");
+    let eras = store
+        .curated_model_eras(provider_id, model_id)
+        .map_err(|e| store_error(&e))?;
+    let Some(first) = eras.first() else {
+        // The file carries the row but this store has no record of it: the
+        // boot that records the file has not run, or failed.
+        let in_file = crate::curated_models::models()
+            .contains_key(&(provider_id.to_string(), model_id.to_string()));
+        return Ok(in_file.then(|| {
+            RouteError::no_coverage(format!(
+                "{id} is a curated row with no stored history: fusiform records \
+                 a curated row when a build carrying it starts, and this store \
+                 holds no record of it, so it has no value to give at {}. Read \
+                 it without at_ms; the response's curated list gives its source \
+                 and review date",
+                at.0
+            ))
+        }));
+    };
+    // Eras are oldest first, so the last one at or before the instant is the
+    // one in force, as on the read path.
+    match eras.iter().rev().find(|era| era.boundary_at_ms <= at.0) {
+        None => Ok(Some(RouteError::no_coverage(format!(
+            "{id} is a curated row, and fusiform's record of it begins at {}: \
+             fusiform did not serve it before then, so it has no value to give \
+             at {}. A read at or after {} answers it, as does a read without \
+             at_ms",
+            first.boundary_at_ms, at.0, first.boundary_at_ms
+        )))),
+        Some(era) if era.claim.is_none() => Ok(Some(RouteError::no_coverage(format!(
+            "{id} is a curated row fusiform stopped serving at {}: from then its \
+             curated file no longer carried it, or held it, so fusiform has no \
+             value to give at {}. A read before {} answers with the value served \
+             then",
+            era.boundary_at_ms, at.0, era.boundary_at_ms
+        )))),
+        Some(_) => Ok(None),
+    }
 }
 
 /// One statement of the unknown-model refusal, for the two routes that ask it.
@@ -5403,7 +5494,7 @@ fn aliased_response(
     omit_route_dependent_alias_facts(&mut facts);
     response.wire_corrections.clear();
     emit_alias_route_facts(&mut facts, alias);
-    add_provider_name(store, source, provider_id, &mut facts)?;
+    add_provider_name(store, source, provider_id, None, &mut facts)?;
     narrow_to_requested(&mut facts, prefixes);
     if !facts.contains_key("model.canonical_id") {
         response.canonical_links.clear();
@@ -5828,8 +5919,11 @@ mod curated_tests {
         assert!(response.curated.is_empty());
     }
 
+    /// A point-in-time read serves curated rows only from the store's recorded
+    /// history of the curated file, never from the compiled file: with no
+    /// history recorded, no curated row is served at any instant.
     #[test]
-    fn point_in_time_reads_never_serve_curated_rows() {
+    fn point_in_time_reads_serve_no_unrecorded_curated_row() {
         let (store, _dir) = store();
         store
             .append_eras(&[era("ordinary", "existence", json!("present"))])
@@ -6105,8 +6199,11 @@ mod system_one_tests {
         }
     }
 
+    /// With no history of the curated file recorded, a point-in-time read
+    /// serves none of these rows; `curated_history_tests` covers the rows once
+    /// a boot has recorded them.
     #[test]
-    fn point_in_time_reads_never_serve_system_one_rows() {
+    fn point_in_time_reads_serve_no_unrecorded_system_one_row() {
         let _planted = served();
         let (store, _dir) = store();
         // A point-in-time read needs a record to read against.
@@ -6180,8 +6277,9 @@ mod system_one_tests {
                 refused.message
             );
         }
-        // A curated row has no recorded past, so a point-in-time read is refused
-        // with that reason, not as an unknown id; the current read prices it.
+        // A curated row this store holds no history for is refused at an
+        // instant with that reason, not as an unknown id; the current read
+        // prices it. `curated_history_tests` covers the rows once recorded.
         let refused = try_get(
             &store,
             json!({"provider_id":"typesafe", "model_id":"jev-1.13.0", "at_ms":now_ms()}),
@@ -6191,7 +6289,7 @@ mod system_one_tests {
         assert!(
             refused
                 .message
-                .contains("is a curated row, served on current reads only"),
+                .contains("is a curated row with no stored history"),
             "{}",
             refused.message
         );

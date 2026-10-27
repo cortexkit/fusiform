@@ -10,7 +10,7 @@ that keep them honest.
 | --- | --- | --- |
 | `model-creators.json` | which provider published an open-weight family | at read time |
 | `model-aliases.json` | route-specific ids and the published row each one is | at read time, current reads only |
-| `curated-models.json` | provider rows models.dev does not carry | at read time, current reads only |
+| `curated-models.json` | provider rows models.dev does not carry | at read time on current reads; written to `curated_model_era` at start, which point-in-time reads serve (§4) |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
 | `wire-corrections.json` | sourced per-model endpoint corrections or withholding, and providers whose routed list is complete | at read time, current reads only (§9) |
 | `fact-overrides.json` | sourced values replacing one current upstream fact while upstream still publishes the value they replace, or adding one fact upstream publishes nothing for | at read time, current reads only (§10) |
@@ -32,11 +32,14 @@ the source file of the same name under `crates/fusiform-module/src/`.
 1. **Curated facts are never stored as observations.** Creators, aliases,
    curated rows, canonical links, fact overrides and billing planes are applied when a read is served, so a
    point-in-time read replays what the upstream published and never today's
-   curation (see [`data-model.md`](data-model.md) §8). For model facts the
-   exception is `input-audio-per-token.json` (§8), which adds no value of its
-   own: it supplies evidence for interpreting an upstream `cost.input_audio`
-   during normalization, and an eligible upstream price is then stored as an
-   observed rate like any other.
+   curation (see [`data-model.md`](data-model.md) §8). Curated model rows
+   differ on point-in-time reads: their history is recorded in a separate
+   table, `curated_model_era`, never as eras, and a point-in-time read serves
+   the curated claim in force at its instant (§4, "Point-in-time reads").
+   Among stored model facts the exception is `input-audio-per-token.json`
+   (§8), which adds no value of its own: it supplies evidence for interpreting
+   an upstream `cost.input_audio` during normalization, and an eligible
+   upstream price is then stored as an observed rate like any other.
 2. **An upstream row wins while upstream publishes it.** When models.dev
    currently publishes the same identity, the observed row is served and the
    curated claim is not. A curated model row also returns when upstream
@@ -292,9 +295,10 @@ Serving rules, tested in `crates/fusiform-module/src/route.rs`
    row's facts or disclosures are mixed in, a named read does not list the id
    in `retired`, and a retired-inclusive read shows the one curated row. If
    models.dev lists the identity again, the upstream row is served again with
-   no edit to the file. Point-in-time reads still serve only stored history,
-   so at an instant when upstream listed the model they serve its upstream
-   row. `catalog.history` serves the stored eras for any fact the upstream row
+   no edit to the file. A point-in-time read asks the same rule at its own
+   instant: where the store's history says upstream had the model present
+   then, its upstream row is served, and otherwise the curated claim in force
+   then, if any ("Point-in-time reads" below). `catalog.history` serves the stored eras for any fact the upstream row
    recorded; a fact with no eras that the curated row carries, such as
    `model.kind`, names the curated source. One predicate in `route.rs`
    (`curated_in_effect`) decides this for every route
@@ -306,17 +310,62 @@ Serving rules, tested in `crates/fusiform-module/src/route.rs`
 4. Provider and fact filters apply; a named read keeps the row and its
    disclosure even when the fact filter matches nothing, and a bulk read drops
    it (`curated_rows_respect_fact_and_provider_filters`).
-5. Point-in-time reads never serve curated rows
-   (`point_in_time_reads_never_serve_curated_rows`).
+5. Point-in-time reads serve curated rows only from the store's recorded
+   history of the file, never from the compiled file: a store with no history
+   recorded serves none (`point_in_time_reads_serve_no_unrecorded_curated_row`).
+   See "Point-in-time reads" below.
 6. `catalog.history` returns no eras and a `curated` object naming the source;
    `catalog.status` counts are unaffected
    (`curated_history_names_the_source_without_storing_eras_or_changing_status`).
 7. A provider with curated rows is a known provider on every read, even when
    models.dev does not list it. A named read of a model it does not carry is
    refused `no_coverage` as an unknown model, and a point-in-time provider read
-   answers empty rather than refusing the provider
+   answers rather than refusing the provider
    (`system_one_tests::an_unknown_typesafe_model_is_refused_as_an_unknown_model`,
-   `system_one_tests::point_in_time_reads_never_serve_system_one_rows`).
+   `system_one_tests::point_in_time_reads_serve_no_unrecorded_system_one_row`).
+
+### Point-in-time reads
+
+A consumer pricing a call at the call's instant reads with `at_ms`, so a
+curated row needs a history: the price in force when the call was made, not
+today's. Every start records the file in the store's `curated_model_era` table
+(rules and schema in [`data-model.md`](data-model.md) §7a):
+
+- a row's first recorded claim is dated at its `established_at_ms`;
+- a later change to its facts or `auth_methods` is dated at the start of the
+  build that carries it, the instant fusiform began serving the new value.
+  Re-reading a page and re-dating `established_at_ms`, `review_by_ms` or
+  `source_ref` is not a change and writes nothing, and the stored disclosure
+  keeps the provenance recorded with the claim;
+- a row removed from the file, or held, is tombstoned at that start.
+
+A `catalog.get` with `at_ms` serves, for each curated row, the claim in force
+at that instant (the newest boundary at or before it), in the same shape as a
+current read: the row's facts, its provider's upstream label in force then
+when the row states none, and a `curated` disclosure from that claim's
+provenance. Upstream wins at that instant, as on current reads. A named read
+before the row's first recorded claim, or after its tombstone, is refused
+`no_coverage` with a message saying which, and when a read would answer; a
+bulk or provider read at such an instant does not list the row. Current reads
+are unchanged: they serve the compiled file. Plane reads (`auth_method`)
+refuse `at_ms` as before, and alias rows stay current-only.
+
+Tested in `route/curated_history_tests.rs`: Jev's priced input and stated-zero
+output with the disclosure after its first claim
+(`a_read_after_the_first_era_serves_jevs_recorded_rates_and_disclosure`), the
+refusal before it (`a_read_before_the_first_era_is_refused_with_the_reason`),
+a changed price dated at the start that carries it
+(`a_changed_curated_price_opens_an_era_dated_at_the_boot_that_carries_it`), an
+unchanged or re-dated file writing nothing
+(`re_applying_an_unchanged_or_only_redated_file_writes_nothing`), removal and
+holding as tombstones
+(`a_removed_row_is_tombstoned_and_a_read_after_it_is_refused`,
+`a_row_held_from_its_first_boot_is_first_served_at_its_release`), upstream
+winning at the instant
+(`a_historical_read_where_upstream_had_the_model_serves_the_upstream_row`),
+and current reads ignoring the stored history
+(`a_current_read_serves_the_compiled_file_not_the_stored_history`). The golden
+case `catalog.get — a curated row at an instant` pins the served bytes.
 
 The decision and extraction rows (the vendors call them "System One"
 models: they return typed decisions or values, never replies) are covered on

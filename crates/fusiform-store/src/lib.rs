@@ -14,6 +14,7 @@
 //! domain: the schema, the writes, and the reads.
 
 pub mod correct;
+mod curated;
 pub mod ingest;
 mod readers;
 pub mod schema;
@@ -31,6 +32,10 @@ use fusiform_core::{
     BoundaryKind, Correction, FailureClass, FieldId, ObservationOutcome, SourceId, Timestamp,
 };
 use rusqlite::{params, OptionalExtension};
+
+pub use curated::{
+    CuratedModelEra, NewCuratedModel, CURATED_MODELS_FILE, CURATED_MODEL_NOT_SERVED,
+};
 
 /// A lease-guarded, migrated catalog store.
 pub struct CatalogStore {

@@ -1,6 +1,6 @@
 {
   "schema": "curated-models/v1",
-  "purpose": "Current-only provider rows models.dev does not carry: models published only at lab level, and providers models.dev does not list. Facts are computed at read time, never stored. Login methods are an allowlist, not a preference.",
+  "purpose": "Provider rows models.dev does not carry: models published only at lab level, and providers models.dev does not list. Current reads serve these rows from this file; every start also records each row's claim in the store, so a point-in-time read serves the claim in force at its instant. Login methods are an allowlist, not a preference.",
   "models": [
     {
       "provider_id": "meta",

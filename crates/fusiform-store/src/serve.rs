@@ -809,7 +809,18 @@ impl CatalogStore {
         source: SourceId,
         provider_id: &str,
     ) -> Result<Option<String>, CatalogError> {
-        let at = Timestamp(now_ms());
+        self.provider_display_name_at(source, provider_id, Timestamp(now_ms()))
+    }
+
+    /// The upstream provider label as it stood at an instant, by the same rule
+    /// as [`Self::provider_display_name`]. A point-in-time read of a curated
+    /// row joins the label published then, not today's.
+    pub fn provider_display_name_at(
+        &self,
+        source: SourceId,
+        provider_id: &str,
+        at: Timestamp,
+    ) -> Result<Option<String>, CatalogError> {
         let model_id = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT e.model_id FROM era e \

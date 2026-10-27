@@ -41,7 +41,10 @@ models.dev/api.json
 ```
 
 The curated subscription prices take a separate path: the compiled-in file is
-applied to `plan_price_era` on every start and served by `plan.prices`.
+applied to `plan_price_era` on every start and served by `plan.prices`. The
+curated model rows are also applied on every start, to `curated_model_era`,
+which point-in-time reads of those rows are served from; current reads serve
+the compiled file.
 
 ## 3. The rules that shape everything else
 
@@ -63,7 +66,10 @@ applied to `plan_price_era` on every start and served by `plan.prices`.
    and retractions are events ([`data-model.md`](data-model.md) §3, §5, §6).
 6. **Serve-time layers are never stored.** Inheritance, aliases, curated rows
    and billing planes are applied when a read is served, and only on current
-   reads, so a point-in-time read replays what the upstream published.
+   reads, so a point-in-time read replays what the upstream published. The one
+   exception is curated model rows: their history is recorded in its own
+   table, and a point-in-time read serves the curated claim in force at its
+   instant ([`data-model.md`](data-model.md) §7a).
 7. **Refuse rather than answer wrongly.** An unknown provider, an instant
    before the record begins, an undeclared billing plane, and a store that
    cannot be read are refusals with distinct codes, never an empty catalog

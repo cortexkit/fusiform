@@ -26,6 +26,7 @@ use subc_protocol::ModuleHelloAckBody;
 
 use fusiform_store::CatalogStore;
 
+use fusiform_module::curated_models;
 use fusiform_module::enrollment;
 use fusiform_module::fetch::{Fetcher, SourceEndpoint};
 use fusiform_module::health;
@@ -214,6 +215,26 @@ impl ModuleHandler for Fusiform {
                 "fusiform: could not apply curated plan prices, so subscription \
                  pricing reads will serve whatever the store already held — the \
                  model catalog is unaffected: {e}"
+            ),
+        }
+
+        // Record the curated model rows on EVERY boot, for the same reason as
+        // the plan prices: the file ships with the binary, and a release that
+        // changes a curated price must reach the store, or a point-in-time read
+        // after it would serve the old price. A change is dated at this boot,
+        // the instant this build began serving it; an unchanged file writes
+        // nothing.
+        //
+        // Not fatal: current reads serve curated rows from the compiled file
+        // and are unaffected. Only point-in-time reads of curated rows are,
+        // and the message says so.
+        match curated_models::apply_to_store(&store, curated_models::table(), now_ms()) {
+            Ok(0) => {}
+            Ok(n) => eprintln!("fusiform: recorded {n} curated model row change(s)"),
+            Err(e) => eprintln!(
+                "fusiform: could not record the curated model rows, so a \
+                 point-in-time read of a curated row serves what the store \
+                 already held; current reads are unaffected: {e}"
             ),
         }
 

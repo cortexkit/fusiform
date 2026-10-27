@@ -95,6 +95,7 @@ behaves differently:
 | `era` rows | recent facts revert to older values | at the next poll, which writes ordinary observed eras for whatever moved; up to one poll interval (30 minutes) |
 | `observation` rows | recent polls are missing | the next poll's window opens against an older prior observation, so it is wider than the truth: a weaker claim, never a false one |
 | `plan_price_era` rows | revert | at start: the curated file is re-applied on every boot, before the first read is served |
+| `curated_model_era` rows | revert | at start: the curated model file is re-applied on every boot, before the first read is served. A curated change first recorded after the backup was taken is recorded again dated at this start, so a point-in-time read between its first recording and the restore serves the claim before it |
 | `catalog_version` | the stored counter rewinds | immediately: the next value is `max(now_ms, current + 1)`, so it still moves forward (`store_durability::a_restore_rewinds_the_row_counts_but_not_the_catalog_version`) |
 | writer fence epoch | rewinds | the next fenced write claims a new epoch (`store_durability::a_restore_rewinds_the_fence_and_the_catalog_version_recovers`) |
 | stored ETag | an older validator is sent | models.dev has been observed to answer an unrecognised validator with a full `200`, so the next poll reads the current document. This depends on the upstream's behaviour, not on fusiform's code |

@@ -224,6 +224,7 @@ fn no_write_escapes_the_fence() {
         "serve.rs",
         "correct.rs",
         "readers.rs",
+        "curated.rs",
     ] {
         let text = source(file);
         let unfenced = unfenced_writes(&text);
@@ -258,8 +259,8 @@ fn no_write_escapes_the_fence() {
     // passed its own codebase perfectly while seeing nothing.
     //
     // The count is MEASURED and EXACT, and the enumeration is here so the next
-    // reader can check it rather than trust it. All in lib.rs, all with their
-    // SQL keyword straddling a `\` continuation:
+    // reader can check it rather than trust it. All with their SQL keyword
+    // straddling a `\` continuation; all in lib.rs except the last:
     //
     //   INSERT INTO observation
     //   INSERT INTO era
@@ -269,10 +270,12 @@ fn no_write_escapes_the_fence() {
     //   INSERT INTO plan_price_era             (the curated row)
     //   INSERT INTO plan_price_era             (the tombstone for a key the
     //                                           file stopped carrying)
+    //   INSERT INTO curated_model_era          (curated.rs: one statement
+    //                                           writes both a curated model
+    //                                           row's claim and its tombstone)
     //
     // ingest.rs, serve.rs and correct.rs issue none: they build plans and read,
-    // and every write they cause goes through `append_eras` in lib.rs. That is
-    // itself worth knowing, because it means the fenced surface is ONE file.
+    // and every write they cause goes through `append_eras` in lib.rs.
     //
     // The first version of this assertion said `>= 8`, a number I guessed and
     // wrote in the register of a measurement. It fired immediately, which is the
@@ -292,8 +295,8 @@ fn no_write_escapes_the_fence() {
     // list that quietly became wrong, which is worse than no list — a reader
     // checking the guard against three sites concludes it is complete.
     assert_eq!(
-        writes_seen, 7,
-        "the write detector found {writes_seen} write sites; seven are enumerated \
+        writes_seen, 8,
+        "the write detector found {writes_seen} write sites; eight are enumerated \
          above. If you ADDED a write, add it to that list and update this number \
          — the list is how the next reader checks this guard, and a stale list \
          is worse than none. If you added nothing, either WRITE_KEYWORDS has \

@@ -100,6 +100,18 @@ different questions (`catalog.status` carries only the second).
 6. A historical read and a current one can be told apart by
    `resolved_at_ms`, which matters when a historical read returns fewer models
    than a current one (`served_corrections::a_historical_read_is_distinguishable_from_a_current_one`).
+7. A curated model row (one models.dev does not list; see
+   [`curated-data.md`](curated-data.md) §4) is served on a point-in-time read
+   from the store's history of the curated file: the curated claim in force at
+   `at_ms`, in the same shape as a current read, with a `curated` disclosure
+   from that claim's provenance. A claim's first era begins at the row's
+   curation date and a later change begins at the start of the build that
+   carried it. Where models.dev had the model present at `at_ms`, its upstream
+   row is served instead, as on a current read. A named read before the row's
+   first era, or after fusiform stopped serving the row, is refused
+   `no_coverage` with a message saying which. A re-dated row's provenance is
+   not a change, so a disclosure on a replayed read can carry the source and
+   review date recorded with the claim rather than today's.
 
 ## 4. Facts
 
@@ -159,8 +171,10 @@ the stored upstream provider claims, or is sourced in the curated row when the
 provider is absent upstream. Aliases never inherit the target's `model.name` or
 `provider.name`: they use their own `model_name` in `model-aliases.json` when
 stated, with the row's source citation, and their own provider's upstream name.
-Curated and alias rows, including these provider-label joins, are current-only;
-they are not served on `at_ms` reads. Retired aliases carry only their retirement
+Curated and alias rows, including these provider-label joins, are current-only,
+with one exception: a curated model row is served on `at_ms` reads from its
+recorded history, with the provider label in force at that instant (§3 item
+7). Retired aliases carry only their retirement
 facts, not live labels. Name eras can be corrected independently through
 `{"field":"model","attribute":"name"}` and `{"field":"provider_name"}`.
 
@@ -588,6 +602,8 @@ only thing fusiform serves under its provider (`typesafe`, which models.dev
 does not list): such a provider is known to every read, so a named read of a
 model it does not carry is refused as an unknown model, not an unknown
 provider (`route::system_one_tests::an_unknown_typesafe_model_is_refused_as_an_unknown_model`).
+On an `at_ms` read, each entry comes from the curated claim in force at that
+instant (§3 item 7).
 Rules are in [`curated-data.md`](curated-data.md) §4.
 
 ### 5.7 Canonical links
@@ -703,6 +719,8 @@ only, and `correction` (`affected_from_ms`, `affected_until_ms`, `reason`,
    `alias` (`crates/fusiform-module/src/route.rs`: `alias_tests::history_of_an_alias_names_the_target`).
 5. A curated row has no eras; `curated` names its source
    (`crates/fusiform-module/src/route.rs`: `curated_tests::curated_history_names_the_source_without_storing_eras_or_changing_status`).
+   The curated row's own history is recorded separately and served through
+   `catalog.get` with `at_ms` (§3 item 7), not through `catalog.history`.
 
 ## 7. `catalog.status`
 

@@ -58,6 +58,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 6,
         statements: SCHEMA_V6,
     },
+    Migration {
+        version: 7,
+        statements: SCHEMA_V7,
+    },
 ];
 
 const SCHEMA_V1: &str = r#"
@@ -472,4 +476,68 @@ CREATE TABLE plan_price_era (
 -- contradiction is refused.
 CREATE INDEX plan_price_era_key
     ON plan_price_era(provider_id, tier, boundary_at_ms);
+"#;
+
+// The history of fusiform's hand-curated model rows (`curated-models.json`):
+// rows for models models.dev does not list.
+//
+// Those rows are compiled into the binary and served straight from the file on
+// a current read. Without a stored history a point-in-time read had nothing to
+// answer from, so a consumer pricing a past call at the call's instant could
+// not price any call to a curated model. The file is applied on every boot and
+// each change to a row's claim lands here as a new row.
+//
+// WHY NOT THE `era` TABLE: `era` holds what models.dev published, one fact per
+// row, with observation windows. A curated row is fusiform's own claim about
+// the whole row at once, with its own provenance, and mixing it into `era`
+// would make curation look like an upstream observation in `catalog.history`
+// and in every count `catalog.status` derives from eras.
+const SCHEMA_V7: &str = r#"
+CREATE TABLE curated_model_era (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_id       TEXT    NOT NULL,
+    model_id          TEXT    NOT NULL,
+
+    -- When fusiform began serving this claim. A row's first claim is dated at
+    -- its curation date (`established_at_ms`); every later one, including a
+    -- tombstone, at the start of the build that carried it, because that is
+    -- when fusiform began serving the new value. `established_at_ms` cannot
+    -- date a later change: it records when the row was first curated or last
+    -- re-read, not when a fact on it changed.
+    boundary_at_ms    INTEGER NOT NULL,
+
+    -- The row's whole claim: its facts as one JSON object in the served
+    -- vocabulary, and the login methods allowed to read it as a JSON array.
+    -- NULL in both for a tombstone.
+    facts_json        TEXT,
+    auth_methods_json TEXT,
+
+    -- Provenance, served as the read's `curated` disclosure. Never compared
+    -- when deciding whether a row changed: re-reading a page and re-dating the
+    -- row confirms the claim, it does not change it.
+    source_ref        TEXT    NOT NULL,
+    established_by    TEXT,
+    established_at_ms INTEGER NOT NULL,
+    -- NULL for a tombstone, whose claim is about fusiform's own curation and
+    -- cannot go stale.
+    review_by_ms      INTEGER,
+
+    -- Set only on a tombstone: the row is no longer served, because the file
+    -- stopped carrying it or holds it.
+    tombstone_reason  TEXT,
+
+    -- A row is a claim (facts, login methods and a review date, no reason) or
+    -- a tombstone (a reason and none of the three). Anything in between is a
+    -- claim with a missing part, which nothing could serve correctly.
+    CHECK ((facts_json IS NULL) = (tombstone_reason IS NOT NULL)),
+    CHECK ((facts_json IS NULL) = (auth_methods_json IS NULL)),
+    CHECK ((facts_json IS NULL) = (review_by_ms IS NULL))
+) STRICT;
+
+-- NOT UNIQUE, as for plan_price_era: when the clock at boot is behind the
+-- newest stored boundary for a key, the next claim shares that boundary rather
+-- than being dated before it, and the newest id among equal boundaries is the
+-- one in force.
+CREATE INDEX curated_model_era_key
+    ON curated_model_era (provider_id, model_id, boundary_at_ms);
 "#;

@@ -1,8 +1,14 @@
-//! Current-only model facts backed by explicit probes and lab records.
+//! Model rows models.dev does not carry, backed by explicit probes and lab
+//! records.
 //!
 //! Provider rows missing from models.dev's API catalog cannot be inferred from
 //! lab ids: the provider may require a different model id and login method.
-//! These rows carry those restrictions and stand down as soon as upstream lands.
+//! These rows carry those restrictions and stand down wherever upstream
+//! publishes the model.
+//!
+//! A current read serves the rows straight from the compiled file. Every boot
+//! also records the file in the store ([`apply_to_store`]), so a point-in-time
+//! read can serve the claim that was in force at its instant.
 
 use std::collections::BTreeMap;
 
@@ -253,7 +259,8 @@ pub fn load_reporting_rejects(doc: &str) -> (CuratedModels, Vec<String>) {
     (rows, rejects)
 }
 
-/// The embedded file, parsed once per process, never written to the store.
+/// The embedded file, parsed once per process. Current reads serve from it
+/// directly; the store holds its history for point-in-time reads.
 ///
 /// A unit test may plant another document for its own thread with [`plant`],
 /// so route tests can exercise the rows both as served and as held.
@@ -373,6 +380,55 @@ pub(crate) fn document_without_held() -> String {
     let mut doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
     doc.as_object_mut().unwrap().remove("held");
     serde_json::to_string(&doc).unwrap()
+}
+
+/// A loaded row as the store records it.
+pub fn store_row(row: &CuratedModel) -> fusiform_store::NewCuratedModel {
+    fusiform_store::NewCuratedModel {
+        provider_id: row.provider_id.clone(),
+        model_id: row.model_id.clone(),
+        facts: row.facts.clone(),
+        auth_methods: row.auth_methods.clone(),
+        source_ref: row.source_ref.clone(),
+        established_by: row.established_by.clone(),
+        established_at_ms: row.established_at_ms,
+        review_by_ms: row.review_by_ms,
+    }
+}
+
+/// A stored claim as the row shape the route serves.
+pub fn from_store(row: fusiform_store::NewCuratedModel) -> CuratedModel {
+    CuratedModel {
+        provider_id: row.provider_id,
+        model_id: row.model_id,
+        auth_methods: row.auth_methods,
+        facts: row.facts,
+        source_ref: row.source_ref,
+        established_by: row.established_by,
+        established_at_ms: row.established_at_ms,
+        review_by_ms: row.review_by_ms,
+    }
+}
+
+/// Record this table in the store as it stands at a boot dated `boot_at_ms`,
+/// returning how many rows were written.
+///
+/// Held rows are not in effect, so they are passed as not served: the store
+/// tombstones them. See `CatalogStore::append_curated_models` for the dating
+/// rule and why an unchanged or merely re-dated row writes nothing.
+pub fn apply_to_store(
+    store: &fusiform_store::CatalogStore,
+    table: &Table,
+    boot_at_ms: i64,
+) -> Result<usize, fusiform_store::CatalogError> {
+    let rows: Vec<_> = table
+        .models
+        .iter()
+        .filter(|(key, _)| !table.held.contains_key(*key))
+        .map(|(_, row)| store_row(row))
+        .collect();
+    let held: Vec<_> = table.held.keys().cloned().collect();
+    store.append_curated_models(&rows, &held, boot_at_ms)
 }
 
 pub fn upstream_collisions(rows: &CuratedModels, seed: &serde_json::Value) -> Vec<String> {

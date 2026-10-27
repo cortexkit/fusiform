@@ -157,11 +157,12 @@ fn the_design_note_names_the_tables_that_exist() {
     // returning the same type as the success path, so failure-to-measure
     // arrives dressed as evidence.
     //
-    // The floors are deliberately low: the store creates seven tables
+    // The floors are deliberately low: the store creates eight tables
     // (observation, era, catalog_version, observation_artifact_event,
-    // plan_price_era, cortexkit_schema_version, and cortexkit_fence once a
-    // fenced write has happened), and the doc names all of them. Stated as
-    // floors so adding a table does not fail a test about extraction.
+    // plan_price_era, curated_model_era, cortexkit_schema_version, and
+    // cortexkit_fence once a fenced write has happened), and the doc names all
+    // of them. Stated as floors so adding a table does not fail a test about
+    // extraction.
     let real_tables = tables_in_a_real_store();
     assert!(
         real_tables.len() >= 3,
@@ -541,6 +542,122 @@ fn the_plan_price_table_arrives_on_a_populated_store() {
         observed.is_err(),
         "this plane has no observed boundaries; nothing here is fetched"
     );
+}
+
+/// The curated model history table arrives on a populated store at the
+/// previous version, and its constraints hold.
+///
+/// Same reasoning as the plan-price table above: every real application of
+/// this migration lands on a store with years of history, so it is tested on
+/// one that has rows in the tables before it, including the plan-price table
+/// the previous migration added.
+#[test]
+fn the_curated_model_table_arrives_on_a_populated_store() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("store.db");
+
+    {
+        let conn = rusqlite::Connection::open(&path).expect("open");
+        for m in &fusiform_store::schema::MIGRATIONS[..6] {
+            conn.execute_batch(m.statements).expect("earlier migration");
+        }
+        conn.execute(
+            "INSERT INTO observation (source, observed_at_ms, outcome) \
+             VALUES ('models.dev', 1000, 'seeded')",
+            [],
+        )
+        .expect("an observation that must survive");
+        conn.execute(
+            "INSERT INTO era (source, provider_id, model_id, fact_key, value_json, \
+                              boundary_at_ms, boundary_kind) \
+             VALUES ('models.dev', 'meta', 'm', 'existence', '\"present\"', 1000, 'seed')",
+            [],
+        )
+        .expect("an era that must survive");
+        conn.execute(
+            "INSERT INTO plan_price_era \
+             (provider_id, tier, minor_units, exponent, currency, period, \
+              boundary_kind, boundary_at_ms, established_by, established_at_ms, \
+              review_by_ms, source_ref) \
+             VALUES ('anthropic', 'max_20x', 20000, 2, 'USD', 'month', \
+                     'asserted', 1000, 'fusi', 2000, 3000, 'https://example')",
+            [],
+        )
+        .expect("a plan price that must survive");
+    }
+
+    let conn = rusqlite::Connection::open(&path).expect("reopen");
+    assert_eq!(
+        fusiform_store::schema::MIGRATIONS[6].version,
+        7,
+        "this test applies the curated model migration"
+    );
+    conn.execute_batch(fusiform_store::schema::MIGRATIONS[6].statements)
+        .expect("v7 must apply to a store that already has rows");
+
+    for (table, expected) in [("observation", 1), ("era", 1), ("plan_price_era", 1)] {
+        let kept: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(kept, expected, "the migration must not disturb {table}");
+    }
+    let value: String = conn
+        .query_row("SELECT value_json FROM era", [], |r| r.get(0))
+        .expect("the era is readable");
+    assert_eq!(value, "\"present\"");
+
+    // A claim: facts, login methods and a review date, no reason.
+    conn.execute(
+        "INSERT INTO curated_model_era \
+         (provider_id, model_id, boundary_at_ms, facts_json, auth_methods_json, \
+          source_ref, established_by, established_at_ms, review_by_ms) \
+         VALUES ('typesafe', 'jev', 1000, '{\"existence\":\"present\"}', '[\"apikey\"]', \
+                 'https://example', 'fusiform', 1000, 2000)",
+        [],
+    )
+    .expect("a well-formed claim must be accepted");
+    // A tombstone: a reason and none of the three.
+    conn.execute(
+        "INSERT INTO curated_model_era \
+         (provider_id, model_id, boundary_at_ms, source_ref, established_by, \
+          established_at_ms, tombstone_reason) \
+         VALUES ('typesafe', 'jev', 3000, 'file', 'fusiform', 3000, 'removed')",
+        [],
+    )
+    .expect("a well-formed tombstone must be accepted");
+
+    // Each half-written shape is refused, or the constraints are decorative.
+    for (shape, sql) in [
+        (
+            "a claim carrying a tombstone reason",
+            "INSERT INTO curated_model_era \
+             (provider_id, model_id, boundary_at_ms, facts_json, auth_methods_json, \
+              source_ref, established_at_ms, review_by_ms, tombstone_reason) \
+             VALUES ('x', 'y', 1, '{}', '[]', 's', 1, 2, 'why')",
+        ),
+        (
+            "a row with neither a claim nor a reason",
+            "INSERT INTO curated_model_era \
+             (provider_id, model_id, boundary_at_ms, source_ref, established_at_ms) \
+             VALUES ('x', 'y', 1, 's', 1)",
+        ),
+        (
+            "a claim without its login methods",
+            "INSERT INTO curated_model_era \
+             (provider_id, model_id, boundary_at_ms, facts_json, source_ref, \
+              established_at_ms, review_by_ms) \
+             VALUES ('x', 'y', 1, '{}', 's', 1, 2)",
+        ),
+        (
+            "a claim without its review date",
+            "INSERT INTO curated_model_era \
+             (provider_id, model_id, boundary_at_ms, facts_json, auth_methods_json, \
+              source_ref, established_at_ms) \
+             VALUES ('x', 'y', 1, '{}', '[]', 's', 1)",
+        ),
+    ] {
+        assert!(conn.execute(sql, []).is_err(), "{shape} must be refused");
+    }
 }
 
 /// Re-applying the same curated file writes nothing the second time.
