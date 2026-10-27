@@ -1953,6 +1953,18 @@ fn single_model_snapshot(
             .model_is_known(source, provider_id, model_id)
             .map_err(|e| store_error(&e))?
         {
+            // A curated row is added at read time and never stored, so a
+            // point-in-time read finds no record of it. Saying "unknown model,
+            // check the id" would send the caller hunting a typo in an id that
+            // is right; name the real reason and the read that does answer.
+            if at.is_some() && curated_row_exists(provider_id, model_id) {
+                return Err(RouteError::no_coverage(format!(
+                    "{provider_id}/{model_id} is a curated row, served on current \
+                     reads only: it is never stored, so fusiform has no past for \
+                     it. Read it without at_ms; the response's curated list gives \
+                     its source and established_at_ms"
+                )));
+            }
             return Err(unknown_model(provider_id, model_id));
         }
         // Known, and absent at this instant: that is a real answer about a real
@@ -2391,6 +2403,15 @@ fn curated_in_effect(
         return Ok(None);
     }
     Ok(Some(row))
+}
+
+/// Whether the curated file serves this id at all (held rows excluded), with no
+/// store check: used to explain a point-in-time refusal, where the store has no
+/// record of the id by construction.
+fn curated_row_exists(provider_id: &str, model_id: &str) -> bool {
+    let key = (provider_id.to_string(), model_id.to_string());
+    crate::curated_models::models().contains_key(&key)
+        && !crate::curated_models::held().contains_key(&key)
 }
 
 /// One statement of the unknown-model refusal, for the two routes that ask it.
@@ -6159,6 +6180,37 @@ mod system_one_tests {
                 refused.message
             );
         }
+        // A curated row has no recorded past, so a point-in-time read is refused
+        // with that reason, not as an unknown id; the current read prices it.
+        let refused = try_get(
+            &store,
+            json!({"provider_id":"typesafe", "model_id":"jev-1.13.0", "at_ms":now_ms()}),
+        )
+        .unwrap_err();
+        assert_eq!(refused.code, fusiform_protocol::CODE_NO_COVERAGE);
+        assert!(
+            refused
+                .message
+                .contains("is a curated row, served on current reads only"),
+            "{}",
+            refused.message
+        );
+        assert!(
+            !refused.message.contains("check the model id"),
+            "{}",
+            refused.message
+        );
+        // Control: a wrong id at an instant is still an unknown model.
+        let refused = try_get(
+            &store,
+            json!({"provider_id":"typesafe", "model_id":"jev-9.9.9", "at_ms":now_ms()}),
+        )
+        .unwrap_err();
+        assert!(
+            refused.message.starts_with("unknown model"),
+            "{}",
+            refused.message
+        );
         // Control: a provider nobody serves is still refused as a provider.
         let refused = try_get(
             &store,
