@@ -13,7 +13,7 @@ that keep them honest.
 | `curated-models.json` | provider rows models.dev does not carry | at read time, current reads only |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
 | `wire-corrections.json` | sourced per-model endpoint corrections or withholding, and providers whose routed list is complete | at read time, current reads only (§9) |
-| `fact-overrides.json` | sourced values replacing one current upstream fact, while upstream still publishes the value they replace | at read time, current reads only (§10) |
+| `fact-overrides.json` | sourced values replacing one current upstream fact while upstream still publishes the value they replace, or adding one fact upstream publishes nothing for | at read time, current reads only (§10) |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
 | `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio` (§8) |
 | `plan-prices.json` | subscription list prices | written to `plan_price_era` at start |
@@ -526,30 +526,45 @@ It is not `catalog.correct`, which withholds a past window of recorded values;
 an override changes what a current read serves and leaves the record alone.
 
 Each row in `overrides` has `provider_id`, `model_id`, `fact_key`, `value`,
-`replaces` (the exact upstream value it corrects), `reason`, `source_ref`,
-`quote` (the source sentences establishing the value), optional `notes`,
-`established_by` (`fusiform`), `established_at_ms` and a `review_by_ms`
-exactly 60 days later. Only `limit.context` and `limit.output` may be
-overridden: other facts have their own curated mechanism or serve-time
-derivation (rates: inheritance and billing planes; `wire.*`: §9;
-`model.canonical_id`: §5), and two mechanisms writing one fact would make the
-served value depend on which ran last. `value` and `replaces` must be
-different positive integers. The file is embedded and parsed once; malformed
-rows and duplicate `(provider_id, model_id, fact_key)` identities are counted
-as rejects.
+`replaces` (the exact upstream value it corrects, or `null` for an addition),
+`reason`, `source_ref`, `quote` (the source sentences establishing the value),
+optional `notes`, `established_by` (`fusiform`), `established_at_ms` and a
+`review_by_ms` exactly 60 days later. `replaces` is required in both kinds, so
+an addition is always written as one. Each fact key has its own rule:
 
-The row applies on current reads only, and only while the stored upstream
-value equals `replaces`. Once models.dev publishes anything else, the row
-stops applying and the upstream value is served, so an override can never
-hide a later upstream change. Nothing is stored, `at_ms` reads and
+| Fact key | Kind | `value` | `replaces` |
+| --- | --- | --- | --- |
+| `limit.context`, `limit.output` | replacement only | positive integer | a different positive integer |
+| `capability.server_side_fallback` | addition only | `true` or `false` | `null` |
+
+No other fact may be overridden: other facts have their own curated mechanism
+or serve-time derivation (rates: inheritance and billing planes; `wire.*`: §9;
+`model.canonical_id`: §5), and two mechanisms writing one fact would make the
+served value depend on which ran last. Limits cannot be added: an unpublished
+limit is stored as `null`, so a limit is absent only when a correction
+withholds it, and an addition must never undo a withholding.
+`capability.server_side_fallback` can only be added, because models.dev has
+no such field. The file is embedded and parsed once; malformed rows and
+duplicate `(provider_id, model_id, fact_key)` identities are counted as
+rejects.
+
+A replacement applies on current reads only, and only while the stored
+upstream value equals `replaces`. Once models.dev publishes anything else, the
+row stops applying and the upstream value is served, so an override can never
+hide a later upstream change. An addition applies on current reads only, and
+only while the stored upstream row has no such fact, neither served nor
+withheld: once models.dev publishes the key with any value, `null` included,
+upstream wins. Nothing is stored, `at_ms` reads and
 `catalog.history` serve the recorded values, and every applied row is
 disclosed in the response's `fact_overrides` list
 ([wire contract](wire-contract.md) §5.8). Alias entries are built from their
 target's served facts, so an alias of an overridden row serves the overridden
-value, disclosed under the alias id. Curated model rows (§4) are fusiform's own
-data and are never overridden.
+value, disclosed under the alias id. `capability.server_side_fallback` is not
+projected onto aliases, because it describes what the Claude API accepts and an
+alias route reaches the model another way. Curated model rows (§4) are
+fusiform's own data and are never overridden.
 
-The one shipped row serves `limit.output` 65,536 for `google/gemini-4-argon`.
+One replacement row serves `limit.output` 65,536 for `google/gemini-4-argon`.
 models.dev changed it from 65,536 to 32,768 on 2026-10-13; 32,768 is Google's
 cap for a non-streaming request, while a streaming request returns up to
 65,536 ([model page](https://ai.google.dev/gemini-api/docs/models/gemini-4-argon),
@@ -558,11 +573,31 @@ Its alias `google/antigravity-gemini-4-argon` serves 65,536 through the target,
 which matches the route's own declaration in the Antigravity plugin's
 [`model-registry.ts`](https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts).
 
+Five addition rows serve `capability.server_side_fallback` on `anthropic`
+rows, from Anthropic's
+[refusals and fallback page](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback).
+`true` means the Claude API accepts `fallbacks: "default"` with the
+`server-side-fallback-2026-07-01` beta header for the model; an absent fact
+means not stated.
+
+| Model | Value | Basis |
+| --- | --- | --- |
+| `claude-fable-5`, `claude-fable-5-1`, `claude-opus-5`, `claude-opus-5-5` | `true` | The page names six models with safety classifiers, states the fallback generally for the Claude API, and excludes only Haiku 5.5; `claude-fable-5` is also its default-mode request example. The anthropic-auth plugin's [model table](https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts) marks exactly these four true. No sentence names each model individually. |
+| `claude-haiku-5-5` | `false` | "Claude Haiku 5.5 has no server-side fallback: with `fallbacks: "default"`, a declined request stays declined, and a list of fallback models returns a 400 error." |
+
+`claude-sonnet-5-5` has no row. The page lists it among the models with
+classifiers and shows a Sonnet 5.5 request falling back only in the
+explicit-list form, while the anthropic-auth table marks it false; with the
+two sources disagreeing, nothing is served for it.
+
 Gates in `fact_overrides.rs` check rejects, review dates
 (`fact_overrides_are_within_their_review_dates`, with a planted overdue row in
-`planted_overdue_override_fails_the_review_gate`), and that the embedded seed
-still publishes each row's `replaces`
+`planted_overdue_override_fails_the_review_gate`), and that each row would
+apply over the embedded seed as ingest stores it
 (`overrides_replace_what_the_embedded_seed_publishes`): a seed refresh that
-moves the value names the row to re-source or remove. Route tests in
+moves a replaced value, that starts publishing an added key, or that drops the
+model names the row to re-source or remove
+(`planted_upstream_move_reports_the_stale_override`,
+`planted_upstream_publication_reports_the_stale_addition`). Route tests in
 `tests/it/fact_overrides.rs` cover named, bulk, paged, filtered, plane, alias,
-historical and upstream-moved reads.
+historical, upstream-moved and upstream-published reads.

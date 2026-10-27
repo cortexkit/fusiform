@@ -2144,11 +2144,18 @@ fn render(
         if at.is_none() {
             // A sourced value replaces the stored upstream value only on a
             // current read; `at` reads serve the recorded history as it was.
+            let withheld: Vec<&str> = snapshot
+                .withheld
+                .iter()
+                .filter(|w| w.provider_id == model.provider_id && w.model_id == model.model_id)
+                .map(|w| w.fact_key.as_str())
+                .collect();
             fact_overrides.extend(crate::fact_overrides::apply(
                 &model.provider_id,
                 &model.model_id,
                 &mut facts,
                 requested_prefixes,
+                &withheld,
             ));
             if let Some(correction) = crate::wire_corrections::apply(
                 &model.provider_id,
@@ -4984,12 +4991,16 @@ fn admits_rates(prefixes: &[String]) -> bool {
 /// [`narrow_to_requested`] if the caller did not ask for them.
 fn widened_for_inheritance(prefixes: &[String]) -> Vec<String> {
     let mut out = prefixes.to_vec();
-    // Keep an existing model readable when a sourced identity or endpoint can
-    // fill an absent fact. Rendering drops this extra presence fact afterward.
-    if prefixes
-        .iter()
-        .any(|p| "model.canonical_id".starts_with(p) || "wire.api".starts_with(p))
-        && !out.iter().any(|p| "existence".starts_with(p))
+    // Keep an existing model readable when a sourced identity, endpoint or
+    // added fact can fill an absent fact. Rendering drops this extra presence
+    // fact afterward.
+    if prefixes.iter().any(|p| {
+        "model.canonical_id".starts_with(p.as_str())
+            || "wire.api".starts_with(p.as_str())
+            || crate::fact_overrides::ADDED_FACTS
+                .iter()
+                .any(|key| key.starts_with(p.as_str()))
+    }) && !out.iter().any(|p| "existence".starts_with(p))
     {
         out.push("existence".to_string());
     }
@@ -5400,7 +5411,9 @@ fn aliased_response(
 
 /// Route-dependent claims do not necessarily survive routing through an alias.
 /// Whether a route enforces JSON schema depends on the route's own behavior,
-/// which the target model's structured-output claim cannot establish.
+/// which the target model's structured-output claim cannot establish; the same
+/// holds for which request parameters, such as server-side fallback, the
+/// route's backend accepts.
 /// Its client package, endpoint and request shape likewise describe the target
 /// backend, not the backend reached through the alias.
 fn omit_route_dependent_alias_facts(facts: &mut BTreeMap<String, serde_json::Value>) {
@@ -5410,6 +5423,11 @@ fn omit_route_dependent_alias_facts(facts: &mut BTreeMap<String, serde_json::Val
     facts.remove("provider.name");
     facts.retain(|key, _| !key.starts_with("route."));
     facts.remove("capability.structured_output");
+    // Anthropic documents server-side fallback only on the Claude API and on
+    // Claude Models on Google Cloud (Anthropic managed). A route reaching the
+    // model through another serving path, such as Antigravity's Google-managed
+    // Vertex backend, is not established to accept the `fallbacks` parameter.
+    facts.remove("capability.server_side_fallback");
     facts.remove("wire.npm");
     facts.remove("wire.api");
     facts.remove("wire.shape");

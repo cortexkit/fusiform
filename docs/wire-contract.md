@@ -125,6 +125,7 @@ value would do to a consumer:
 | `capability.reasoning_options` | byte-affecting | the upstream's `reasoning_options` array verbatim, or `null` |
 | `capability.structured_output` | advisory | `true` or `false` only when published by models.dev; otherwise no fact |
 | `capability.tool_call` | advisory | `true`, `false` or `null` |
+| `capability.server_side_fallback` | advisory | `true` or `false` on current reads of the `anthropic` rows Anthropic's documentation covers, from sourced additions disclosed in `fact_overrides` (§5.8); otherwise no fact, which means not stated, never `false` |
 | `capability.attachment` | advisory | `true`, `false` or `null` |
 | `capability.input_modalities` | advisory | list of modality strings, or `null` |
 | `capability.output_modalities` | advisory | list of modality strings, or `null` |
@@ -614,37 +615,60 @@ value rather than the upstream's. It is an array, omitted when empty, whose
 entries have `model` (the `provider/model` entry in `models` carrying the
 value), `provider_id` and `model_id` (the row the override is declared for),
 `fact_key`, `value` (what `models` serves), `replaces` (the upstream value it
-replaces), `reason`, `source_ref`, `quote`, optional `notes`,
-`established_by`, `established_at_ms` and `review_by_ms`.
+replaces, or `null` for an addition), `reason`, `source_ref`, `quote`,
+optional `notes`, `established_by`, `established_at_ms` and `review_by_ms`.
+
+An entry is either a REPLACEMENT, whose `replaces` is the upstream value it
+corrects, or an ADDITION, whose `replaces` is always present and `null`: a
+fact models.dev publishes no value for, sourced from the vendor's own
+documentation. Today the only added fact is `capability.server_side_fallback`.
 
 For example, a current `google/gemini-4-argon` read serves
 `limit.output: 65536` where models.dev publishes 32,768, Google's cap for a
 non-streaming request; Google's streaming cap is 65,536. The disclosure names
 both values and quotes Google's model page and latest-model guide
-(`golden_payload`: `catalog.get — sourced output override`).
+(`golden_payload`: `catalog.get — sourced output override`). A current
+`anthropic/claude-opus-5-5` read serves `capability.server_side_fallback:
+true`, meaning the Claude API accepts `fallbacks: "default"` with the
+`server-side-fallback-2026-07-01` beta header for it, and discloses an
+addition quoting Anthropic's refusals-and-fallback page
+(`golden_payload`: `catalog.get — sourced server-side fallback addition`).
+`anthropic/claude-haiku-5-5` serves `false`, which Anthropic states.
 
 1. **Current reads only.** `at_ms` reads serve the recorded value with no
-   disclosure, and `catalog.history` lists only stored eras; nothing is
-   written to the store
-   (`fact_overrides::an_at_ms_read_serves_the_stored_value_without_disclosure`).
+   disclosure, and serve no added fact at all; `catalog.history` lists only
+   stored eras; nothing is written to the store
+   (`fact_overrides::an_at_ms_read_serves_the_stored_value_without_disclosure`,
+   `fact_overrides::an_at_ms_read_serves_no_server_side_fallback`).
 2. **Only while upstream publishes `replaces`.** When the stored upstream
    value is anything else, including the override's own value, or the fact is
    absent or withheld by a correction, the upstream value is served and
    nothing is disclosed. An override can never hide a later upstream change
    (`fact_overrides::an_upstream_value_other_than_replaces_is_served_as_published`).
+   An addition applies only while the stored upstream row has no such fact:
+   once upstream records the key, with any value including `null`, or a
+   correction withholds it, the addition stops applying
+   (`fact_overrides::an_upstream_value_for_the_key_suppresses_the_addition`).
 3. **Named, bulk and paged reads alike**, and billing-plane (`auth_method`)
    reads, which are current-only and change only rates
-   (`fact_overrides::a_current_read_serves_the_override_and_discloses_it`).
+   (`fact_overrides::a_current_read_serves_the_override_and_discloses_it`,
+   `fact_overrides::a_current_read_serves_the_documented_server_side_fallback`).
    Paging keeps each entry with the provider of its `model`.
 4. **Aliases carry it.** An alias entry is built from its target's served
    facts, so it serves the overridden value too, and its disclosure has the
    alias id in `model` and the target in `provider_id`/`model_id`
    (`fact_overrides::the_antigravity_alias_serves_the_overridden_value`).
+   `capability.server_side_fallback` is the exception: it describes what the
+   Claude API accepts, so an alias route reaching the model another way never
+   carries it
+   (`fact_overrides::the_antigravity_route_to_opus_does_not_carry_server_side_fallback`).
    A curated row (§5.6) is fusiform's own data and replaces no upstream value,
    so no override applies to it.
 5. **Filters apply.** A fact-prefix filter that excludes the fact excludes the
    disclosure too
    (`fact_overrides::a_filter_excluding_the_fact_serves_and_discloses_nothing`).
+   A filter naming an added fact still reaches the rows it is added to, even
+   though the store holds no fact under that key.
 
 Rules for the data are in [`curated-data.md`](curated-data.md) §10.
 

@@ -506,6 +506,10 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
             "catalog.get — alias serves the sourced override",
             serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-4-argon","fact_prefixes":["limit."]}),
         ),
+        (
+            "catalog.get — sourced server-side fallback addition",
+            serde_json::json!({"provider_id":"anthropic","model_id":"claude-opus-5-5","fact_prefixes":["capability."]}),
+        ),
     ] {
         let request = serde_json::json!({"name":"catalog.get","arguments":arguments});
         let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();

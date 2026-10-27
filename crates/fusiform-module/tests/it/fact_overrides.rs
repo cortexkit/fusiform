@@ -307,3 +307,240 @@ fn an_upstream_value_other_than_replaces_is_served_as_published() {
     assert_eq!(then.models[TARGET]["limit.output"], json!(32_768));
     assert!(then.fact_overrides.is_empty());
 }
+
+const FALLBACK: &str = "capability.server_side_fallback";
+const OPUS: &str = "anthropic/claude-opus-5-5";
+const HAIKU: &str = "anthropic/claude-haiku-5-5";
+const SONNET: &str = "anthropic/claude-sonnet-5-5";
+const OPUS_ALIAS: &str = "google/antigravity-claude-opus-5-5";
+
+/// A store holding three of the embedded seed's anthropic rows.
+///
+/// models.dev has no server-side fallback field, so `planted` stands in for
+/// the day it publishes one: it writes that fact for Opus 5.5 into the same
+/// seed ingest, as a stored upstream era.
+fn anthropic_store(planted: Option<Value>) -> (CatalogStore, tempfile::TempDir) {
+    let seed: Value =
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+    let mut upstream = json!({});
+    for (provider, ids) in [
+        (
+            "anthropic",
+            vec!["claude-opus-5-5", "claude-haiku-5-5", "claude-sonnet-5-5"],
+        ),
+        // Only so the Antigravity alias of Opus 5.5 has its provider.
+        ("google", vec!["gemini-3.8-flash"]),
+    ] {
+        upstream[provider] = seed[provider].clone();
+        upstream[provider]["models"] = json!({});
+        for id in ids {
+            let row = seed[provider]["models"][id].clone();
+            assert!(row.is_object(), "the seed must carry {provider}/{id}");
+            upstream[provider]["models"][id] = row;
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(1_000),
+            outcome: ObservationOutcome::Changed {
+                snapshot_seq: 1_000,
+            },
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: None,
+            detail: None,
+        })
+        .unwrap();
+    let catalog = normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
+        .unwrap()
+        .catalog;
+    let mut plan =
+        plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
+    assert!(
+        plan.eras
+            .iter()
+            .all(|era| era.fact_key.as_str() != FALLBACK),
+        "the normalizer now produces {FALLBACK}; the addition rows need review"
+    );
+    if let Some(value) = planted {
+        plan.eras.push(fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "claude-opus-5-5".into(),
+            fact_key: fusiform_store::FactKey::capability("server_side_fallback"),
+            value_json: value.to_string(),
+            boundary_at: Timestamp(1_000),
+            boundary_kind: BoundaryKind::Seed,
+            observation_id: None,
+        });
+    }
+    store.append_eras(&plan.eras).unwrap();
+    (store, dir)
+}
+
+#[test]
+fn a_current_read_serves_the_documented_server_side_fallback() {
+    let (store, _dir) = anthropic_store(None);
+    for (label, response) in [
+        (
+            "named",
+            get(
+                &store,
+                json!({"provider_id":"anthropic","model_id":"claude-opus-5-5"}),
+            ),
+        ),
+        ("provider", get(&store, json!({"provider_id":"anthropic"}))),
+        ("bulk", get(&store, json!({}))),
+        ("paged", paged(&store, json!({}))),
+        // The store holds no fact under this key, so a read filtered to it
+        // must still reach the rows an addition applies to.
+        (
+            "filtered bulk",
+            get(&store, json!({"fact_prefixes":[FALLBACK]})),
+        ),
+        (
+            "filtered named",
+            get(
+                &store,
+                json!({"provider_id":"anthropic","model_id":"claude-opus-5-5","fact_prefixes":[FALLBACK]}),
+            ),
+        ),
+    ] {
+        assert_eq!(response.models[OPUS][FALLBACK], json!(true), "{label}");
+        let rows = disclosed(&response, OPUS);
+        assert_eq!(rows.len(), 1, "{label}: {:?}", response.fact_overrides);
+        let row = rows[0];
+        assert_eq!(row.fact_key, FALLBACK, "{label}");
+        assert_eq!(row.value, json!(true), "{label}");
+        assert_eq!(
+            row.replaces,
+            Value::Null,
+            "{label}: an addition replaces nothing"
+        );
+        assert!(row.source_ref.contains(
+            "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback"
+        ));
+        assert!(row.quote.contains("server-side-fallback-2026-07-01"));
+        assert_eq!(row.review_by_ms - row.established_at_ms, 60 * 86_400_000);
+        // The disclosure serializes `replaces` as an explicit null.
+        let wire = serde_json::to_value(row).unwrap();
+        assert!(
+            wire.as_object().unwrap().contains_key("replaces"),
+            "{label}"
+        );
+        assert_eq!(wire["replaces"], Value::Null, "{label}");
+
+        // Named reads carry only Opus 5.5; every other read carries Haiku 5.5.
+        if !label.starts_with("named") && !label.starts_with("filtered named") {
+            assert_eq!(response.models[HAIKU][FALLBACK], json!(false), "{label}");
+            assert_eq!(disclosed(&response, HAIKU).len(), 1, "{label}");
+        }
+        // Sonnet 5.5 has no row, so no value and no disclosure.
+        if let Some(facts) = response.models.get(SONNET) {
+            assert!(!facts.contains_key(FALLBACK), "{label}");
+        }
+        assert!(disclosed(&response, SONNET).is_empty(), "{label}");
+        for row in &response.fact_overrides {
+            assert_eq!(
+                response.models[&row.model][&row.fact_key], row.value,
+                "{label}"
+            );
+        }
+    }
+    // A filtered read serves only the key it asked for.
+    let filtered = get(&store, json!({"fact_prefixes":[FALLBACK]}));
+    assert!(filtered
+        .models
+        .values()
+        .all(|facts| facts.keys().all(|key| key == FALLBACK)));
+}
+
+#[test]
+fn a_haiku_read_serves_false_with_the_exclusion_quoted() {
+    let (store, _dir) = anthropic_store(None);
+    let response = get(
+        &store,
+        json!({"provider_id":"anthropic","model_id":"claude-haiku-5-5"}),
+    );
+    assert_eq!(response.models[HAIKU][FALLBACK], json!(false));
+    let rows = disclosed(&response, HAIKU);
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].replaces.is_null());
+    assert!(rows[0]
+        .quote
+        .contains("Claude Haiku 5.5 has no server-side fallback"));
+}
+
+#[test]
+fn an_at_ms_read_serves_no_server_side_fallback() {
+    let (store, _dir) = anthropic_store(None);
+    for response in [
+        get(
+            &store,
+            json!({"provider_id":"anthropic","model_id":"claude-opus-5-5","at_ms":1_000}),
+        ),
+        get(&store, json!({"at_ms":1_000})),
+        paged(&store, json!({"at_ms":1_000})),
+    ] {
+        for model in [OPUS, HAIKU] {
+            if let Some(facts) = response.models.get(model) {
+                assert!(!facts.contains_key(FALLBACK), "{model}");
+                assert!(facts.contains_key("limit.context"), "{model} is served");
+            }
+        }
+        assert!(response.models.contains_key(OPUS));
+        assert!(response.fact_overrides.is_empty());
+    }
+}
+
+#[test]
+fn an_upstream_value_for_the_key_suppresses_the_addition() {
+    // Any stored value wins, including one that disagrees with the row and a
+    // null, which is upstream recording the key with no value.
+    for published in [json!(false), json!(true), Value::Null] {
+        let (store, _dir) = anthropic_store(Some(published.clone()));
+        for args in [
+            json!({"provider_id":"anthropic","model_id":"claude-opus-5-5"}),
+            json!({"provider_id":"anthropic"}),
+            json!({"fact_prefixes":[FALLBACK]}),
+        ] {
+            let response = get(&store, args.clone());
+            assert_eq!(response.models[OPUS][FALLBACK], published, "{args}");
+            assert!(disclosed(&response, OPUS).is_empty(), "{published} {args}");
+            // Rows upstream still says nothing about keep their addition.
+            if let Some(facts) = response.models.get(HAIKU) {
+                assert_eq!(facts[FALLBACK], json!(false), "{args}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_antigravity_route_to_opus_does_not_carry_server_side_fallback() {
+    // The route reaches Opus 5.5 through Google-managed Vertex, which the docs
+    // do not list among the platforms with server-side fallback.
+    let (store, _dir) = anthropic_store(None);
+    for args in [
+        json!({"provider_id":"google","model_id":"antigravity-claude-opus-5-5"}),
+        json!({"provider_id":"google"}),
+        json!({}),
+    ] {
+        let response = get(&store, args.clone());
+        let facts = &response.models[OPUS_ALIAS];
+        assert!(facts.contains_key("limit.context"), "{args}");
+        assert!(!facts.contains_key(FALLBACK), "{args}");
+        assert!(disclosed(&response, OPUS_ALIAS).is_empty(), "{args}");
+    }
+}

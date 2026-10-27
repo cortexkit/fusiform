@@ -133,6 +133,13 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             .filter(|key| CURATED_ONLY.contains(&key.as_str()))
             .cloned()
     }));
+    // An addition-only fact is produced by a shipped addition row.
+    curated.extend(
+        fusiform_module::fact_overrides::overrides()
+            .values()
+            .filter(|row| row.replaces.is_null())
+            .map(|row| row.fact_key.clone()),
+    );
     let unproduced = unproduced_tabled_facts(&produced, &curated, &tabled);
     assert!(unproduced.is_empty(), "{}", unproduced.join("\n"));
 
@@ -205,17 +212,26 @@ pub(crate) const CURATED_ONLY: &[&str] = &[
     "successor",
 ];
 
+/// Served facts that only fusiform's sourced fact-override additions state.
+///
+/// Like `CURATED_ONLY`, models.dev publishes no such field and the
+/// normalizer must never produce one. Unlike it, these are served on upstream
+/// rows, so the golden fixture must always carry them.
+pub(crate) const ADDITION_ONLY: &[&str] = &["capability.server_side_fallback"];
+
 /// Tabled facts nothing emits, and curated-only facts the normalizer emits.
 ///
 /// A tabled fact must come from the normalizer, or be declared curated-only
-/// and be carried by at least one curated row.
+/// or addition-only and be carried by at least one curated row or shipped
+/// addition row (both passed in `curated`).
 fn unproduced_tabled_facts(
     normalized: &[String],
     curated: &[String],
     tabled: &[&str],
 ) -> Vec<String> {
     let mut problems = Vec::new();
-    for key in CURATED_ONLY {
+    let not_upstream = || CURATED_ONLY.iter().chain(ADDITION_ONLY);
+    for key in not_upstream() {
         if normalized.iter().any(|p| p == key) {
             problems.push(format!(
                 "the normalizer emits {key:?}, which only curated rows may state"
@@ -223,7 +239,7 @@ fn unproduced_tabled_facts(
         }
     }
     for key in tabled {
-        let produced = if CURATED_ONLY.contains(key) {
+        let produced = if not_upstream().any(|k| k == key) {
             curated.iter().any(|p| p == key)
         } else {
             normalized.iter().any(|p| p == key)

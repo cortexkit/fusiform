@@ -1,5 +1,5 @@
 {
-  "notes": "Each row serves a sourced value for one upstream fact on current catalog reads, in place of the value models.dev publishes. A row applies only while the stored upstream value equals its `replaces` exactly: when models.dev moves to any other value the row stops applying and the upstream value is served, so an override can never hide a later upstream change. Nothing here is stored, and point-in-time (`at_ms`) reads serve the recorded value. Every applied row is disclosed in the response's `fact_overrides` list. Only limit.context and limit.output may be overridden.",
+  "notes": "Each row serves a sourced value for one fact on current catalog reads. A replacement row corrects a value models.dev publishes, and applies only while the stored upstream value equals its `replaces` exactly: when models.dev moves to any other value the row stops applying and the upstream value is served, so an override can never hide a later upstream change. An addition row (`replaces: null`) supplies a fact models.dev publishes nothing for, and applies only while the stored upstream row has no such fact: if models.dev ever publishes the key, upstream wins and the row stops applying. Nothing here is stored, and point-in-time (`at_ms`) reads serve the recorded value. Every applied row is disclosed in the response's `fact_overrides` list. Only limit.context and limit.output may be replaced, and only capability.server_side_fallback may be added.",
   "overrides": [
     {
       "provider_id": "google",
@@ -11,6 +11,76 @@
       "source_ref": "https://ai.google.dev/gemini-api/docs/models/gemini-4-argon (accessed 2026-10-26); https://ai.google.dev/gemini-api/docs/generate-content/latest-model (accessed 2026-10-26)",
       "quote": "Model page: \"Max output 65,536 (default synchronous) / up to 1,048,576 (with long decode)\". Latest-model guide: \"One streaming request returns up to 65,536 tokens. One non-streaming request returns up to 32,768 tokens, down from 65,536 on Gemini 3.x.\"",
       "notes": "models.dev changed this value from 65,536 to 32,768 at fusiform's 2026-10-13 17:01Z poll. The Antigravity route google/antigravity-gemini-4-argon, a curated alias of this row (model-aliases.json), serves the same value because alias entries are built from the target's served facts; the plugin declares that route as limit: { context: 1048576, output: 65536 } in https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts.",
+      "established_by": "fusiform",
+      "established_at_ms": 1792972800000,
+      "review_by_ms": 1798156800000
+    },
+    {
+      "provider_id": "anthropic",
+      "model_id": "claude-fable-5",
+      "fact_key": "capability.server_side_fallback",
+      "value": true,
+      "replaces": null,
+      "reason": "models.dev publishes no server-side fallback field. Anthropic's page names six models with safety classifiers, Claude Fable 5 among them, states the fallback generally for the Claude API, and excludes only Haiku 5.5. anthropic-auth's model table (a9b4c35) also marks this model true. This is a reading of the page's structure, not a sentence naming Claude Fable 5.",
+      "source_ref": "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-10-26); https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts",
+      "quote": "\"Claude Fable 5.1, Claude Fable 5, Claude Opus 5.5, Claude Opus 5, Claude Sonnet 5.5, and Claude Haiku 5.5 include safety classifiers that can decline a request.\" \"Set the `fallbacks` parameter to the string `\"default\"` and send the `server-side-fallback-2026-07-01` beta header. The API then applies the requested model's server-defined default routing, which selects a recommended fallback model based on the refusal category the classifier reports, so refused requests are served without you maintaining a model list as recommendations change.\" \"Claude Haiku 5.5 has no server-side fallback: with `fallbacks: \"default\"`, a declined request stays declined, and a list of fallback models returns a 400 error.\"",
+      "notes": "https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts marks id 'claude-fable-5' serverSideFallback: true. The page names no dated snapshot ids. Server-side fallback is in beta on the Claude API and on Claude Models on Google Cloud (Anthropic managed), so the fact is not projected onto alias routes that reach the model another way. The page's default-mode request example sends \"model\": \"claude-fable-5\" with \"fallbacks\": \"default\" and the server-side-fallback-2026-07-01 beta header.",
+      "established_by": "fusiform",
+      "established_at_ms": 1792972800000,
+      "review_by_ms": 1798156800000
+    },
+    {
+      "provider_id": "anthropic",
+      "model_id": "claude-fable-5-1",
+      "fact_key": "capability.server_side_fallback",
+      "value": true,
+      "replaces": null,
+      "reason": "models.dev publishes no server-side fallback field. Anthropic's page names six models with safety classifiers, Claude Fable 5.1 among them, states the fallback generally for the Claude API, and excludes only Haiku 5.5. anthropic-auth's model table (a9b4c35) also marks this model true. This is a reading of the page's structure, not a sentence naming Claude Fable 5.1.",
+      "source_ref": "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-10-26); https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts",
+      "quote": "\"Claude Fable 5.1, Claude Fable 5, Claude Opus 5.5, Claude Opus 5, Claude Sonnet 5.5, and Claude Haiku 5.5 include safety classifiers that can decline a request.\" \"Set the `fallbacks` parameter to the string `\"default\"` and send the `server-side-fallback-2026-07-01` beta header. The API then applies the requested model's server-defined default routing, which selects a recommended fallback model based on the refusal category the classifier reports, so refused requests are served without you maintaining a model list as recommendations change.\" \"Claude Haiku 5.5 has no server-side fallback: with `fallbacks: \"default\"`, a declined request stays declined, and a list of fallback models returns a 400 error.\"",
+      "notes": "https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts marks id 'claude-fable-5-1' serverSideFallback: true. The page names no dated snapshot ids. Server-side fallback is in beta on the Claude API and on Claude Models on Google Cloud (Anthropic managed), so the fact is not projected onto alias routes that reach the model another way.",
+      "established_by": "fusiform",
+      "established_at_ms": 1792972800000,
+      "review_by_ms": 1798156800000
+    },
+    {
+      "provider_id": "anthropic",
+      "model_id": "claude-opus-5",
+      "fact_key": "capability.server_side_fallback",
+      "value": true,
+      "replaces": null,
+      "reason": "models.dev publishes no server-side fallback field. Anthropic's page names six models with safety classifiers, Claude Opus 5 among them, states the fallback generally for the Claude API, and excludes only Haiku 5.5. anthropic-auth's model table (a9b4c35) also marks this model true. This is a reading of the page's structure, not a sentence naming Claude Opus 5.",
+      "source_ref": "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-10-26); https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts",
+      "quote": "\"Claude Fable 5.1, Claude Fable 5, Claude Opus 5.5, Claude Opus 5, Claude Sonnet 5.5, and Claude Haiku 5.5 include safety classifiers that can decline a request.\" \"Set the `fallbacks` parameter to the string `\"default\"` and send the `server-side-fallback-2026-07-01` beta header. The API then applies the requested model's server-defined default routing, which selects a recommended fallback model based on the refusal category the classifier reports, so refused requests are served without you maintaining a model list as recommendations change.\" \"Claude Haiku 5.5 has no server-side fallback: with `fallbacks: \"default\"`, a declined request stays declined, and a list of fallback models returns a 400 error.\"",
+      "notes": "https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts marks id 'claude-opus-5' serverSideFallback: true. The page names no dated snapshot ids. Server-side fallback is in beta on the Claude API and on Claude Models on Google Cloud (Anthropic managed), so the fact is not projected onto alias routes that reach the model another way.",
+      "established_by": "fusiform",
+      "established_at_ms": 1792972800000,
+      "review_by_ms": 1798156800000
+    },
+    {
+      "provider_id": "anthropic",
+      "model_id": "claude-opus-5-5",
+      "fact_key": "capability.server_side_fallback",
+      "value": true,
+      "replaces": null,
+      "reason": "models.dev publishes no server-side fallback field. Anthropic's page names six models with safety classifiers, Claude Opus 5.5 among them, states the fallback generally for the Claude API, and excludes only Haiku 5.5. anthropic-auth's model table (a9b4c35) also marks this model true. This is a reading of the page's structure, not a sentence naming Claude Opus 5.5.",
+      "source_ref": "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-10-26); https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts",
+      "quote": "\"Claude Fable 5.1, Claude Fable 5, Claude Opus 5.5, Claude Opus 5, Claude Sonnet 5.5, and Claude Haiku 5.5 include safety classifiers that can decline a request.\" \"Set the `fallbacks` parameter to the string `\"default\"` and send the `server-side-fallback-2026-07-01` beta header. The API then applies the requested model's server-defined default routing, which selects a recommended fallback model based on the refusal category the classifier reports, so refused requests are served without you maintaining a model list as recommendations change.\" \"Claude Haiku 5.5 has no server-side fallback: with `fallbacks: \"default\"`, a declined request stays declined, and a list of fallback models returns a 400 error.\"",
+      "notes": "https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts marks id 'claude-opus-5-5' serverSideFallback: true. The page names no dated snapshot ids. Server-side fallback is in beta on the Claude API and on Claude Models on Google Cloud (Anthropic managed), so the fact is not projected onto alias routes that reach the model another way.",
+      "established_by": "fusiform",
+      "established_at_ms": 1792972800000,
+      "review_by_ms": 1798156800000
+    },
+    {
+      "provider_id": "anthropic",
+      "model_id": "claude-haiku-5-5",
+      "fact_key": "capability.server_side_fallback",
+      "value": false,
+      "replaces": null,
+      "reason": "models.dev publishes no server-side fallback field. Anthropic's page states that Claude Haiku 5.5 has no server-side fallback, even though it has a safety classifier: with fallbacks \"default\" a declined request stays declined.",
+      "source_ref": "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-10-26); https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts",
+      "quote": "\"Claude Haiku 5.5 has no server-side fallback: with `fallbacks: \"default\"`, a declined request stays declined, and a list of fallback models returns a 400 error.\" \"Claude Haiku 5.5 has neither server-side fallback nor fallback credit, so use the SDK middleware or a manual retry.\"",
+      "notes": "https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts marks id 'claude-haiku-5-5' serverSideFallback: false. The request is accepted with \"default\" but never falls back, and a list of fallback models is refused with a 400 error.",
       "established_by": "fusiform",
       "established_at_ms": 1792972800000,
       "review_by_ms": 1798156800000

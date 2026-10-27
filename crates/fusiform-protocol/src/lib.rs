@@ -1119,6 +1119,21 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "whether the model accepts tool definitions",
     },
     ServedFact {
+        key: "capability.server_side_fallback",
+        class: FactClass::Advisory,
+        note: "whether the Claude API applies server-side fallback to this model: \
+               true means a request may send fallbacks: \"default\" with the \
+               anthropic-beta header server-side-fallback-2026-07-01 and a \
+               classifier refusal is retried on Anthropic's recommended model; \
+               false means Anthropic states the model has none. ABSENT MEANS \
+               NOT STATED, never false. models.dev publishes no such field: \
+               served only on current reads of anthropic rows from sourced \
+               additions disclosed in fact_overrides (replaces null), never on \
+               at_ms reads, never projected onto alias routes, and suppressed \
+               for a row once upstream records the key. It becomes \
+               ByteAffecting if a consumer renders it into requests.",
+    },
+    ServedFact {
         key: "capability.attachment",
         class: FactClass::Advisory,
         note: "whether the model accepts attachments",
@@ -1383,8 +1398,14 @@ pub struct FactOverrideWire {
     pub value: serde_json::Value,
     /// The upstream value it replaces. The override applies only while the
     /// stored upstream value is exactly this.
+    ///
+    /// For an ADDITION, `replaces` is null because upstream publishes no value
+    /// for the fact; the addition applies only while the stored upstream row
+    /// has no such fact. The field is always serialized, as an explicit null
+    /// for an addition.
     pub replaces: serde_json::Value,
-    /// Why the upstream value is wrong for consumers.
+    /// Why the upstream value is wrong for consumers, or for an addition, why
+    /// the sourced value holds where upstream says nothing.
     pub reason: String,
     pub source_ref: String,
     /// The sentences in `source_ref` that establish the value.
