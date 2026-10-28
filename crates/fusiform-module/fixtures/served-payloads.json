@@ -6126,6 +6126,26 @@
           "tier": "ultra_5x"
         },
         {
+          "boundary_at_ms": 1793145600000,
+          "established_at_ms": 1793145600000,
+          "established_by": "fusiform",
+          "price": {
+            "currency": "USD",
+            "exponent": 2,
+            "minor_units": 9900,
+            "period": "month"
+          },
+          "provider_id": "kimi-code-plan-global",
+          "quota_value": {
+            "refusal_reason": "No Kimi Code account is measured yet; astrocyte has no Kimi readings. The operator can state a figure.",
+            "review_by_ms": 1798329600000,
+            "state": "not_established"
+          },
+          "review_by_ms": 1798329600000,
+          "source_ref": "https://www.kimi.com/zh-hans/resources/kimi-k2-7-code-pricing",
+          "tier": "allegro"
+        },
+        {
           "boundary_at_ms": 1791849600000,
           "established_at_ms": 1791849600000,
           "established_by": "fusiform",

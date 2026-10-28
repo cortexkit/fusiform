@@ -213,6 +213,22 @@
       "established_at_ms": 1792886400000,
       "review_by_ms": 1798070400000,
       "source_ref": "https://one.google.com/about/google-ai-plans/"
+    },
+    {
+      "provider_id": "kimi-code-plan-global",
+      "tier": "allegro",
+      "price": {"minor_units": 9900, "exponent": 2, "currency": "USD", "period": "month"},
+      "quota_value": {
+        "state": "not_established",
+        "refusal_reason": "No Kimi Code account is measured yet; astrocyte has no Kimi readings. The operator can state a figure.",
+        "review_by_ms": 1798329600000
+      },
+      "note": "'Allegro: $99/month', from Kimi's own K2.7 Code pricing page, whose row reads 'Monthly price | Moderato: $19/month | Allegretto: $39/month | Allegro: $99/month | Vivace: $199/month'. Read 2026-10-28 from an indexed copy: the live page now renders only the renamed tiers (Go, Plus, Pro, Max, Ultra). Kimi's Help Center (https://www.kimi.com/en/help/membership/membership-pricing) lists Andante, Moderato, Allegretto and Allegro as legacy plans and gives no current Allegro price. Allegro is curated because it is the tier the operator holds (the operator's statement, 2026-10-28). A legacy plan keeps the price it was sold at, so this is the price the account pays unless the operator states otherwise. Only a monthly price is published for Allegro.",
+      "boundary_at_ms": 1793145600000,
+      "established_by": "fusiform",
+      "established_at_ms": 1793145600000,
+      "review_by_ms": 1798329600000,
+      "source_ref": "https://www.kimi.com/zh-hans/resources/kimi-k2-7-code-pricing"
     }
   ],
   "why_this_basis": "US list price, MONTHLY-BILLED basis. Recorded rather than assumed, and the basis is chosen for its FAILURE DIRECTION rather than for consistency: a higher denominator produces a lower multiplier, so recording the monthly-billed price makes a subscription look WORSE than it is for an annual subscriber. Every other known residual in the consuming calculation biases toward 'keep paying', so the one term that errs pessimistic is the one pushing back. Do not 'correct' this to the annual figure: it would remove the only conservative term. anthropic/pro is $17 billed annually against $20 monthly, a 15% spread, and that difference is deliberately not modelled here \u2014 an operator on an annual term or a grandfathered rate overrides this plane on their own credential record, which is where a fact about one account belongs. WEB-SUBSCRIPTION prices, additionally: the Max help centre states 'these prices are for web subscriptions only. Mobile pricing may vary depending on your app platform.' An operator who subscribed through an app store may pay an app-store markup this plane cannot see, which is a third basis axis beyond country and billing term. Same remedy as the others \u2014 the credential override carries what one account actually pays.",
