@@ -390,6 +390,14 @@ another provider's route id. The file fills only a null or absent
 `model.canonical_id`; any non-null upstream value wins, including a different
 identity. No fact is written to the store, and `at_ms` reads never apply links.
 
+The shipped list is empty after the 2026-10-28 seed refresh. Upstream now
+publishes canonical identities for `ollama-cloud/deepseek-v4-pro`,
+`ollama-cloud/kimi-k2.6` and `ollama-cloud/minimax-m2.7`, so their links are no
+longer needed. The seed no longer contains `ollama-cloud/deepseek-v4-flash`,
+`ollama-cloud/glm-5.1`, `ollama-cloud/kimi-k2.5` or
+`ollama-cloud/minimax-m2.5`, so their links were removed too. The mechanism and
+its fixture-based tests remain available for future sourced claims.
+
 Two sources establish the claim: `source_ref` is the provider's library URL,
 and `quote` is its sentence identifying the exact model and variant.
 `lab_source_ref` points to `https://models.dev/models.json`; `lab_quote` quotes

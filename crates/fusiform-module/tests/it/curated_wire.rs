@@ -278,11 +278,11 @@ fn pi_endpoints_correct_current_reads_without_changing_observed_facts_or_history
     assert!(historical.wire_corrections.is_empty());
     assert_eq!(
         historical.models["opencode-go/claude-haiku-5-5"]["wire.api"]["from"],
-        "provider"
+        "model"
     );
     assert_eq!(
         historical.models["opencode-go/claude-haiku-5-5"]["wire.api"]["value"],
-        "https://opencode.ai/inference/go/v1"
+        "https://opencode.ai/inference/go/anthropic/v1"
     );
     let request = json!({"name":"catalog.history","arguments":{"provider_id":"opencode-go","model_id":"claude-haiku-5-5","fact_key":"wire.api"}});
     let ToolResponse::History(history) =
@@ -291,7 +291,11 @@ fn pi_endpoints_correct_current_reads_without_changing_observed_facts_or_history
         panic!("expected history")
     };
     assert_eq!(history.eras.len(), 1);
-    assert_eq!(history.eras[0].value["from"], "provider");
+    assert_eq!(history.eras[0].value["from"], "model");
+    assert_eq!(
+        history.eras[0].value["value"],
+        "https://opencode.ai/inference/go/anthropic/v1"
+    );
     assert!(get(&store, json!({"fact_prefixes":["wire.npm"]}))
         .wire_corrections
         .is_empty());

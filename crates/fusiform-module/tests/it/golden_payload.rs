@@ -447,6 +447,10 @@ fn render_all() -> String {
         "catalog.get — a sourced canonical identity".into(),
         render_canonical_link(),
     );
+    ordinary.as_object_mut().unwrap().insert(
+        "catalog.get — synthetic canonical link".into(),
+        render_synthetic_canonical_link(),
+    );
     ordinary
         .as_object_mut()
         .unwrap()
@@ -562,8 +566,51 @@ fn render_curated_history() -> serde_json::Value {
     serde_json::json!({"request":request, "response":response})
 }
 
-/// Isolate the real unlinked seed row so it cannot change ordinary-case counts.
+/// Render the seed's `ollama-cloud/kimi-k2.6` row separately so this identity
+/// case does not change the model counts in the ordinary golden cases.
 fn render_canonical_link() -> serde_json::Value {
+    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    let row = seed["ollama-cloud"]["models"]["kimi-k2.6"].clone();
+    assert!(row.is_object());
+    assert_eq!(row["canonical_model_id"], "moonshotai/kimi-k2.6");
+    let doc = serde_json::json!({"ollama-cloud": {
+        "id":"ollama-cloud", "name":"Ollama Cloud",
+        "models":{"kimi-k2.6":row}
+    }});
+    render_canonical_identity(&doc, "ollama-cloud", "kimi-k2.6")
+}
+
+/// Pin disclosure bytes even when upstream identities make all shipped links unnecessary.
+fn render_synthetic_canonical_link() -> serde_json::Value {
+    let _links = fusiform_module::canonical_links::plant(
+        &serde_json::json!({"links": [{
+            "provider_id": "synthetic-provider",
+            "model_id": "synthetic-model",
+            "canonical_id": "synthetic-lab/synthetic-model",
+            "source_ref": "https://example.org/provider/synthetic-model",
+            "quote": "The synthetic provider serves Synthetic Model.",
+            "lab_source_ref": "https://example.org/lab/synthetic-model",
+            "lab_quote": "Synthetic Model is our model.",
+            "established_by": "fusiform",
+            "established_at_ms": 1,
+            "review_by_ms": 5_184_000_001_i64
+        }]})
+        .to_string(),
+    );
+    let doc = serde_json::json!({"synthetic-provider": {
+        "id":"synthetic-provider", "name":"Synthetic Provider",
+        "models":{"synthetic-model": {
+            "id":"synthetic-model", "name":"Synthetic Model", "canonical_model_id":null
+        }}
+    }});
+    render_canonical_identity(&doc, "synthetic-provider", "synthetic-model")
+}
+
+fn render_canonical_identity(
+    doc: &serde_json::Value,
+    provider: &str,
+    model: &str,
+) -> serde_json::Value {
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -574,21 +621,13 @@ fn render_canonical_link() -> serde_json::Value {
         },
     })
     .unwrap();
-    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
-    let row = seed["ollama-cloud"]["models"]["kimi-k2.6"].clone();
-    assert!(row.is_object());
-    assert!(row["canonical_model_id"].is_null());
-    let doc = serde_json::json!({"ollama-cloud": {
-        "id":"ollama-cloud", "name":"Ollama Cloud",
-        "models":{"kimi-k2.6":row}
-    }});
     let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
         .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     let request = serde_json::json!({"name":"catalog.get","arguments":{
-        "provider_id":"ollama-cloud", "model_id":"kimi-k2.6",
+        "provider_id":provider, "model_id":model,
         "fact_prefixes":["model.canonical_id"]
     }});
     let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
@@ -691,12 +730,12 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         .count();
     assert_eq!(plain_plane_cases, 2);
     let curated_wire = render_curated_wire();
-    // The three single cases rendered outside `cases()`: the first provider
-    // page, the sourced canonical identity, and the curated row at an instant.
+    // The four single cases rendered outside `cases()`: the first provider page,
+    // the seed and synthetic identities, and the curated row at an instant.
     for (text, expected) in [
         (
             GOLDEN.to_string(),
-            cases().len() + plain_plane_cases + 3 + curated_wire.len(),
+            cases().len() + plain_plane_cases + 4 + curated_wire.len(),
         ),
         (
             serde_json::to_string(&curated_wire).unwrap(),
@@ -706,6 +745,11 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         (serde_json::json!({"paged":render_paged()}).to_string(), 1),
         (
             serde_json::json!({"canonical":render_canonical_link()}).to_string(),
+            1,
+        ),
+        (
+            serde_json::json!({"synthetic_canonical":render_synthetic_canonical_link()})
+                .to_string(),
             1,
         ),
         (

@@ -4,7 +4,29 @@ use fusiform_core::BoundaryKind;
 use fusiform_store::NewEra;
 use serde_json::{json, Value};
 
-fn fixture(canonical: Option<Value>) -> (CatalogStore, tempfile::TempDir) {
+fn fixture(
+    canonical: Option<Value>,
+) -> (
+    CatalogStore,
+    tempfile::TempDir,
+    crate::canonical_links::Planted,
+) {
+    let links = crate::canonical_links::plant(
+        &json!({"links": [{
+            "provider_id": "ollama-cloud",
+            "model_id": "kimi-k2.6",
+            "canonical_id": "moonshotai/kimi-k2.6",
+            "source_ref": "https://example.org/provider/kimi-k2.6",
+            "quote": "The provider serves Kimi K2.6.",
+            "lab_source_ref": "https://example.org/lab/kimi-k2.6",
+            "lab_quote": "Kimi K2.6 is our model.",
+            "established_by": "fusiform",
+            "established_at_ms": 1,
+            "review_by_ms": 5_184_000_001_i64
+        }]})
+        .to_string(),
+    );
+    assert_eq!(crate::canonical_links::links().len(), 1);
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -42,7 +64,7 @@ fn fixture(canonical: Option<Value>) -> (CatalogStore, tempfile::TempDir) {
             .collect();
         store.append_eras(&eras).unwrap();
     }
-    (store, dir)
+    (store, dir, links)
 }
 
 fn get(store: &CatalogStore, args: Value) -> CatalogGetResponse {
@@ -52,7 +74,7 @@ fn get(store: &CatalogStore, args: Value) -> CatalogGetResponse {
 #[test]
 fn canonical_links_fill_only_missing_identities_on_current_reads() {
     for stored in [Some(Value::Null), None] {
-        let (store, _dir) = fixture(stored.clone());
+        let (store, _dir, _links) = fixture(stored.clone());
         let eras_before = store.era_count(SourceId::ModelsDev).unwrap();
         let version_before = store.catalog_version().unwrap();
         for row in crate::canonical_links::links().values() {
@@ -141,7 +163,7 @@ fn canonical_links_fill_only_missing_identities_on_current_reads() {
 
 #[test]
 fn upstream_non_null_canonical_identity_wins_even_when_it_disagrees() {
-    let (store, _dir) = fixture(Some(json!("upstream/a-different-model")));
+    let (store, _dir, _links) = fixture(Some(json!("upstream/a-different-model")));
     for args in [
         json!({}),
         json!({"provider_id":"ollama-cloud","model_id":"kimi-k2.6","fact_prefixes":["model.canonical_id"]}),
@@ -157,7 +179,7 @@ fn upstream_non_null_canonical_identity_wins_even_when_it_disagrees() {
 
 #[test]
 fn point_in_time_reads_do_not_apply_canonical_links() {
-    let (store, _dir) = fixture(Some(Value::Null));
+    let (store, _dir, _links) = fixture(Some(Value::Null));
     for args in [
         json!({"at_ms":1000}),
         json!({"provider_id":"ollama-cloud","model_id":"kimi-k2.6","at_ms":1000,"fact_prefixes":["model."]}),

@@ -96,8 +96,41 @@ pub fn load_reporting_rejects(doc: &str) -> (CanonicalLinks, Vec<String>) {
 }
 
 pub fn links() -> &'static CanonicalLinks {
+    if let Some(rows) = PLANTED.with(|planted| planted.get()) {
+        return rows;
+    }
     static ROWS: std::sync::OnceLock<CanonicalLinks> = std::sync::OnceLock::new();
     ROWS.get_or_init(|| load_reporting_rejects(DOCUMENT).0)
+}
+
+thread_local! {
+    static PLANTED: std::cell::Cell<Option<&'static CanonicalLinks>> = const { std::cell::Cell::new(None) };
+}
+
+#[doc(hidden)]
+#[must_use]
+pub struct Planted {
+    previous: Option<&'static CanonicalLinks>,
+    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+/// Use fixture links on the calling thread until the returned guard is dropped.
+/// Normal serving uses the embedded file; only tests call this fixture seam.
+#[doc(hidden)]
+pub fn plant(doc: &str) -> Planted {
+    let (rows, rejects) = load_reporting_rejects(doc);
+    assert!(rejects.is_empty(), "{rejects:?}");
+    let rows = Box::leak(Box::new(rows));
+    Planted {
+        previous: PLANTED.with(|planted| planted.replace(Some(rows))),
+        _thread_bound: std::marker::PhantomData,
+    }
+}
+
+impl Drop for Planted {
+    fn drop(&mut self) {
+        PLANTED.with(|planted| planted.set(self.previous));
+    }
 }
 
 pub fn upstream_collisions(rows: &CanonicalLinks, seed: &serde_json::Value) -> Vec<String> {
@@ -127,8 +160,30 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn document() -> serde_json::Value {
-        serde_json::from_str(DOCUMENT).unwrap()
+    fn fixture_document() -> serde_json::Value {
+        json!({"links": [{
+            "provider_id": "provider",
+            "model_id": "model",
+            "canonical_id": "lab/model",
+            "source_ref": "https://example.org/provider/model",
+            "quote": "The provider serves Lab Model.",
+            "lab_source_ref": "https://example.org/lab/model",
+            "lab_quote": "Lab Model is our model.",
+            "established_by": "fusiform",
+            "established_at_ms": 1,
+            "review_by_ms": 1 + REVIEW_INTERVAL_MS
+        }]})
+    }
+
+    fn fixture_links() -> CanonicalLinks {
+        let (rows, rejects) = load_reporting_rejects(&fixture_document().to_string());
+        assert!(rejects.is_empty(), "{rejects:?}");
+        assert_eq!(rows.len(), 1);
+        rows
+    }
+
+    fn fixture_seed() -> serde_json::Value {
+        json!({"provider": {"models": {"model": {}}}})
     }
 
     fn seed() -> serde_json::Value {
@@ -137,9 +192,30 @@ mod tests {
 
     #[test]
     fn shipped_links_load_without_rejects() {
-        let (rows, rejects) = load_reporting_rejects(DOCUMENT);
+        let (_, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert!(!rows.is_empty());
+    }
+
+    #[test]
+    fn empty_document_loads_without_rejects() {
+        let (rows, rejects) = load_reporting_rejects(r#"{"links": []}"#);
+        assert!(rows.is_empty());
+        assert!(rejects.is_empty(), "{rejects:?}");
+    }
+
+    #[test]
+    fn planted_links_restore_the_previous_table_on_drop() {
+        let shipped = links();
+        {
+            let _links = plant(&fixture_document().to_string());
+            assert_eq!(links().len(), 1);
+            {
+                let _empty = plant(r#"{"links": []}"#);
+                assert!(links().is_empty());
+            }
+            assert_eq!(links().len(), 1);
+        }
+        assert!(std::ptr::eq(links(), shipped));
     }
 
     #[test]
@@ -150,11 +226,13 @@ mod tests {
 
     #[test]
     fn planted_upstream_identity_triggers_the_removal_fence() {
-        let mut seed = seed();
-        let row = links().values().next().unwrap();
+        let rows = fixture_links();
+        let mut seed = fixture_seed();
+        let row = rows.values().next().unwrap();
+        assert!(upstream_collisions(&rows, &seed).is_empty());
         seed[&row.provider_id]["models"][&row.model_id]["canonical_model_id"] =
             json!("lab/published");
-        let collisions = upstream_collisions(links(), &seed);
+        let collisions = upstream_collisions(&rows, &seed);
         assert_eq!(collisions.len(), 1);
         assert!(collisions[0].contains(&format!("{}/{}", row.provider_id, row.model_id)));
         assert!(collisions[0].contains("remove the canonical link"));
@@ -168,13 +246,15 @@ mod tests {
 
     #[test]
     fn planted_missing_seed_row_names_the_bad_link() {
-        let mut seed = seed();
-        let row = links().values().next().unwrap();
+        let rows = fixture_links();
+        let mut seed = fixture_seed();
+        let row = rows.values().next().unwrap();
+        assert!(missing_seed_rows(&rows, &seed).is_empty());
         seed[&row.provider_id]["models"]
             .as_object_mut()
             .unwrap()
             .remove(&row.model_id);
-        let missing = missing_seed_rows(links(), &seed);
+        let missing = missing_seed_rows(&rows, &seed);
         assert_eq!(missing.len(), 1);
         assert!(missing[0].contains(&format!("{}/{}", row.provider_id, row.model_id)));
         assert!(missing[0].contains("correct or remove"));
@@ -192,11 +272,7 @@ mod tests {
 
     #[test]
     fn planted_overdue_link_requires_reverification_or_removal() {
-        let rows = CanonicalLinks::from([links()
-            .iter()
-            .next()
-            .map(|(key, row)| (key.clone(), row.clone()))
-            .unwrap()]);
+        let rows = fixture_links();
         let row = rows.values().next().unwrap();
         assert!(overdue_at(&rows, row.review_by_ms).is_empty());
         let overdue = overdue_at(&rows, row.review_by_ms + 1);
@@ -207,14 +283,14 @@ mod tests {
 
     #[test]
     fn malformed_and_duplicate_rows_are_counted_as_rejects() {
-        let mut doc = document();
+        let mut doc = fixture_document();
         let row = doc["links"][0].clone();
         doc["links"]
             .as_array_mut()
             .unwrap()
             .extend([row, json!({})]);
         let (rows, rejects) = load_reporting_rejects(&doc.to_string());
-        assert_eq!(rows.len(), links().len());
+        assert_eq!(rows.len(), 1);
         assert_eq!(rejects.len(), 2);
         assert!(rejects[0].contains("duplicate"));
         assert!(rejects[1].contains("did not parse"));
@@ -240,7 +316,7 @@ mod tests {
             ("review_by_ms", json!(1)),
             ("unknown", json!(true)),
         ] {
-            let mut row = document()["links"][0].clone();
+            let mut row = fixture_document()["links"][0].clone();
             row[field] = value;
             let (rows, rejects) = load_reporting_rejects(&json!({"links": [row]}).to_string());
             assert!(rows.is_empty(), "{field}");
