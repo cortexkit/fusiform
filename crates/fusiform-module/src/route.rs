@@ -35,6 +35,10 @@ mod paging_tests;
 mod canonical_link_tests;
 
 #[cfg(test)]
+#[path = "route/quality_score_tests.rs"]
+mod quality_score_tests;
+
+#[cfg(test)]
 #[path = "route/curated_withdrawn_tests.rs"]
 mod curated_withdrawn_tests;
 
@@ -873,6 +877,21 @@ fn serve_catalog_get_with_cache(
     // model would otherwise produce a different no-coverage refusal.
     let plane = select_billing_plane(&request)?;
     let requested_prefixes = request.fact_prefixes.clone();
+    if request.at_ms.is_none() {
+        request.fact_prefixes = request.fact_prefixes.as_ref().map(|prefixes| {
+            let mut wide = prefixes.clone();
+            if ["quality.elo", "quality.eq"]
+                .iter()
+                .any(|key| prefixes.iter().any(|p| key.starts_with(p)))
+            {
+                // Keep the served identity until quality grades have been joined.
+                wide.push("model.canonical_id".to_string());
+                wide.push("existence".to_string());
+            }
+            wide
+        });
+    }
+    let curated_prefixes = request.fact_prefixes.clone();
     if plane.is_some() {
         // Carry every rate and the real family through the existing named,
         // bulk and alias paths. Their intermediate filters now retain these
@@ -1028,7 +1047,14 @@ fn serve_catalog_get_with_cache(
                 at,
                 request.fact_prefixes.as_ref(),
             )?;
-            return finish_plane_view(store, source, response, plane, requested_prefixes.as_ref());
+            return finish_plane_view(
+                store,
+                source,
+                response,
+                plane,
+                requested_prefixes.as_ref(),
+                at.is_none(),
+            );
         }
     }
 
@@ -1181,7 +1207,7 @@ fn serve_catalog_get_with_cache(
         }
         let mut facts = row.facts.clone();
         add_provider_name(store, source, &row.provider_id, at, &mut facts)?;
-        narrow_to_requested(&mut facts, requested_prefixes.as_ref());
+        narrow_to_requested(&mut facts, curated_prefixes.as_ref());
         if !named && facts.is_empty() {
             continue;
         }
@@ -1189,8 +1215,30 @@ fn serve_catalog_get_with_cache(
         response.models.insert(disclosure.model.clone(), facts);
         response.curated.push(disclosure);
     }
-    let mut response =
-        finish_plane_view(store, source, response, plane, requested_prefixes.as_ref())?;
+    let mut response = finish_plane_view(
+        store,
+        source,
+        response,
+        plane,
+        requested_prefixes.as_ref(),
+        at.is_none(),
+    )?;
+    // Observed plane rows keep their envelope when billing rules remove all
+    // selected rates. Curated rows and plain bulk rows require a selected fact.
+    if !named {
+        let curated = &response.curated;
+        response.models.retain(|identity, facts| {
+            !facts.is_empty()
+                || (request.auth_method.is_some()
+                    && !curated.iter().any(|row| &row.model == identity))
+        });
+        response
+            .curated
+            .retain(|row| response.models.contains_key(&row.model));
+        response
+            .aliased
+            .retain(|row| response.models.contains_key(&row.model));
+    }
     for (provider, model, retired_at_ms, successor) in retired_ids {
         let id = format!("{provider}/{model}");
         if response.models.contains_key(&id) {
@@ -1346,6 +1394,7 @@ fn scope_page(response: &mut CatalogGetResponse, providers: &BTreeSet<String>) {
     response
         .fact_overrides
         .retain(|row| providers.contains(model_provider(&row.model)));
+    retain_quality_disclosure(response);
 }
 
 fn page_catalog(
@@ -1403,6 +1452,7 @@ fn page_catalog(
     }
     let initial_count = boundaries.len();
     loop {
+        retain_quality_disclosure(&mut response);
         response.next_page_token = if has_more {
             boundaries.last().map(|(_, token)| token.clone())
         } else {
@@ -1685,9 +1735,23 @@ fn finish_plane_view(
     mut response: CatalogGetResponse,
     plane: Option<SelectedPlane>,
     requested_prefixes: Option<&Vec<String>>,
+    current: bool,
 ) -> Result<CatalogGetResponse, RouteError> {
+    if current {
+        apply_quality_scores(&mut response);
+    }
     let Some(plane) = plane else {
         // Callers that did not ask for a billing claim keep the ordinary view.
+        for facts in response.models.values_mut() {
+            narrow_to_requested(facts, requested_prefixes);
+        }
+        response.canonical_links.retain(|link| {
+            response
+                .models
+                .get(&link.model)
+                .is_some_and(|facts| facts.contains_key("model.canonical_id"))
+        });
+        retain_quality_disclosure(&mut response);
         retain_served_overrides(&mut response);
         return Ok(response);
     };
@@ -1716,7 +1780,49 @@ fn finish_plane_view(
             .is_some_and(|facts| facts.contains_key("model.canonical_id"))
     });
     retain_served_overrides(&mut response);
+    retain_quality_disclosure(&mut response);
     Ok(response)
+}
+
+fn apply_quality_scores(response: &mut CatalogGetResponse) {
+    let scores = crate::quality_scores::scores();
+    for (identity, facts) in &mut response.models {
+        let canonical = facts
+            .get("model.canonical_id")
+            .and_then(serde_json::Value::as_str);
+        // An alias without a served canonical identity has no independent grade.
+        if canonical.is_none()
+            && response
+                .aliased
+                .iter()
+                .any(|alias| &alias.model == identity)
+        {
+            continue;
+        }
+        let Some(row) = scores.rows.get(canonical.unwrap_or(identity)) else {
+            continue;
+        };
+        for (key, value) in [("quality.elo", &row.elo), ("quality.eq", &row.eq)] {
+            if let Some(value) = value {
+                facts.insert(key.to_string(), serde_json::Value::Number(value.clone()));
+            }
+        }
+    }
+    response.quality_scores = Some(fusiform_protocol::QualityScoresWire {
+        graded_by: "operator".to_string(),
+        graded_at_ms: scores.graded_at_ms,
+    });
+    retain_quality_disclosure(response);
+}
+
+fn retain_quality_disclosure(response: &mut CatalogGetResponse) {
+    if !response
+        .models
+        .values()
+        .any(|facts| facts.contains_key("quality.elo") || facts.contains_key("quality.eq"))
+    {
+        response.quality_scores = None;
+    }
 }
 
 /// Keep only override disclosures whose value `models` still serves under the
@@ -2291,6 +2397,7 @@ fn render(
         // callers that serve one row's facts under another id.
         aliased: Vec::new(),
         curated: Vec::new(),
+        quality_scores: None,
         canonical_links,
         wire_corrections,
         fact_overrides,

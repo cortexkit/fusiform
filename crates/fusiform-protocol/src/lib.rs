@@ -535,6 +535,12 @@ pub struct CatalogGetResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub curated: Vec<CuratedModelWire>,
 
+    /// Operator judgments for routing selection, not upstream observations or
+    /// request bytes. Present once only when this response serves quality facts;
+    /// point-in-time reads omit both the facts and this disclosure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality_scores: Option<QualityScoresWire>,
+
     /// Facts this read withheld because their record is known bad.
     ///
     /// Omitted from the wire when empty, which is the ordinary case, so this
@@ -1002,6 +1008,16 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// shape verbatim. The consumer owns package-to-renderer mapping and transport
 /// quirks. Fusiform never infers a wire family or serves header/body overrides.
 pub const SERVED_FACTS: &[ServedFact] = &[
+    ServedFact {
+        key: "quality.elo",
+        class: FactClass::Advisory,
+        note: "operator-assigned general quality score for routing selection, not request bytes; current reads only, disclosed in quality_scores.",
+    },
+    ServedFact {
+        key: "quality.eq",
+        class: FactClass::Advisory,
+        note: "operator-assigned writing and judgment score for routing selection, not request bytes; current reads only, disclosed in quality_scores.",
+    },
     ServedFact {
         key: "model.name",
         class: FactClass::Advisory,
@@ -1498,6 +1514,13 @@ pub struct CuratedModelWire {
     pub auth_methods: Vec<String>,
     pub source_ref: String,
     pub review_by_ms: i64,
+}
+
+/// Attribution shared by all operator quality facts in one response.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QualityScoresWire {
+    pub graded_by: String,
+    pub graded_at_ms: i64,
 }
 
 /// Provenance for a curated `model.canonical_id`, not an upstream observation.

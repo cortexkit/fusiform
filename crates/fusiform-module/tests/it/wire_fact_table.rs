@@ -140,6 +140,23 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             .filter(|row| row.replaces.is_null())
             .map(|row| row.fact_key.clone()),
     );
+    // Grades are intentionally empty in the shipped file. Exercise the actual
+    // serving path with fixture grades rather than promising unproduced keys.
+    let quality = super::golden_payload::render_synthetic_quality_scores();
+    curated.extend(
+        quality["response"]["models"]
+            .as_object()
+            .unwrap()
+            .values()
+            .flat_map(|facts| {
+                facts
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .filter(|key| QUALITY_ONLY.contains(&key.as_str()))
+                    .cloned()
+            }),
+    );
     let unproduced = unproduced_tabled_facts(&produced, &curated, &tabled);
     assert!(unproduced.is_empty(), "{}", unproduced.join("\n"));
 
@@ -186,6 +203,16 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             "connection claims leave transport interpretation to the consumer"
         );
     }
+    for key in QUALITY_ONLY {
+        assert_eq!(
+            SERVED_FACTS
+                .iter()
+                .find(|fact| fact.key == *key)
+                .unwrap()
+                .class,
+            FactClass::Advisory
+        );
+    }
 
     // Every rate is money. A rate classified as advisory would tell a consumer
     // that a wrong value cannot cost anything.
@@ -219,18 +246,21 @@ pub(crate) const CURATED_ONLY: &[&str] = &[
 /// rows, so the golden fixture must always carry them.
 pub(crate) const ADDITION_ONLY: &[&str] = &["capability.server_side_fallback"];
 
+/// Operator judgments are joined at read time, never inferred from upstream.
+const QUALITY_ONLY: &[&str] = &["quality.elo", "quality.eq"];
+
 /// Tabled facts nothing emits, and curated-only facts the normalizer emits.
 ///
-/// A tabled fact must come from the normalizer, or be declared curated-only
-/// or addition-only and be carried by at least one curated row or shipped
-/// addition row (both passed in `curated`).
+/// A tabled fact must come from the normalizer, or be declared curated-only,
+/// addition-only or quality-only and be carried by at least one curated row, shipped
+/// addition row or synthetic grade response (all passed in `curated`).
 fn unproduced_tabled_facts(
     normalized: &[String],
     curated: &[String],
     tabled: &[&str],
 ) -> Vec<String> {
     let mut problems = Vec::new();
-    let not_upstream = || CURATED_ONLY.iter().chain(ADDITION_ONLY);
+    let not_upstream = || CURATED_ONLY.iter().chain(ADDITION_ONLY).chain(QUALITY_ONLY);
     for key in not_upstream() {
         if normalized.iter().any(|p| p == key) {
             problems.push(format!(

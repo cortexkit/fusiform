@@ -12,6 +12,7 @@ that keep them honest.
 | `model-aliases.json` | route-specific ids and the published row each one is | at read time, current reads only |
 | `curated-models.json` | provider rows models.dev does not carry | at read time on current reads; written to `curated_model_era` at start, which point-in-time reads serve (§4) |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
+| `quality-scores.json` | operator-assigned ELO and EQ judgments for routing selection | at read time, current reads only (§11) |
 | `wire-corrections.json` | sourced per-model endpoint corrections or withholding, and providers whose routed list is complete | at read time, current reads only (§9) |
 | `fact-overrides.json` | sourced values replacing one current upstream fact while upstream still publishes the value they replace, or adding one fact upstream publishes nothing for | at read time, current reads only (§10) |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
@@ -30,7 +31,7 @@ the source file of the same name under `crates/fusiform-module/src/`.
 ## 1. Rules every curated file follows
 
 1. **Curated facts are never stored as observations.** Creators, aliases,
-   curated rows, canonical links, fact overrides and billing planes are applied when a read is served, so a
+   curated rows, canonical links, quality scores, fact overrides and billing planes are applied when a read is served, so a
    point-in-time read replays what the upstream published and never today's
    curation (see [`data-model.md`](data-model.md) §8). Curated model rows
    differ on point-in-time reads: their history is recorded in a separate
@@ -658,3 +659,67 @@ model names the row to re-source or remove
 `planted_upstream_publication_reports_the_stale_addition`). Route tests in
 `tests/it/fact_overrides.rs` cover named, bulk, paged, filtered, plane, alias,
 historical, upstream-moved and upstream-published reads.
+
+## 11. Operator quality scores (`quality-scores.json`)
+
+These grades are the operator's judgments, not upstream facts or benchmark
+measurements. ELO describes general quality; EQ describes writing and judgment.
+They guide routing selection, not request bytes. The shipped table is empty;
+loading completed grades later changes data only.
+
+The compiled-in document is parsed once. File-level fields are `graded_by`
+(always `"operator"`), `graded_at_ms` (epoch milliseconds, with `0` meaning
+unspecified), `purpose`, and `rows`. Each row has `model`, `elo`, and `eq`:
+
+```json
+{
+  "graded_by": "operator",
+  "graded_at_ms": 123,
+  "purpose": "Operator-assigned model quality scores for routing selection, not upstream facts.",
+  "rows": [
+    {"model": "synthetic-lab/synthetic-model", "elo": 1284, "eq": 1599.8}
+  ]
+}
+```
+
+The example is synthetic. Each score is a JSON number or `null`; only non-null
+scores are served. JSON numbers travel as `serde_json::Number` with the
+workspace's `arbitrary_precision` feature, never through a binary float, so the
+decimal text survives parsing and serialization. Malformed rows, duplicate
+keys, and rows with both scores null are rejected and counted. The shipped-data
+test requires zero rejects.
+
+One grade belongs to the served `model.canonical_id`, shared across providers.
+Only a row with no canonical id falls back to its own `provider/model` key
+(which can contain slashes inside the model id). An alias gets a grade only
+when its served canonical id matches; it does not borrow a target's own-key
+grade. Canonical links are applied before the join. Billing-plane reads use
+the same grades as plain reads. All grades are computed per read and never
+stored; `at_ms` reads omit them. `fact_prefixes` filters `quality.elo` and
+`quality.eq` normally, including `quality.`. A response containing either
+fact carries one `quality_scores` attribution object; filtered or paged
+responses with no quality facts omit it.
+
+Import a finished sheet with:
+
+```sh
+python3 scripts/import-quality-scores.py grades.csv --graded-at 123
+```
+
+The CSV must have `model,ELO,EQ` columns; `AA` and other reference columns are
+ignored. Rows with neither score are omitted. Scores must be plain JSON
+decimals, without exponents, plus signs, or surrounding whitespace. Their text
+is written verbatim, including fractional trailing zeros. Duplicate model keys
+are refused with the CSV line number, even if an unscored row repeats a key.
+Rows are sorted by key with stable formatting. Omitting `--graded-at` writes
+`0`, not the current time, so rerunning the same import is byte-identical.
+Review and commit only the resulting data change when the grades are ready.
+
+Gates: `quality_scores.rs` checks shipped rejects, malformed and duplicate rows,
+fixture restoration, and exact decimal round trips. `route/quality_score_tests.rs`
+covers canonical and own-key joins, null omission, aliases, billing planes,
+filters, pages, and exclusion from point-in-time reads and storage. The golden
+case `catalog.get — synthetic operator quality scores` plants fixture grades
+so the response-field coverage fence remains effective with an empty shipped
+table. `python3 -m unittest discover -s scripts -p 'test_import_quality_scores.py'`
+checks the importer.

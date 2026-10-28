@@ -544,6 +544,7 @@ where
                     catalog_version: _,
                     models,
                     curated,
+                    quality_scores,
                     withheld,
                     retired,
                     uncertain,
@@ -556,6 +557,9 @@ where
                 } = page;
                 merged.models.extend(models);
                 merged.curated.extend(curated);
+                if quality_scores.is_some() {
+                    merged.quality_scores = quality_scores;
+                }
                 merged.withheld.extend(withheld);
                 merged.retired.extend(retired);
                 merged.uncertain.extend(uncertain);
@@ -814,15 +818,36 @@ fn render_catalog_models(
 
     let mut out = render_billing_plane(response);
     out.push('\n');
-    for identity in models.keys() {
-        let _ = writeln!(out, "  {identity}");
+    for (identity, facts) in models {
+        let _ = write!(out, "  {identity}");
+        for key in ["quality.elo", "quality.eq"] {
+            if let Some(value) = facts.get(key) {
+                let _ = write!(out, "  {key}={}", render_fact_value(value));
+            }
+        }
+        out.push('\n');
     }
     out.push_str(&render_curated(response));
+    out.push_str(&render_quality_scores(response));
     out.push_str(&render_aliased(response));
     out.push_str(&render_fact_overrides(response));
     out.push_str(&render_withheld(response));
     out.push_str(&render_uncertain(response));
     out
+}
+
+fn render_quality_scores(response: &serde_json::Value) -> String {
+    let Some(grades) = response
+        .get("quality_scores")
+        .filter(|value| value.is_object())
+    else {
+        return String::new();
+    };
+    format!(
+        "\nquality scores: graded by {} at {} (routing judgments, not upstream facts)\n",
+        grades["graded_by"].as_str().unwrap_or("?"),
+        format_instant(grades["graded_at_ms"].as_i64().unwrap_or(0))
+    )
 }
 
 /// An alias serves another model's facts under its own id, and its prices are
@@ -1110,6 +1135,7 @@ fn render_single_model(
     out.push_str(&render_fact_overrides(response));
     out.push_str(&render_withheld(response));
     out.push_str(&render_uncertain(response));
+    out.push_str(&render_quality_scores(response));
     // Return the assembled text so the caller can print it once.
     out
 }
@@ -3283,6 +3309,36 @@ mod render_history_tests {
 
 #[cfg(test)]
 mod curated_render_tests {
+    #[test]
+    fn quality_scores_render_exact_decimals_and_disclosure_once() {
+        let response: serde_json::Value = serde_json::from_str(
+            r#"{
+            "models":{"reseller/m":{"quality.elo":1284,"quality.eq":1599.8}},
+            "quality_scores":{"graded_by":"operator","graded_at_ms":123}
+        }"#,
+        )
+        .unwrap();
+        for bulk in [false, true] {
+            let mut response = response.clone();
+            if bulk {
+                response["models"]["reseller/n"] = serde_json::json!({"quality.elo":1000});
+            }
+            let text =
+                super::render_catalog_models(&response, response["models"].as_object().unwrap());
+            assert!(text.contains("quality.elo"));
+            assert!(text.contains("1284"));
+            assert!(text.contains("quality.eq"));
+            assert!(text.contains("1599.8"));
+            assert_eq!(
+                text.matches("quality scores: graded by operator").count(),
+                1
+            );
+        }
+        let mut empty = response;
+        empty.as_object_mut().unwrap().remove("quality_scores");
+        assert!(super::render_quality_scores(&empty).is_empty());
+    }
+
     use super::*;
 
     #[test]
@@ -3494,6 +3550,8 @@ mod paging_tests {
         // carries entries the first one does not. Losing them would print a
         // corrected or linked row without saying why.
         let mut second = page(2, "b", None);
+        second["quality_scores"] = json!({"graded_by":"operator","graded_at_ms":123});
+        second["models"]["b/m"]["quality.elo"] = json!(1284);
         second["canonical_links"] = json!([{
             "model":"b/m", "canonical_id":"lab/m", "source_ref":"s", "quote":"q",
             "lab_source_ref":"l", "lab_quote":"lq", "review_by_ms":2000
@@ -3515,6 +3573,11 @@ mod paging_tests {
         .await
         .unwrap();
         assert_eq!(result["canonical_links"][0]["model"], "b/m");
+        assert_eq!(
+            result["quality_scores"],
+            json!({"graded_by":"operator","graded_at_ms":123})
+        );
+        assert_eq!(result["models"]["b/m"]["quality.elo"], 1284);
         assert_eq!(result["wire_corrections"][0]["provider"], "b");
         assert_eq!(result["fact_overrides"][0]["model"], "b/m");
         assert_eq!(result["curated"].as_array().unwrap().len(), 2);

@@ -451,6 +451,10 @@ fn render_all() -> String {
         "catalog.get — synthetic canonical link".into(),
         render_synthetic_canonical_link(),
     );
+    ordinary.as_object_mut().unwrap().insert(
+        "catalog.get — synthetic operator quality scores".into(),
+        render_synthetic_quality_scores(),
+    );
     ordinary
         .as_object_mut()
         .unwrap()
@@ -606,6 +610,50 @@ fn render_synthetic_canonical_link() -> serde_json::Value {
     render_canonical_identity(&doc, "synthetic-provider", "synthetic-model")
 }
 
+/// Pin grade decimals and their shared disclosure while the shipped table is empty.
+pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
+    let _grades = fusiform_module::quality_scores::plant(
+        r#"{
+        "graded_by":"operator","graded_at_ms":123,"purpose":"synthetic routing grades",
+        "rows":[{"model":"synthetic-lab/synthetic-model","elo":1284,"eq":1599.8}]
+    }"#,
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("quality.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    let doc = serde_json::json!({"synthetic-quality-reseller": {
+        "id":"synthetic-quality-reseller", "name":"Synthetic Quality Reseller",
+        "models":{"synthetic-model": {
+            "id":"synthetic-model", "canonical_model_id":"synthetic-lab/synthetic-model"
+        }}
+    }});
+    let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+        .unwrap()
+        .catalog;
+    let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
+    store.append_eras(&plan.eras).unwrap();
+    let request = serde_json::json!({"name":"catalog.get","arguments":{
+        "provider_id":"synthetic-quality-reseller", "model_id":"synthetic-model",
+        "fact_prefixes":["quality."]
+    }});
+    let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+    let mut response = serde_json::to_value(response).unwrap();
+    response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+    assert_eq!(
+        response["models"]["synthetic-quality-reseller/synthetic-model"]["quality.eq"].to_string(),
+        "1599.8"
+    );
+    assert_eq!(response["quality_scores"]["graded_by"], "operator");
+    serde_json::json!({"request":request, "response":response})
+}
+
 fn render_canonical_identity(
     doc: &serde_json::Value,
     provider: &str,
@@ -730,12 +778,12 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         .count();
     assert_eq!(plain_plane_cases, 2);
     let curated_wire = render_curated_wire();
-    // The four single cases rendered outside `cases()`: the first provider page,
-    // the seed and synthetic identities, and the curated row at an instant.
+    // The five single cases rendered outside `cases()`: the first provider page,
+    // the seed and synthetic identities, synthetic grades, and curated history.
     for (text, expected) in [
         (
             GOLDEN.to_string(),
-            cases().len() + plain_plane_cases + 4 + curated_wire.len(),
+            cases().len() + plain_plane_cases + 5 + curated_wire.len(),
         ),
         (
             serde_json::to_string(&curated_wire).unwrap(),
@@ -754,6 +802,10 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         ),
         (
             serde_json::json!({"curated_history":render_curated_history()}).to_string(),
+            1,
+        ),
+        (
+            serde_json::json!({"synthetic_quality":render_synthetic_quality_scores()}).to_string(),
             1,
         ),
     ] {
@@ -1946,6 +1998,7 @@ fn every_read_response_field_reaches_the_fixture() {
         &[
             "CatalogGetResponse",
             "CuratedModelWire",
+            "QualityScoresWire",
             "CanonicalLinkWire",
             "WireCorrectionWire",
             "FactOverrideWire",

@@ -131,6 +131,8 @@ value would do to a consumer:
 | `existence` | advisory | `"present"` or `"absent"` |
 | `model.name` | advisory | human display name as a JSON string; otherwise no fact |
 | `provider.name` | advisory | the row's provider display name as a JSON string; otherwise no fact |
+| `quality.elo` | advisory | operator-assigned general quality score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
+| `quality.eq` | advisory | operator-assigned writing and judgment score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
 | `limit.context` | byte-affecting | integer token count, or `null` |
 | `limit.output` | byte-affecting | integer token count, or `null`; a sourced current-read override is disclosed in `fact_overrides` (§5.8) |
 | `capability.reasoning` | byte-affecting | `true`, `false` or `null` |
@@ -687,6 +689,44 @@ addition quoting Anthropic's refusals-and-fallback page
    though the store holds no fact under that key.
 
 Rules for the data are in [`curated-data.md`](curated-data.md) §10.
+
+### 5.9 Operator quality scores
+
+Current `catalog.get` reads join the operator's compiled-in grade table to each
+row's served `model.canonical_id`. A row without a canonical id uses its own
+`provider/model` key. Several providers serving the same canonical model share
+one grade. Alias rows receive grades only through a matching served canonical
+id, never through a target's provider/model key. Billing-plane reads keep the
+plain read's grades for the same row.
+
+`quality.elo` (general quality) and `quality.eq` (writing and judgment) are
+advisory judgments for routing selection, not upstream measurements or
+instructions changing request bytes. Null grades are absent facts. Numbers
+retain their decimal representation without a binary-float conversion.
+`fact_prefixes` applies normally (`["quality."]` selects both).
+
+When at least one quality fact survives in the response, `quality_scores`
+appears once at response level:
+
+```json
+{
+  "source": "models.dev",
+  "resolved_at_ms": 1000,
+  "catalog_version": 1,
+  "models": {
+    "synthetic-reseller/model": {"quality.elo": 1284, "quality.eq": 1599.8}
+  },
+  "quality_scores": {"graded_by": "operator", "graded_at_ms": 123}
+}
+```
+
+The example uses synthetic grades. `graded_at_ms` is epoch milliseconds (`0`
+means unspecified). There is no per-model attribution duplication. The object
+is omitted for an empty grade table, unmatched rows, filters excluding quality,
+and pages with no quality facts. The shipped table is empty. These derivations
+are computed per read, never stored: point-in-time (`at_ms`) reads carry no
+quality facts or attribution, and history has no grade eras. See
+[`curated-data.md`](curated-data.md) §11 for the table and CSV importer.
 
 ## 6. `catalog.history`
 
