@@ -69,8 +69,11 @@ def epoch_ms(value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("csv", type=Path)
-    parser.add_argument("--graded-at", type=epoch_ms, default=0,
-                        help="epoch milliseconds of grading (default: 0, unspecified)")
+    # Required rather than defaulted: the value is served to consumers as when
+    # the operator graded, so a placeholder such as 0 would read as a real date
+    # in 1970, and the current time would make two runs on the same sheet differ.
+    parser.add_argument("--graded-at", type=epoch_ms, required=True,
+                        help="epoch milliseconds when the operator finished grading")
     args = parser.parse_args()
     try:
         with args.csv.open(encoding="utf-8-sig", newline="") as source:

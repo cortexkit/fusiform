@@ -668,8 +668,9 @@ They guide routing selection, not request bytes. The shipped table is empty;
 loading completed grades later changes data only.
 
 The compiled-in document is parsed once. File-level fields are `graded_by`
-(always `"operator"`), `graded_at_ms` (epoch milliseconds, with `0` meaning
-unspecified), `purpose`, and `rows`. Each row has `model`, `elo`, and `eq`:
+(always `"operator"`), `graded_at_ms` (epoch milliseconds when the operator
+finished grading; `0` only in the shipped empty table, which serves no
+attribution), `purpose`, and `rows`. Each row has `model`, `elo`, and `eq`:
 
 ```json
 {
@@ -711,8 +712,10 @@ ignored. Rows with neither score are omitted. Scores must be plain JSON
 decimals, without exponents, plus signs, or surrounding whitespace. Their text
 is written verbatim, including fractional trailing zeros. Duplicate model keys
 are refused with the CSV line number, even if an unscored row repeats a key.
-Rows are sorted by key with stable formatting. Omitting `--graded-at` writes
-`0`, not the current time, so rerunning the same import is byte-identical.
+Rows are sorted by key with stable formatting. `--graded-at` is required: it is
+served as the grading date, so a placeholder would read as a real date, and the
+current time would make two runs on the same sheet differ. With the same sheet
+and the same `--graded-at`, rerunning the import is byte-identical.
 Review and commit only the resulting data change when the grades are ready.
 
 Gates: `quality_scores.rs` checks shipped rejects, malformed and duplicate rows,
