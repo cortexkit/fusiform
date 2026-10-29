@@ -110,7 +110,15 @@ fn canonical_links_fill_only_missing_identities_on_current_reads() {
                         assert_eq!(disclosure.lab_source_ref, row.lab_source_ref);
                         assert_eq!(disclosure.lab_quote, row.lab_quote);
                         assert_eq!(disclosure.review_by_ms, row.review_by_ms);
-                        if !prefixes.is_null() {
+                        if prefixes == json!(["model."]) {
+                            assert_eq!(
+                                response.models[&id],
+                                BTreeMap::from([
+                                    ("model.canonical_id".into(), json!(row.canonical_id)),
+                                    ("model.lineage".into(), json!("kimi")),
+                                ])
+                            );
+                        } else if !prefixes.is_null() {
                             assert_eq!(response.models[&id].len(), 1);
                         }
                     } else {
