@@ -7,26 +7,42 @@
 # Phase 1 runs on this machine in seconds and compiles nothing: lock parity,
 # formatting, lock resolution, the path-dependency check, the wire-crate
 # version check and the importer's Python tests.
-# Phase 2 runs the compile-heavy CI steps (clippy and the full test suite) as
-# one job on the remote Linux build server, never on this machine.
+# Phase 2 runs the compile-heavy CI steps (clippy and the full test suite). On
+# a Mac it sends them as one job to the remote Linux build server (`ck motor
+# run`), never compiling here. Anywhere else it runs them in place, which is
+# how a worker gates: it runs this whole script as one remote Linux job.
 #
 # Every step's exit code is captured on its own and printed, so one step's
 # failure can never hide behind another's success.
 #
-# Usage: scripts/gate.sh          both phases
-#        scripts/gate.sh --fast   phase 1 only
+# Usage: scripts/gate.sh [--fast] [--base REF]
+#   --fast      phase 1 only
+#   --base REF  the ref the wire-crate version check compares against
+#               (default origin/master, as CI uses). A checkout without that
+#               ref, such as a remote job's snapshot, passes the commit its
+#               work started from.
 set -uo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 fast_only=0
-if [ "${1:-}" = "--fast" ]; then
-    fast_only=1
-elif [ $# -gt 0 ]; then
-    echo "usage: scripts/gate.sh [--fast]" >&2
-    exit 2
-fi
+base=origin/master
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --fast) fast_only=1 ;;
+        --base)
+            [ $# -ge 2 ] || { echo "usage: scripts/gate.sh [--fast] [--base REF]" >&2; exit 2; }
+            base="$2"
+            shift
+            ;;
+        *)
+            echo "usage: scripts/gate.sh [--fast] [--base REF]" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
 
 log_dir="$(mktemp -d "${TMPDIR:-/tmp}/fusiform-gate.XXXXXX")"
 failed=()
@@ -53,10 +69,18 @@ lock_parity() {
 }
 
 wire_version() {
-    # The CI step compares against origin/master, so compare against the
-    # same ref. Refresh it first when the network allows.
-    git fetch -q origin master 2> /dev/null || true
-    ./scripts/check-wire-crate-version.sh origin/master
+    # The CI step compares against origin/master, so that is the default.
+    # Refresh it first when the network allows.
+    if [ "$base" = origin/master ]; then
+        git fetch -q origin master 2> /dev/null || true
+    fi
+    # A missing base is a failure, never a skip: skipping would let a wire
+    # change through without its version bump.
+    if ! git rev-parse --verify --quiet "$base^{commit}" > /dev/null; then
+        echo "base ref '$base' is not in this checkout; pass --base <commit>"
+        return 1
+    fi
+    ./scripts/check-wire-crate-version.sh "$base"
 }
 
 if ! git diff --quiet HEAD -- || [ -n "$(git ls-files --others --exclude-standard)" ]; then
@@ -73,14 +97,20 @@ step wire-crate-version wire_version
 step importer-tests python3 scripts/test_import_quality_scores.py
 
 if [ "$fast_only" -eq 0 ]; then
-    echo "phase 2 (remote Linux build server)"
-    # One job, so both steps share one snapshot and one warm build folder.
-    # The remote command prints each exit code and fails if either failed.
-    step clippy-and-tests ck motor run --vcpus 16 --timeout 3600 -- '
+    # Prints each exit code and fails if either failed.
+    compile_steps='
         cargo clippy --locked --workspace --all-targets -- -D warnings; c=$?
         cargo test --locked --workspace --all-targets; t=$?
         echo "clippy=$c test=$t"
         [ "$c" -eq 0 ] && [ "$t" -eq 0 ]'
+    if [ "$(uname -s)" = Darwin ]; then
+        echo "phase 2 (remote Linux build server)"
+        # One job, so both steps share one snapshot and one warm build folder.
+        step clippy-and-tests ck motor run --vcpus 16 --timeout 3600 -- "$compile_steps"
+    else
+        echo "phase 2 (in place)"
+        step clippy-and-tests bash -c "$compile_steps"
+    fi
     grep -E '^test result:|^clippy=' "$log_dir/clippy-and-tests.log" |
         awk '/^test result/{p+=$4; f+=$6; next} {print "      " $0} END{printf "      tests passed=%d failed=%d\n", p, f}'
 fi
