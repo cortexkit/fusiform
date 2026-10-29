@@ -898,6 +898,12 @@ fn serve_catalog_get_with_cache(
                 wide.push("model.canonical_id".to_string());
                 wide.push("existence".to_string());
             }
+            if prefixes.iter().any(|p| "wire.family".starts_with(p)) {
+                // Protocol verification needs the package and shape, and endpoint
+                // corrections must run before a route can advertise its protocol.
+                wide.push("wire.".to_string());
+                wide.push("existence".to_string());
+            }
             wide
         });
     }
@@ -1764,6 +1770,7 @@ fn finish_plane_view(
         });
         retain_quality_disclosure(&mut response);
         retain_served_overrides(&mut response);
+        retain_requested_wire_corrections(&mut response, requested_prefixes);
         return Ok(response);
     };
     response.plane = Some(plane.wire);
@@ -1775,6 +1782,16 @@ fn finish_plane_view(
             response
                 .billing_rules
                 .extend(apply_billing_plane(identity, facts, declared));
+            if current
+                && !response.wire_corrections.iter().any(|correction| {
+                    correction.withheld
+                        && format!("{}/{}", correction.provider, correction.model) == *identity
+                })
+            {
+                if let Some(family) = &declared.wire_family {
+                    facts.insert("wire.family".to_string(), serde_json::json!(family));
+                }
+            }
         }
         narrow_to_requested(facts, requested_prefixes);
     }
@@ -1792,7 +1809,19 @@ fn finish_plane_view(
     });
     retain_served_overrides(&mut response);
     retain_quality_disclosure(&mut response);
+    retain_requested_wire_corrections(&mut response, requested_prefixes);
     Ok(response)
+}
+
+fn retain_requested_wire_corrections(
+    response: &mut CatalogGetResponse,
+    prefixes: Option<&Vec<String>>,
+) {
+    // Endpoint facts fetched only to verify a protocol must not broaden the
+    // caller's requested endpoint disclosures.
+    if prefixes.is_some_and(|prefixes| !prefixes.iter().any(|p| "wire.api".starts_with(p))) {
+        response.wire_corrections.clear();
+    }
 }
 
 fn apply_model_lineage(response: &mut CatalogGetResponse) {
@@ -2327,6 +2356,7 @@ fn render(
             facts.insert(key.as_str().to_string(), value);
         }
         if at.is_none() {
+            let mut endpoint_withheld = false;
             // A sourced value replaces the stored upstream value only on a
             // current read; `at` reads serve the recorded history as it was.
             let withheld: Vec<&str> = snapshot
@@ -2348,6 +2378,7 @@ fn render(
                 &mut facts,
                 requested_prefixes,
             ) {
+                endpoint_withheld = correction.withheld;
                 wire_corrections.push(correction);
             }
             if let Some(correction) = crate::wire_corrections::apply_provider_api(
@@ -2357,6 +2388,17 @@ fn render(
                 requested_prefixes,
             ) {
                 wire_corrections.push(correction);
+            }
+            if !endpoint_withheld {
+                let npm = facts
+                    .get("wire.npm")
+                    .and_then(|claim| claim["value"].as_str());
+                let shape = facts
+                    .get("wire.shape")
+                    .and_then(|claim| claim["value"].as_str());
+                if let Some(family) = npm.and_then(|npm| crate::wire_families::lookup(npm, shape)) {
+                    facts.insert("wire.family".to_string(), serde_json::json!(family));
+                }
             }
             if let Some(link) = apply_canonical_link(
                 &model.provider_id,
@@ -4129,6 +4171,7 @@ mod alias_tests {
             target_provider_id: "ollama-cloud".to_string(),
             target_model_id: "glm-x".to_string(),
             model_name: None,
+            wire_family: None,
             basis: "b".to_string(),
             source_ref: "s".to_string(),
             established_at_ms: 1,
@@ -5153,6 +5196,7 @@ mod billing_plane_tests {
             target_provider_id: "other-provider".into(),
             target_model_id: "target-model".into(),
             model_name: None,
+            wire_family: None,
             basis: "same backend model".into(),
             source_ref: "routing code".into(),
             established_at_ms: 1_000,
@@ -5683,12 +5727,16 @@ fn omit_route_dependent_alias_facts(facts: &mut BTreeMap<String, serde_json::Val
     facts.remove("wire.npm");
     facts.remove("wire.api");
     facts.remove("wire.shape");
+    facts.remove("wire.family");
 }
 
 fn emit_alias_route_facts(
     facts: &mut BTreeMap<String, serde_json::Value>,
     alias: &crate::aliases::Alias,
 ) {
+    if let Some(family) = &alias.wire_family {
+        facts.insert("wire.family".to_string(), serde_json::json!(family));
+    }
     if let Some(name) = &alias.model_name {
         facts.insert("model.name".to_string(), serde_json::json!(name));
     }

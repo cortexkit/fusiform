@@ -33,6 +33,7 @@ struct AliasRow {
     provider_id: String,
     model_id: String,
     model_name: Option<String>,
+    wire_family: Option<String>,
     target: TargetRow,
     basis: String,
     source_ref: String,
@@ -57,6 +58,8 @@ pub struct Alias {
     pub target_model_id: String,
     /// The route's own display label from the pinned plugin source, if stated.
     pub model_name: Option<String>,
+    /// The alias route's protocol, verified from its own plugin source.
+    pub wire_family: Option<String>,
     /// Why this id is that model, in a sentence.
     pub basis: String,
     /// The file and pinned revision the claim was read from.
@@ -120,6 +123,14 @@ pub fn load_reporting_rejects(doc: &str) -> (Aliases, Vec<String>) {
             continue;
         }
         let key = (row.provider_id.clone(), row.model_id.clone());
+        if row
+            .wire_family
+            .as_deref()
+            .is_some_and(|family| !crate::wire_families::is_known(family))
+        {
+            rejects.push(format!("alias {}/{} has unknown wire_family", key.0, key.1));
+            continue;
+        }
         if row.reasoning_wire_ids.is_empty() != row.reasoning_default.is_none()
             || row
                 .reasoning_default
@@ -140,6 +151,7 @@ pub fn load_reporting_rejects(doc: &str) -> (Aliases, Vec<String>) {
             target_provider_id: row.target.provider_id,
             target_model_id: row.target.model_id,
             model_name: row.model_name.filter(|name| !name.is_empty()),
+            wire_family: row.wire_family,
             basis: row.basis,
             source_ref: row.source_ref,
             established_at_ms: row.established_at_ms,

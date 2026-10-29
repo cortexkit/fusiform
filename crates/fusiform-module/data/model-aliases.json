@@ -9,12 +9,13 @@
       "provider_id": "google",
       "model_id": "antigravity-claude-sonnet-5-5",
       "model_name": "Claude Sonnet 5.5 (Antigravity)",
+      "wire_family": "google.code_assist",
       "target": {
         "provider_id": "anthropic",
         "model_id": "claude-sonnet-5-5"
       },
       "basis": "ALL_MODEL_DEFINITIONS exposes antigravity-claude-sonnet-5-5 with low, medium and high variants and limits context: 1000000, output: 128000; ANTIGRAVITY_OPENCODE_MODEL_IDS includes it. The native claude-sonnet-5-5-low, -medium and -high entries all declare vertexModelId: 'claude-sonnet-5-5@default', so every tier reaches the same Anthropic model and the suffix selects only its thinking level. resolveModelWithTier maps the bare id to actualModel: `${modelWithoutQuota}-low`, tier: 'low'.",
-      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/d17ca2e88fe033f54f745faf31f6b815a75c32e1/packages/core/src/model-registry.ts#L188-L216 (vertexModelId: 'claude-sonnet-5-5@default' on all three tiers), #L327-L340 (variants and limits), #L472 (public id); packages/core/src/transform/model-resolver.ts#L205-L211 (actualModel: `${modelWithoutQuota}-low`, tier: 'low') at the same revision",
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/d17ca2e88fe033f54f745faf31f6b815a75c32e1/packages/core/src/model-registry.ts#L188-L216 (vertexModelId: 'claude-sonnet-5-5@default' on all three tiers), #L327-L340 (variants and limits), #L472 (public id); packages/core/src/transform/model-resolver.ts#L205-L211 (actualModel: `${modelWithoutQuota}-low`, tier: 'low') at the same revision; protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
       "established_at_ms": 1792713600000,
       "review_by_ms": 1797897600000,
       "reasoning_wire_ids": {
@@ -28,12 +29,13 @@
       "provider_id": "google",
       "model_id": "antigravity-claude-opus-5-5",
       "model_name": "Claude Opus 5.5 (Antigravity)",
+      "wire_family": "google.code_assist",
       "target": {
         "provider_id": "anthropic",
         "model_id": "claude-opus-5-5"
       },
       "basis": "ALL_MODEL_DEFINITIONS exposes antigravity-claude-opus-5-5 with low, medium and high variants and limits context: 1000000, output: 128000; ANTIGRAVITY_OPENCODE_MODEL_IDS includes it. The native claude-opus-5-5-low, -medium and -high entries all declare vertexModelId: 'claude-opus-5-5@default', so every tier reaches the same Anthropic model and the suffix selects only its thinking level. resolveModelWithTier maps the bare id to actualModel: `${modelWithoutQuota}-low`, tier: 'low'.",
-      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/d17ca2e88fe033f54f745faf31f6b815a75c32e1/packages/core/src/model-registry.ts#L158-L187 (vertexModelId: 'claude-opus-5-5@default' on all three tiers), #L341-L351 (variants and limits), #L473 (public id); packages/core/src/transform/model-resolver.ts#L205-L211 (actualModel: `${modelWithoutQuota}-low`, tier: 'low') at the same revision",
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/d17ca2e88fe033f54f745faf31f6b815a75c32e1/packages/core/src/model-registry.ts#L158-L187 (vertexModelId: 'claude-opus-5-5@default' on all three tiers), #L341-L351 (variants and limits), #L473 (public id); packages/core/src/transform/model-resolver.ts#L205-L211 (actualModel: `${modelWithoutQuota}-low`, tier: 'low') at the same revision; protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
       "established_at_ms": 1792713600000,
       "review_by_ms": 1797897600000,
       "reasoning_wire_ids": {
@@ -47,12 +49,13 @@
       "provider_id": "google",
       "model_id": "antigravity-gemini-4-argon",
       "model_name": "Gemini 4 Argon (Antigravity)",
+      "wire_family": "google.code_assist",
       "target": {
         "provider_id": "google",
         "model_id": "gemini-4-argon"
       },
       "basis": "The resolver recognises the id as Argon and resolves every tier through getGeminiArgonAntigravityModel: low, medium and high go to gemini-4-argon-low, -medium and -high, and a missing or unknown tier defaults to gemini-4-argon-medium. RESOLVER_ALIASES maps each of those back to gemini-4-argon, so the suffix spells a reasoning level and every request reaches Google's gemini-4-argon.",
-      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS, RESOLVER_ALIASES, getGeminiArgonAntigravityModel), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, isGeminiArgonModel)",
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS, RESOLVER_ALIASES, getGeminiArgonAntigravityModel), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, isGeminiArgonModel); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
       "established_at_ms": 1792108800000,
       "review_by_ms": 1797292800000,
       "reasoning_wire_ids": {
@@ -66,12 +69,13 @@
       "provider_id": "google",
       "model_id": "antigravity-gemini-3.8-flash",
       "model_name": "Gemini 3.8 Flash (Antigravity)",
+      "wire_family": "google.code_assist",
       "target": {
         "provider_id": "google",
         "model_id": "gemini-3.8-flash"
       },
       "basis": "The plugin resolves every tier of this id through GEMINI_38_FLASH_ROUTES: low, medium and high go to gemini-3.8-flash-low, -medium and -high, and a missing or unknown tier defaults to gemini-3.8-flash-medium. The suffix is how Code Assist spells a reasoning level, so every request reaches Google's gemini-3.8-flash.",
-      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
       "established_at_ms": 1790294400000,
       "review_by_ms": 1795478400000,
       "reasoning_wire_ids": {
@@ -85,12 +89,13 @@
       "provider_id": "google",
       "model_id": "antigravity-gemini-3.1-flash-image",
       "model_name": "Gemini 3.1 Flash Image (Antigravity)",
+      "wire_family": "google.code_assist",
       "target": {
         "provider_id": "google",
         "model_id": "gemini-3.1-flash-image"
       },
       "basis": "The id defines no reasoning variants, and the resolver sends it unchanged: an explicit antigravity- Gemini 3 id skips the alias map, and image models get no tier suffix, so the backend model is gemini-3.1-flash-image.",
-      "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, skipAlias and isImageModel)",
+      "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, skipAlias and isImageModel); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
       "established_at_ms": 1790294400000,
       "review_by_ms": 1795478400000
     }

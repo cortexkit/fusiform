@@ -26,6 +26,7 @@ pub mod route;
 pub mod seed;
 pub mod signals;
 pub mod wire_corrections;
+pub mod wire_families;
 
 use std::sync::Arc;
 

@@ -33,4 +33,5 @@ mod structured_output;
 mod tick;
 mod wire_claims;
 mod wire_fact_table;
+mod wire_families;
 mod wire_types_decode_the_wire;

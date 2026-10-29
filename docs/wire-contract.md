@@ -152,6 +152,7 @@ value would do to a consumer:
 | `wire.npm` | advisory | `{"value": "<published client package>", "from": "model" or "provider"}`; otherwise no fact |
 | `wire.api` | advisory | `{"value": "<base URL>", "from": "model", "provider" or "curated"}`; otherwise no fact; corrections/withholding disclosed in `wire_corrections` |
 | `wire.shape` | advisory | `{"value": "<published request shape>", "from": "model"}`; otherwise no fact |
+| `wire.family` | byte-affecting | verified request protocol token; current reads only; otherwise the request protocol is not verified |
 | `route.reasoning_wire_ids` | byte-affecting | curated effort → backend model id object on live aliases only; otherwise no fact |
 | `route.reasoning_default` | byte-affecting | default effort selected when the alias is requested without a tier suffix; a key in `route.reasoning_wire_ids`; otherwise no fact |
 | `successor` | advisory | sourced replacement `provider/model` identity on retired aliases; otherwise no fact |
@@ -181,14 +182,46 @@ recorded history, with the provider label in force at that instant (§3 item
 facts, not live labels. Name eras can be corrected independently through
 `{"field":"model","attribute":"name"}` and `{"field":"provider_name"}`.
 
-Except for explicitly disclosed corrections, the `wire.*` values are models.dev's claims, not fusiform's transport policy.
+Except for explicitly disclosed corrections, `wire.npm`, `wire.api` and
+`wire.shape` are models.dev's claims, not fusiform's transport policy.
 For each field independently, a model's `provider.npm` or `provider.api` wins
 over its provider's `npm` or `api` default; `from` names the level that supplied
 the value. `provider.shape` exists only on models. Missing fields create **no
 fact**: absence means unknown, never an inferred default. Strings pass through
-verbatim, including empty strings, URL spelling and trailing slashes. Consumers
-own package-to-renderer mapping and all transport quirks. Alias rows do not
+verbatim, including empty strings, URL spelling and trailing slashes. `wire.api`
+is a base URL, not a request protocol token. Consumers own runner support and
+transport quirks. Alias rows do not
 inherit these backend-specific claims (§5.5), and curated rows carry none.
+
+`wire.family` is a fact about the wire: this route's request protocol is
+verified, from its client package or the provider's own docs. It is not a
+statement that any client or runner can send it. Routing matches a runner pair's
+`wire_api` member against this `wire.family` fact; runners declare their own
+protocol and auth-method support elsewhere. When the fact is absent, **the
+request protocol is not verified**, never unsupported and never a fallback to
+another grammar.
+
+The only tokens are `anthropic.messages`, `openai.responses`,
+`openai.chat_completions`, `openai.chatgpt_responses`,
+`google.generate_content`, `google.code_assist` and `aws.bedrock_converse`.
+For plain upstream rows, the compiled-in `wire-families.json` matches the exact
+`wire.npm` package and `wire.shape` (including absence). Today's verification is
+broca's pinned `wire_family` table at
+[`d75a77db7249d4eb094ba667d1fa0d649e2e1682`](https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L19-L40).
+A new rule is added when someone verifies a package's protocol, citing the
+package source or the provider's docs. Unknown packages or shapes produce no
+fact. A row whose endpoint is withheld by a wire correction also gets no
+`wire.family`, so protocol matching cannot admit that unaddressable route.
+
+Present Code Assist aliases use their own curated `wire_family` in
+`model-aliases.json`, verified from the pinned plugin source, never the target's
+protocol. Retired aliases get none. A billing-plane read may replace the row's
+value with the optional `wire_family` in `billing-planes.json`: `openai/chatgpt`
+uses `openai.chatgpt_responses`, and `meta/oauth` uses `openai.responses`.
+Other planes inherit the row's value. Curated plane-only and System One rows
+have no package-derived protocol; a plane's verified value can still apply.
+These facts are computed only on current reads, never stored, and omitted on
+`at_ms` reads. `fact_prefixes: ["wire.family"]` and `["wire."]` select them.
 
 Current reads correct OpenCode Go's `wire.api` to the per-model base in
 `@earendil-works/pi-ai` 1.4.0's catalog, verified against its provider code at
@@ -389,7 +422,8 @@ provider overrides, and the request-selecting parts of `experimental`) are
 parsed, quarantined and never served
 (`models_dev_normalization::renderer_selecting_fields_are_quarantined`,
 `served_vocabulary::unreliable_and_renderer_selecting_fields_are_not_facts`).
-Fusiform says what a model is, never how to speak to it.
+These unserved request overrides are distinct from `wire.family`, which states
+a verified request protocol without supplying header or body overrides.
 
 ### 4.6 `model.kind`
 

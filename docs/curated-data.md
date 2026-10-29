@@ -16,6 +16,7 @@ that keep them honest.
 | `quality-scores.json` | operator-assigned ELO and EQ judgments for routing selection | at read time, current reads only (§11) |
 | `model-lineage.json` | curated routing diversity and cost-fallback groups | computed per row at read time, current reads only (§12) |
 | `wire-corrections.json` | sourced per-model endpoint corrections or withholding, and providers whose routed list is complete | at read time, current reads only (§9) |
+| `wire-families.json` | verified package-and-shape request protocols | at read time, current reads only (§13) |
 | `fact-overrides.json` | sourced values replacing one current upstream fact while upstream still publishes the value they replace, or adding one fact upstream publishes nothing for | at read time, current reads only (§10) |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
 | `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio` (§8) |
@@ -89,6 +90,7 @@ published row:
 | `source_ref` | the file and pinned revision of the routing code that was read |
 | `established_at_ms`, `review_by_ms` | when it was read; when it must be read again |
 | `reasoning_wire_ids`, `reasoning_default` | optional effort → backend model id map and default effort used when no tier is specified, read from the pinned plugin |
+| `wire_family` | optional verified route protocol, from the alias's pinned plugin source, never its target's package |
 
 How to add a row: read the routing code at a pinned revision. Include the
 alias only if every tier of the id resolves to the target's own backend model
@@ -146,6 +148,10 @@ absent row carries `successor`; a named read excluding the row carries it in
 the `retired` disclosure instead. Point-in-time reads do not apply this list.
 
 Serving rules are in [`wire-contract.md`](wire-contract.md) §5.5.
+
+Every present Antigravity alias states `wire_family: "google.code_assist"`.
+Retired aliases serve no protocol. This describes the request wire, not whether
+a runner supports it.
 
 ## 4. Curated model rows (`curated-models.json`)
 
@@ -777,3 +783,55 @@ embedded seed row with the dated routing glob reference supplied on
 grouped by one-line reasons and pins both sides of every difference; stale or
 new differences fail the test. New family classifications must be reviewed,
 not inferred from names or added merely to preserve a mistaken glob match.
+
+## 13. Request protocols (`wire-families.json`)
+
+`wire.family` is a byte-affecting fact about a route's verified request protocol,
+not a claim about runner support. Absent means **the request protocol is not
+verified**, never unsupported. `wire.api` is a base URL, not this token. Runners
+publish the protocols and auth methods they can drive separately.
+
+The compiled-in table is parsed once. Each rule names exact `npm` packages,
+`shapes` (`null` means the shape is absent, not a wildcard), one `wire_family`
+token and a one-line `basis`. Today's rules cite broca's `wire_family` table at
+[`d75a77db7249d4eb094ba667d1fa0d649e2e1682`](https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L19-L40).
+A new rule is added when someone verifies a package's protocol, citing the
+package source or the provider's docs. A new or unverified package or shape
+makes no fact, never a fallback to a different protocol.
+
+Only `anthropic.messages`, `openai.responses`, `openai.chat_completions`,
+`openai.chatgpt_responses`, `google.generate_content`, `google.code_assist` and
+`aws.bedrock_converse` are admitted. The loader counts rejects for unknown
+tokens, malformed rules, missing provenance and duplicate selectors; shipped
+rules must have zero rejects. Alias and billing-plane loaders reject unknown
+protocol tokens too.
+
+Current upstream reads derive the fact from `wire.npm` and `wire.shape` only
+after endpoint corrections. Withheld endpoints get no protocol. Present alias
+rows use their own curated `wire_family` (§3); retired aliases get none.
+`billing-planes.json` may set an optional per-plane `wire_family` in place of the
+row's value; unspecified planes inherit it. Only these planes override today:
+
+- `openai/chatgpt` → `openai.chatgpt_responses`. OpenAI's Codex client at
+  [`708e3e2c70142c75682a375669ca60754f76976d`](https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85)
+  defines `CHATGPT_CODEX_BASE_URL` as `https://chatgpt.com/backend-api/codex`,
+  selected for `AuthMode::Chatgpt` (lines 151–159 and 467–486). Its
+  [`responses.rs` lines 135–150](https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150)
+  constructs `POST /responses`.
+- `meta/oauth` → `openai.responses`. Broca's pinned
+  [`credential_persona_route` lines 9–17](https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L9-L17)
+  selects Responses at `https://api.meta.ai/v1` for Meta subscription credentials.
+  Meta's [API reference](https://dev.meta.ai/docs/api-reference) describes
+  `POST /v1/responses` as “OpenAI-compatible”; its
+  [Responses guide](https://dev.meta.ai/docs/protocols/responses) says “Call
+  `POST /v1/responses` with a `model` and `input`.” These docs verify the protocol,
+  not subscription credential eligibility; that plane's source also records a
+  successful subscription-login probe.
+
+Curated plane-only and System One rows have no package-derived protocol. The
+Meta plane has an explicit verified value; no protocol is inferred for the
+Cloudflare or TypeSafe curated rows from their decision/extraction kind.
+`wire.family` is never stored, appears only on current reads, is omitted on
+`at_ms` reads, and respects `wire.family` and `wire.` fact-prefix filters.
+`tests/it/wire_families.rs` exercises real seed witnesses, endpoint withholding,
+aliases, planes, history and filters through the served route.

@@ -60,6 +60,8 @@ pub struct Plane {
     pub kind: PlaneKind,
     /// Borrow only the exact canonical row from this provider on a quota view.
     pub rates_from_provider: Option<String>,
+    /// A sourced protocol specific to this login plane, not its API price card.
+    pub wire_family: Option<String>,
     pub source_ref: String,
     pub established_by: String,
     pub established_at_ms: i64,
@@ -123,6 +125,7 @@ struct PlaneRow {
     auth_method: String,
     kind: PlaneKind,
     rates_from_provider: Option<String>,
+    wire_family: Option<String>,
     source_ref: String,
     established_by: String,
     established_at_ms: i64,
@@ -204,6 +207,14 @@ pub fn load_reporting_rejects(doc: &str) -> (Planes, Vec<String>) {
             continue;
         }
         let key = (row.provider_id.clone(), row.auth_method.clone());
+        if row
+            .wire_family
+            .as_deref()
+            .is_some_and(|family| !crate::wire_families::is_known(family))
+        {
+            rejects.push(at("unknown wire_family"));
+            continue;
+        }
         if let Some(prior) = positions.get(&key) {
             rejects.push(at(&format!(
                 "duplicates plane {prior}: {}/{} already has a declaration",
@@ -279,6 +290,7 @@ pub fn load_reporting_rejects(doc: &str) -> (Planes, Vec<String>) {
                 auth_method: row.auth_method,
                 kind: row.kind,
                 rates_from_provider: row.rates_from_provider,
+                wire_family: row.wire_family,
                 source_ref: row.source_ref,
                 established_by: row.established_by,
                 established_at_ms: row.established_at_ms,

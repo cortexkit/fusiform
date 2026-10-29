@@ -83,6 +83,7 @@
             "from": "curated",
             "value": "https://api.anthropic.com/v1"
           },
+          "wire.family": "anthropic.messages",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/anthropic"
@@ -221,6 +222,7 @@
             "from": "provider",
             "value": "https://api.deepseek.com"
           },
+          "wire.family": "openai.chat_completions",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai-compatible"
@@ -410,6 +412,7 @@
             "from": "curated",
             "value": "https://api.openai.com/v1"
           },
+          "wire.family": "openai.responses",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai"
@@ -571,6 +574,7 @@
             "from": "curated",
             "value": "https://api.x.ai/v1"
           },
+          "wire.family": "openai.responses",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/xai"
@@ -616,7 +620,7 @@
       "aliased": [
         {
           "model": "google/antigravity-claude-sonnet-5-5",
-          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/d17ca2e88fe033f54f745faf31f6b815a75c32e1/packages/core/src/model-registry.ts#L188-L216 (vertexModelId: 'claude-sonnet-5-5@default' on all three tiers), #L327-L340 (variants and limits), #L472 (public id); packages/core/src/transform/model-resolver.ts#L205-L211 (actualModel: `${modelWithoutQuota}-low`, tier: 'low') at the same revision",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/d17ca2e88fe033f54f745faf31f6b815a75c32e1/packages/core/src/model-registry.ts#L188-L216 (vertexModelId: 'claude-sonnet-5-5@default' on all three tiers), #L327-L340 (variants and limits), #L472 (public id); packages/core/src/transform/model-resolver.ts#L205-L211 (actualModel: `${modelWithoutQuota}-low`, tier: 'low') at the same revision; protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
           "target_model_id": "claude-sonnet-5-5",
           "target_provider_id": "anthropic"
         }
@@ -724,7 +728,8 @@
             "high": "claude-sonnet-5-5-high",
             "low": "claude-sonnet-5-5-low",
             "medium": "claude-sonnet-5-5-medium"
-          }
+          },
+          "wire.family": "google.code_assist"
         }
       },
       "resolved_at_ms": -1,
@@ -743,7 +748,7 @@
       "aliased": [
         {
           "model": "google/antigravity-gemini-3.8-flash",
-          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
           "target_model_id": "gemini-3.8-flash",
           "target_provider_id": "google"
         }
@@ -853,7 +858,8 @@
             "high": "gemini-3.8-flash-high",
             "low": "gemini-3.8-flash-low",
             "medium": "gemini-3.8-flash-medium"
-          }
+          },
+          "wire.family": "google.code_assist"
         }
       },
       "resolved_at_ms": -1,
@@ -1184,6 +1190,7 @@
             "from": "provider",
             "value": "https://api.anyapi.ai/v1"
           },
+          "wire.family": "openai.chat_completions",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai-compatible"
@@ -1499,7 +1506,7 @@
       "aliased": [
         {
           "model": "google/antigravity-gemini-4-argon",
-          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS, RESOLVER_ALIASES, getGeminiArgonAntigravityModel), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, isGeminiArgonModel)",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS, RESOLVER_ALIASES, getGeminiArgonAntigravityModel), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, isGeminiArgonModel); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
           "target_model_id": "gemini-4-argon",
           "target_provider_id": "google"
         }
@@ -1544,7 +1551,7 @@
       "aliased": [
         {
           "model": "google/antigravity-gemini-3.8-flash",
-          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier)",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
           "target_model_id": "gemini-3.8-flash",
           "target_provider_id": "google"
         }
@@ -1638,7 +1645,8 @@
             "high": "gemini-3.8-flash-high",
             "low": "gemini-3.8-flash-low",
             "medium": "gemini-3.8-flash-medium"
-          }
+          },
+          "wire.family": "google.code_assist"
         }
       },
       "resolved_at_ms": -1,
@@ -1884,7 +1892,8 @@
           "model.family": "muse",
           "model.lineage": "llama",
           "model.name": "Muse Wonder Full",
-          "model.open_weights": false
+          "model.open_weights": false,
+          "wire.family": "openai.responses"
         }
       },
       "plane": {
@@ -1892,7 +1901,7 @@
         "kind": "quota_proxy",
         "provider_id": "meta",
         "review_by_ms": 1797033600000,
-        "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with 12 ids including muse-wonder-full-1.0; POST https://api.meta.ai/v1/responses with muse-wonder-full-1.0 at 16:42:45Z returned 200."
+        "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with 12 ids including muse-wonder-full-1.0; POST https://api.meta.ai/v1/responses with muse-wonder-full-1.0 at 16:42:45Z returned 200. Protocol: https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L9-L17 credential_persona_route selects OpenAiResponses at https://api.meta.ai/v1 for meta/oauth. https://dev.meta.ai/docs/api-reference states 'Meta Model API is an HTTP API served at https://api.meta.ai/v1 and authenticated with a bearer token' and 'POST /v1/responses and related endpoints ... OpenAI-compatible'; https://dev.meta.ai/docs/protocols/responses says 'Call POST /v1/responses with a model and input.' The docs establish the protocol, not subscription credential eligibility; the pinned client policy and successful probe establish this plane."
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
@@ -2145,6 +2154,7 @@
             "from": "curated",
             "value": "https://api.anthropic.com/v1"
           },
+          "wire.family": "anthropic.messages",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/anthropic"
@@ -2273,6 +2283,7 @@
             "from": "curated",
             "value": "https://opencode.ai/inference/go/v1"
           },
+          "wire.family": "anthropic.messages",
           "wire.npm": {
             "from": "model",
             "value": "@ai-sdk/anthropic"
@@ -2888,6 +2899,7 @@
             "from": "curated",
             "value": "https://api.openai.com/v1"
           },
+          "wire.family": "openai.responses",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai"
@@ -3318,6 +3330,7 @@
         "route.reasoning_wire_ids",
         "route.reasoning_default",
         "successor",
+        "wire.family",
         "wire.npm",
         "wire.api",
         "wire.shape",
@@ -3401,6 +3414,7 @@
             "from": "curated",
             "value": "https://api.openai.com/v1"
           },
+          "wire.family": "openai.chatgpt_responses",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai"
@@ -3412,7 +3426,7 @@
         "kind": "quota_proxy",
         "provider_id": "openai",
         "review_by_ms": 1796515200000,
-        "source_ref": "https://help.openai.com/en/articles/20001106"
+        "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -3502,7 +3516,7 @@
         "kind": "quota_proxy",
         "provider_id": "openai",
         "review_by_ms": 1796515200000,
-        "source_ref": "https://help.openai.com/en/articles/20001106"
+        "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
@@ -3568,7 +3582,7 @@
         "kind": "quota_proxy",
         "provider_id": "openai",
         "review_by_ms": 1796515200000,
-        "source_ref": "https://help.openai.com/en/articles/20001106"
+        "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
@@ -3732,7 +3746,7 @@
         "kind": "quota_proxy",
         "provider_id": "openai",
         "review_by_ms": 1796515200000,
-        "source_ref": "https://help.openai.com/en/articles/20001106"
+        "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
@@ -3919,6 +3933,7 @@
             "from": "curated",
             "value": "https://api.openai.com/v1"
           },
+          "wire.family": "openai.chatgpt_responses",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai"
@@ -3954,6 +3969,7 @@
             "from": "curated",
             "value": "https://api.openai.com/v1"
           },
+          "wire.family": "openai.chatgpt_responses",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai"
@@ -3965,7 +3981,7 @@
         "kind": "quota_proxy",
         "provider_id": "openai",
         "review_by_ms": 1796515200000,
-        "source_ref": "https://help.openai.com/en/articles/20001106"
+        "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -4054,7 +4070,7 @@
         "kind": "quota_proxy",
         "provider_id": "openai",
         "review_by_ms": 1796515200000,
-        "source_ref": "https://help.openai.com/en/articles/20001106"
+        "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
@@ -4108,7 +4124,7 @@
         "kind": "quota_proxy",
         "provider_id": "openai",
         "review_by_ms": 1796515200000,
-        "source_ref": "https://help.openai.com/en/articles/20001106"
+        "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
@@ -4257,7 +4273,7 @@
         "kind": "quota_proxy",
         "provider_id": "openai",
         "review_by_ms": 1796515200000,
-        "source_ref": "https://help.openai.com/en/articles/20001106"
+        "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
@@ -4435,6 +4451,7 @@
             "from": "curated",
             "value": "https://api.openai.com/v1"
           },
+          "wire.family": "openai.chatgpt_responses",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai"
@@ -4446,7 +4463,7 @@
         "kind": "quota_proxy",
         "provider_id": "openai",
         "review_by_ms": 1796515200000,
-        "source_ref": "https://help.openai.com/en/articles/20001106"
+        "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -4617,6 +4634,7 @@
             "from": "curated",
             "value": "https://api.anthropic.com/v1"
           },
+          "wire.family": "anthropic.messages",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/anthropic"
@@ -4857,6 +4875,7 @@
             "from": "provider",
             "value": "https://api.kimi.ai/coding/v1"
           },
+          "wire.family": "openai.chat_completions",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai-compatible"
@@ -4963,6 +4982,7 @@
             "from": "provider",
             "value": "https://api.kimi.ai/coding/v1"
           },
+          "wire.family": "openai.chat_completions",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai-compatible"
@@ -5025,6 +5045,7 @@
             "from": "provider",
             "value": "https://api.kimi.ai/coding/v1"
           },
+          "wire.family": "openai.chat_completions",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai-compatible"
@@ -5106,6 +5127,7 @@
             "from": "provider",
             "value": "https://api.kimi.ai/coding/v1"
           },
+          "wire.family": "openai.chat_completions",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai-compatible"
@@ -5495,6 +5517,7 @@
             "from": "provider",
             "value": "https://api.kimi.ai/coding/v1"
           },
+          "wire.family": "openai.chat_completions",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai-compatible"
@@ -5549,6 +5572,7 @@
             "from": "provider",
             "value": "https://api.kimi.ai/coding/v1"
           },
+          "wire.family": "openai.chat_completions",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai-compatible"
@@ -5603,6 +5627,7 @@
             "from": "provider",
             "value": "https://api.kimi.ai/coding/v1"
           },
+          "wire.family": "openai.chat_completions",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai-compatible"
@@ -5648,6 +5673,7 @@
             "from": "provider",
             "value": "https://api.kimi.ai/coding/v1"
           },
+          "wire.family": "openai.chat_completions",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai-compatible"
@@ -5762,6 +5788,7 @@
             "from": "curated",
             "value": "https://api.anthropic.com/v1"
           },
+          "wire.family": "anthropic.messages",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/anthropic"
@@ -6042,6 +6069,7 @@
             "from": "curated",
             "value": "https://opencode.ai/inference/go/v1"
           },
+          "wire.family": "anthropic.messages",
           "wire.npm": {
             "from": "model",
             "value": "@ai-sdk/anthropic"
