@@ -130,7 +130,9 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
     curated.extend(response.models.values().flat_map(|facts| {
         facts
             .keys()
-            .filter(|key| CURATED_ONLY.contains(&key.as_str()))
+            .filter(|key| {
+                CURATED_ONLY.contains(&key.as_str()) || LINEAGE_ONLY.contains(&key.as_str())
+            })
             .cloned()
     }));
     // An addition-only fact is produced by a shipped addition row.
@@ -203,7 +205,7 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             "connection claims leave transport interpretation to the consumer"
         );
     }
-    for key in QUALITY_ONLY {
+    for key in QUALITY_ONLY.iter().chain(LINEAGE_ONLY) {
         assert_eq!(
             SERVED_FACTS
                 .iter()
@@ -249,18 +251,27 @@ pub(crate) const ADDITION_ONLY: &[&str] = &["capability.server_side_fallback"];
 /// Operator judgments are joined at read time, never inferred from upstream.
 const QUALITY_ONLY: &[&str] = &["quality.elo", "quality.eq"];
 
+/// `catalog.get` computes `model.lineage` on current reads, never the normalizer.
+const LINEAGE_ONLY: &[&str] = &["model.lineage"];
+
 /// Tabled facts nothing emits, and curated-only facts the normalizer emits.
 ///
 /// A tabled fact must come from the normalizer, or be declared curated-only,
-/// addition-only or quality-only and be carried by at least one curated row, shipped
-/// addition row or synthetic grade response (all passed in `curated`).
+/// addition-only, quality-only or lineage-only and be carried by at least one
+/// curated row, shipped addition row or actual served response (all passed in `curated`).
 fn unproduced_tabled_facts(
     normalized: &[String],
     curated: &[String],
     tabled: &[&str],
 ) -> Vec<String> {
     let mut problems = Vec::new();
-    let not_upstream = || CURATED_ONLY.iter().chain(ADDITION_ONLY).chain(QUALITY_ONLY);
+    let not_upstream = || {
+        CURATED_ONLY
+            .iter()
+            .chain(ADDITION_ONLY)
+            .chain(QUALITY_ONLY)
+            .chain(LINEAGE_ONLY)
+    };
     for key in not_upstream() {
         if normalized.iter().any(|p| p == key) {
             problems.push(format!(
@@ -313,6 +324,21 @@ fn planted_unproduced_or_inferred_curated_only_fact_is_reported() {
             &["model.kind"]
         ),
         ["the normalizer emits \"model.kind\", which only curated rows may state"]
+    );
+    assert!(
+        unproduced_tabled_facts(&[], &strings(&["model.lineage"]), &["model.lineage"],).is_empty()
+    );
+    assert_eq!(
+        unproduced_tabled_facts(&[], &[], &["model.lineage"]),
+        ["the wire table lists \"model.lineage\" and the producer never emits it"]
+    );
+    assert_eq!(
+        unproduced_tabled_facts(
+            &strings(&["model.lineage"]),
+            &strings(&["model.lineage"]),
+            &["model.lineage"],
+        ),
+        ["the normalizer emits \"model.lineage\", which only curated rows may state"]
     );
 }
 

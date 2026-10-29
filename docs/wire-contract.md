@@ -130,6 +130,7 @@ value would do to a consumer:
 | --- | --- | --- |
 | `existence` | advisory | `"present"` or `"absent"` |
 | `model.name` | advisory | human display name as a JSON string; otherwise no fact |
+| `model.lineage` | advisory | curated routing diversity and cost-fallback group; current reads only; otherwise no fact (§5.10) |
 | `provider.name` | advisory | the row's provider display name as a JSON string; otherwise no fact |
 | `quality.elo` | advisory | operator-assigned general quality score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
 | `quality.eq` | advisory | operator-assigned writing and judgment score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
@@ -727,6 +728,30 @@ and pages with no quality facts. The shipped table is empty. These derivations
 are computed per read, never stored: point-in-time (`at_ms`) reads carry no
 quality facts or attribution, and history has no grade eras. See
 [`curated-data.md`](curated-data.md) §11 for the table and CSV importer.
+
+### 5.10 Model lineage
+
+`model.lineage` is a curated per-row classification for routing panel diversity
+(one seat per lineage) and same-lineage cost fallback. Its closed string set is
+`claude`, `gpt`, `gemini`, `grok`, `qwen`, `kimi`, `glm`, `deepseek`, `minimax`,
+`mistral`, `llama`. An unclassified row has no fact. The string `other` is never
+served; consumers may treat absence as their own other group.
+
+The compiled-in `model-lineage.json` applies exact model overrides first, then
+an exact models.dev `model.family` mapping. Only a row without a family may
+fall back to the lab prefix of its served `model.canonical_id`. If both fields
+are absent, a final map of first-party providers may establish lineage; a
+reseller id or model name never does. A present but unmapped family blocks both
+fallbacks. Gemma belongs to `gemini`; Muse belongs to `llama` under routing's
+current grouping. These are routing policy groups, not claims of identical
+weights or request formats.
+
+Aliases use their own exact override or their own served canonical identity,
+never a target's exact-model override or copied family. The fact is computed
+on current `catalog.get` reads, including billing-plane reads, before the final
+`fact_prefixes` filter (`model.lineage` and `model.` both select it). It is never
+stored, never present on `at_ms` reads, and adds no history or disclosure field.
+See [curated data §12](curated-data.md#12-model-lineage-model-lineagejson).
 
 ## 6. `catalog.history`
 
