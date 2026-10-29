@@ -11,7 +11,14 @@ scripts/no-outside-path-deps.sh
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked --workspace --all-targets
 scripts/check-wire-crate-version.sh origin/master
+python3 scripts/test_import_quality_scores.py
 ```
+
+`scripts/gate.sh` runs the whole list and prints `GATE_OK <rev>` or names each
+failed step. The checks that compile nothing run locally in seconds; clippy
+and the test suite run as one job on the CortexKit remote build server through
+`ck motor run`. Without that server, run the commands above directly.
+`scripts/gate.sh --fast` runs only the local checks.
 
 - `cargo fmt --check` prints nothing on success.
 - `scripts/no-outside-path-deps.sh` refuses a path dependency that points

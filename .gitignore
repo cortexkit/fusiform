@@ -1,5 +1,8 @@
-# Alfonso seat working state (prompts, drafts, session scratch)
-.cortexkit/
+# Agent working state (prompts, drafts, session scratch). The contents are
+# ignored rather than the folder, so the standing worker rules can be tracked.
+.cortexkit/*
+!.cortexkit/WORKER.md
+__pycache__/
 /target
 
 # Tooling-generated codebase summaries. Ignored rather than committed because

@@ -211,3 +211,8 @@ jobs:
       # Fetch depth 0 above so origin/master resolves for the comparison.
       - name: Served schema version discipline
         run: ./scripts/check-wire-crate-version.sh origin/master
+
+      # The quality-score importer is a maintainer script with its own tests.
+      # scripts/gate.sh runs them too, so the local gate and CI stay one list.
+      - name: Quality-score importer tests
+        run: python3 scripts/test_import_quality_scores.py
