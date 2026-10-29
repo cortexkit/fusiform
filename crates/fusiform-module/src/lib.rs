@@ -19,6 +19,7 @@ pub mod fetch;
 pub mod health;
 pub mod input_audio;
 pub mod loop_;
+pub mod model_lineage;
 pub mod plan_prices;
 pub mod quality_scores;
 pub mod route;

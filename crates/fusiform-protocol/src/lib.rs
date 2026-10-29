@@ -1024,6 +1024,11 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "human display label, verbatim upstream or sourced curation. Absent when missing or empty; aliases use only their own sourced route label, never the target's name. Consumer display only.",
     },
     ServedFact {
+        key: "model.lineage",
+        class: FactClass::Advisory,
+        note: "curated routing diversity and cost-fallback group; current reads only, never stored. One of claude, gpt, gemini, grok, qwen, kimi, glm, deepseek, minimax, mistral, llama. Absence means unclassified, never the string other.",
+    },
+    ServedFact {
         key: "provider.name",
         class: FactClass::Advisory,
         note: "human display label of the row's provider, verbatim upstream or sourced curation for an unlisted provider. Absent when missing or empty. Consumer display only, not the model's creator.",

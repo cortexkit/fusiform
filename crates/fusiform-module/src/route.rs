@@ -35,6 +35,9 @@ mod paging_tests;
 mod canonical_link_tests;
 
 #[cfg(test)]
+#[path = "route/model_lineage_tests.rs"]
+mod model_lineage_tests;
+#[cfg(test)]
 #[path = "route/quality_score_tests.rs"]
 mod quality_score_tests;
 
@@ -885,6 +888,13 @@ fn serve_catalog_get_with_cache(
                 .any(|key| prefixes.iter().any(|p| key.starts_with(p)))
             {
                 // Keep the served identity until quality grades have been joined.
+                wide.push("model.canonical_id".to_string());
+                wide.push("existence".to_string());
+            }
+            if prefixes.iter().any(|p| "model.lineage".starts_with(p)) {
+                // Lineage needs classification inputs even when the caller
+                // requests only the derived fact, not the upstream fields.
+                wide.push("model.family".to_string());
                 wide.push("model.canonical_id".to_string());
                 wide.push("existence".to_string());
             }
@@ -1739,6 +1749,7 @@ fn finish_plane_view(
 ) -> Result<CatalogGetResponse, RouteError> {
     if current {
         apply_quality_scores(&mut response);
+        apply_model_lineage(&mut response);
     }
     let Some(plane) = plane else {
         // Callers that did not ask for a billing claim keep the ordinary view.
@@ -1782,6 +1793,28 @@ fn finish_plane_view(
     retain_served_overrides(&mut response);
     retain_quality_disclosure(&mut response);
     Ok(response)
+}
+
+fn apply_model_lineage(response: &mut CatalogGetResponse) {
+    let classifications = crate::model_lineage::classifications();
+    for (identity, facts) in &mut response.models {
+        let lineage = classifications.lookup(
+            identity,
+            facts
+                .get("model.family")
+                .and_then(serde_json::Value::as_str),
+            facts
+                .get("model.canonical_id")
+                .and_then(serde_json::Value::as_str),
+            response
+                .aliased
+                .iter()
+                .any(|alias| &alias.model == identity),
+        );
+        if let Some(lineage) = lineage {
+            facts.insert("model.lineage".into(), serde_json::json!(lineage));
+        }
+    }
 }
 
 fn apply_quality_scores(response: &mut CatalogGetResponse) {

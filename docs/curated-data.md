@@ -2,8 +2,9 @@
 
 Most of what fusiform serves is observed: fetched from models.dev and stored
 as eras. A small set of facts is curated by hand in files under
-`crates/fusiform-module/data/`, compiled into the binary, and reviewed on a
-schedule. This document lists those files, what each may claim, and the gates
+`crates/fusiform-module/data/`, compiled into the binary, and generally reviewed
+on a schedule. Routing lineage is an undated classification, not a dated price
+or vendor claim. This document lists those files, what each may claim, and the gates
 that keep them honest.
 
 | File | Holds | Applied |
@@ -13,6 +14,7 @@ that keep them honest.
 | `curated-models.json` | provider rows models.dev does not carry | at read time on current reads; written to `curated_model_era` at start, which point-in-time reads serve (§4) |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
 | `quality-scores.json` | operator-assigned ELO and EQ judgments for routing selection | at read time, current reads only (§11) |
+| `model-lineage.json` | curated routing diversity and cost-fallback groups | computed per row at read time, current reads only (§12) |
 | `wire-corrections.json` | sourced per-model endpoint corrections or withholding, and providers whose routed list is complete | at read time, current reads only (§9) |
 | `fact-overrides.json` | sourced values replacing one current upstream fact while upstream still publishes the value they replace, or adding one fact upstream publishes nothing for | at read time, current reads only (§10) |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
@@ -31,7 +33,7 @@ the source file of the same name under `crates/fusiform-module/src/`.
 ## 1. Rules every curated file follows
 
 1. **Curated facts are never stored as observations.** Creators, aliases,
-   curated rows, canonical links, quality scores, fact overrides and billing planes are applied when a read is served, so a
+   curated rows, canonical links, quality scores, model lineage, fact overrides and billing planes are applied when a read is served, so a
    point-in-time read replays what the upstream published and never today's
    curation (see [`data-model.md`](data-model.md) §8). Curated model rows
    differ on point-in-time reads: their history is recorded in a separate
@@ -726,3 +728,45 @@ case `catalog.get — synthetic operator quality scores` plants fixture grades
 so the response-field coverage fence remains effective with an empty shipped
 table. `python3 -m unittest discover -s scripts -p 'test_import_quality_scores.py'`
 checks the importer.
+
+## 12. Model lineage (`model-lineage.json`)
+
+This file carries routing's grouping, applied to models.dev's own family and
+canonical fields. It is classification policy rather than a published vendor
+fact, so it requires neither first-party quotes nor review dates. Each map has
+a short `purpose` note and an `entries` object from exact keys to one of the
+closed lineage strings: `claude`, `gpt`, `gemini`, `grok`, `qwen`, `kimi`, `glm`,
+`deepseek`, `minimax`, `mistral`, `llama`. Unknown rows have no `model.lineage`;
+`other` is not an accepted value.
+
+The maps apply in order:
+
+1. `models`: exact `provider/model` overrides, including alias identities that
+   cannot use the ordinary family path.
+2. `families`: exact upstream `model.family` values. All 67 families belonging
+   to the eleven lineages in the embedded seed are mapped; other families are
+   deliberately unmapped. Related Mistral families are grouped together, Gemma
+   is `gemini`, and Muse is `llama` under routing's existing policy.
+3. `labs`: the lab prefix of the served `model.canonical_id`, only when no family
+   is present. An unmapped family does not fall through.
+4. `providers`: first-party provider ids present in the seed, only when both
+   family and canonical id are absent. This does not include reseller provider
+   prefixes or inspect model names.
+
+Aliases use only their own exact entry or served canonical id: neither the
+copied target family nor the target's exact-model override establishes the
+alias's classification. A missing canonical identity is not replaced with the
+target's provider/model key.
+
+`model_lineage.rs` parses the embedded file once, reports malformed entries as
+rejects while retaining independent valid classifications, and tests that the
+shipped file has zero rejects. The route joins `model.lineage` only on current
+reads, before the final fact-prefix filter and equally for plain and billing
+plane views. Nothing is written to storage or served on `at_ms` reads.
+
+`route/model_lineage_tests.rs` checks the serving paths and compares every
+embedded seed row with the dated routing glob reference supplied on
+2026-10-29. Its explicit `model_lineage_routing_differences.json` allowlist is
+grouped by one-line reasons and pins both sides of every difference; stale or
+new differences fail the test. New family classifications must be reviewed,
+not inferred from names or added merely to preserve a mistaken glob match.
