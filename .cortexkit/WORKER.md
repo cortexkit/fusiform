@@ -7,10 +7,12 @@ routine steps; anything not listed under "pre-approved" still comes to the head.
 
 - Compile and test only on the remote Linux build server (`runon: "linux,16c"`
   for the whole suite, smaller for one crate). Never compile on the Mac.
-- Before delivering, run `scripts/gate.sh`. It runs exactly what CI runs: a
-  local phase in seconds, then clippy and the full test suite as one remote
-  job. Quote its final line (`GATE_OK <rev>`) in the delivery. A delivery
-  without it is not finished.
+- Before delivering, run the whole gate as one remote job:
+  `scripts/gate.sh --base <the commit your work started from>` with
+  `runon: "linux,16c"`. It runs exactly what CI runs, in place on the build
+  server. `--base` is needed because the remote checkout has no
+  `origin/master`. Quote its final line (`GATE_OK <rev>`) in the delivery. A
+  delivery without it is not finished.
 - A bug fix carries one test, shown once to fail without the fix. Say how you
   showed it.
 
