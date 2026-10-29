@@ -8,10 +8,13 @@
 //! is exactly the value the row was sourced against (`replaces`). Once
 //! models.dev publishes anything else, the row stops applying and the upstream
 //! value is served again, so an override can never hide a later upstream
-//! change.
+//! change. `replaces` may be `null` when the fact is one ingest always stores,
+//! as `null` when models.dev publishes nothing (`model.status`): the row then
+//! applies only while that stored `null` is there.
 //!
-//! An ADDITION (`replaces: null`) supplies a fact models.dev publishes nothing
-//! for, sourced from the model vendor's own documentation. It applies only
+//! An ADDITION supplies a fact models.dev publishes nothing for and ingest does
+//! not store at all (see `ADDED_FACTS`), sourced from the model vendor's own
+//! documentation. Its `replaces` is `null`. It applies only
 //! while the stored upstream row carries no such fact at all. If upstream ever
 //! records the key, upstream wins and the row stops applying, for the same
 //! reason as a replacement.
@@ -34,16 +37,31 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 ///
 /// `capability.server_side_fallback` is a vendor-documented request feature
 /// that models.dev has no field for, so it can only arrive as an addition.
-pub const OVERRIDABLE_FACTS: [&str; 3] = [
+///
+/// `model.status` can only replace the `null` ingest stores when models.dev
+/// publishes no status, and only with `"deprecated"`, for a model whose
+/// vendor marks it deprecated before models.dev does. Consumers stop routing
+/// to deprecated rows, so leaving the mark off serves a dead model as live
+/// until models.dev catches up.
+pub const OVERRIDABLE_FACTS: [&str; 4] = [
     "limit.context",
     "limit.output",
     "capability.server_side_fallback",
+    "model.status",
 ];
 
 /// The facts only an addition row can serve, because models.dev publishes no
 /// value for them. A read filtered to one of these must still reach the rows
 /// an addition applies to, even though the store holds no matching fact.
 pub const ADDED_FACTS: [&str; 1] = ["capability.server_side_fallback"];
+
+/// Whether a row supplies a fact the stored row lacks (an addition), rather
+/// than replacing a stored value. The fact key decides, not `replaces`: a
+/// `model.status` row replaces a stored `null`, so its `replaces` is `null`
+/// too, yet it must apply only while that `null` is stored.
+fn is_addition(row: &FactOverride) -> bool {
+    ADDED_FACTS.contains(&row.fact_key.as_str())
+}
 
 /// What `value` and `replaces` must be for a fact key, or why the row is
 /// invalid.
@@ -71,7 +89,20 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
-        _ => Some("only limit.context, limit.output and capability.server_side_fallback may be overridden"),
+        // Only the vendor's deprecation is served. Other statuses (beta,
+        // alpha) change nothing a consumer does, and a status models.dev
+        // publishes is never replaced: the row applies only over the `null`
+        // ingest stores when models.dev publishes none.
+        "model.status" => {
+            if row.value != serde_json::json!("deprecated") {
+                Some("model.status value must be \"deprecated\"")
+            } else if !row.replaces.is_null() {
+                Some("model.status rows replace only the null stored when models.dev publishes no status, so replaces must be null")
+            } else {
+                None
+            }
+        }
+        _ => Some("only limit.context, limit.output, capability.server_side_fallback and model.status may be overridden"),
     }
 }
 
@@ -203,7 +234,7 @@ pub fn overdue_at(rows: &FactOverrides, now_ms: i64) -> Vec<String> {
 
 /// What a row expects upstream to publish, as a reviewer reads it.
 fn upstream_expectation(row: &FactOverride) -> String {
-    if row.replaces.is_null() {
+    if is_addition(row) {
         "no value for this fact".to_string()
     } else {
         row.replaces.to_string()
@@ -260,7 +291,7 @@ fn stale_row(
         ));
     };
     let published = facts.get(&row.fact_key);
-    let applies = if row.replaces.is_null() {
+    let applies = if is_addition(row) {
         published.is_none()
     } else {
         published == Some(&row.replaces)
@@ -317,7 +348,7 @@ fn apply_rows(
         if prefixes.is_some_and(|p| !p.iter().any(|p| fact_key.starts_with(p.as_str()))) {
             continue;
         }
-        if row.replaces.is_null() {
+        if is_addition(row) {
             // An addition applies only while the stored row has no such fact.
             // Any stored value, null included, means upstream now records the
             // key, and upstream wins. A withheld fact is stored too, just not
@@ -393,7 +424,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .find(|row| row["replaces"].is_null())
+            .find(|row| row["fact_key"] == "capability.server_side_fallback")
             .expect("the document ships an addition row")
             .clone()
     }
@@ -402,7 +433,7 @@ mod tests {
     fn shipped_overrides_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 6);
+        assert_eq!(rows.len(), 8);
         let row = argon();
         assert_eq!(row.value, json!(65_536));
         assert_eq!(row.replaces, json!(32_768));
@@ -601,6 +632,35 @@ mod tests {
             load_reporting_rejects(&json!({"overrides": [row.clone(), row]}).to_string());
         assert_eq!(rows.len(), 1);
         assert!(rejects[0].contains("duplicate"), "{rejects:?}");
+    }
+
+    #[test]
+    fn a_status_row_accepts_only_deprecated_over_a_null_status() {
+        let status_row = |value: serde_json::Value, replaces: serde_json::Value| {
+            let mut row = addition_row();
+            row["fact_key"] = json!("model.status");
+            row["value"] = value;
+            row["replaces"] = replaces;
+            row
+        };
+        let (rows, rejects) = load_reporting_rejects(
+            &json!({"overrides": [status_row(json!("deprecated"), json!(null))]}).to_string(),
+        );
+        assert_eq!(rows.len(), 1, "{rejects:?}");
+        for (value, replaces, reason) in [
+            (json!("beta"), json!(null), "must be \"deprecated\""),
+            (json!(true), json!(null), "must be \"deprecated\""),
+            (json!("deprecated"), json!("beta"), "replaces must be null"),
+        ] {
+            let (rows, rejects) = load_reporting_rejects(
+                &json!({"overrides": [status_row(value.clone(), replaces.clone())]}).to_string(),
+            );
+            assert!(rows.is_empty(), "{value} over {replaces}");
+            assert!(
+                rejects[0].contains(reason),
+                "{value} over {replaces}: {rejects:?}"
+            );
+        }
     }
 
     #[test]

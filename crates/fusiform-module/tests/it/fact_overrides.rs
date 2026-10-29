@@ -544,3 +544,151 @@ fn the_antigravity_route_to_opus_does_not_carry_server_side_fallback() {
         assert!(disclosed(&response, OPUS_ALIAS).is_empty(), "{args}");
     }
 }
+
+const STATUS: &str = "model.status";
+const DAYBREAK_BLUE: &str = "openai/gpt-daybreak-blue-latest";
+const DAYBREAK_RED: &str = "openai/gpt-daybreak-red-latest";
+// A seed row with no status and no override, so the addition is shown to
+// reach only the rows it names.
+const DAYBREAK_CONTROL: &str = "openai/gpt-5.6-sol";
+
+/// A store holding the two Daybreak aliases plus a control row, as the seed
+/// publishes them. Ingest stores `model.status` on every row, as `null` when
+/// models.dev publishes none. `planted` replaces Daybreak Blue's stored status
+/// with one models.dev would have published.
+fn daybreak_store(planted: Option<Value>) -> (CatalogStore, tempfile::TempDir) {
+    let seed: Value =
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+    let mut upstream = json!({});
+    upstream["openai"] = seed["openai"].clone();
+    upstream["openai"]["models"] = json!({});
+    for id in [
+        "gpt-daybreak-blue-latest",
+        "gpt-daybreak-red-latest",
+        "gpt-5.6-sol",
+    ] {
+        let row = seed["openai"]["models"][id].clone();
+        assert!(row.is_object(), "the seed must carry openai/{id}");
+        upstream["openai"]["models"][id] = row;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(1_000),
+            outcome: ObservationOutcome::Changed {
+                snapshot_seq: 1_000,
+            },
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: None,
+            detail: None,
+        })
+        .unwrap();
+    let catalog = normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
+        .unwrap()
+        .catalog;
+    let mut plan =
+        plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
+    for era in &mut plan.eras {
+        if era.fact_key.as_str() == STATUS && era.model_id.starts_with("gpt-daybreak-") {
+            assert_eq!(
+                era.value_json, "null",
+                "models.dev now publishes a status for {}; review the deprecation rows",
+                era.model_id
+            );
+            if let (Some(value), "gpt-daybreak-blue-latest") = (&planted, era.model_id.as_str()) {
+                era.value_json = value.to_string();
+            }
+        }
+    }
+    store.append_eras(&plan.eras).unwrap();
+    (store, dir)
+}
+
+#[test]
+fn a_current_read_marks_the_vendor_deprecated_daybreak_aliases() {
+    let (store, _dir) = daybreak_store(None);
+    for (label, response) in [
+        (
+            "named",
+            get(
+                &store,
+                json!({"provider_id":"openai","model_id":"gpt-daybreak-blue-latest"}),
+            ),
+        ),
+        ("provider", get(&store, json!({"provider_id":"openai"}))),
+        ("paged", paged(&store, json!({}))),
+        // The store holds no status for these rows, so a read filtered to the
+        // key must still reach them.
+        ("filtered", get(&store, json!({"fact_prefixes":[STATUS]}))),
+    ] {
+        assert_eq!(
+            response.models[DAYBREAK_BLUE][STATUS],
+            json!("deprecated"),
+            "{label}"
+        );
+        let rows = disclosed(&response, DAYBREAK_BLUE);
+        assert_eq!(rows.len(), 1, "{label}: {:?}", response.fact_overrides);
+        assert_eq!(rows[0].fact_key, STATUS, "{label}");
+        assert_eq!(
+            rows[0].replaces,
+            Value::Null,
+            "{label}: it replaces the stored null"
+        );
+        assert!(
+            rows[0]
+                .source_ref
+                .contains("https://platform.openai.com/docs/models/gpt-daybreak-blue-latest"),
+            "{label}"
+        );
+        if label != "named" {
+            assert_eq!(
+                response.models[DAYBREAK_RED][STATUS],
+                json!("deprecated"),
+                "{label}"
+            );
+        }
+        // The control row has no override, so it keeps its stored null.
+        if let Some(facts) = response.models.get(DAYBREAK_CONTROL) {
+            assert_eq!(facts.get(STATUS), Some(&Value::Null), "{label}: {facts:?}");
+        }
+    }
+}
+
+#[test]
+fn an_at_ms_read_serves_the_recorded_null_status() {
+    let (store, _dir) = daybreak_store(None);
+    let response = get(
+        &store,
+        json!({"provider_id":"openai","model_id":"gpt-daybreak-blue-latest","at_ms":1_000}),
+    );
+    assert_eq!(response.models[DAYBREAK_BLUE][STATUS], Value::Null);
+    assert!(response.fact_overrides.is_empty());
+}
+
+#[test]
+fn a_status_models_dev_publishes_wins_over_the_deprecation_row() {
+    // Any published status stands, including one other than deprecated.
+    for published in [json!("beta"), json!("deprecated")] {
+        let (store, _dir) = daybreak_store(Some(published.clone()));
+        let response = get(&store, json!({"provider_id":"openai"}));
+        assert_eq!(response.models[DAYBREAK_BLUE][STATUS], published);
+        assert!(
+            disclosed(&response, DAYBREAK_BLUE).is_empty(),
+            "{published}"
+        );
+        // Red still has no published status, so it keeps its addition.
+        assert_eq!(response.models[DAYBREAK_RED][STATUS], json!("deprecated"));
+    }
+}

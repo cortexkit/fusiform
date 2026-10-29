@@ -84,6 +84,34 @@
       "established_by": "fusiform",
       "established_at_ms": 1792972800000,
       "review_by_ms": 1798156800000
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-daybreak-blue-latest",
+      "fact_key": "model.status",
+      "value": "deprecated",
+      "replaces": null,
+      "reason": "OpenAI's own model page marks the Daybreak Blue alias deprecated, while models.dev still publishes no status for it (stored as null). Consumers stop routing to deprecated rows, so without this mark the alias is served as live.",
+      "source_ref": "https://platform.openai.com/docs/models/gpt-daybreak-blue-latest (accessed 2026-10-29)",
+      "quote": "\"This alias is deprecated, please use the latest cyber model available to you.\"",
+      "notes": "The page names no shutdown date and no specific replacement, and the deprecations page has no entry for it. Calls to gpt-daybreak-blue-latest were refused with model_not_found from about 2026-10-29 00:00Z.",
+      "established_by": "fusiform",
+      "established_at_ms": 1793232000000,
+      "review_by_ms": 1798416000000
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-daybreak-red-latest",
+      "fact_key": "model.status",
+      "value": "deprecated",
+      "replaces": null,
+      "reason": "OpenAI's own model page marks the Daybreak Red alias deprecated, while models.dev still publishes no status for it (stored as null). Consumers stop routing to deprecated rows, so without this mark the alias is served as live.",
+      "source_ref": "https://platform.openai.com/docs/models/gpt-daybreak-red-latest (accessed 2026-10-29)",
+      "quote": "\"This alias is deprecated, please use the latest cyber model available to you.\"",
+      "notes": "The page names no shutdown date and no specific replacement, and the deprecations page has no entry for it. Calls to gpt-daybreak-blue-latest were refused with model_not_found from about 2026-10-29 00:00Z.",
+      "established_by": "fusiform",
+      "established_at_ms": 1793232000000,
+      "review_by_ms": 1798416000000
     }
   ]
 }

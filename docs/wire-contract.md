@@ -146,7 +146,7 @@ value would do to a consumer:
 | `model.family` | advisory | upstream family string, or `null` |
 | `model.open_weights` | advisory | `true`, `false` or `null` |
 | `model.canonical_id` | advisory | upstream canonical model id, or `null` |
-| `model.status` | advisory | upstream lifecycle label verbatim, or `null` |
+| `model.status` | advisory | upstream lifecycle label verbatim, or `null`; on current reads, `"deprecated"` may come from a sourced override of the stored `null`, disclosed in `fact_overrides` (§5.8) when the vendor deprecates a model models.dev has not yet marked |
 | `model.kind` | advisory | `"decision"` or `"extraction"`, on curated rows only; otherwise no fact (§4.6) |
 | `wire.npm` | advisory | `{"value": "<published client package>", "from": "model" or "provider"}`; otherwise no fact |
 | `wire.api` | advisory | `{"value": "<base URL>", "from": "model", "provider" or "curated"}`; otherwise no fact; corrections/withholding disclosed in `wire_corrections` |

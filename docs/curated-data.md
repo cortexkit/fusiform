@@ -594,6 +594,7 @@ an addition is always written as one. Each fact key has its own rule:
 | --- | --- | --- | --- |
 | `limit.context`, `limit.output` | replacement only | positive integer | a different positive integer |
 | `capability.server_side_fallback` | addition only | `true` or `false` | `null` |
+| `model.status` | replacement of the stored `null` only | `"deprecated"` | `null` |
 
 No other fact may be overridden: other facts have their own curated mechanism
 or serve-time derivation (rates: inheritance and billing planes; `wire.*`: §9;
@@ -602,7 +603,13 @@ served value depend on which ran last. Limits cannot be added: an unpublished
 limit is stored as `null`, so a limit is absent only when a correction
 withholds it, and an addition must never undo a withholding.
 `capability.server_side_fallback` can only be added, because models.dev has
-no such field. The file is embedded and parsed once; malformed rows and
+no such field. Ingest stores `model.status` on every row, as `null` when
+models.dev publishes none, so a `model.status` row replaces that stored `null`
+(`replaces: null`), only with `"deprecated"`: it marks a model its vendor has
+deprecated while models.dev still publishes no status for it, so consumers
+that skip deprecated rows stop routing to it. A status models.dev publishes is
+never replaced. Whether a row is an addition follows its fact key, not a null
+`replaces`. The file is embedded and parsed once; malformed rows and
 duplicate `(provider_id, model_id, fact_key)` identities are counted as
 rejects.
 
