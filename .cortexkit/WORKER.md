@@ -12,7 +12,9 @@ routine steps; anything not listed under "pre-approved" still comes to the head.
   `runon: "linux,16c"`. It runs exactly what CI runs, in place on the build
   server. `--base` is needed because the remote checkout has no
   `origin/master`. Quote its final line (`GATE_OK <rev>`) in the delivery. A
-  delivery without it is not finished.
+  delivery without it is not finished. If 16c is refused for capacity, run
+  the same gate as one `linux,4c` job without asking: only the CPU size
+  changes, and a refusal that says nothing ran is safe to retry.
 - A bug fix carries one test, shown once to fail without the fix. Say how you
   showed it.
 
