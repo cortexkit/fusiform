@@ -106,7 +106,9 @@ if [ "$fast_only" -eq 0 ]; then
     if [ "$(uname -s)" = Darwin ]; then
         echo "phase 2 (remote Linux build server)"
         # One job, so both steps share one snapshot and one warm build folder.
-        step clippy-and-tests ck motor run --vcpus 16 --timeout 3600 -- "$compile_steps"
+        # 8 CPUs: a full workspace build and test keeps that many busy, and a
+        # job holds every CPU it requests for its whole run.
+        step clippy-and-tests ck motor run --vcpus 8 --timeout 3600 -- "$compile_steps"
     else
         echo "phase 2 (in place)"
         step clippy-and-tests bash -c "$compile_steps"

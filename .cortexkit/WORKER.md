@@ -5,14 +5,16 @@ routine steps; anything not listed under "pre-approved" still comes to the head.
 
 ## Build, test, gate
 
-- Compile and test only on the remote Linux build server (`runon: "linux,16c"`
-  for the whole suite, smaller for one crate). Never compile on the Mac.
+- Compile and test only on the remote Linux build server. Request the CPUs
+  the job uses: `linux,8c` for the whole suite, `linux,2c` to `linux,4c` for
+  one crate or a lint. A job holds every CPU it requests for its whole run, so
+  a larger request only makes other jobs wait. Never compile on the Mac.
 - Before delivering, run the whole gate as one remote job:
   `scripts/gate.sh --base <the commit your work started from>` with
-  `runon: "linux,16c"`. It runs exactly what CI runs, in place on the build
+  `runon: "linux,8c"`. It runs exactly what CI runs, in place on the build
   server. `--base` is needed because the remote checkout has no
   `origin/master`. Quote its final line (`GATE_OK <rev>`) in the delivery. A
-  delivery without it is not finished. If 16c is refused for capacity, run
+  delivery without it is not finished. If 8c is refused for capacity, run
   the same gate as one `linux,4c` job without asking: only the CPU size
   changes, and a refusal that says nothing ran is safe to retry.
 - A bug fix carries one test, shown once to fail without the fix. Say how you
