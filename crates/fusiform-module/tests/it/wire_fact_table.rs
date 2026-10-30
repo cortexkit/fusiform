@@ -131,7 +131,9 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
         facts
             .keys()
             .filter(|key| {
-                CURATED_ONLY.contains(&key.as_str()) || LINEAGE_ONLY.contains(&key.as_str())
+                CURATED_ONLY.contains(&key.as_str())
+                    || LINEAGE_ONLY.contains(&key.as_str())
+                    || WIRE_ONLY.contains(&key.as_str())
             })
             .cloned()
     }));
@@ -172,7 +174,7 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
     // comes from the caller's max_tokens. That correction is the reason this
     // list is short: it is what a consumer read out of their source, not what
     // the field names suggest.
-    for key in ["limit.context", "capability.reasoning"] {
+    for key in ["limit.context", "capability.reasoning", "wire.family"] {
         let fact = SERVED_FACTS
             .iter()
             .find(|f| f.key == key)
@@ -254,10 +256,13 @@ const QUALITY_ONLY: &[&str] = &["quality.elo", "quality.eq"];
 /// `catalog.get` computes `model.lineage` on current reads, never the normalizer.
 const LINEAGE_ONLY: &[&str] = &["model.lineage"];
 
+/// Request protocols are verified on current reads, never stored as upstream claims.
+const WIRE_ONLY: &[&str] = &["wire.family"];
+
 /// Tabled facts nothing emits, and curated-only facts the normalizer emits.
 ///
 /// A tabled fact must come from the normalizer, or be declared curated-only,
-/// addition-only, quality-only or lineage-only and be carried by at least one
+/// addition-only, quality-only, lineage-only or wire-only and be carried by at least one
 /// curated row, shipped addition row or actual served response (all passed in `curated`).
 fn unproduced_tabled_facts(
     normalized: &[String],
@@ -271,6 +276,7 @@ fn unproduced_tabled_facts(
             .chain(ADDITION_ONLY)
             .chain(QUALITY_ONLY)
             .chain(LINEAGE_ONLY)
+            .chain(WIRE_ONLY)
     };
     for key in not_upstream() {
         if normalized.iter().any(|p| p == key) {

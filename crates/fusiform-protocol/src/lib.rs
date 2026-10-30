@@ -1004,9 +1004,9 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 ///
 /// # Connection claims are not transport policy
 ///
-/// `wire.*` carries models.dev's published client package, endpoint and request
-/// shape verbatim. The consumer owns package-to-renderer mapping and transport
-/// quirks. Fusiform never infers a wire family or serves header/body overrides.
+/// `wire.npm`, `wire.api` and `wire.shape` carry published connection claims.
+/// `wire.family` verifies the request protocol on current reads; consumers own
+/// runner support and transport quirks. No header/body overrides are served.
 pub const SERVED_FACTS: &[ServedFact] = &[
     ServedFact {
         key: "quality.elo",
@@ -1049,11 +1049,16 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "sourced replacement provider/model identity on retired alias rows only; absent when no replacement has been established.",
     },
     ServedFact {
+        key: "wire.family",
+        class: FactClass::ByteAffecting,
+        note: "verified request protocol token; selects the request grammar, not runner support. Current reads only, never stored. Absent means the request protocol is not verified. wire.api is a URL, not this token.",
+    },
+    ServedFact {
         key: "wire.npm",
         class: FactClass::Advisory,
         note: "verbatim models.dev client package as {value, from}; a model override \
                wins over the provider default. from is model or provider. Absent \
-               means unknown, never a default. Renderer mapping is the consumer's. \
+               means unknown, never a default. Protocol verification uses the sourced wire.family rules. \
                Not projected onto aliases or curated rows.",
     },
     ServedFact {

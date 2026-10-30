@@ -60,12 +60,19 @@ pub struct Plane {
     pub kind: PlaneKind,
     /// Borrow only the exact canonical row from this provider on a quota view.
     pub rates_from_provider: Option<String>,
+    /// A sourced protocol specific to this login plane, not its API price card.
+    pub wire_family: Option<String>,
     pub source_ref: String,
     pub established_by: String,
     pub established_at_ms: i64,
     pub review_by_ms: i64,
     pub rules: Vec<BillingRule>,
 }
+
+// The plane cites both billing and protocol evidence. Its billing rules still
+// cite only their original billing source; serving must preserve both references.
+#[cfg(test)]
+pub(crate) const OPENAI_CHATGPT_SOURCE: &str = "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses.";
 
 impl Plane {
     /// The different provider whose canonical API card this plane uses in place
@@ -123,6 +130,7 @@ struct PlaneRow {
     auth_method: String,
     kind: PlaneKind,
     rates_from_provider: Option<String>,
+    wire_family: Option<String>,
     source_ref: String,
     established_by: String,
     established_at_ms: i64,
@@ -204,6 +212,14 @@ pub fn load_reporting_rejects(doc: &str) -> (Planes, Vec<String>) {
             continue;
         }
         let key = (row.provider_id.clone(), row.auth_method.clone());
+        if row
+            .wire_family
+            .as_deref()
+            .is_some_and(|family| !crate::wire_families::is_known(family))
+        {
+            rejects.push(at("unknown wire_family"));
+            continue;
+        }
         if let Some(prior) = positions.get(&key) {
             rejects.push(at(&format!(
                 "duplicates plane {prior}: {}/{} already has a declaration",
@@ -279,6 +295,7 @@ pub fn load_reporting_rejects(doc: &str) -> (Planes, Vec<String>) {
                 auth_method: row.auth_method,
                 kind: row.kind,
                 rates_from_provider: row.rates_from_provider,
+                wire_family: row.wire_family,
                 source_ref: row.source_ref,
                 established_by: row.established_by,
                 established_at_ms: row.established_at_ms,
@@ -533,7 +550,14 @@ mod tests {
                 (provider, auth)
             );
             assert_eq!(p.kind, kind);
-            assert_eq!(p.source_ref, source);
+            assert_eq!(
+                p.source_ref,
+                if provider == "openai" {
+                    OPENAI_CHATGPT_SOURCE
+                } else {
+                    source
+                }
+            );
             assert_eq!(p.established_by, "fusiform");
             assert_eq!(p.established_at_ms, 1_791_331_200_000); // 2026-10-07 UTC
             assert_eq!(p.review_by_ms, 1_796_515_200_000); // 2026-12-06 UTC

@@ -1,0 +1,47 @@
+{
+  "_note": "Verified request protocols, not runner support. Absence means the request protocol is not verified. Add a rule after verifying a package's protocol from package source or provider docs. Today's verification is broca's pinned wire_family table; null shape means absent, never a wildcard.",
+  "rules": [
+    {
+      "npm": ["@ai-sdk/openai", "@ai-sdk/xai"],
+      "shapes": [null, "responses"],
+      "wire_family": "openai.responses",
+      "basis": "broca wire_family: https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L25-L26"
+    },
+    {
+      "npm": ["@ai-sdk/openai", "@ai-sdk/openai-compatible"],
+      "shapes": ["completions"],
+      "wire_family": "openai.chat_completions",
+      "basis": "broca wire_family: https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L27"
+    },
+    {
+      "npm": ["@ai-sdk/openai-compatible", "@ai-sdk/amazon-bedrock/mantle"],
+      "shapes": ["responses"],
+      "wire_family": "openai.responses",
+      "basis": "broca wire_family: https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L28-L30"
+    },
+    {
+      "npm": ["@ai-sdk/anthropic"],
+      "shapes": [null],
+      "wire_family": "anthropic.messages",
+      "basis": "broca wire_family: https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L31"
+    },
+    {
+      "npm": ["@ai-sdk/google"],
+      "shapes": [null],
+      "wire_family": "google.generate_content",
+      "basis": "broca wire_family: https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L32"
+    },
+    {
+      "npm": ["@ai-sdk/amazon-bedrock"],
+      "shapes": [null],
+      "wire_family": "aws.bedrock_converse",
+      "basis": "broca wire_family: https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L33"
+    },
+    {
+      "npm": ["@ai-sdk/openai-compatible", "@openrouter/ai-sdk-provider", "@ai-sdk/cerebras"],
+      "shapes": [null],
+      "wire_family": "openai.chat_completions",
+      "basis": "broca wire_family: https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L34-L37"
+    }
+  ]
+}
