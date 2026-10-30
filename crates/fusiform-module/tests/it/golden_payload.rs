@@ -888,6 +888,7 @@ fn assert_rule(response: &serde_json::Value, model: &str, key: &str, state: &str
 fn chatgpt_named_and_bulk_cases_apply_the_plane_before_each_filter() {
     let doc: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
     let source = "https://help.openai.com/en/articles/20001106";
+    let plane_source = "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses.";
     for path in ["named", "bulk"] {
         for filter in ["unfiltered", "rates", "cache-write", "capabilities"] {
             let label = format!("chatgpt luna — {path}, {filter}");
@@ -896,7 +897,7 @@ fn chatgpt_named_and_bulk_cases_apply_the_plane_before_each_filter() {
                 response["plane"],
                 serde_json::json!({
                     "provider_id":"openai", "auth_method":"chatgpt", "kind":"quota_proxy",
-                    "source_ref":source, "review_by_ms":1796515200000_i64
+                    "source_ref":plane_source, "review_by_ms":1796515200000_i64
                 }),
                 "{label}"
             );
