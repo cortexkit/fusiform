@@ -69,6 +69,11 @@ pub struct Plane {
     pub rules: Vec<BillingRule>,
 }
 
+// The plane cites both billing and protocol evidence. Its billing rules still
+// cite only their original billing source; serving must preserve both references.
+#[cfg(test)]
+pub(crate) const OPENAI_CHATGPT_SOURCE: &str = "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses.";
+
 impl Plane {
     /// The different provider whose canonical API card this plane uses in place
     /// of its own rates, if one is configured. Where a row has no matching card
@@ -545,7 +550,14 @@ mod tests {
                 (provider, auth)
             );
             assert_eq!(p.kind, kind);
-            assert_eq!(p.source_ref, source);
+            assert_eq!(
+                p.source_ref,
+                if provider == "openai" {
+                    OPENAI_CHATGPT_SOURCE
+                } else {
+                    source
+                }
+            );
             assert_eq!(p.established_by, "fusiform");
             assert_eq!(p.established_at_ms, 1_791_331_200_000); // 2026-10-07 UTC
             assert_eq!(p.review_by_ms, 1_796_515_200_000); // 2026-12-06 UTC

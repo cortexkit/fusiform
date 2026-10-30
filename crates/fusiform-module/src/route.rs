@@ -4412,7 +4412,7 @@ mod billing_plane_tests {
                 assert_eq!(
                     plane.source_ref.as_deref(),
                     Some(if provider == "openai" {
-                        "https://help.openai.com/en/articles/20001106"
+                        billing_planes::OPENAI_CHATGPT_SOURCE
                     } else {
                         "https://support.anthropic.com/en/articles/9797557"
                     })
