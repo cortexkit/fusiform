@@ -455,13 +455,14 @@ pub fn manifest() -> ModuleManifest {
         // Nothing is lost operationally: the StorageDescriptor arrives from the
         // daemon in HELLO_ACK, constructed by its own policy, never derived
         // from anything a module claims here.
-        // No capability claim until one has been through the owner round.
-        //
-        // The field is decode-optional and construct-required, so the honest
-        // pre-review value is None rather than a plausible string. A capability is a
-        // claim other modules route on, and a claim minted here to fill a field
-        // would be indistinguishable from one that was reviewed.
-        .capabilities(None)
+        // The daemon owner asks modules that ignore the route's project to
+        // declare this capability. Fusiform reads no project field from
+        // route.bind: the catalog is the same for every caller.
+        .capabilities(Some(subc_protocol::manifest::CapabilityDeclarations {
+            provides: vec![subc_protocol::scope::BIND_NO_PROJECT_CAPABILITY.to_string()],
+            requires: Vec::new(),
+            must_never_reach: Vec::new(),
+        }))
         .self_signals(self_signals)
         .provenance(provenance)
         .provides(provides)

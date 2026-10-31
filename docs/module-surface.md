@@ -70,11 +70,12 @@ supervisor (subc), which routes each tool call to the module.
 | `sub_supervises` | `true` | |
 | self signal | `catalog_poll`: a poller with effect `observe`, anchored to a fixed interval, literal cadence of 30 minutes, domain `models.dev` | the poll loop observes the upstream and changes nothing there |
 | provenance | the build's git commit when stamped, otherwise "never derived" | see §5 |
-| capabilities | none declared | |
+| capabilities | provides `subc_protocol::scope::BIND_NO_PROJECT_CAPABILITY` | the catalog is the same for every caller; no project field is read from `route.bind` |
 | storage bindings | none declared | the module makes no storage claim; the supervisor assigns the store and sends its descriptor in the handshake |
 
 `route::the_manifest_declares_what_is_true_and_omits_what_is_not` pins the
-trust tier, the absent storage bindings and the empty `identity_scope`.
+trust tier, the absent storage bindings, the project-free bind capability and
+the empty `identity_scope`.
 Each tool's input schema in the manifest names exactly the fields its
 request type decodes, so a caller that validates its arguments against the
 schema can use every argument the route accepts

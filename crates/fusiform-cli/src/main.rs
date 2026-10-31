@@ -655,11 +655,7 @@ async fn call(
     // A per-invocation session: the CLI is not a durable participant, and
     // reusing one id across invocations would make two concurrent operator
     // commands look like one session to anything counting them.
-    let identity = BindIdentity::new(
-        env::current_dir().map_err(|e| e.to_string())?,
-        "fusiform-cli",
-        format!("cli-{}", process::id()),
-    );
+    let identity = BindIdentity::new("fusiform-cli", format!("cli-{}", process::id()));
 
     let body = serde_json::to_vec(&serde_json::json!({
         "name": tool,

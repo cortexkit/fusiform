@@ -2182,13 +2182,15 @@ fn marking_an_unknown_observation_is_not_a_bad_request() {
 /// survived only as long as nobody tidied the builder chain, and the tidy is
 /// INVITED, since the protocol itself says the field goes unread.
 ///
-/// So both claims are pinned here, and the pinning is what makes them
+/// So the claims are pinned here, and the pinning is what makes them
 /// declarations rather than leftovers:
 ///
 /// - `trust_tier` PRESENT, because fusiform is first-party and that is true.
 /// - `bindings` ABSENT, because the only storage scope the enum can express
 ///   reads as a per-project partition, and this catalog describes the world.
 ///   Two projects asking what models exist must get the same answer.
+/// - The project-free bind capability PRESENT, because fusiform reads no
+///   project field from route.bind and serves the same catalog to every caller.
 ///
 /// A manifest describes the module, not what the supervisor currently bothers
 /// to read. The reader changes; the module does not.
@@ -2219,6 +2221,16 @@ fn the_manifest_declares_what_is_true_and_omits_what_is_not() {
         wire.get("bindings").is_none() || wire["bindings"].is_null(),
         "absent on the wire too, so a reader sees no claim rather than a claim \
          this module would have to footnote"
+    );
+
+    assert_eq!(
+        wire["capabilities"],
+        serde_json::json!({
+            "provides": [subc_protocol::scope::BIND_NO_PROJECT_CAPABILITY],
+            "requires": [],
+            "must_never_reach": [],
+        }),
+        "the manifest must declare that route.bind project fields are unused"
     );
 
     // identity_scope EMPTY, which is a claim and not an omission: the set of
