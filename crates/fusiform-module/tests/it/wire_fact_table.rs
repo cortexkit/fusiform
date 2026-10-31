@@ -248,7 +248,10 @@ pub(crate) const CURATED_ONLY: &[&str] = &[
 /// Like `CURATED_ONLY`, models.dev publishes no such field and the
 /// normalizer must never produce one. Unlike it, these are served on upstream
 /// rows, so the golden fixture must always carry them.
-pub(crate) const ADDITION_ONLY: &[&str] = &["capability.server_side_fallback"];
+pub(crate) const ADDITION_ONLY: &[&str] = &[
+    "capability.server_side_fallback",
+    "capability.mid_conversation_system",
+];
 
 /// Operator judgments are joined at read time, never inferred from upstream.
 const QUALITY_ONLY: &[&str] = &["quality.elo", "quality.eq"];

@@ -3063,6 +3063,21 @@
       "catalog_version": 0,
       "fact_overrides": [
         {
+          "established_at_ms": 1793404800000,
+          "established_by": "fusiform",
+          "fact_key": "capability.mid_conversation_system",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "claude-opus-5-5",
+          "notes": "Covers only persistent role: \"system\" messages inside messages, not the beta turn-scoped clear_at variant. Applies only to this anthropic row when it exists, never to resellers, Bedrock, Vertex or Code Assist aliases.",
+          "provider_id": "anthropic",
+          "quote": "\"This feature is available on Claude Fable 5.1, Claude Mythos 5.1, Claude Fable 5, Claude Mythos 5, Claude Opus 5.5, Claude Opus 4.8, Claude Opus 5, Claude Sonnet 5.5, and Claude Haiku 5.5.\" \"No beta header is required for mid-conversation system messages.\"",
+          "reason": "models.dev publishes no mid-conversation system message field. Anthropic explicitly lists Claude Opus 5.5 as supporting persistent system messages inside messages without a beta header.",
+          "replaces": null,
+          "review_by_ms": 1798588800000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages (accessed 2026-10-31)",
+          "value": true
+        },
+        {
           "established_at_ms": 1792972800000,
           "established_by": "fusiform",
           "fact_key": "capability.server_side_fallback",
@@ -3086,6 +3101,7 @@
             "pdf",
             "text"
           ],
+          "capability.mid_conversation_system": true,
           "capability.output_modalities": [
             "text"
           ],
@@ -3342,6 +3358,7 @@
         "capability.structured_output",
         "capability.tool_call",
         "capability.server_side_fallback",
+        "capability.mid_conversation_system",
         "capability.attachment",
         "capability.input_modalities",
         "capability.output_modalities",

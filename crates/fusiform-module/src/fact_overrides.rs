@@ -35,25 +35,30 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 /// `model.canonical_id`: canonical links), and a second mechanism writing the
 /// same fact would make the served value depend on which one ran last.
 ///
-/// `capability.server_side_fallback` is a vendor-documented request feature
-/// that models.dev has no field for, so it can only arrive as an addition.
+/// `capability.server_side_fallback` and `capability.mid_conversation_system`
+/// are vendor-documented request features that models.dev has no fields for,
+/// so they can only arrive as additions.
 ///
 /// `model.status` can only replace the `null` ingest stores when models.dev
 /// publishes no status, and only with `"deprecated"`, for a model whose
 /// vendor marks it deprecated before models.dev does. Consumers stop routing
 /// to deprecated rows, so leaving the mark off serves a dead model as live
 /// until models.dev catches up.
-pub const OVERRIDABLE_FACTS: [&str; 4] = [
+pub const OVERRIDABLE_FACTS: [&str; 5] = [
     "limit.context",
     "limit.output",
     "capability.server_side_fallback",
+    "capability.mid_conversation_system",
     "model.status",
 ];
 
 /// The facts only an addition row can serve, because models.dev publishes no
 /// value for them. A read filtered to one of these must still reach the rows
 /// an addition applies to, even though the store holds no matching fact.
-pub const ADDED_FACTS: [&str; 1] = ["capability.server_side_fallback"];
+pub const ADDED_FACTS: [&str; 2] = [
+    "capability.server_side_fallback",
+    "capability.mid_conversation_system",
+];
 
 /// Whether a row supplies a fact the stored row lacks (an addition), rather
 /// than replacing a stored value. The fact key decides, not `replaces`: a
@@ -80,11 +85,11 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
-        "capability.server_side_fallback" => {
+        "capability.server_side_fallback" | "capability.mid_conversation_system" => {
             if !row.value.is_boolean() {
-                Some("capability.server_side_fallback value must be a boolean")
+                Some("capability addition value must be a boolean")
             } else if !row.replaces.is_null() {
-                Some("capability.server_side_fallback rows must be additions: models.dev publishes no such field, so replaces must be null")
+                Some("capability rows must be additions: models.dev publishes no such field, so replaces must be null")
             } else {
                 None
             }
@@ -102,7 +107,7 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
-        _ => Some("only limit.context, limit.output, capability.server_side_fallback and model.status may be overridden"),
+        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system and model.status may be overridden"),
     }
 }
 
@@ -433,7 +438,7 @@ mod tests {
     fn shipped_overrides_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 8);
+        assert_eq!(rows.len(), 17);
         let row = argon();
         assert_eq!(row.value, json!(65_536));
         assert_eq!(row.replaces, json!(32_768));
@@ -484,6 +489,37 @@ mod tests {
             .as_millis() as i64;
         let overdue = overdue_at(overrides(), now);
         assert!(overdue.is_empty(), "{}", overdue.join("\n"));
+    }
+
+    #[test]
+    fn mid_conversation_system_rows_match_the_documented_models() {
+        let expected = BTreeMap::from([
+            ("claude-fable-5-1", true),
+            ("claude-fable-5", true),
+            ("claude-opus-5-5", true),
+            ("claude-opus-4-8", true),
+            ("claude-opus-5", true),
+            ("claude-sonnet-5-5", true),
+            ("claude-haiku-5-5", true),
+            ("claude-sonnet-5", false),
+            ("claude-opus-4-7", false),
+        ]);
+        let rows: Vec<_> = overrides()
+            .values()
+            .filter(|row| row.fact_key == "capability.mid_conversation_system")
+            .collect();
+        assert_eq!(rows.len(), expected.len());
+        for row in rows {
+            assert_eq!(row.provider_id, "anthropic");
+            assert_eq!(row.value, json!(expected[row.model_id.as_str()]));
+            assert!(row.replaces.is_null());
+            assert_eq!(row.review_by_ms - row.established_at_ms, REVIEW_INTERVAL_MS);
+            assert!(row
+                .notes
+                .as_ref()
+                .unwrap()
+                .contains("not the beta turn-scoped clear_at variant"));
+        }
     }
 
     #[test]
@@ -549,8 +585,15 @@ mod tests {
             .unwrap()
             .remove("claude-haiku-5-5");
         let stale = stale_against_seed(overrides(), &seed);
-        assert_eq!(stale.len(), 1, "{stale:?}");
-        assert!(stale[0].contains("anthropic/claude-haiku-5-5 capability.server_side_fallback"));
+        assert_eq!(stale.len(), 2, "{stale:?}");
+        for key in ADDED_FACTS {
+            assert!(
+                stale
+                    .iter()
+                    .any(|problem| problem.contains(&format!("anthropic/claude-haiku-5-5 {key}"))),
+                "{stale:?}"
+            );
+        }
     }
 
     #[test]
@@ -603,22 +646,26 @@ mod tests {
 
     #[test]
     fn malformed_addition_rows_are_rejected() {
-        for (field, value, reason) in [
-            ("value", json!(null), "must be a boolean"),
-            ("value", json!("true"), "must be a boolean"),
-            ("value", json!(1), "must be a boolean"),
-            ("replaces", json!(false), "must be additions"),
-            ("replaces", json!(true), "must be additions"),
-            ("quote", json!(""), "empty identity"),
-            ("source_ref", json!(" "), "empty identity"),
-            ("review_by_ms", json!(1), "review_by_ms"),
-        ] {
-            let mut row = addition_row();
-            row[field] = value;
-            let (rows, rejects) = load_reporting_rejects(&json!({"overrides": [row]}).to_string());
-            assert!(rows.is_empty(), "{field}");
-            assert_eq!(rejects.len(), 1, "{field}");
-            assert!(rejects[0].contains(reason), "{field}: {rejects:?}");
+        for key in ADDED_FACTS {
+            for (field, value, reason) in [
+                ("value", json!(null), "must be a boolean"),
+                ("value", json!("true"), "must be a boolean"),
+                ("value", json!(1), "must be a boolean"),
+                ("replaces", json!(false), "must be additions"),
+                ("replaces", json!(true), "must be additions"),
+                ("quote", json!(""), "empty identity"),
+                ("source_ref", json!(" "), "empty identity"),
+                ("review_by_ms", json!(1), "review_by_ms"),
+            ] {
+                let mut row = addition_row();
+                row["fact_key"] = json!(key);
+                row[field] = value;
+                let (rows, rejects) =
+                    load_reporting_rejects(&json!({"overrides": [row]}).to_string());
+                assert!(rows.is_empty(), "{field}");
+                assert_eq!(rejects.len(), 1, "{field}");
+                assert!(rejects[0].contains(reason), "{field}: {rejects:?}");
+            }
         }
         // An addition must say so: a row without `replaces` is not read as one.
         let mut row = addition_row();
@@ -666,8 +713,15 @@ mod tests {
     #[test]
     fn an_addition_applies_only_while_upstream_has_no_such_fact() {
         const KEY: &str = "capability.server_side_fallback";
+        let only_key = vec![KEY.to_string()];
         let mut served = facts(json!(1));
-        let applied = apply("anthropic", "claude-opus-5-5", &mut served, None, &[]);
+        let applied = apply(
+            "anthropic",
+            "claude-opus-5-5",
+            &mut served,
+            Some(&only_key),
+            &[],
+        );
         assert_eq!(served[KEY], json!(true));
         assert_eq!(applied.len(), 1);
         assert_eq!(applied[0].model, "anthropic/claude-opus-5-5");
@@ -682,12 +736,26 @@ mod tests {
         for published in [json!(false), json!(true), json!(null)] {
             let mut served = facts(json!(1));
             served.insert(KEY.to_string(), published.clone());
-            assert!(apply("anthropic", "claude-opus-5-5", &mut served, None, &[]).is_empty());
+            assert!(apply(
+                "anthropic",
+                "claude-opus-5-5",
+                &mut served,
+                Some(&only_key),
+                &[]
+            )
+            .is_empty());
             assert_eq!(served[KEY], published);
         }
         // A withheld fact is stored and hidden, not unpublished.
         let mut served = facts(json!(1));
-        assert!(apply("anthropic", "claude-opus-5-5", &mut served, None, &[KEY]).is_empty());
+        assert!(apply(
+            "anthropic",
+            "claude-opus-5-5",
+            &mut served,
+            Some(&only_key),
+            &[KEY]
+        )
+        .is_empty());
         assert!(!served.contains_key(KEY));
         // A filter that excludes the key adds nothing; one naming it does.
         let limits = vec!["limit.".to_string()];
@@ -701,7 +769,7 @@ mod tests {
         )
         .is_empty());
         assert!(!served.contains_key(KEY));
-        let capability = vec!["capability.".to_string()];
+        let capability = only_key;
         assert_eq!(
             apply(
                 "anthropic",

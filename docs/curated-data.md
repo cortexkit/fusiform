@@ -616,6 +616,7 @@ an addition is always written as one. Each fact key has its own rule:
 | --- | --- | --- | --- |
 | `limit.context`, `limit.output` | replacement only | positive integer | a different positive integer |
 | `capability.server_side_fallback` | addition only | `true` or `false` | `null` |
+| `capability.mid_conversation_system` | addition only | `true` or `false` | `null` |
 | `model.status` | replacement of the stored `null` only | `"deprecated"` | `null` |
 
 No other fact may be overridden: other facts have their own curated mechanism
@@ -624,8 +625,9 @@ or serve-time derivation (rates: inheritance and billing planes; `wire.*`: §9;
 served value depend on which ran last. Limits cannot be added: an unpublished
 limit is stored as `null`, so a limit is absent only when a correction
 withholds it, and an addition must never undo a withholding.
-`capability.server_side_fallback` can only be added, because models.dev has
-no such field. Ingest stores `model.status` on every row, as `null` when
+`capability.server_side_fallback` and `capability.mid_conversation_system` can
+only be added, because models.dev has no such fields. Ingest stores
+`model.status` on every row, as `null` when
 models.dev publishes none, so a `model.status` row replaces that stored `null`
 (`replaces: null`), only with `"deprecated"`: it marks a model its vendor has
 deprecated while models.dev still publishes no status for it, so consumers
@@ -646,9 +648,10 @@ upstream wins. Nothing is stored, `at_ms` reads and
 disclosed in the response's `fact_overrides` list
 ([wire contract](wire-contract.md) §5.8). Alias entries are built from their
 target's served facts, so an alias of an overridden row serves the overridden
-value, disclosed under the alias id. `capability.server_side_fallback` is not
-projected onto aliases, because it describes what the Claude API accepts and an
-alias route reaches the model another way. Curated model rows (§4) are
+value, disclosed under the alias id. `capability.server_side_fallback` and
+`capability.mid_conversation_system` are not projected onto aliases, because
+they describe what the Claude API accepts and an alias route reaches the model
+another way. Curated model rows (§4) are
 fusiform's own data and are never overridden.
 
 One replacement row serves `limit.output` 65,536 for `google/gemini-4-argon`.
@@ -676,6 +679,29 @@ means not stated.
 classifiers and shows a Sonnet 5.5 request falling back only in the
 explicit-list form, while the anthropic-auth table marks it false; with the
 two sources disagreeing, nothing is served for it.
+
+Nine addition rows serve `capability.mid_conversation_system` on `anthropic`
+rows only. It means support for a **persistent** `role: "system"` message inside
+`messages`, without a beta header, not the beta turn-scoped `clear_at` variant.
+The [mid-conversation system messages page](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages)
+explicitly lists the supported models and excludes Sonnet 5; the
+[Opus 5.5 migration guide](https://platform.claude.com/docs/en/models/opus-5-5/migration-guide)
+states that Opus 4.7 rejects the message with a 400 error. Each row quotes its
+relevant sentence, accessed 2026-10-31, with review due 2026-12-30 (60 days).
+
+| Model | Value |
+| --- | --- |
+| `claude-fable-5-1`, `claude-fable-5`, `claude-opus-5-5`, `claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` | `true` |
+| `claude-sonnet-5`, `claude-opus-4-7` | `false` |
+
+All other Anthropic rows, resellers, Bedrock, Vertex and Code Assist aliases
+have no curated value; absence means not stated, never `false`.
+`claude-mythos-preview` stays absent after its documented end-of-life.
+The source also covers `claude-mythos-5-1` and `claude-mythos-5`, but the seed
+does not carry them. They have no addition rows until the catalog carries
+those ids, preserving the seed-presence gate. If models.dev ever publishes
+the fact key, its value wins; the addition is current-read-only and never
+stored, just like the fallback addition.
 
 Gates in `fact_overrides.rs` check rejects, review dates
 (`fact_overrides_are_within_their_review_dates`, with a planted overdue row in

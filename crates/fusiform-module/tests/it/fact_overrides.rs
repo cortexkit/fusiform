@@ -104,6 +104,17 @@ fn disclosed<'a>(
         .collect()
 }
 
+fn disclosed_fact<'a>(
+    response: &'a CatalogGetResponse,
+    model: &str,
+    key: &str,
+) -> Vec<&'a fusiform_protocol::FactOverrideWire> {
+    disclosed(response, model)
+        .into_iter()
+        .filter(|row| row.fact_key == key)
+        .collect()
+}
+
 fn assert_overridden(response: &CatalogGetResponse, model: &str, label: &str) {
     assert_eq!(
         response.models[model]["limit.output"],
@@ -313,23 +324,38 @@ const OPUS: &str = "anthropic/claude-opus-5-5";
 const HAIKU: &str = "anthropic/claude-haiku-5-5";
 const SONNET: &str = "anthropic/claude-sonnet-5-5";
 const OPUS_ALIAS: &str = "google/antigravity-claude-opus-5-5";
+const MID_SYSTEM: &str = "capability.mid_conversation_system";
 
-/// A store holding three of the embedded seed's anthropic rows.
-///
-/// models.dev has no server-side fallback field, so `planted` stands in for
-/// the day it publishes one: it writes that fact for Opus 5.5 into the same
-/// seed ingest, as a stored upstream era.
 fn anthropic_store(planted: Option<Value>) -> (CatalogStore, tempfile::TempDir) {
+    anthropic_store_with_capability("server_side_fallback", planted)
+}
+
+/// Seeded routes for testing Claude API additions and their route boundaries.
+/// `planted` records a capability for Opus 5.5 as if upstream had published it.
+fn anthropic_store_with_capability(
+    capability: &str,
+    planted: Option<Value>,
+) -> (CatalogStore, tempfile::TempDir) {
     let seed: Value =
         serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
     let mut upstream = json!({});
     for (provider, ids) in [
         (
             "anthropic",
-            vec!["claude-opus-5-5", "claude-haiku-5-5", "claude-sonnet-5-5"],
+            vec![
+                "claude-opus-5-5",
+                "claude-haiku-5-5",
+                "claude-sonnet-5-5",
+                "claude-sonnet-5",
+                "claude-opus-4-7",
+                "claude-sonnet-4-5",
+            ],
         ),
         // Only so the Antigravity alias of Opus 5.5 has its provider.
         ("google", vec!["gemini-3.8-flash"]),
+        ("opencode-go", vec!["claude-haiku-5-5"]),
+        ("amazon-bedrock", vec!["anthropic.claude-fable-5"]),
+        ("google-vertex-anthropic", vec!["claude-sonnet-5@default"]),
     ] {
         upstream[provider] = seed[provider].clone();
         upstream[provider]["models"] = json!({});
@@ -371,15 +397,16 @@ fn anthropic_store(planted: Option<Value>) -> (CatalogStore, tempfile::TempDir) 
     assert!(
         plan.eras
             .iter()
-            .all(|era| era.fact_key.as_str() != FALLBACK),
-        "the normalizer now produces {FALLBACK}; the addition rows need review"
+            .all(|era| !fusiform_module::fact_overrides::ADDED_FACTS
+                .contains(&era.fact_key.as_str())),
+        "the normalizer now produces an addition-only fact; the addition rows need review"
     );
     if let Some(value) = planted {
         plan.eras.push(fusiform_store::NewEra {
             source: SourceId::ModelsDev,
             provider_id: "anthropic".into(),
             model_id: "claude-opus-5-5".into(),
-            fact_key: fusiform_store::FactKey::capability("server_side_fallback"),
+            fact_key: fusiform_store::FactKey::capability(capability),
             value_json: value.to_string(),
             boundary_at: Timestamp(1_000),
             boundary_kind: BoundaryKind::Seed,
@@ -419,7 +446,7 @@ fn a_current_read_serves_the_documented_server_side_fallback() {
         ),
     ] {
         assert_eq!(response.models[OPUS][FALLBACK], json!(true), "{label}");
-        let rows = disclosed(&response, OPUS);
+        let rows = disclosed_fact(&response, OPUS, FALLBACK);
         assert_eq!(rows.len(), 1, "{label}: {:?}", response.fact_overrides);
         let row = rows[0];
         assert_eq!(row.fact_key, FALLBACK, "{label}");
@@ -445,13 +472,20 @@ fn a_current_read_serves_the_documented_server_side_fallback() {
         // Named reads carry only Opus 5.5; every other read carries Haiku 5.5.
         if !label.starts_with("named") && !label.starts_with("filtered named") {
             assert_eq!(response.models[HAIKU][FALLBACK], json!(false), "{label}");
-            assert_eq!(disclosed(&response, HAIKU).len(), 1, "{label}");
+            assert_eq!(
+                disclosed_fact(&response, HAIKU, FALLBACK).len(),
+                1,
+                "{label}"
+            );
         }
-        // Sonnet 5.5 has no row, so no value and no disclosure.
+        // Sonnet 5.5 has no fallback row, so no fallback value or disclosure.
         if let Some(facts) = response.models.get(SONNET) {
             assert!(!facts.contains_key(FALLBACK), "{label}");
         }
-        assert!(disclosed(&response, SONNET).is_empty(), "{label}");
+        assert!(
+            disclosed_fact(&response, SONNET, FALLBACK).is_empty(),
+            "{label}"
+        );
         for row in &response.fact_overrides {
             assert_eq!(
                 response.models[&row.model][&row.fact_key], row.value,
@@ -475,7 +509,7 @@ fn a_haiku_read_serves_false_with_the_exclusion_quoted() {
         json!({"provider_id":"anthropic","model_id":"claude-haiku-5-5"}),
     );
     assert_eq!(response.models[HAIKU][FALLBACK], json!(false));
-    let rows = disclosed(&response, HAIKU);
+    let rows = disclosed_fact(&response, HAIKU, FALLBACK);
     assert_eq!(rows.len(), 1);
     assert!(rows[0].replaces.is_null());
     assert!(rows[0]
@@ -518,7 +552,10 @@ fn an_upstream_value_for_the_key_suppresses_the_addition() {
         ] {
             let response = get(&store, args.clone());
             assert_eq!(response.models[OPUS][FALLBACK], published, "{args}");
-            assert!(disclosed(&response, OPUS).is_empty(), "{published} {args}");
+            assert!(
+                disclosed_fact(&response, OPUS, FALLBACK).is_empty(),
+                "{published} {args}"
+            );
             // Rows upstream still says nothing about keep their addition.
             if let Some(facts) = response.models.get(HAIKU) {
                 assert_eq!(facts[FALLBACK], json!(false), "{args}");
@@ -542,6 +579,140 @@ fn the_antigravity_route_to_opus_does_not_carry_server_side_fallback() {
         assert!(facts.contains_key("limit.context"), "{args}");
         assert!(!facts.contains_key(FALLBACK), "{args}");
         assert!(disclosed(&response, OPUS_ALIAS).is_empty(), "{args}");
+    }
+}
+
+#[test]
+fn a_current_read_serves_the_documented_mid_conversation_system() {
+    let (store, _dir) = anthropic_store_with_capability("mid_conversation_system", None);
+    for response in [
+        get(
+            &store,
+            json!({"provider_id":"anthropic","model_id":"claude-opus-5-5"}),
+        ),
+        get(&store, json!({"provider_id":"anthropic"})),
+        get(&store, json!({})),
+        paged(&store, json!({})),
+        get(&store, json!({"fact_prefixes":[MID_SYSTEM]})),
+        get(
+            &store,
+            json!({"provider_id":"anthropic","model_id":"claude-opus-5-5","fact_prefixes":[MID_SYSTEM]}),
+        ),
+    ] {
+        assert_eq!(response.models[OPUS][MID_SYSTEM], json!(true));
+        let rows = disclosed_fact(&response, OPUS, MID_SYSTEM);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].value, json!(true));
+        assert!(rows[0].replaces.is_null());
+        assert!(rows[0]
+            .source_ref
+            .contains("/mid-conversation-system-messages"));
+        assert!(rows[0]
+            .quote
+            .contains("No beta header is required for mid-conversation system messages."));
+        assert_eq!(
+            rows[0].review_by_ms - rows[0].established_at_ms,
+            60 * 86_400_000
+        );
+    }
+    for (model_id, sentence) in [
+        (
+            "claude-sonnet-5",
+            "This feature is not available on Claude Sonnet 5.",
+        ),
+        (
+            "claude-opus-4-7",
+            "Claude Opus 4.7 rejects `role: \"system\"` in `messages` with a 400 error.",
+        ),
+    ] {
+        let response = get(
+            &store,
+            json!({"provider_id":"anthropic","model_id":model_id}),
+        );
+        let model = format!("anthropic/{model_id}");
+        assert_eq!(response.models[&model][MID_SYSTEM], json!(false));
+        let rows = disclosed_fact(&response, &model, MID_SYSTEM);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].value, json!(false));
+        assert!(rows[0].quote.contains(sentence));
+    }
+    let filtered = get(&store, json!({"fact_prefixes":[MID_SYSTEM]}));
+    assert!(filtered
+        .models
+        .values()
+        .all(|facts| facts.keys().all(|key| key == MID_SYSTEM)));
+    let excluded = get(
+        &store,
+        json!({"provider_id":"anthropic","fact_prefixes":["limit."]}),
+    );
+    assert!(excluded
+        .models
+        .values()
+        .all(|facts| !facts.contains_key(MID_SYSTEM)));
+    assert!(excluded.fact_overrides.is_empty());
+}
+
+#[test]
+fn mid_conversation_system_is_not_projected_onto_other_routes() {
+    let (store, _dir) = anthropic_store_with_capability("mid_conversation_system", None);
+    for (provider, model_id) in [
+        ("anthropic", "claude-sonnet-4-5"),
+        ("opencode-go", "claude-haiku-5-5"),
+        ("amazon-bedrock", "anthropic.claude-fable-5"),
+        ("google-vertex-anthropic", "claude-sonnet-5@default"),
+        ("google", "antigravity-claude-opus-5-5"),
+    ] {
+        for response in [
+            get(&store, json!({"provider_id":provider,"model_id":model_id})),
+            get(&store, json!({"provider_id":provider})),
+            get(&store, json!({})),
+        ] {
+            let model = format!("{provider}/{model_id}");
+            let facts = &response.models[&model];
+            assert!(facts.contains_key("limit.context"), "{model} is served");
+            assert!(!facts.contains_key(MID_SYSTEM), "{model}");
+            assert!(
+                disclosed_fact(&response, &model, MID_SYSTEM).is_empty(),
+                "{model}"
+            );
+        }
+    }
+}
+
+#[test]
+fn mid_conversation_system_is_current_only_and_upstream_wins() {
+    for published in [
+        None,
+        Some(json!(false)),
+        Some(json!(true)),
+        Some(Value::Null),
+    ] {
+        let (store, _dir) =
+            anthropic_store_with_capability("mid_conversation_system", published.clone());
+        for args in [
+            json!({"provider_id":"anthropic","model_id":"claude-opus-5-5"}),
+            json!({"provider_id":"anthropic"}),
+            json!({"fact_prefixes":[MID_SYSTEM]}),
+        ] {
+            let response = get(&store, args);
+            if let Some(value) = &published {
+                assert_eq!(&response.models[OPUS][MID_SYSTEM], value);
+                assert!(disclosed_fact(&response, OPUS, MID_SYSTEM).is_empty());
+            } else {
+                assert_eq!(response.models[OPUS][MID_SYSTEM], json!(true));
+            }
+        }
+        for response in [
+            get(
+                &store,
+                json!({"provider_id":"anthropic","model_id":"claude-opus-5-5","at_ms":1_000}),
+            ),
+            get(&store, json!({"at_ms":1_000})),
+            paged(&store, json!({"at_ms":1_000})),
+        ] {
+            assert_eq!(response.models[OPUS].get(MID_SYSTEM), published.as_ref());
+            assert!(response.fact_overrides.is_empty());
+        }
     }
 }
 

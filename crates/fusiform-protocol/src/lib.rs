@@ -1202,6 +1202,20 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                ByteAffecting if a consumer renders it into requests.",
     },
     ServedFact {
+        key: "capability.mid_conversation_system",
+        class: FactClass::Advisory,
+        note: "whether the Claude API accepts persistent role: \"system\" messages \
+               inside messages for this model, without a beta header; not the \
+               beta turn-scoped clear_at variant. false means Anthropic states \
+               the model does not support it. ABSENT MEANS NOT STATED, never \
+               false. Served only on current reads of documented anthropic rows \
+               from sourced additions disclosed in fact_overrides (replaces \
+               null), never stored or served on at_ms reads, never projected \
+               onto reseller, Bedrock, Vertex or Code Assist alias rows, and \
+               suppressed once upstream records the key. It becomes \
+               ByteAffecting if a consumer renders it into requests.",
+    },
+    ServedFact {
         key: "capability.attachment",
         class: FactClass::Advisory,
         note: "whether the model accepts attachments",

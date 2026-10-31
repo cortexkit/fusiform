@@ -141,6 +141,7 @@ value would do to a consumer:
 | `capability.structured_output` | advisory | `true` or `false` only when published by models.dev; otherwise no fact |
 | `capability.tool_call` | advisory | `true`, `false` or `null` |
 | `capability.server_side_fallback` | advisory | `true` or `false` on current reads of the `anthropic` rows Anthropic's documentation covers, from sourced additions disclosed in `fact_overrides` (§5.8); otherwise no fact, which means not stated, never `false` |
+| `capability.mid_conversation_system` | advisory | `true` or `false` for persistent `role: "system"` messages inside `messages`, without a beta header, not the beta turn-scoped `clear_at` variant; sourced current-read-only additions on documented `anthropic` rows, disclosed in `fact_overrides` (§5.8), never stored or inherited by resellers, Bedrock, Vertex or Code Assist aliases; any upstream value wins; otherwise no fact, which means not stated, never `false` |
 | `capability.attachment` | advisory | `true`, `false` or `null` |
 | `capability.input_modalities` | advisory | list of modality strings, or `null` |
 | `capability.output_modalities` | advisory | list of modality strings, or `null` |
@@ -674,7 +675,8 @@ optional `notes`, `established_by`, `established_at_ms` and `review_by_ms`.
 An entry is either a REPLACEMENT, whose `replaces` is the upstream value it
 corrects, or an ADDITION, whose `replaces` is always present and `null`: a
 fact models.dev publishes no value for, sourced from the vendor's own
-documentation. Today the only added fact is `capability.server_side_fallback`.
+documentation. The added facts are `capability.server_side_fallback` and
+`capability.mid_conversation_system`.
 
 For example, a current `google/gemini-4-argon` read serves
 `limit.output: 65536` where models.dev publishes 32,768, Google's cap for a
@@ -687,6 +689,11 @@ true`, meaning the Claude API accepts `fallbacks: "default"` with the
 addition quoting Anthropic's refusals-and-fallback page
 (`golden_payload`: `catalog.get — sourced server-side fallback addition`).
 `anthropic/claude-haiku-5-5` serves `false`, which Anthropic states.
+`capability.mid_conversation_system` describes only persistent `role: "system"`
+messages inside `messages`, without a beta header, not the beta turn-scoped
+`clear_at` variant. Supported `anthropic` rows serve `true`, Sonnet 5 and
+Opus 4.7 serve `false`, and absence on any other row means not stated. Its
+additions use the same current-only, never-stored, upstream-wins rules.
 
 1. **Current reads only.** `at_ms` reads serve the recorded value with no
    disclosure, and serve no added fact at all; `catalog.history` lists only
@@ -711,9 +718,9 @@ addition quoting Anthropic's refusals-and-fallback page
    facts, so it serves the overridden value too, and its disclosure has the
    alias id in `model` and the target in `provider_id`/`model_id`
    (`fact_overrides::the_antigravity_alias_serves_the_overridden_value`).
-   `capability.server_side_fallback` is the exception: it describes what the
-   Claude API accepts, so an alias route reaching the model another way never
-   carries it
+   `capability.server_side_fallback` and `capability.mid_conversation_system`
+   are exceptions: they describe what the Claude API accepts, so an alias route
+   reaching the model another way never carries them
    (`fact_overrides::the_antigravity_route_to_opus_does_not_carry_server_side_fallback`).
    A curated row (§5.6) is fusiform's own data and replaces no upstream value,
    so no override applies to it.
