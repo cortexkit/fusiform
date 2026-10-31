@@ -1921,6 +1921,12 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
         r#""state": "billed_as""#,
         r#""reason": "not_established""#,
         r#""basis": "quota_proxy""#,
+        // Plan entitlements and both exact consumption multipliers.
+        r#""service_tiers""#,
+        r#""tier": "fast""#,
+        r#""tier": "ultrafast""#,
+        r#""included_usage_rate""#,
+        r#""credit_rate""#,
     ] {
         assert!(
             GOLDEN.contains(needle),

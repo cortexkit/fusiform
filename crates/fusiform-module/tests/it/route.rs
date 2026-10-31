@@ -2506,6 +2506,122 @@ fn a_named_read_of_a_retired_model_says_so() {
 }
 
 #[test]
+fn plan_prices_joins_service_tiers_for_each_openai_plan() {
+    use fusiform_protocol::{QuotaDecimal, ServiceTier, ServiceTierWire, ServiceTiersWire};
+    let f = fixture();
+    let curated = fusiform_module::plan_prices::store_rows(fusiform_module::plan_prices::rows());
+    f.store.append_plan_prices(&curated).unwrap();
+    let call = serde_json::json!({"name":"plan.prices", "arguments":{}});
+    let ToolResponse::PlanPrices(response) =
+        serve_tool_call(&f.store, &serde_json::to_vec(&call).unwrap()).unwrap()
+    else {
+        panic!("wrong response arm");
+    };
+    let fast = ServiceTierWire {
+        tier: ServiceTier::Fast,
+        included_usage_rate: QuotaDecimal {
+            units: 25,
+            exponent: 1,
+        },
+        credit_rate: QuotaDecimal {
+            units: 2,
+            exponent: 0,
+        },
+    };
+    let ultrafast = ServiceTierWire {
+        tier: ServiceTier::Ultrafast,
+        included_usage_rate: QuotaDecimal {
+            units: 8,
+            exponent: 0,
+        },
+        credit_rate: QuotaDecimal {
+            units: 6,
+            exponent: 0,
+        },
+    };
+    for plan in ["plus", "pro_100", "pro_200", "pro_500"] {
+        let row = response
+            .prices
+            .iter()
+            .find(|r| r.provider_id == "openai" && r.tier == plan)
+            .unwrap();
+        let Some(ServiceTiersWire::Established {
+            tiers,
+            source_ref,
+            established_by,
+            established_at_ms,
+            review_by_ms,
+        }) = &row.service_tiers
+        else {
+            panic!("openai/{plan}: service_tiers must reach the plan.prices route");
+        };
+        let expected = if plan == "pro_500" {
+            vec![fast.clone(), ultrafast.clone()]
+        } else {
+            vec![fast.clone()]
+        };
+        assert_eq!(*tiers, expected, "openai/{plan}");
+        assert_eq!(established_by, "fusiform");
+        assert_eq!(*review_by_ms - *established_at_ms, 30 * 86_400_000);
+        for source in [
+            "https://developers.openai.com/codex/pricing",
+            "https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers",
+            "https://developers.openai.com/codex/agent-configuration/speed",
+        ] {
+            assert!(source_ref.contains(source), "{plan}: {source_ref}");
+        }
+        assert_eq!(
+            serde_json::to_value(row).unwrap()["service_tiers"]["state"],
+            "established"
+        );
+    }
+    let other_providers: Vec<_> = response
+        .prices
+        .iter()
+        .filter(|r| r.provider_id != "openai")
+        .collect();
+    assert!(
+        !other_providers.is_empty(),
+        "the omission control needs a non-OpenAI row"
+    );
+    for row in other_providers {
+        assert!(row.service_tiers.is_none());
+        assert!(serde_json::to_value(row)
+            .unwrap()
+            .get("service_tiers")
+            .is_none());
+    }
+    let uncurated = response
+        .prices
+        .iter()
+        .find(|r| r.provider_id == "openai" && r.tier == "pro")
+        .unwrap();
+    assert!(
+        uncurated.service_tiers.is_none(),
+        "a legacy, ambiguous plan remains unknown"
+    );
+
+    // A retired plan must not inherit entitlements from the compiled current data.
+    let remaining: Vec<_> = curated
+        .into_iter()
+        .filter(|r| !(r.provider_id == "openai" && r.tier == "pro_500"))
+        .collect();
+    assert_eq!(f.store.append_plan_prices(&remaining).unwrap(), 1);
+    let ToolResponse::PlanPrices(response) =
+        serve_tool_call(&f.store, &serde_json::to_vec(&call).unwrap()).unwrap()
+    else {
+        panic!("wrong response arm");
+    };
+    let retired = response
+        .prices
+        .iter()
+        .find(|r| r.provider_id == "openai" && r.tier == "pro_500")
+        .unwrap();
+    assert!(retired.price.is_none());
+    assert!(retired.service_tiers.is_none());
+}
+
+#[test]
 fn plan_prices_joins_quota_values_and_omits_them_for_tombstones() {
     use fusiform_protocol::{QuotaDecimal, QuotaValueWire};
     let f = fixture();

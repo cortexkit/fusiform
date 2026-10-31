@@ -894,7 +894,26 @@ The storage rules are in [`data-model.md`](data-model.md) §6.
 
 ## 9. `plan.prices`
 
-Curated subscription list prices. See [`plan-prices.md`](plan-prices.md).
+Curated subscription list prices, current reads only. See
+[`plan-prices.md`](plan-prices.md) for the complete row contract.
+
+Each priced row may carry `service_tiers`, independent of `quota_value`:
+
+- Absent means unknown (never curated), **not** that the plan has no tiers.
+- `state: "established"` carries `tiers`, `source_ref`, `established_by`,
+  `established_at_ms` and `review_by_ms`.
+- Each tier has `tier` (`fast` or `ultrafast`, a closed vocabulary),
+  `included_usage_rate` and `credit_rate`. Both rates are exact decimals
+  `{units, exponent}`, meaning `units / 10^exponent` relative to Standard.
+  For example, Fast consumes included usage at `{units: 25, exponent: 1}`
+  (2.5x), and purchased credits after the allowance at `{units: 2, exponent: 0}`
+  (2x). No floats are used.
+- `state: "not_established"` instead carries `refusal_reason` and `review_by_ms`.
+
+Standard is implicit and never listed. Tier names match model rows'
+`rate.<dim>.mode.<name>` suffixes; which models offer a tier stays on those
+rows, not here. Plan entitlements are joined at read time, never stored as
+plan-price eras. Their own review dates can expire independently of the price.
 
 ## 10. Versioning
 

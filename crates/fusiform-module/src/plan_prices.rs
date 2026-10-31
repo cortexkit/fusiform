@@ -40,6 +40,8 @@ pub struct PlanPrice {
     pub price: Option<Amount>,
     /// Joined onto served rows, never part of the stored price claim.
     pub quota_value: Option<fusiform_protocol::QuotaValueWire>,
+    /// Current-read entitlements, independent of the stored price claim.
+    pub service_tiers: Option<fusiform_protocol::ServiceTiersWire>,
     pub refusal_reason: Option<String>,
     /// When the price took effect, as best the source allows.
     ///
@@ -245,11 +247,24 @@ pub fn load_reporting_rejects(doc: &str) -> (Vec<PlanPrice>, Vec<String>) {
             },
         };
 
+        // Invalid entitlements must not discard an independently sourced price.
+        let service_tiers = match cell.get("service_tiers") {
+            None => None,
+            Some(value) => match parse_service_tiers(value) {
+                Ok(value) => Some(value),
+                Err(reason) => {
+                    rejects.push(at(&format!("service_tiers: {reason}")));
+                    None
+                }
+            },
+        };
+
         rows.push(PlanPrice {
             provider_id: provider_id.to_string(),
             tier: tier.to_string(),
             price,
             quota_value,
+            service_tiers,
             refusal_reason: refusal.map(str::to_string),
             boundary_at_ms,
             established_by: established_by.to_string(),
@@ -311,6 +326,54 @@ fn parse_quota_value(
     Ok(value)
 }
 
+fn parse_service_tiers(
+    value: &serde_json::Value,
+) -> Result<fusiform_protocol::ServiceTiersWire, String> {
+    use fusiform_protocol::ServiceTiersWire;
+    let value: ServiceTiersWire =
+        serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+    match &value {
+        ServiceTiersWire::Established {
+            tiers,
+            source_ref,
+            established_by,
+            established_at_ms,
+            review_by_ms,
+        } => {
+            if tiers.is_empty() {
+                return Err("an established entitlement must list at least one tier".into());
+            }
+            for (i, tier) in tiers.iter().enumerate() {
+                if tiers[..i].iter().any(|prior| prior.tier == tier.tier) {
+                    return Err("a service tier is listed more than once".into());
+                }
+                for rate in [tier.included_usage_rate, tier.credit_rate] {
+                    if rate.units <= 0 || rate.exponent > 6 {
+                        return Err(
+                            "rates must be positive exact decimals with exponent <= 6".into()
+                        );
+                    }
+                }
+            }
+            if [source_ref, established_by]
+                .iter()
+                .any(|s| s.trim().is_empty())
+            {
+                return Err("required strings must not be empty".into());
+            }
+            if review_by_ms <= established_at_ms {
+                return Err("review_by_ms must be after established_at_ms".into());
+            }
+        }
+        ServiceTiersWire::NotEstablished { refusal_reason, .. } => {
+            if refusal_reason.trim().is_empty() {
+                return Err("refusal_reason must not be empty".into());
+            }
+        }
+    }
+    Ok(value)
+}
+
 /// The curated rows as the store records them.
 ///
 /// Lives here rather than at the startup call site because `main.rs` is
@@ -350,7 +413,7 @@ pub struct Overdue {
     pub source_ref: String,
 }
 
-/// Which prices and quota values are past their own review dates at `now_ms`.
+/// Which prices, quota values and service tiers are past their own review dates.
 ///
 /// Takes the instant rather than reading the clock, so the gate can be driven
 /// in both directions. A check that can only ever be run against the real
@@ -391,6 +454,29 @@ pub fn overdue_at(rows: &[PlanPrice], now_ms: i64) -> Vec<Overdue> {
                     });
                 }
             }
+            if let Some(value) = &r.service_tiers {
+                use fusiform_protocol::ServiceTiersWire;
+                let (review_by_ms, source) = match value {
+                    ServiceTiersWire::Established {
+                        review_by_ms,
+                        source_ref,
+                        ..
+                    } => (*review_by_ms, source_ref.clone()),
+                    ServiceTiersWire::NotEstablished {
+                        review_by_ms,
+                        refusal_reason,
+                    } => (*review_by_ms, format!("not established: {refusal_reason}")),
+                };
+                if review_by_ms < now_ms {
+                    overdue.push(Overdue {
+                        subject: "service_tiers",
+                        provider_id: r.provider_id.clone(),
+                        tier: r.tier.clone(),
+                        days_overdue: (now_ms - review_by_ms) / 86_400_000,
+                        source_ref: source,
+                    });
+                }
+            }
             overdue
         })
         .collect()
@@ -407,7 +493,7 @@ pub fn overdue_at(rows: &[PlanPrice], now_ms: i64) -> Vec<Overdue> {
 pub fn overdue_report(overdue: &[Overdue]) -> String {
     let mut out = String::from(
         "NOT A BUILD FAILURE. Nothing changed; a review date passed.\n\n\
-         These curated subscription prices or quota values are past their review date. Nothing \
+         These curated subscription prices, quota values or service tiers are past their review date. Nothing \
          reveals a plan reprice — no fetch, no diff, no contradiction — so this \
          date is the only signal that a price may have moved, and the damage is \
          retroactive: every window priced in the stale period used the old \
@@ -426,6 +512,8 @@ pub fn overdue_report(overdue: &[Overdue]) -> String {
          For quota_value, revisit the measurement or operator statement (or the \
          refusal reason). Update its figure and provenance, including as_of_ms \
          for a measured value, and its review_by_ms.\n\n\
+         For service_tiers, revisit the entitlement and both rates at the source \
+         (or the refusal reason). Update its provenance and review_by_ms.\n\n\
          Confirming a price unchanged is a real result and the commit should \
          look like one. If it did not move, the only edit is the provenance.\n\n\
          What this gate CANNOT tell you: whether a price is still correct. It \
@@ -460,6 +548,177 @@ mod tests {
             "boundary_at_ms": 1, "established_by": "reader", "established_at_ms": 2,
             "review_by_ms": 9_000_000_000_000i64, "source_ref": "price page"
         }]})
+    }
+
+    fn established_service_tiers() -> serde_json::Value {
+        serde_json::json!({
+            "state": "established",
+            "tiers": [{"tier": "fast",
+                "included_usage_rate": {"units": 25, "exponent": 1},
+                "credit_rate": {"units": 2, "exponent": 0}}],
+            "source_ref": "https://example/speed: 'Fast uses 2.5x included and 2x credits.'",
+            "established_by": "reader", "established_at_ms": 1, "review_by_ms": 1000
+        })
+    }
+
+    fn service_tiers_document(value: serde_json::Value) -> serde_json::Value {
+        let mut doc = quota_document(serde_json::Value::Null);
+        doc["cells"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("quota_value");
+        doc["cells"][0]["service_tiers"] = value;
+        doc
+    }
+
+    #[test]
+    fn well_formed_service_tiers_load_and_absence_stays_unknown() {
+        for value in [
+            established_service_tiers(),
+            serde_json::json!({"state":"not_established", "refusal_reason":"no published entitlement", "review_by_ms":1000}),
+        ] {
+            let (rows, rejects) =
+                load_reporting_rejects(&service_tiers_document(value.clone()).to_string());
+            assert!(rejects.is_empty(), "{rejects:?}");
+            assert_eq!(rows.len(), 1);
+            assert_eq!(
+                serde_json::to_value(rows[0].service_tiers.as_ref().unwrap()).unwrap(),
+                value
+            );
+        }
+        assert!(rows_for_test().iter().all(|r| r.service_tiers.is_none()));
+    }
+
+    #[test]
+    fn malformed_service_tiers_are_counted_without_losing_the_price() {
+        let mut cases = vec![("null".to_string(), serde_json::Value::Null)];
+        for name in ["standard", "turbo", "FAST"] {
+            let mut value = established_service_tiers();
+            value["tiers"][0]["tier"] = name.into();
+            cases.push((format!("unknown tier {name}"), value));
+        }
+        for rate in ["included_usage_rate", "credit_rate"] {
+            for (field, bad) in [
+                ("units", serde_json::json!(2.5)),
+                ("units", serde_json::json!(0)),
+                ("units", serde_json::json!(-1)),
+                ("exponent", serde_json::json!(1.5)),
+                ("exponent", serde_json::json!(-1)),
+                ("exponent", serde_json::json!(7)),
+            ] {
+                let mut value = established_service_tiers();
+                value["tiers"][0][rate][field] = bad.clone();
+                cases.push((format!("{rate} {field} {bad}"), value));
+            }
+            let mut value = established_service_tiers();
+            value["tiers"][0].as_object_mut().unwrap().remove(rate);
+            cases.push((format!("missing {rate}"), value));
+        }
+        for field in [
+            "source_ref",
+            "established_by",
+            "established_at_ms",
+            "review_by_ms",
+        ] {
+            let mut value = established_service_tiers();
+            value.as_object_mut().unwrap().remove(field);
+            cases.push((format!("missing {field}"), value));
+        }
+        for field in ["source_ref", "established_by"] {
+            let mut value = established_service_tiers();
+            value[field] = " ".into();
+            cases.push((format!("empty {field}"), value));
+        }
+        let mut duplicate = established_service_tiers();
+        let tier = duplicate["tiers"][0].clone();
+        duplicate["tiers"].as_array_mut().unwrap().push(tier);
+        cases.push(("duplicate tier".into(), duplicate));
+        let mut empty = established_service_tiers();
+        empty["tiers"] = serde_json::json!([]);
+        cases.push(("empty tiers".into(), empty));
+        let mut expired = established_service_tiers();
+        expired["review_by_ms"] = 1.into();
+        cases.push(("review not after establishment".into(), expired));
+        let mut both = established_service_tiers();
+        both["refusal_reason"] = "also refused".into();
+        cases.push(("both shapes".into(), both));
+        cases.push(("empty refusal".into(), serde_json::json!({"state":"not_established", "refusal_reason":" ", "review_by_ms":1000})));
+        for (case, value) in cases {
+            let (rows, rejects) =
+                load_reporting_rejects(&service_tiers_document(value).to_string());
+            assert_eq!(rejects.len(), 1, "{case}: {rejects:?}");
+            assert!(
+                rejects[0].contains("cell 0: service_tiers"),
+                "{case}: {rejects:?}"
+            );
+            assert_eq!(rows.len(), 1, "{case}: the price must survive");
+            assert_eq!(rows[0].price.unwrap().minor_units, 2000, "{case}");
+            assert!(rows[0].service_tiers.is_none(), "{case}");
+        }
+    }
+
+    #[test]
+    fn changing_only_service_tiers_writes_no_plan_price_era() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.db");
+        let store = fusiform_store::CatalogStore::open(&cortexkit_store_types::StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: cortexkit_store_types::Isolation::Module,
+            backend: cortexkit_store_types::StorageBackend::Sqlite {
+                path: path.to_string_lossy().into_owned(),
+            },
+        })
+        .unwrap();
+        let mut doc = service_tiers_document(established_service_tiers());
+        let (rows, rejects) = load_reporting_rejects(&doc.to_string());
+        assert!(rejects.is_empty());
+        assert_eq!(store.append_plan_prices(&store_rows(&rows)).unwrap(), 1);
+        doc["cells"][0]["service_tiers"]["tiers"][0]["included_usage_rate"]["units"] = 30.into();
+        doc["cells"][0]["service_tiers"]["established_at_ms"] = 2.into();
+        doc["cells"][0]["service_tiers"]["review_by_ms"] = 2000.into();
+        let (changed, rejects) = load_reporting_rejects(&doc.to_string());
+        assert!(rejects.is_empty());
+        assert_ne!(rows[0].service_tiers, changed[0].service_tiers);
+        assert_eq!(store.append_plan_prices(&store_rows(&changed)).unwrap(), 0);
+        let conn = rusqlite::Connection::open(path).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM plan_price_era", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "entitlement changes must not enter price history");
+    }
+
+    #[test]
+    fn overdue_service_tiers_fire_for_both_shapes() {
+        for value in [
+            established_service_tiers(),
+            serde_json::json!({"state":"not_established", "refusal_reason":"no published entitlement", "review_by_ms":1000}),
+        ] {
+            let (rows, rejects) =
+                load_reporting_rejects(&service_tiers_document(value).to_string());
+            assert!(rejects.is_empty(), "{rejects:?}");
+            assert!(
+                overdue_at(&rows, 1000).is_empty(),
+                "not overdue at the boundary"
+            );
+            let overdue = overdue_at(&rows, 1000 + 3 * 86_400_000);
+            assert_eq!(
+                overdue.len(),
+                1,
+                "entitlements expire independently of price"
+            );
+            assert_eq!(overdue[0].subject, "service_tiers");
+            let message = overdue_report(&overdue);
+            assert!(
+                message.contains("acme/pro service_tiers") && message.contains("3 day(s)"),
+                "{message}"
+            );
+            assert!(
+                message.contains("https://example/speed")
+                    || message.contains("no published entitlement"),
+                "{message}"
+            );
+        }
     }
 
     #[test]
@@ -766,7 +1025,7 @@ mod tests {
         assert_eq!(rows[0].price.expect("priced").minor_units, 2000);
     }
 
-    /// No curated price or quota value is past its review date.
+    /// No curated price, quota value or service-tier entitlement is overdue.
     ///
     /// CI runs this test on pushes and on its daily 06:00 schedule. The daily
     /// run catches a review date passing even when no edit triggers a push:

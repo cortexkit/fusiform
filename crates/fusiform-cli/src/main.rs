@@ -1785,6 +1785,13 @@ fn render_plan_prices(response: &serde_json::Value) -> String {
             },
             None => out.push_str("      quota value unknown (not curated)\n"),
         }
+        match row.get("service_tiers").filter(|v| !v.is_null()) {
+            Some(value) => match serde_json::from_value(value.clone()) {
+                Ok(value) => out.push_str(&render_service_tiers(&value)),
+                Err(_) => out.push_str("      service tiers unknown (malformed response)\n"),
+            },
+            None => out.push_str("      service tiers unknown (not curated)\n"),
+        }
     }
 
     if let Some(policy) = response["unit_policy"].as_str() {
@@ -1820,6 +1827,48 @@ fn render_quota_value(value: &fusiform_protocol::QuotaValueWire) -> String {
             review_by_ms,
         } => format!(
             "      quota value not established — {refusal_reason}\n      review by {}\n",
+            format_instant(*review_by_ms),
+        ),
+    }
+}
+
+fn render_service_tiers(value: &fusiform_protocol::ServiceTiersWire) -> String {
+    use fusiform_protocol::{ServiceTier, ServiceTiersWire};
+    match value {
+        ServiceTiersWire::Established {
+            tiers,
+            source_ref,
+            established_by,
+            established_at_ms,
+            review_by_ms,
+        } => {
+            let tiers = tiers
+                .iter()
+                .map(|tier| {
+                    let name = match tier.tier {
+                        ServiceTier::Fast => "fast",
+                        ServiceTier::Ultrafast => "ultrafast",
+                    };
+                    format!(
+                        "{name} ({}x usage, {}x credits)",
+                        render_quota_decimal(&tier.included_usage_rate),
+                        render_quota_decimal(&tier.credit_rate),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "      service tiers: {tiers}\n      established by {established_by} on {}\n\
+                 \x20     source {source_ref}\n      review by {}\n",
+                format_instant(*established_at_ms),
+                format_instant(*review_by_ms),
+            )
+        }
+        ServiceTiersWire::NotEstablished {
+            refusal_reason,
+            review_by_ms,
+        } => format!(
+            "      service tiers not established: {refusal_reason}\n      review by {}\n",
             format_instant(*review_by_ms),
         ),
     }
@@ -2201,6 +2250,54 @@ mod tests {
         assert!(
             !out.contains("quota value 0"),
             "absence must not invent zero: {out}"
+        );
+    }
+
+    #[test]
+    fn service_tiers_render_rates_and_provenance() {
+        let response = serde_json::json!({"prices":[{
+            "provider_id":"openai", "tier":"pro_500",
+            "service_tiers": {
+                "state":"established",
+                "tiers":[
+                    {"tier":"fast", "included_usage_rate":{"units":25,"exponent":1}, "credit_rate":{"units":2,"exponent":0}},
+                    {"tier":"ultrafast", "included_usage_rate":{"units":8,"exponent":0}, "credit_rate":{"units":6,"exponent":0}}
+                ],
+                "source_ref":"quoted speed page", "established_by":"fusiform",
+                "established_at_ms":1793404800000i64, "review_by_ms":1795996800000i64
+            }
+        }]});
+        let out = render_plan_prices(&response);
+        for term in [
+            "service tiers: fast (2.5x usage, 2x credits), ultrafast (8x usage, 6x credits)",
+            "established by fusiform on 2026-10-31",
+            "source quoted speed page",
+            "review by 2026-11-30",
+        ] {
+            assert!(out.contains(term), "missing {term:?}: {out}");
+        }
+    }
+
+    #[test]
+    fn service_tiers_render_refusal_and_unknown_distinctly() {
+        let response = serde_json::json!({"prices":[{
+            "provider_id":"openai", "tier":"pro_100",
+            "service_tiers":{"state":"not_established", "refusal_reason":"no published entitlement", "review_by_ms":1795996800000i64}
+        }, {"provider_id":"anthropic", "tier":"pro"}]});
+        let out = render_plan_prices(&response);
+        assert!(
+            out.contains("service tiers not established: no published entitlement"),
+            "{out}"
+        );
+        assert!(out.contains("review by 2026-11-30"), "{out}");
+        assert_eq!(
+            out.matches("service tiers unknown (not curated)").count(),
+            1,
+            "{out}"
+        );
+        assert!(
+            !out.contains("service tiers: "),
+            "absence must not imply no tiers: {out}"
         );
     }
 

@@ -6274,6 +6274,26 @@
             "state": "not_established"
           },
           "review_by_ms": 1797552000000,
+          "service_tiers": {
+            "established_at_ms": 1793404800000,
+            "established_by": "fusiform",
+            "review_by_ms": 1795996800000,
+            "source_ref": "https://developers.openai.com/codex/pricing: 'Fast mode' is 'Available' for ChatGPT Plus and ChatGPT Pro; 'Ultrafast (Pro $500 and eligible Enterprise/Edu plans)'. https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers: 'Ultrafast is available only on Pro 500.' https://developers.openai.com/codex/agent-configuration/speed: 'For supported models, Fast mode uses included subscription limits at 2.5x the Standard rate. Purchased credits and Enterprise pay-as-you-go usage are billed at 2x the Standard rate.'",
+            "state": "established",
+            "tiers": [
+              {
+                "credit_rate": {
+                  "exponent": 0,
+                  "units": 2
+                },
+                "included_usage_rate": {
+                  "exponent": 1,
+                  "units": 25
+                },
+                "tier": "fast"
+              }
+            ]
+          },
           "source_ref": "https://help.openai.com/en/articles/6950777-what-is-chatgpt-plus",
           "tier": "plus"
         },
@@ -6304,6 +6324,26 @@
             "state": "not_established"
           },
           "review_by_ms": 1797552000000,
+          "service_tiers": {
+            "established_at_ms": 1793404800000,
+            "established_by": "fusiform",
+            "review_by_ms": 1795996800000,
+            "source_ref": "https://developers.openai.com/codex/pricing: 'Fast mode' is 'Available' for ChatGPT Plus and ChatGPT Pro. https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers: 'Pro 100 | $100 | Not included' (Ultrafast); 'Ultrafast is available only on Pro 500.' https://developers.openai.com/codex/agent-configuration/speed: 'For supported models, Fast mode uses included subscription limits at 2.5x the Standard rate. Purchased credits and Enterprise pay-as-you-go usage are billed at 2x the Standard rate.'",
+            "state": "established",
+            "tiers": [
+              {
+                "credit_rate": {
+                  "exponent": 0,
+                  "units": 2
+                },
+                "included_usage_rate": {
+                  "exponent": 1,
+                  "units": 25
+                },
+                "tier": "fast"
+              }
+            ]
+          },
           "source_ref": "https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers",
           "tier": "pro_100"
         },
@@ -6336,6 +6376,26 @@
             "token_mix": "Agentic coding, 96.2% cache read, 3.3% input, 0.23% reasoning, 0.22% output, about 0% cache write, over 26.0B tokens."
           },
           "review_by_ms": 1797552000000,
+          "service_tiers": {
+            "established_at_ms": 1793404800000,
+            "established_by": "fusiform",
+            "review_by_ms": 1795996800000,
+            "source_ref": "https://developers.openai.com/codex/pricing: 'Fast mode' is 'Available' for ChatGPT Plus and ChatGPT Pro. https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers: 'Pro 200 | $200 | Not included' (Ultrafast); 'Ultrafast is available only on Pro 500.' https://developers.openai.com/codex/agent-configuration/speed: 'For supported models, Fast mode uses included subscription limits at 2.5x the Standard rate. Purchased credits and Enterprise pay-as-you-go usage are billed at 2x the Standard rate.'",
+            "state": "established",
+            "tiers": [
+              {
+                "credit_rate": {
+                  "exponent": 0,
+                  "units": 2
+                },
+                "included_usage_rate": {
+                  "exponent": 1,
+                  "units": 25
+                },
+                "tier": "fast"
+              }
+            ]
+          },
           "source_ref": "https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers",
           "tier": "pro_200"
         },
@@ -6356,6 +6416,37 @@
             "state": "not_established"
           },
           "review_by_ms": 1797552000000,
+          "service_tiers": {
+            "established_at_ms": 1793404800000,
+            "established_by": "fusiform",
+            "review_by_ms": 1795996800000,
+            "source_ref": "https://developers.openai.com/codex/pricing: 'Fast mode' is 'Available' for ChatGPT Plus and ChatGPT Pro; 'Ultrafast (Pro $500 and eligible Enterprise/Edu plans)'. https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers: 'Pro 500 | $500 | Included' (Ultrafast). https://developers.openai.com/codex/agent-configuration/speed: 'For supported models, Fast mode uses included subscription limits at 2.5x the Standard rate. Purchased credits and Enterprise pay-as-you-go usage are billed at 2x the Standard rate.' 'Ultrafast mode bills purchased credits and Enterprise pay-as-you-go usage at 6x the Standard rate. Ultrafast uses included subscription limits at 8x the Standard rate.'",
+            "state": "established",
+            "tiers": [
+              {
+                "credit_rate": {
+                  "exponent": 0,
+                  "units": 2
+                },
+                "included_usage_rate": {
+                  "exponent": 1,
+                  "units": 25
+                },
+                "tier": "fast"
+              },
+              {
+                "credit_rate": {
+                  "exponent": 0,
+                  "units": 6
+                },
+                "included_usage_rate": {
+                  "exponent": 0,
+                  "units": 8
+                },
+                "tier": "ultrafast"
+              }
+            ]
+          },
           "source_ref": "https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers",
           "tier": "pro_500"
         },

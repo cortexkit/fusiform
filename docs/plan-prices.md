@@ -33,6 +33,7 @@ Each row in `prices`:
 | `price` | priced rows only | `minor_units`, `exponent`, `currency`, `period`; the amount is `minor_units × 10^-exponent` |
 | `refusal_reason` | refusal rows only | why there is no price |
 | `quota_value` | when curated, priced rows only | §5 |
+| `service_tiers` | when curated, priced rows only | §5.1 |
 | `boundary_at_ms` | always | when the price took effect, as best the source allows |
 | `established_by`, `established_at_ms` | always | who read the source and when |
 | `review_by_ms` | always | when someone must read the source again |
@@ -103,12 +104,39 @@ consumed. It is optional and tagged by `state`:
 6. A malformed quota value is rejected without losing the row's price
    (`malformed_quota_is_rejected_without_losing_the_price`).
 
+### 5.1. Service tiers
+
+`service_tiers` records which speed modes a plan includes, not which models
+offer them. Absent means unknown, never "no tiers". Standard is implicit and
+never listed. `state: "established"` carries a nonempty `tiers` list plus
+`source_ref`, `established_by`, `established_at_ms` and `review_by_ms`.
+`state: "not_established"` carries `refusal_reason` and `review_by_ms` instead.
+
+Each entry has `tier` (`fast` or `ultrafast` only), `included_usage_rate` and
+`credit_rate`. Both rates are positive exact decimals, `{units, exponent}`,
+relative to Standard: 25 with exponent 1 means 2.5x. The first rate consumes
+the plan's included usage; the second consumes purchased credits after the
+allowance runs out. Tier names match model `rate.<dim>.mode.<name>` keys.
+
+OpenAI Plus, Pro 100 and Pro 200 include Fast only (2.5x usage, 2x credits).
+Pro 500 includes Fast and Ultrafast (8x usage, 6x credits). The data quotes
+OpenAI's pricing, Pro-tier and speed pages and carries a 30-day review date.
+Other providers have no field. These are consumption rates, not speed guarantees.
+
+Like quota values, service tiers are joined only on current reads, omitted for
+tombstones and never stored. An entitlement-only change writes zero
+`plan_price_era` rows (`changing_only_service_tiers_writes_no_plan_price_era`).
+Malformed fields are counted rejects without dropping the price
+(`malformed_service_tiers_are_counted_without_losing_the_price`).
+The route test `route::plan_prices_joins_service_tiers_for_each_openai_plan`
+checks each curated plan and omission on other providers.
+
 ## 6. The file
 
 `plan-prices.json` has schema `plan-prices/v1`, a `cells` array, and the
 `unit_policy` and `tier_vocabulary` statements served above. Each cell:
 `provider_id`, `tier`, either `price` or `refusal_reason`, optional
-`quota_value`, `boundary_at_ms`, `established_by`, `established_at_ms`,
+`quota_value` and `service_tiers`, `boundary_at_ms`, `established_by`, `established_at_ms`,
 `review_by_ms`, `source_ref`, and an optional free-text `note` that is not
 served.
 
@@ -143,10 +171,11 @@ to re-check a price, and it is a ceiling on how long a wrong value may
 circulate. Each row carries its
 own date; there is no file-level date.
 
-The suite fails when any price or quota value is past its review date
+The suite fails when any price, quota value or service-tier field is past its review date
 (`no_curated_price_is_past_its_review_date`). The failure message begins "NOT A
 BUILD FAILURE", names each overdue row and its `source_ref`, and says what to
 commit (`an_overdue_row_fires_and_the_message_is_actionable`,
-`overdue_quota_values_fire_for_both_shapes`). CI's scheduled run exists so this
+`overdue_quota_values_fire_for_both_shapes`,
+`overdue_service_tiers_fire_for_both_shapes`). CI's scheduled run exists so this
 gate fires on a day nobody pushed. How to clear it is in
 [`curated-data.md`](curated-data.md) §6.

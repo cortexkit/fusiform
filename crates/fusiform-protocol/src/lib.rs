@@ -151,6 +151,10 @@ pub struct PlanPriceWire {
     /// number takes `low`, the conservative end that undervalues the subscription.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quota_value: Option<QuotaValueWire>,
+    /// Curated speed-tier entitlements. Absent means unknown, never no tiers.
+    /// Standard is implicit; model rows say which models offer each tier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tiers: Option<ServiceTiersWire>,
     /// Why there is no price, when there is none.
     ///
     /// A POSITIVE claim rather than a gap. "Tier not observed" and "tier
@@ -215,6 +219,41 @@ pub enum QuotaValueWire {
 pub struct QuotaDecimal {
     pub units: i64,
     pub exponent: u32,
+}
+
+/// Plan entitlements and usage multipliers, curated only on current reads.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ServiceTiersWire {
+    Established {
+        tiers: Vec<ServiceTierWire>,
+        source_ref: String,
+        established_by: String,
+        established_at_ms: i64,
+        review_by_ms: i64,
+    },
+    NotEstablished {
+        refusal_reason: String,
+        review_by_ms: i64,
+    },
+}
+
+/// A speed mode matching the model row's `rate.<dim>.mode.<name>` suffix.
+/// Standard is always implicit and cannot appear in the curated tier list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceTier {
+    Fast,
+    Ultrafast,
+}
+
+/// Exact rates relative to Standard, for included usage and purchased credits.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceTierWire {
+    pub tier: ServiceTier,
+    pub included_usage_rate: QuotaDecimal,
+    pub credit_rate: QuotaDecimal,
 }
 
 /// Curated subscription prices.

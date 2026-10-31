@@ -20,12 +20,26 @@ that keep them honest.
 | `fact-overrides.json` | sourced values replacing one current upstream fact while upstream still publishes the value they replace, or adding one fact upstream publishes nothing for | at read time, current reads only (§10) |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
 | `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio` (§8) |
-| `plan-prices.json` | subscription list prices | written to `plan_price_era` at start |
+| `plan-prices.json` | subscription list prices, quota values and service-tier entitlements | prices written to `plan_price_era` at start; quota values and service tiers joined only on current reads |
 | `models-dev-seed.json` | a copy of the upstream catalog for offline first boot | written as seed eras into an empty store |
 | `engram-catalog.json` | the backup enrollment descriptor | written beside `store.db` at start; not otherwise read |
 
 Billing planes and plan prices have their own documents,
 [`billing-planes.md`](billing-planes.md) and [`plan-prices.md`](plan-prices.md).
+
+The optional `service_tiers` field on a plan-price cell curates `fast` and
+`ultrafast` entitlements and their exact included-usage and purchased-credit
+rates relative to implicit Standard. Absent means unknown, never "no tiers".
+An established field carries quoted first-party `source_ref`, establisher,
+establishment date and its own review date; `not_established` carries a refusal
+reason and review date. Unknown tier names, floats and missing provenance are
+counted rejects without losing the independently sourced price. These fields
+are never stored, so changing only service tiers writes no price era.
+Only OpenAI Plus, Pro 100, Pro 200 and Pro 500 are curated for service tiers;
+the other providers remain unknown. Review service tiers after 30 days because
+Pro 500 and the published consumption rates are recent. Model availability
+stays on model rows.
+
 The seed and the enrollment descriptor are covered in
 [`architecture.md`](architecture.md) and
 [`backup-and-restore.md`](backup-and-restore.md). Unit tests named below are in
@@ -440,7 +454,7 @@ its MIT license; see `THIRD-PARTY-NOTICES.md`.
 
 ## 7. When a review gate fires
 
-Plan prices, quota values, billing planes and rules, aliases, canonical links, wire corrections, fact overrides,
+Plan prices, quota values, service tiers, billing planes and rules, aliases, canonical links, wire corrections, fact overrides,
 input-audio sources and curated model rows each carry a review date, and a test fails once any date has
 passed. These are time-triggered: they fail on a day nobody changed anything,
 and CI's scheduled run exists so they fire then. The plan-price, billing-plane
@@ -454,7 +468,7 @@ To clear one:
 3. Whether or not it changed, record who looked (`established_by` where the
    file has it), when (`established_at_ms`), and a new `review_by_ms`: 60 days
    later for billing planes, aliases, canonical links, wire corrections, fact overrides, input-audio sources and curated model rows; the file's stated
-   interval for plan prices.
+   interval for plan prices, and 30 days for service-tier entitlements.
 4. Commit the file. Confirming a claim unchanged is a real result; the diff is
    the provenance change alone.
 
