@@ -6,17 +6,22 @@ routine steps; anything not listed under "pre-approved" still comes to the head.
 ## Build, test, gate
 
 - Compile and test only on the remote Linux build server. Request the CPUs
-  the job uses: `linux,8c` for the whole suite, `linux,2c` to `linux,4c` for
-  one crate or a lint. A job holds every CPU it requests for its whole run, so
-  a larger request only makes other jobs wait. Never compile on the Mac.
-- Before delivering, run the whole gate as one remote job:
-  `scripts/gate.sh --base <the commit your work started from>` with
-  `runon: "linux,8c"`. It runs exactly what CI runs, in place on the build
-  server. `--base` is needed because the remote checkout has no
-  `origin/master`. Quote its final line (`GATE_OK <rev>`) in the delivery. A
-  delivery without it is not finished. If 8c is refused for capacity, run
-  the same gate as one `linux,4c` job without asking: only the CPU size
-  changes, and a refusal that says nothing ran is safe to retry.
+  the job uses: `linux,2c` for one test binary or a filtered run, `linux,4c`
+  for clippy on the workspace. A job holds every CPU it requests for its whole
+  run, so a larger request only makes other jobs wait. Never compile on the Mac.
+- Run only filtered tests: the tests for the files and behaviour you changed
+  (for example `cargo test --locked -p fusiform-module --test it fact_overrides`),
+  plus `cargo fmt --check` and `cargo clippy --locked --workspace --all-targets
+  -- -D warnings`. Quote each command and its exit code in the delivery.
+- Never run the whole workspace suite or `scripts/gate.sh`. The head runs the
+  full gate once, over merged deliveries.
+- A failure that looks unrelated to your change: rerun that one test by name on
+  the base commit, never the suite, and report both results.
+- A filtered run that takes longer than about 15 minutes means the filter is
+  too broad; narrow it rather than waiting on it. Keep the default build
+  directory; a separate `CARGO_TARGET_DIR` forces a cold build every time.
+- A refusal that says nothing ran is safe to retry straight away, at a
+  smaller CPU size if capacity was the reason.
 - A bug fix carries one test, shown once to fail without the fix. Say how you
   showed it.
 
