@@ -10,7 +10,7 @@
         "existence": "present",
         "model.name": "Muse Wonder Full",
         "limit.context": 1048576,
-        "limit.output": null,
+        "limit.output": 131072,
         "capability.attachment": true,
         "capability.reasoning": true,
         "capability.reasoning_options": [
@@ -24,9 +24,9 @@
         "model.family": "muse",
         "model.open_weights": false
       },
-      "source_ref": "Display name confirmed 2026-10-26 at https://research.meta.ai/blog/muse-wonder: 'Muse Wonder Full'. Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with muse-wonder-full-1.0 among 12 ids; POST https://api.meta.ai/v1/responses with muse-wonder-full at 16:42:35Z returned 404 'The requested model was not found.'; POST with muse-wonder-full-1.0 at 16:42:45Z returned 200. Lab record meta/muse-wonder-full in https://models.dev/models.json read 2026-10-13: Muse Wonder Full, released 2026-10-12; https://research.meta.ai/blog/muse-wonder and https://research.meta.ai/static/muse-wonder-model-card. No output limit or cost published. Reasoning effort levels low, medium, high and xhigh: the operator's statement on 2026-10-16; the Muse Wonder blog shows Wonder Full at several reasoning efforts but does not name them, and the lab record carries no reasoning options.",
-      "established_at_ms": 1791849600000,
-      "review_by_ms": 1797033600000
+      "source_ref": "Display name confirmed 2026-10-26 at https://research.meta.ai/blog/muse-wonder: 'Muse Wonder Full'. Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with muse-wonder-full-1.0 among 12 ids; POST https://api.meta.ai/v1/responses with muse-wonder-full at 16:42:35Z returned 404 'The requested model was not found.'; POST with muse-wonder-full-1.0 at 16:42:45Z returned 200. Lab record meta/muse-wonder-full in https://models.dev/models.json read 2026-10-13: Muse Wonder Full, released 2026-10-12; https://research.meta.ai/blog/muse-wonder and https://research.meta.ai/static/muse-wonder-model-card. No cost published. Output limit 131072: the operator's statement on 2026-11-02 that Wonder Full's output limit is 128K, matching models.dev's 131072 for muse-wonder-1.0. Meta publishes no output limit for either Muse Wonder model: re-read 2026-11-02 at https://dev.meta.ai/models/muse-wonder, https://dev.meta.ai/docs/pricing-rate-limits and the 13-page model card, which give only 'Context Length 1M tokens at inference'; https://dev.meta.ai/docs/api-reference/responses/schemas says max_output_tokens counts 'both visible output and reasoning tokens' and 'values above the model's configured maximum ... return a 400 error'. Reasoning effort levels low, medium, high and xhigh: the operator's statement on 2026-10-16; the Muse Wonder blog shows Wonder Full at several reasoning efforts but does not name them, and the lab record carries no reasoning options.",
+      "established_at_ms": 1793577600000,
+      "review_by_ms": 1798761600000
     },
     {
       "provider_id": "cloudflare-workers-ai",

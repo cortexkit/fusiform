@@ -5975,7 +5975,7 @@ mod curated_tests {
             let facts = &response.models[ID];
             assert_eq!(facts["model.canonical_id"], "meta/muse-wonder-full");
             assert_eq!(facts["limit.context"], 1048576);
-            assert!(facts["limit.output"].is_null());
+            assert_eq!(facts["limit.output"], 131072);
             assert_eq!(facts["model.family"], "muse");
             assert_eq!(facts["model.open_weights"], false);
             for key in [
@@ -6078,7 +6078,8 @@ mod curated_tests {
             assert!(row.source_ref.contains("16:42:35Z"));
             assert!(row.source_ref.contains("16:42:45Z"));
             assert!(row.source_ref.contains("https://models.dev/models.json"));
-            assert_eq!(row.review_by_ms, 1797033600000);
+            assert!(row.source_ref.contains("Output limit 131072"));
+            assert_eq!(row.review_by_ms, 1798761600000);
         }
     }
 
