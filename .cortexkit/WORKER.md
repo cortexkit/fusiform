@@ -23,7 +23,10 @@ routine steps; anything not listed under "pre-approved" still comes to the head.
 - A refusal that says nothing ran is safe to retry straight away, at a
   smaller CPU size if capacity was the reason.
 - A bug fix carries one test, shown once to fail without the fix. Say how you
-  showed it.
+  showed it. Make the red-first change locally or in a scratch copy under
+  `$TMPDIR`, never by editing a tracked file inside a remote job: remote Linux
+  jobs can't write tracked files, so the edit fails and the test would run
+  against the fix and read as a false proof.
 
 ## Pre-approved: do these without asking
 
