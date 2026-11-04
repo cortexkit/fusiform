@@ -5050,6 +5050,12 @@ mod billing_plane_tests {
 
     #[test]
     fn a_read_without_auth_method_keeps_the_pre_plane_wire_bytes() {
+        // These bytes pin a plain `openai` read. The shipped curated table now
+        // adds an `openai` decision row to it, which is unrelated to billing
+        // planes, so this test reads against an empty curated table.
+        let _curated = crate::curated_models::plant(
+            r#"{"schema":"curated-models/v1","purpose":"empty","models":[]}"#,
+        );
         let (store, _dir) = store();
         seed(
             &store,
