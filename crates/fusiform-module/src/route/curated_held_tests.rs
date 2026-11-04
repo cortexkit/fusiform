@@ -86,14 +86,16 @@ fn assert_not_listed(response: &CatalogGetResponse, read: &str) {
             "{read}: a plain read lists no retirement"
         );
     }
-    // Only the held rows state `model.kind`, so no row may carry it.
-    assert!(
-        !response
-            .models
-            .values()
-            .any(|facts| facts.contains_key("model.kind")),
-        "{read}: no served row states model.kind while the System One rows are held"
-    );
+    // Of the rows stating `model.kind`, only the unheld OpenAI Decisions row
+    // may be served, so a held System One row can't leak in some other shape.
+    for (id, facts) in &response.models {
+        if facts.contains_key("model.kind") {
+            assert_eq!(
+                id, "openai/gpt-6-luna-decisions",
+                "{read}: only the unheld Decisions row may state model.kind while the System One rows are held"
+            );
+        }
+    }
 }
 
 /// Each held id is present exactly once, as an identity whose only fact is

@@ -457,6 +457,7 @@ mod tests {
         ("cloudflare-workers-ai", "@cf/cloudflare/clef"),
         ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
         ("meta", "muse-wonder-full-1.0"),
+        ("openai", "gpt-6-luna-decisions"),
         ("typesafe", "jev-1.13.0"),
     ];
 

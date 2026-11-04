@@ -29,6 +29,52 @@
       "review_by_ms": 1798761600000
     },
     {
+      "provider_id": "openai",
+      "model_id": "gpt-6-luna-decisions",
+      "auth_methods": ["apikey"],
+      "facts": {
+        "existence": "present",
+        "model.name": "GPT-6 Luna (Decisions)",
+        "capability.attachment": true,
+        "capability.input_modalities": ["image", "text"],
+        "model.kind": "decision",
+        "rate.input": {
+          "state": "priced",
+          "units": 100000000,
+          "exponent": 9,
+          "currency": "USD",
+          "unit_provenance": {
+            "kind": "stated"
+          }
+        },
+        "rate.cache_read": {
+          "state": "priced",
+          "units": 10000000,
+          "exponent": 9,
+          "currency": "USD",
+          "unit_provenance": {
+            "kind": "stated"
+          }
+        },
+        "rate.cache_write": {
+          "state": "priced",
+          "units": 125000000,
+          "exponent": 9,
+          "currency": "USD",
+          "unit_provenance": {
+            "kind": "stated"
+          }
+        },
+        "rate.output": {
+          "state": "stated_zero"
+        }
+      },
+      "source_ref": "OpenAI's Decisions API: POST /v1/decisions with model gpt-6-luna. This row is that endpoint, not the gpt-6-luna chat row. Read 2026-11-04 at https://developers.openai.com/api/docs/guides/decisions: \"Send requests to `POST /v1/decisions` using `gpt-6-luna`, the only currently supported model.\"; \"The Decisions API evaluates text, images, and JSON and returns typed answers\"; \"Files, audio, and item references aren't supported.\"; \"Provide images as inline base64 data URLs or publicly accessible HTTP or HTTPS URLs.\"; \"With `gpt-6-luna`, uncached input costs **$0.10 per 1M tokens**. Prompt cache hits receive discounted input pricing; cache writes are charged. Cache-read and cache-write rates match the standard `gpt-6-luna` prompt caching rates. Output tokens are not charged.\"; \"Regional processing premiums and long-context input pricing multipliers apply.\" https://developers.openai.com/api/docs/pricing, standard table, row gpt-6-luna: short context cached input $0.01, short context 30m write $0.125, 12h write $0.25. Served: the short-context rates and the 30-minute cache write. Not served: the 12-hour cache write, long-context rates above 272K input tokens, and regional premiums, so a long-context or regional request costs more than these rates. The page states no context window or image size limits.",
+      "established_by": "fusiform",
+      "established_at_ms": 1793750400000,
+      "review_by_ms": 1798934400000
+    },
+    {
       "provider_id": "cloudflare-workers-ai",
       "model_id": "@cf/cloudflare/clef",
       "auth_methods": ["apikey"],
