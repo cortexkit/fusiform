@@ -27,8 +27,10 @@ routine steps; anything not listed under "pre-approved" still comes to the head.
 
 ## Pre-approved: do these without asking
 
-- Regenerate the golden fixture (`UPDATE_GOLDEN=1` on the remote runner) when
-  every changed line is explained by your change. State the explanation in the
+- Regenerate the golden fixture (`UPDATE_GOLDEN=1` on the remote runner, with
+  `return_paths: ["crates/fusiform-module/fixtures/served-payloads.json"]`,
+  because remote Linux jobs can't write tracked files otherwise and the
+  rewrite would be lost) when every changed line is explained by your change. State the explanation in the
   delivery, and stop and report any line you cannot explain.
 - Bump `fusiform-protocol`'s minor version for a wire addition, together with
   the one matching version line in the root `Cargo.lock`. Nothing else in the
