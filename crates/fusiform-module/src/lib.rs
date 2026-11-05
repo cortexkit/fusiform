@@ -81,10 +81,11 @@ pub async fn serve_request(store: Arc<CatalogStore>, body: Vec<u8>) -> HandlerOu
     }
 }
 
-// Two page-sized renders may overlap, not an unbounded blocking-pool burst.
+// One page render at a time: two permits measured about 54 MiB of live Rust
+// heap on the seeded catalog before SQLite and allocator overhead.
 // Acquire before scheduling and move the permit into the work so cancellation
 // cannot admit another catalog while the detached blocking job still runs.
-static CATALOG_WORK: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+static CATALOG_WORK: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
 async fn run_catalog_work<F>(work: F) -> HandlerOutcome
 where
@@ -518,7 +519,7 @@ mod admission_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn at_most_two_catalog_jobs_run_through_completion() {
+    async fn at_most_one_catalog_job_runs_through_completion() {
         let live = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
         let mut tasks = Vec::new();
@@ -540,6 +541,6 @@ mod admission_tests {
             task.await.unwrap();
         }
         assert_eq!(live.load(Ordering::SeqCst), 0);
-        assert_eq!(peak.load(Ordering::SeqCst), 2);
+        assert_eq!(peak.load(Ordering::SeqCst), 1);
     }
 }
