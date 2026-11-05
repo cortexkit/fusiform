@@ -362,6 +362,15 @@ impl CatalogStore {
 
     /// Read the catalog.
     pub fn read_catalog(&self, query: &CatalogQuery) -> Result<CatalogSnapshot, CatalogError> {
+        self.read_catalog_for_provider(query, None)
+    }
+
+    /// Restrict model values in SQL while preserving catalog-wide disclosures.
+    pub fn read_catalog_for_provider(
+        &self,
+        query: &CatalogQuery,
+        provider: Option<&str>,
+    ) -> Result<CatalogSnapshot, CatalogError> {
         // Resolve "now" to a concrete instant ONCE, before the read. Two rows
         // resolved against two different instants would be a snapshot that
         // never existed.
@@ -370,7 +379,7 @@ impl CatalogStore {
             None => Timestamp(now_ms()),
         };
 
-        let rows = self.point_in_time_rows(query.source, resolved_at)?;
+        let rows = self.point_in_time_rows(query.source, resolved_at, provider)?;
 
         // Corrections covering this instant, fetched once for the whole read.
         //
@@ -429,6 +438,44 @@ impl CatalogStore {
                 .entry((provider_id, model_id))
                 .or_default()
                 .insert(fact_key, value_json);
+        }
+
+        // Provider reads have always disclosed corrections and uncertainty across
+        // the catalog. Probe only exceptional keys outside the value scope so a
+        // narrower value query does not silently narrow that envelope.
+        if let Some(provider) = provider {
+            self.raw_conn(|conn| {
+                let sql = format!("{POINT_IN_TIME_SQL} AND e.provider_id = ?3 AND e.model_id = ?4 AND e.fact_key = ?5");
+                let mut stmt = conn.prepare(&sql)?;
+                let mut exists = |p: &str, m: &str, k: &FactKey| -> rusqlite::Result<bool> {
+                    Ok(stmt.query(params![query.source.as_str(), resolved_at.0, p, m, k.as_str()])?.next()?.is_some())
+                };
+                for ((p, m, k), records) in &corrections {
+                    if p != provider && exists(p, m, k)? {
+                        withheld.push(WithheldFact { provider_id: p.clone(), model_id: m.clone(), fact_key: k.clone(), corrections: records.clone() });
+                    }
+                }
+                for ((p, m, k), (prior, boundary)) in &uncertainty {
+                    if p != provider && !corrections.contains_key(&(p.clone(), m.clone(), k.clone())) && exists(p, m, k)? {
+                        uncertain.push(UncertainFact { provider_id: p.clone(), model_id: m.clone(), fact_key: k.clone(), superseded_after: *prior, superseded_by: *boundary });
+                    }
+                }
+                Ok(())
+            })?;
+            withheld.sort_by(|a, b| {
+                (&a.provider_id, &a.model_id, &a.fact_key).cmp(&(
+                    &b.provider_id,
+                    &b.model_id,
+                    &b.fact_key,
+                ))
+            });
+            uncertain.sort_by(|a, b| {
+                (&a.provider_id, &a.model_id, &a.fact_key).cmp(&(
+                    &b.provider_id,
+                    &b.model_id,
+                    &b.fact_key,
+                ))
+            });
         }
 
         let mut models = Vec::with_capacity(by_model.len());
@@ -559,10 +606,21 @@ impl CatalogStore {
         &self,
         source: SourceId,
         at: Timestamp,
+        provider: Option<&str>,
     ) -> Result<Vec<(String, String, String, String)>, CatalogError> {
         let rows = self.raw_conn(|conn| {
-            let mut stmt = conn.prepare(POINT_IN_TIME_SQL)?;
-            let mapped = stmt.query_map(params![source.as_str(), at.0], |r| {
+            let sql = if provider.is_some() {
+                format!("{POINT_IN_TIME_SQL} AND e.provider_id = ?3")
+            } else {
+                POINT_IN_TIME_SQL.to_string()
+            };
+            let mut stmt = conn.prepare(&sql)?;
+            let source = source.as_str();
+            let mut args: Vec<&dyn rusqlite::ToSql> = vec![&source, &at.0];
+            if let Some(ref p) = provider {
+                args.push(p);
+            }
+            let mapped = stmt.query_map(args.as_slice(), |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
             })?;
             mapped.collect::<rusqlite::Result<Vec<_>>>()

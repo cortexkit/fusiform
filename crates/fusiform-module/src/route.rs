@@ -1090,7 +1090,7 @@ fn serve_catalog_get_with_cache(
     {
         single_model_snapshot(store, source, provider_id, model_id, at, &request)?
     } else {
-        let mut query = CatalogQuery {
+        let query = CatalogQuery {
             source,
             at,
             presence: if request.include_retired {
@@ -1108,15 +1108,10 @@ fn serve_catalog_get_with_cache(
                 None => fusiform_store::serve::FactFilter::All,
             },
         };
-        // A provider filter with no model id: narrow after the read rather than
-        // in SQL, because the read is index-backed on the full key and a
-        // provider-only predicate would not use it.
-        let provider_filter = request.provider_id.clone();
-        query.at = at;
-        let mut snapshot = store.read_catalog(&query).map_err(|e| store_error(&e))?;
-        if let Some(provider) = provider_filter {
-            snapshot.models.retain(|m| m.provider_id == provider);
-
+        let snapshot = store
+            .read_catalog_for_provider(&query, request.provider_id.as_deref())
+            .map_err(|e| store_error(&e))?;
+        if let Some(provider) = &request.provider_id {
             // An unknown provider is a REFUSAL, not an empty result.
             //
             // "0 models" is a true statement about the filter and a misleading
@@ -1129,7 +1124,7 @@ fn serve_catalog_get_with_cache(
             // path pays no query.
             if snapshot.models.is_empty()
                 && curated.is_empty()
-                && !provider_is_served(store, source, &provider)?
+                && !provider_is_served(store, source, provider)?
             {
                 // The hint names the VOCABULARY rather than a casing rule.
                 //

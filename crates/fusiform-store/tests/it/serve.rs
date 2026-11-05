@@ -763,6 +763,23 @@ fn sql_catalog_counts_match_snapshot_with_withholding_and_withdrawal() {
         (snapshot.model_count(), snapshot.priced_model_count()),
         (4, 2)
     );
+    for provider in ["counts", "missing"] {
+        let scoped = f
+            .store
+            .read_catalog_for_provider(&CatalogQuery::at(SourceId::ModelsDev, at), Some(provider))
+            .unwrap();
+        assert_eq!(
+            scoped.models,
+            snapshot
+                .models
+                .iter()
+                .filter(|m| m.provider_id == provider)
+                .cloned()
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(scoped.withheld, snapshot.withheld);
+        assert_eq!(scoped.uncertain, snapshot.uncertain);
+    }
     for at in [1_000, 1_200, 1_500, 2_000, 2_001, 3_000] {
         let snapshot = f
             .store
