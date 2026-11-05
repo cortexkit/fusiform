@@ -346,9 +346,28 @@ impl CatalogStore {
         source: SourceId,
         at: Timestamp,
     ) -> Result<UncertaintyByFact, CatalogError> {
+        self.uncertain_facts_in_range(source, at, None, None)
+    }
+
+    fn uncertain_facts_in_range(
+        &self,
+        source: SourceId,
+        at: Timestamp,
+        after: Option<&str>,
+        through: Option<&str>,
+    ) -> Result<UncertaintyByFact, CatalogError> {
         let rows = self.raw_conn(|conn| {
-            let mut stmt = conn.prepare(UNCERTAIN_FACTS_SQL)?;
-            let mapped = stmt.query_map(params![source.as_str(), at.0], |r| {
+            let source = source.as_str();
+            let mut sql = UNCERTAIN_FACTS_SQL.to_string();
+            let mut args: Vec<&dyn rusqlite::ToSql> = vec![&source, &at.0];
+            for (value, operator) in [(&after, ">"), (&through, "<=")] {
+                if let Some(value) = value {
+                    args.push(value);
+                    sql.push_str(&format!(" AND provider_id {operator} ?{}", args.len()));
+                }
+            }
+            let mut stmt = conn.prepare(&sql)?;
+            let mapped = stmt.query_map(args.as_slice(), |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
@@ -427,7 +446,8 @@ impl CatalogStore {
         // Facts whose value at this instant sits inside a later era's window.
         // One query for the whole read, and empty by construction for a read of
         // the current catalog.
-        let uncertainty = self.uncertain_facts_at(query.source, resolved_at)?;
+        let uncertainty =
+            self.uncertain_facts_in_range(query.source, resolved_at, after, through)?;
 
         let mut by_model: BTreeMap<(String, String), BTreeMap<FactKey, String>> = BTreeMap::new();
         let mut withheld: Vec<WithheldFact> = Vec::new();
