@@ -22,3 +22,9 @@ t = "test --locked"
 # that CI rejects is the worst shape a gate can have — it spends a train run to
 # tell you something the alias could have.
 c = "clippy --locked --workspace --all-targets -- -D warnings"
+
+[env]
+# The bundled default shares one page-cache mutex across all connections when
+# memory management is enabled. We use neither release_memory nor soft heap
+# limits, so keep independent caches for concurrent catalog readers instead.
+LIBSQLITE3_FLAGS = "-USQLITE_ENABLE_MEMORY_MANAGEMENT"
