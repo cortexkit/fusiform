@@ -253,27 +253,34 @@ pub fn plan_ingest(
 /// Fed in sorted order, so the digest depends on the fact set rather than on
 /// the order the normalizer happened to emit providers in.
 pub fn catalog_digest(catalog: &NormalizedCatalog) -> String {
-    let mut entries: Vec<(String, String, String, String)> = Vec::new();
-    for model in catalog.models() {
-        for (key, value) in facts_of(model) {
-            entries.push((
-                model.key.provider_id.clone(),
-                model.key.model_id.clone(),
-                key.as_str().to_string(),
-                value,
-            ));
-        }
-    }
-    entries.sort();
-
+    // Sort only model references. Fact tuples live for one model identity at a
+    // time instead of retaining a second copy of the entire catalog.
+    let mut models: Vec<_> = catalog.models().collect();
+    models.sort_unstable_by(|a, b| {
+        (&a.key.provider_id, &a.key.model_id).cmp(&(&b.key.provider_id, &b.key.model_id))
+    });
     let mut hasher = blake3::Hasher::new();
-    for (provider, model, key, value) in entries {
-        // Length-prefixed rather than delimiter-separated: a provider id
-        // containing the delimiter would otherwise let two different fact sets
-        // hash identically, and provider ids are upstream-controlled strings.
-        for field in [&provider, &model, &key, &value] {
-            hasher.update(&(field.len() as u64).to_le_bytes());
-            hasher.update(field.as_bytes());
+    for group in models
+        .chunk_by(|a, b| a.key.provider_id == b.key.provider_id && a.key.model_id == b.key.model_id)
+    {
+        let model = group[0];
+        // Sort duplicate identities' facts together too, even for a catalog
+        // constructed outside the normalizer.
+        let mut facts: Vec<_> = group.iter().flat_map(|model| facts_of(model)).collect();
+        facts.sort();
+        for (key, value) in facts {
+            // Length-prefixed rather than delimiter-separated: a provider id
+            // containing the delimiter would otherwise let two different fact sets
+            // hash identically, and provider ids are upstream-controlled strings.
+            for field in [
+                model.key.provider_id.as_str(),
+                model.key.model_id.as_str(),
+                key.as_str(),
+                &value,
+            ] {
+                hasher.update(&(field.len() as u64).to_le_bytes());
+                hasher.update(field.as_bytes());
+            }
         }
     }
     hasher.finalize().to_hex().to_string()

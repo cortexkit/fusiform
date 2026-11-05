@@ -160,13 +160,13 @@ pub async fn tick(ctx: &PollContext, now_ms: i64) -> Result<TickReport, TickErro
     };
 
     let outcome = ctx.fetcher.poll(&ctx.endpoint, etag.as_deref()).await;
-    let report = apply(
-        &ctx.store,
-        &ctx.signals,
-        ctx.endpoint.source,
-        outcome,
-        now_ms,
-    )?;
+    let store = ctx.store.clone();
+    let signals = ctx.signals.clone();
+    let source = ctx.endpoint.source;
+    let report =
+        tokio::task::spawn_blocking(move || apply(&store, &signals, source, outcome, now_ms))
+            .await
+            .map_err(TickError::ApplyTask)??;
     if matches!(
         report.outcome,
         TickOutcome::Changed { .. } | TickOutcome::Unchanged
@@ -599,12 +599,14 @@ fn record_failure(
 #[derive(Debug)]
 pub enum TickError {
     Store(fusiform_store::CatalogError),
+    ApplyTask(tokio::task::JoinError),
 }
 
 impl std::fmt::Display for TickError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TickError::Store(e) => write!(f, "store: {e}"),
+            TickError::ApplyTask(e) => write!(f, "poll apply task did not complete: {e}"),
         }
     }
 }

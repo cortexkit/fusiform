@@ -1875,3 +1875,45 @@ fn a_retracted_mark_stops_excluding_and_stays_on_the_record() {
         "the mark and its retraction must both stay on the record"
     );
 }
+
+#[test]
+fn streamed_digest_matches_the_original_tuple_sort_on_the_embedded_seed() {
+    use fusiform_store::ingest::{catalog_digest, facts_with_values};
+    fn original(catalog: &fusiform_core::normalize::NormalizedCatalog) -> String {
+        let mut entries = Vec::new();
+        for model in catalog.models() {
+            for (key, value) in facts_with_values(model) {
+                entries.push((
+                    model.key.provider_id.clone(),
+                    model.key.model_id.clone(),
+                    key.as_str().to_string(),
+                    value,
+                ));
+            }
+        }
+        entries.sort();
+        let mut hasher = blake3::Hasher::new();
+        for (provider, model, key, value) in entries {
+            for field in [&provider, &model, &key, &value] {
+                hasher.update(&(field.len() as u64).to_le_bytes());
+                hasher.update(field.as_bytes());
+            }
+        }
+        hasher.finalize().to_hex().to_string()
+    }
+    let mut catalog = fusiform_core::normalize::normalize_models_dev(include_bytes!(
+        "../../../fusiform-module/data/models-dev-seed.json"
+    ))
+    .unwrap()
+    .catalog;
+    let expected = original(&catalog);
+    assert_eq!(catalog_digest(&catalog), expected);
+    catalog.providers.reverse();
+    for provider in &mut catalog.providers {
+        provider.models.reverse();
+    }
+    assert_eq!(catalog_digest(&catalog), expected);
+    let duplicate = catalog.providers[0].models[0].clone();
+    catalog.providers[0].models.push(duplicate);
+    assert_eq!(catalog_digest(&catalog), original(&catalog));
+}
