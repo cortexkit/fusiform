@@ -696,6 +696,7 @@ fn sql_catalog_counts_match_snapshot_with_withholding_and_withdrawal() {
         "zero",
         "unpriced",
         "bad-rate",
+        "withdrawn-rate",
         "partial",
     ] {
         rows.push(row(
@@ -709,7 +710,7 @@ fn sql_catalog_counts_match_snapshot_with_withholding_and_withdrawal() {
             rows.push(row(
                 model,
                 "rate.input",
-                "{\"kind\":\"stated_zero\"}",
+                "{\"state\":\"stated_zero\"}",
                 1_000,
                 BoundaryKind::Seed,
             ));
@@ -718,7 +719,7 @@ fn sql_catalog_counts_match_snapshot_with_withholding_and_withdrawal() {
     rows.push(row(
         "partial",
         "rate.output",
-        "{}",
+        "{\"state\":\"stated_zero\"}",
         1_000,
         BoundaryKind::Seed,
     ));
@@ -726,6 +727,13 @@ fn sql_catalog_counts_match_snapshot_with_withholding_and_withdrawal() {
         "withdrawn",
         "existence",
         "\"retired\"",
+        1_400,
+        BoundaryKind::Asserted,
+    ));
+    rows.push(row(
+        "withdrawn-rate",
+        "rate.input",
+        "{\"state\":\"unpriced\",\"reason\":\"missing_rate\"}",
         1_400,
         BoundaryKind::Asserted,
     ));
@@ -761,7 +769,7 @@ fn sql_catalog_counts_match_snapshot_with_withholding_and_withdrawal() {
         .unwrap();
     assert_eq!(
         (snapshot.model_count(), snapshot.priced_model_count()),
-        (4, 2)
+        (5, 3)
     );
     for provider in ["counts", "missing"] {
         let scoped = f

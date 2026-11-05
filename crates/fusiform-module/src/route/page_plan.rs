@@ -107,17 +107,34 @@ pub(super) fn serve_planned_page(
         {
             plan.clone()
         } else {
-            let plan = Arc::new(build_plan(
-                store,
-                &request,
-                source,
-                key,
-                budget,
-                frame_limit,
-                oversized,
-            )?);
-            *cached = Some(plan.clone());
-            plan
+            loop {
+                let plan = Arc::new(build_plan(
+                    store,
+                    &request,
+                    source,
+                    key.clone(),
+                    budget,
+                    frame_limit,
+                    oversized,
+                )?);
+                check_page_version(
+                    store.catalog_version().map_err(|e| store_error(&e))?,
+                    &PageCursor {
+                        catalog_version: key.catalog_version,
+                        resolved_at_ms: 0,
+                        provider: String::new(),
+                    },
+                )?;
+                let latest = store.latest_era_id().map_err(|e| store_error(&e))?;
+                if latest != key.latest_era_id {
+                    // A correction can change sizes without advancing the catalog
+                    // version. Do not publish a plan measured across that write.
+                    key.latest_era_id = latest;
+                    continue;
+                }
+                *cached = Some(plan.clone());
+                break plan;
+            }
         }
     };
     let range = plan.range_after(cursor.map(|c| c.provider.as_str()))?;
@@ -159,6 +176,27 @@ pub(super) fn serve_planned_page(
     } else {
         None
     };
+    while compact_size(&response)? > budget {
+        let mut providers = partition_providers(&mut response);
+        if providers.len() <= 1 {
+            for rows in providers.into_values() {
+                rows.append_to(&mut response);
+            }
+            break;
+        }
+        // Keep a bounded fallback if size accounting ever drifts:
+        // discard only the last whole provider and resume before it next time.
+        providers.pop_last();
+        let last = providers.last_key_value().map(|(p, _)| p.clone()).unwrap();
+        for rows in providers.into_values() {
+            rows.append_to(&mut response);
+        }
+        retain_quality_disclosure(&mut response);
+        response.next_page_token = Some(format!(
+            "v1:{}:{}:{last}",
+            response.catalog_version, response.resolved_at_ms
+        ));
+    }
     Ok(response)
 }
 
@@ -335,5 +373,101 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod correction_tests {
+    use super::*;
+    use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+    use fusiform_core::{BoundaryKind, Correction, FieldId, TokenClass};
+    use fusiform_store::{FactKey, NewEra};
+
+    #[test]
+    fn a_correction_replans_boundaries_without_a_version_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().into_owned(),
+            },
+        })
+        .unwrap();
+        let mut rows = Vec::new();
+        for provider in ["a", "b", "c"] {
+            for (key, value) in [
+                (FactKey::existence(), "\"present\""),
+                (
+                    FactKey::rate(TokenClass::Input),
+                    "{\"state\":\"stated_zero\"}",
+                ),
+            ] {
+                rows.push(NewEra {
+                    source: SourceId::ModelsDev,
+                    provider_id: provider.into(),
+                    model_id: "model".into(),
+                    fact_key: key,
+                    value_json: value.into(),
+                    boundary_at: Timestamp(1_000),
+                    boundary_kind: BoundaryKind::Seed,
+                    observation_id: None,
+                });
+            }
+        }
+        store.append_eras(&rows).unwrap();
+        let request = CatalogGetRequest {
+            paged: true,
+            at_ms: Some(1_500),
+            ..Default::default()
+        };
+        let cache = Mutex::new(None);
+        let before =
+            serve_catalog_get_request(&store, request.clone(), 1_000, usize::MAX, &cache, None)
+                .unwrap();
+        let version = store.catalog_version().unwrap();
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "a".into(),
+                model_id: "model".into(),
+                fact_key: FactKey::rate(TokenClass::Input),
+                value_json: "{\"state\":\"stated_zero\"}".into(),
+                boundary_at: Timestamp(3_000),
+                boundary_kind: BoundaryKind::Corrected(Correction {
+                    fields: vec![FieldId::Rate {
+                        class: TokenClass::Input,
+                    }],
+                    affected_from: Timestamp(1_000),
+                    affected_until: Timestamp(2_000),
+                    reason: "invalid rate ".repeat(100),
+                }),
+                observation_id: None,
+            }])
+            .unwrap();
+        assert_eq!(store.catalog_version().unwrap(), version);
+        let after =
+            serve_catalog_get_request(&store, request.clone(), 1_000, usize::MAX, &cache, None)
+                .unwrap();
+        let whole = serve_catalog_get_request(
+            &store,
+            CatalogGetRequest {
+                paged: false,
+                ..request
+            },
+            1_000,
+            usize::MAX,
+            &cache,
+            None,
+        )
+        .unwrap();
+        let expected = page_catalog(whole, None, 1_000).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&after).unwrap(),
+            serde_json::to_vec(&expected).unwrap()
+        );
+        assert_ne!(before.next_page_token, after.next_page_token);
+        assert_eq!(after.models.keys().collect::<Vec<_>>(), vec!["a/model"]);
     }
 }

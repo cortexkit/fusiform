@@ -287,13 +287,13 @@ pub type UncertaintyByFact = BTreeMap<(String, String, FactKey), (Timestamp, Tim
 impl CatalogStore {
     /// Provider identities only, including providers with disclosure-only rows.
     pub fn catalog_providers(&self, source: SourceId) -> Result<Vec<String>, CatalogError> {
-        Ok(self.raw_conn(|conn| {
+        self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT DISTINCT provider_id FROM era WHERE source = ?1 ORDER BY provider_id",
             )?;
             let rows = stmt.query_map(params![source.as_str()], |r| r.get(0))?;
             rows.collect()
-        })?)
+        })
     }
 
     /// Present and priced model totals, with the same withholding as a snapshot.
@@ -328,11 +328,11 @@ impl CatalogStore {
             visible("r"),
             visible("e")
         );
-        Ok(self.raw_conn(|conn| {
+        self.raw_conn(|conn| {
             conn.query_row(&sql, params![source.as_str(), at.0], |r| {
                 Ok((r.get::<_, i64>(0)? as usize, r.get::<_, i64>(1)? as usize))
             })
-        })?)
+        })
     }
 
     /// Facts whose recorded value at an instant may already have been
