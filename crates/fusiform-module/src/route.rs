@@ -30,6 +30,9 @@ use serde::Deserialize;
 #[cfg(test)]
 mod paging_tests;
 
+mod page_plan;
+use page_plan::{serve_planned_page, ProviderRange};
+
 #[cfg(test)]
 #[path = "route/canonical_link_tests.rs"]
 mod canonical_link_tests;
@@ -741,7 +744,7 @@ thread_local! {
     static CATALOG_RENDER_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct WholeCatalogKey {
     store_instance: u64,
     catalog_version: i64,
@@ -835,13 +838,24 @@ fn serve_catalog_get_with_cache(
 ) -> Result<CatalogGetResponse, RouteError> {
     // An empty body is a request for everything. A consumer calling a read with
     // no arguments should not have to know that `{}` is the incantation.
-    let mut request: CatalogGetRequest = if body.is_empty() {
+    let request: CatalogGetRequest = if body.is_empty() {
         CatalogGetRequest::default()
     } else {
         serde_json::from_slice(body)
             .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?
     };
 
+    serve_catalog_get_request(store, request, page_budget, frame_limit, oversized, None)
+}
+
+fn serve_catalog_get_request(
+    store: &CatalogStore,
+    mut request: CatalogGetRequest,
+    page_budget: usize,
+    frame_limit: usize,
+    oversized: &Mutex<Option<OversizedCatalog>>,
+    range: Option<&ProviderRange>,
+) -> Result<CatalogGetResponse, RouteError> {
     let source = parse_source(request.source.as_deref())?;
     if request.page_token.is_some() && !request.paged {
         return Err(RouteError::bad_request("page_token requires paged: true"));
@@ -870,6 +884,18 @@ fn serve_catalog_get_with_cache(
                 "at_ms must match the first page's instant",
             ));
         }
+    }
+
+    if request.paged && range.is_none() {
+        return serve_planned_page(
+            store,
+            request,
+            source,
+            cursor.as_ref(),
+            page_budget,
+            frame_limit,
+            oversized,
+        );
     }
 
     // Select the plane before reading rows. A subscription with no declared
@@ -993,6 +1019,9 @@ fn serve_catalog_get_with_cache(
         }
     } else {
         for (provider, model) in crate::curated_models::models().keys() {
+            if range.is_some_and(|r| !r.contains(provider)) {
+                continue;
+            }
             if request
                 .provider_id
                 .as_deref()
@@ -1030,6 +1059,9 @@ fn serve_catalog_get_with_cache(
             .values()
             .map(|row| (&row.provider_id, &row.model_id, row.held_since_ms, None));
         for (provider, model, retired_at_ms, successor) in retired_alias_ids.chain(held_ids) {
+            if range.is_some_and(|r| !r.contains(provider)) {
+                continue;
+            }
             if request
                 .provider_id
                 .as_deref()
@@ -1046,6 +1078,10 @@ fn serve_catalog_get_with_cache(
             }
             retired_ids.push((provider, model, retired_at_ms, successor));
         }
+    }
+    if let Some(range) = range {
+        curated.retain(|row| range.contains(&row.provider_id));
+        retired_ids.retain(|(provider, _, _, _)| range.contains(provider));
     }
     if let (Some(provider_id), Some(model_id)) =
         (request.provider_id.as_deref(), request.model_id.as_deref())
@@ -1108,9 +1144,12 @@ fn serve_catalog_get_with_cache(
                 None => fusiform_store::serve::FactFilter::All,
             },
         };
-        let snapshot = store
-            .read_catalog_for_provider(&query, request.provider_id.as_deref())
-            .map_err(|e| store_error(&e))?;
+        let snapshot = if let Some(range) = range {
+            store.read_catalog_range(&query, range.after.as_deref(), range.through.as_deref())
+        } else {
+            store.read_catalog_for_provider(&query, request.provider_id.as_deref())
+        }
+        .map_err(|e| store_error(&e))?;
         if let Some(provider) = &request.provider_id {
             // An unknown provider is a REFUSAL, not an empty result.
             //
@@ -1180,7 +1219,16 @@ fn serve_catalog_get_with_cache(
             &mut response,
             request.provider_id.as_deref(),
             request.fact_prefixes.as_ref(),
+            range,
         )?;
+    }
+    if let Some(range) = range {
+        response
+            .models
+            .retain(|model, _| range.contains(model_provider(model)));
+        response
+            .aliased
+            .retain(|row| range.contains(model_provider(&row.model)));
     }
     for row in curated {
         let id = format!("{}/{}", row.provider_id, row.model_id);
@@ -1272,36 +1320,14 @@ fn serve_catalog_get_with_cache(
             });
         }
     }
-    if request.paged {
-        // Rendering can consult aliases after the main store read. Reject a
-        // concurrent version change rather than publish a mixed first page.
-        let rendered = PageCursor {
-            catalog_version: response.catalog_version,
-            resolved_at_ms: response.resolved_at_ms,
-            provider: String::new(),
-        };
-        check_page_version(
-            store.catalog_version().map_err(|e| store_error(&e))?,
-            &rendered,
-        )?;
-        if let Some(cursor) = &cursor {
-            check_page_version(response.catalog_version, cursor)?;
-            // An unchanged catalog version means the stored content is unchanged,
-            // so this page is also the current view at page one's instant. Do not
-            // turn it into an at_ms query: that would omit serve-time derivations.
-            response.resolved_at_ms = cursor.resolved_at_ms;
-        }
-        response = page_catalog(response, cursor.as_ref(), page_budget)?;
-    } else if request.provider_id.is_none() {
+    if !request.paged && request.provider_id.is_none() {
         // A whole-catalog reply too large for one frame is refused here, naming
         // the paged form, rather than left for the supervisor to replace with a
         // bare `frame_too_large` that does not say how to read the catalog.
         // Never truncated: a partial catalog would make the missing models look
         // retired. A provider-scoped read is not checked, because paging does
         // not apply to it and every provider today is far below the limit.
-        let size = serde_json::to_vec(&response)
-            .map_err(|e| RouteError::unavailable(e.to_string()))?
-            .len();
+        let size = compact_size(&response)?;
         if size > frame_limit {
             if let Some(key) = whole_key {
                 // Aliases and curated rows consult the store after the snapshot.
@@ -1405,6 +1431,7 @@ fn scope_page(response: &mut CatalogGetResponse, providers: &BTreeSet<String>) {
     retain_quality_disclosure(response);
 }
 
+#[cfg(test)]
 fn page_catalog(
     mut response: CatalogGetResponse,
     cursor: Option<&PageCursor>,
@@ -1530,6 +1557,7 @@ const DISCLOSURE_HEADERS: [&str; 9] = [
     r#","fact_overrides":[]"#,
 ];
 
+#[derive(Clone, Copy)]
 struct ProviderContribution {
     bytes: usize,
     present: [bool; 10],
@@ -1603,10 +1631,25 @@ impl ProviderRows {
     }
 }
 
-fn compact_size(value: &impl serde::Serialize) -> Result<usize, RouteError> {
-    serde_json::to_vec(value)
-        .map(|bytes| bytes.len())
-        .map_err(|e| RouteError::unavailable(e.to_string()))
+fn compact_size<T: serde::Serialize>(value: &T) -> Result<usize, RouteError> {
+    struct CountBytes(usize);
+    impl std::io::Write for CountBytes {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self
+                .0
+                .checked_add(bytes.len())
+                .ok_or_else(|| std::io::Error::other("catalog page size overflow"))?;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    // Size checks use the identical serializer without allocating reply buffers
+    // that would be discarded immediately.
+    let mut count = CountBytes(0);
+    serde_json::to_writer(&mut count, value).map_err(|e| RouteError::unavailable(e.to_string()))?;
+    Ok(count.0)
 }
 
 fn partition_providers(response: &mut CatalogGetResponse) -> BTreeMap<String, ProviderRows> {
@@ -5837,9 +5880,12 @@ fn add_aliases_to_bulk(
     response: &mut CatalogGetResponse,
     provider_filter: Option<&str>,
     prefixes: Option<&Vec<String>>,
+    range: Option<&ProviderRange>,
 ) -> Result<(), RouteError> {
     for (provider_id, model_id) in aliases.keys() {
-        if provider_filter.is_some_and(|p| p != provider_id) {
+        if provider_filter.is_some_and(|p| p != provider_id)
+            || range.is_some_and(|r| !r.contains(provider_id))
+        {
             continue;
         }
         let Some(alias) = alias_in_effect(store, source, aliases, provider_id, model_id)? else {

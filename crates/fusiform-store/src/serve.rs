@@ -285,6 +285,17 @@ pub const UNCERTAIN_FACTS_SQL: &str =
 pub type UncertaintyByFact = BTreeMap<(String, String, FactKey), (Timestamp, Timestamp)>;
 
 impl CatalogStore {
+    /// Provider identities only, including providers with disclosure-only rows.
+    pub fn catalog_providers(&self, source: SourceId) -> Result<Vec<String>, CatalogError> {
+        Ok(self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT provider_id FROM era WHERE source = ?1 ORDER BY provider_id",
+            )?;
+            let rows = stmt.query_map(params![source.as_str()], |r| r.get(0))?;
+            rows.collect()
+        })?)
+    }
+
     /// Present and priced model totals, with the same withholding as a snapshot.
     /// A stated-zero rate still counts as priced; an absent rate does not.
     pub fn catalog_counts(
@@ -371,6 +382,26 @@ impl CatalogStore {
         query: &CatalogQuery,
         provider: Option<&str>,
     ) -> Result<CatalogSnapshot, CatalogError> {
+        self.read_catalog_scoped(query, provider, None, None)
+    }
+
+    /// Read only a provider interval, including only its disclosures.
+    pub fn read_catalog_range(
+        &self,
+        query: &CatalogQuery,
+        after: Option<&str>,
+        through: Option<&str>,
+    ) -> Result<CatalogSnapshot, CatalogError> {
+        self.read_catalog_scoped(query, None, after, through)
+    }
+
+    fn read_catalog_scoped(
+        &self,
+        query: &CatalogQuery,
+        provider: Option<&str>,
+        after: Option<&str>,
+        through: Option<&str>,
+    ) -> Result<CatalogSnapshot, CatalogError> {
         // Resolve "now" to a concrete instant ONCE, before the read. Two rows
         // resolved against two different instants would be a snapshot that
         // never existed.
@@ -402,50 +433,63 @@ impl CatalogStore {
         let mut withheld: Vec<WithheldFact> = Vec::new();
         let mut uncertain: Vec<UncertainFact> = Vec::new();
         self.raw_conn(|conn| {
-            let sql = if provider.is_some() {
-                format!("{POINT_IN_TIME_SQL} AND e.provider_id = ?3 ORDER BY e.provider_id, e.model_id, e.fact_key")
-            } else {
-                format!("{POINT_IN_TIME_SQL} ORDER BY e.provider_id, e.model_id, e.fact_key")
-            };
-            let mut stmt = conn.prepare(&sql)?;
+            let mut sql = POINT_IN_TIME_SQL.to_string();
             let source = query.source.as_str();
             let mut args: Vec<&dyn rusqlite::ToSql> = vec![&source, &resolved_at.0];
-            if let Some(ref p) = provider { args.push(p); }
-            let mut rows = stmt.query(args.as_slice())?;
-            while let Some(row) = rows.next()? {
-            let provider_id = row_text(row, 0)?;
-            let model_id = row_text(row, 1)?;
-            let fact_key = FactKey::from_stored(row.get(2)?);
-            if !corrections.is_empty() {
-                let key = (provider_id.to_string(), model_id.to_string(), fact_key.clone());
-                if let Some(records) = corrections.get(&key) {
-                    // Named rather than dropped. A silently missing fact is
-                    // indistinguishable from one the upstream never published.
-                    withheld.push(WithheldFact {
-                        provider_id: provider_id.to_string(),
-                        model_id: model_id.to_string(),
-                        fact_key,
-                        corrections: records.clone(),
-                    });
-                    continue;
+            for (value, operator) in [(&provider, "="), (&after, ">"), (&through, "<=")] {
+                if let Some(value) = value {
+                    args.push(value);
+                    sql.push_str(&format!(" AND e.provider_id {operator} ?{}", args.len()));
                 }
             }
-            // Uncertain rather than withheld: the value is real and is
-            // returned. What is not established is that it was still in force
-            // at the read instant.
-            if let Some((prior, boundary)) = (!uncertainty.is_empty()).then(||
-                uncertainty.get(&(provider_id.to_string(), model_id.to_string(), fact_key.clone()))).flatten()
-            {
-                uncertain.push(UncertainFact {
-                    provider_id: provider_id.to_string(),
-                    model_id: model_id.to_string(),
-                    fact_key: fact_key.clone(),
-                    superseded_after: *prior,
-                    superseded_by: *boundary,
-                });
-            }
+            sql.push_str(" ORDER BY e.provider_id, e.model_id, e.fact_key");
+            let mut stmt = conn.prepare(&sql)?;
+            let mut rows = stmt.query(args.as_slice())?;
+            while let Some(row) = rows.next()? {
+                let provider_id = row_text(row, 0)?;
+                let model_id = row_text(row, 1)?;
+                let fact_key = FactKey::from_stored(row.get(2)?);
+                if !corrections.is_empty() {
+                    let key = (
+                        provider_id.to_string(),
+                        model_id.to_string(),
+                        fact_key.clone(),
+                    );
+                    if let Some(records) = corrections.get(&key) {
+                        // Named rather than dropped. A silently missing fact is
+                        // indistinguishable from one the upstream never published.
+                        withheld.push(WithheldFact {
+                            provider_id: provider_id.to_string(),
+                            model_id: model_id.to_string(),
+                            fact_key,
+                            corrections: records.clone(),
+                        });
+                        continue;
+                    }
+                }
+                // Uncertain rather than withheld: the value is real and is
+                // returned. What is not established is that it was still in force
+                // at the read instant.
+                if let Some((prior, boundary)) = (!uncertainty.is_empty())
+                    .then(|| {
+                        uncertainty.get(&(
+                            provider_id.to_string(),
+                            model_id.to_string(),
+                            fact_key.clone(),
+                        ))
+                    })
+                    .flatten()
+                {
+                    uncertain.push(UncertainFact {
+                        provider_id: provider_id.to_string(),
+                        model_id: model_id.to_string(),
+                        fact_key: fact_key.clone(),
+                        superseded_after: *prior,
+                        superseded_by: *boundary,
+                    });
+                }
 
-            insert_streamed_fact(&mut by_model, provider_id, model_id, fact_key, row.get(3)?);
+                insert_streamed_fact(&mut by_model, provider_id, model_id, fact_key, row.get(3)?);
             }
             Ok(())
         })?;
