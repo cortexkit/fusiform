@@ -31,7 +31,21 @@ mkdir -p "$data_dir"
 
 echo "→ fetching $source_url"
 tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+# macOS /bin/bash 3.2 exits 0 when `set -eu` stops the script on an unbound
+# variable while an EXIT trap is set, so an aborted refresh would look like a
+# finished one. The trap keeps any failure status, and turns a 0 into 1 unless
+# the script reached its last line and set `finished=1`.
+finished=0
+on_exit() {
+  local rc=$?
+  rm -f "$tmp" || true
+  if [ "$rc" -eq 0 ] && [ "$finished" -ne 1 ]; then
+    echo "refresh-seed.sh: stopped before its last step; treating this run as failed" >&2
+    rc=1
+  fi
+  exit "$rc"
+}
+trap on_exit EXIT
 
 # The fetch instant is captured around the request rather than after the file is
 # written, so a slow download cannot push the recorded instant later than the
@@ -89,3 +103,4 @@ echo "→ wrote $meta"
 echo
 echo "Review the diff before committing. A seed refresh changes what a fresh"
 echo "install believes before its first poll."
+finished=1

@@ -71,7 +71,21 @@ IDENTITY="$FUSIFORM_SIGNING_IDENTITY"
 # live module. A hard link shares the inode, so the probe runs exactly the
 # signed bytes it is checking; a copy is the fallback across volumes.
 CKDEV_DIR="$(mktemp -d)"
-trap 'rm -rf "$CKDEV_DIR"' EXIT
+# macOS /bin/bash 3.2 exits 0 when `set -eu` stops the script on an unbound
+# variable while an EXIT trap is set, so an aborted stage would look like a
+# finished one. The trap keeps any failure status, and turns a 0 into 1 unless
+# the script reached its last line and set `finished=1`.
+finished=0
+on_exit() {
+  local rc=$?
+  rm -rf "$CKDEV_DIR" || true
+  if [ "$rc" -eq 0 ] && [ "$finished" -ne 1 ]; then
+    echo "stage.sh: stopped before its last step; treating this run as failed" >&2
+    rc=1
+  fi
+  exit "$rc"
+}
+trap on_exit EXIT
 ckdev_run() {
   local built="$1"; shift
   local link="$CKDEV_DIR/ckdev-$(basename "$built" | sed 's/^ck-//')"
@@ -388,3 +402,4 @@ done
 echo
 echo "staged at $STAGE"
 echo "declared in $current"
+finished=1

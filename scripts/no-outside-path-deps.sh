@@ -68,7 +68,21 @@ sys.exit(1 if outside else 0)
 
 if [ "${1:-}" = "--self-test" ]; then
     tmp=$(mktemp -d)
-    trap 'rm -rf "$tmp"' EXIT
+    # On macOS /bin/sh is bash 3.2, which exits 0 when `set -eu` stops the
+    # script on an unbound variable while an EXIT trap is set, so an aborted
+    # self-test would look like a pass. The trap keeps any failure status, and
+    # turns a 0 into 1 unless the self-test reached its end and set finished=1.
+    finished=0
+    on_exit() {
+        rc=$?
+        rm -rf "$tmp" || true
+        if [ "$rc" -eq 0 ] && [ "$finished" -ne 1 ]; then
+            echo "self-test FAILED: stopped before its last step" >&2
+            rc=1
+        fi
+        exit "$rc"
+    }
+    trap on_exit EXIT
     mkdir -p "$tmp/repo/src" "$tmp/outside/src"
     printf '[package]\nname = "outside"\nversion = "0.1.0"\nedition = "2021"\n' \
         > "$tmp/outside/Cargo.toml"
@@ -108,6 +122,7 @@ if [ "${1:-}" = "--self-test" ]; then
         exit 1
     }
     echo "no-outside-path-deps self-test: refuses a planted path dependency and a planted [patch], accepts the clean control"
+    finished=1
     exit 0
 fi
 

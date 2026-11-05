@@ -5,8 +5,8 @@
 # worker delivery cites its final line.
 #
 # Phase 1 runs on this machine in seconds and compiles nothing: lock parity,
-# formatting, lock resolution, the path-dependency check, the wire-crate
-# version check and the importer's Python tests.
+# formatting, lock resolution, the path-dependency check, the shell-script
+# exit guard, the wire-crate version check and the importer's Python tests.
 # Phase 2 runs the compile-heavy CI steps (clippy and the full test suite). On
 # a Mac it sends them as one job to the remote Linux build server (`ck motor
 # run`), never compiling here. Anywhere else it runs them in place, which is
@@ -93,6 +93,8 @@ step fmt cargo --locked fmt --all -- --check
 step lock-resolves cargo metadata --locked --offline --format-version 1
 step path-deps-self-test scripts/no-outside-path-deps.sh --self-test
 step path-deps scripts/no-outside-path-deps.sh
+step shell-guard-self-test python3 scripts/check-shell-exit-guard.py --self-test
+step shell-guard python3 scripts/check-shell-exit-guard.py
 step wire-crate-version wire_version
 step importer-tests python3 scripts/test_import_quality_scores.py
 

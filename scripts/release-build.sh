@@ -43,7 +43,21 @@ echo
 # as a second `ck-fusiform` beside the live one. The link shares the inode, so
 # it runs exactly the bytes just built.
 probe_dir="$(mktemp -d)"
-trap 'rm -rf "$probe_dir"' EXIT
+# macOS /bin/bash 3.2 exits 0 when `set -eu` stops the script on an unbound
+# variable while an EXIT trap is set, so an aborted build would look like a
+# finished one. The trap keeps any failure status, and turns a 0 into 1 unless
+# the script reached its last line and set `finished=1`.
+finished=0
+on_exit() {
+  local rc=$?
+  rm -rf "$probe_dir" || true
+  if [ "$rc" -eq 0 ] && [ "$finished" -ne 1 ]; then
+    echo "release-build.sh: stopped before its last step; treating this run as failed" >&2
+    rc=1
+  fi
+  exit "$rc"
+}
+trap on_exit EXIT
 for bin in ck-fusiform ck-models; do
   link="$probe_dir/ckdev-${bin#ck-}"
   ln "./target/release/$bin" "$link" 2>/dev/null || cp "./target/release/$bin" "$link"
@@ -70,3 +84,4 @@ else
   echo "no sha256 tool found (looked for shasum, sha256sum)" >&2
   exit 1
 fi
+finished=1

@@ -178,6 +178,15 @@ jobs:
           scripts/no-outside-path-deps.sh --self-test
           scripts/no-outside-path-deps.sh
 
+      # This check reads the scripts' source text rather than running them, so
+      # it works here even though Linux bash 5 does not show the macOS bash 3.2
+      # exit-0 it guards against. Self-test first, for the same
+      # reason as the path-dependency check above.
+      - name: Shell scripts fail closed on an early stop
+        run: |
+          python3 scripts/check-shell-exit-guard.py --self-test
+          python3 scripts/check-shell-exit-guard.py
+
       - name: Clippy
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
