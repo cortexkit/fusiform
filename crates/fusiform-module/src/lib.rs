@@ -60,7 +60,8 @@ where
 
 /// Serve and serialize a tool call on the blocking pool, not the reader runtime.
 pub async fn serve_request(store: Arc<CatalogStore>, body: Vec<u8>) -> HandlerOutcome {
-    run_off_reader(move || match route::serve_tool_call(&store, &body) {
+    let bulk = route::needs_catalog_permit(&body);
+    let work = move || match route::serve_tool_call(&store, &body) {
         Ok(response) => match serde_json::to_vec(&response) {
             Ok(bytes) => HandlerOutcome::Response(bytes),
             Err(e) => HandlerOutcome::Error {
@@ -72,6 +73,30 @@ pub async fn serve_request(store: Arc<CatalogStore>, body: Vec<u8>) -> HandlerOu
             code: e.code.to_string(),
             message: e.message,
         },
+    };
+    if bulk {
+        run_catalog_work(work).await
+    } else {
+        run_off_reader(work).await
+    }
+}
+
+// Two page-sized renders may overlap, not an unbounded blocking-pool burst.
+// Acquire before scheduling and move the permit into the work so cancellation
+// cannot admit another catalog while the detached blocking job still runs.
+static CATALOG_WORK: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
+async fn run_catalog_work<F>(work: F) -> HandlerOutcome
+where
+    F: FnOnce() -> HandlerOutcome + Send + 'static,
+{
+    let permit = CATALOG_WORK
+        .acquire()
+        .await
+        .expect("catalog semaphore is never closed");
+    run_off_reader(move || {
+        let _permit = permit;
+        work()
     })
     .await
 }
@@ -467,4 +492,54 @@ pub fn manifest() -> ModuleManifest {
         .provenance(provenance)
         .provides(provides)
         .build()
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn only_bulk_catalog_gets_need_admission() {
+        for body in [b"".as_slice(), br#"{"name":"catalog.get","arguments":{}}"#,
+            br#"{"name":"catalog.get","arguments":{"paged":true}}"#,
+            br#"{"name":"catalog.get","arguments":{"provider_id":"openai","auth_method":"chatgpt"}}"#] {
+            assert!(route::needs_catalog_permit(body));
+        }
+        for body in [
+            br#"{"name":"catalog.get","arguments":{"provider_id":"openai","model_id":"gpt-4o"}}"#
+                .as_slice(),
+            br#"{"name":"catalog.history","arguments":{}}"#,
+            br#"{"name":"catalog.status","arguments":{}}"#,
+            br#"{"name":"plan.prices","arguments":{}}"#,
+        ] {
+            assert!(!route::needs_catalog_permit(body));
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn at_most_two_catalog_jobs_run_through_completion() {
+        let live = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let mut tasks = Vec::new();
+        for _ in 0..6 {
+            let live = live.clone();
+            let peak = peak.clone();
+            tasks.push(tokio::spawn(async move {
+                run_catalog_work(move || {
+                    let count = live.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(count, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    live.fetch_sub(1, Ordering::SeqCst);
+                    HandlerOutcome::Response(Vec::new())
+                })
+                .await
+            }));
+        }
+        for task in tasks {
+            task.await.unwrap();
+        }
+        assert_eq!(live.load(Ordering::SeqCst), 0);
+        assert_eq!(peak.load(Ordering::SeqCst), 2);
+    }
 }

@@ -143,6 +143,20 @@ struct ToolCall {
     preset: Option<String>,
 }
 
+pub(crate) fn needs_catalog_permit(body: &[u8]) -> bool {
+    if body.is_empty() {
+        return true;
+    }
+    serde_json::from_slice::<ToolCall>(body).is_ok_and(|call| {
+        call.name == TOOL_GET
+            && call
+                .arguments
+                .get("model_id")
+                .and_then(serde_json::Value::as_str)
+                .is_none()
+    })
+}
+
 /// Serve one tool call, unwrapping the wire envelope and dispatching by name.
 ///
 /// This is what the daemon handler calls. The envelope is unwrapped here rather
