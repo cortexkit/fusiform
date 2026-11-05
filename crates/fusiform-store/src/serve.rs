@@ -379,8 +379,6 @@ impl CatalogStore {
             None => Timestamp(now_ms()),
         };
 
-        let rows = self.point_in_time_rows(query.source, resolved_at, provider)?;
-
         // Corrections covering this instant, fetched once for the whole read.
         //
         // A fact inside a corrected interval must not appear with its recorded
@@ -403,16 +401,29 @@ impl CatalogStore {
         let mut by_model: BTreeMap<(String, String), BTreeMap<FactKey, String>> = BTreeMap::new();
         let mut withheld: Vec<WithheldFact> = Vec::new();
         let mut uncertain: Vec<UncertainFact> = Vec::new();
-        for (provider_id, model_id, fact_key, value_json) in rows {
-            let fact_key = FactKey::from_stored(fact_key);
+        self.raw_conn(|conn| {
+            let sql = if provider.is_some() {
+                format!("{POINT_IN_TIME_SQL} AND e.provider_id = ?3 ORDER BY e.provider_id, e.model_id, e.fact_key")
+            } else {
+                format!("{POINT_IN_TIME_SQL} ORDER BY e.provider_id, e.model_id, e.fact_key")
+            };
+            let mut stmt = conn.prepare(&sql)?;
+            let source = query.source.as_str();
+            let mut args: Vec<&dyn rusqlite::ToSql> = vec![&source, &resolved_at.0];
+            if let Some(ref p) = provider { args.push(p); }
+            let mut rows = stmt.query(args.as_slice())?;
+            while let Some(row) = rows.next()? {
+            let provider_id = row_text(row, 0)?;
+            let model_id = row_text(row, 1)?;
+            let fact_key = FactKey::from_stored(row.get(2)?);
             if !corrections.is_empty() {
-                let key = (provider_id.clone(), model_id.clone(), fact_key.clone());
+                let key = (provider_id.to_string(), model_id.to_string(), fact_key.clone());
                 if let Some(records) = corrections.get(&key) {
                     // Named rather than dropped. A silently missing fact is
                     // indistinguishable from one the upstream never published.
                     withheld.push(WithheldFact {
-                        provider_id,
-                        model_id,
+                        provider_id: provider_id.to_string(),
+                        model_id: model_id.to_string(),
                         fact_key,
                         corrections: records.clone(),
                     });
@@ -422,23 +433,22 @@ impl CatalogStore {
             // Uncertain rather than withheld: the value is real and is
             // returned. What is not established is that it was still in force
             // at the read instant.
-            if let Some((prior, boundary)) =
-                uncertainty.get(&(provider_id.clone(), model_id.clone(), fact_key.clone()))
+            if let Some((prior, boundary)) = (!uncertainty.is_empty()).then(||
+                uncertainty.get(&(provider_id.to_string(), model_id.to_string(), fact_key.clone()))).flatten()
             {
                 uncertain.push(UncertainFact {
-                    provider_id: provider_id.clone(),
-                    model_id: model_id.clone(),
+                    provider_id: provider_id.to_string(),
+                    model_id: model_id.to_string(),
                     fact_key: fact_key.clone(),
                     superseded_after: *prior,
                     superseded_by: *boundary,
                 });
             }
 
-            by_model
-                .entry((provider_id, model_id))
-                .or_default()
-                .insert(fact_key, value_json);
-        }
+            insert_streamed_fact(&mut by_model, provider_id, model_id, fact_key, row.get(3)?);
+            }
+            Ok(())
+        })?;
 
         // Provider reads have always disclosed corrections and uncertainty across
         // the catalog. Probe only exceptional keys outside the value scope so a
@@ -493,11 +503,8 @@ impl CatalogStore {
                 continue;
             }
 
-            let facts: BTreeMap<FactKey, String> = model
-                .facts
-                .into_iter()
-                .filter(|(k, _)| query.facts.admits(k))
-                .collect();
+            let mut facts = model.facts;
+            facts.retain(|k, _| query.facts.admits(k));
 
             // A model whose every fact was filtered out contributes nothing but
             // its name, and a consumer reading a plane it does not participate
@@ -600,32 +607,6 @@ impl CatalogStore {
             }),
             withheld,
         ))
-    }
-
-    fn point_in_time_rows(
-        &self,
-        source: SourceId,
-        at: Timestamp,
-        provider: Option<&str>,
-    ) -> Result<Vec<(String, String, String, String)>, CatalogError> {
-        let rows = self.raw_conn(|conn| {
-            let sql = if provider.is_some() {
-                format!("{POINT_IN_TIME_SQL} AND e.provider_id = ?3")
-            } else {
-                POINT_IN_TIME_SQL.to_string()
-            };
-            let mut stmt = conn.prepare(&sql)?;
-            let source = source.as_str();
-            let mut args: Vec<&dyn rusqlite::ToSql> = vec![&source, &at.0];
-            if let Some(ref p) = provider {
-                args.push(p);
-            }
-            let mapped = stmt.query_map(args.as_slice(), |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-            })?;
-            mapped.collect::<rusqlite::Result<Vec<_>>>()
-        })?;
-        Ok(rows)
     }
 
     fn point_in_time_rows_for_model(
@@ -1091,4 +1072,36 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// Borrow identities until a model changes instead of allocating them per fact.
+pub(crate) fn row_text<'a>(row: &'a rusqlite::Row<'_>, column: usize) -> rusqlite::Result<&'a str> {
+    row.get_ref(column)?.as_str().map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            column,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })
+}
+
+pub(crate) fn insert_streamed_fact(
+    models: &mut BTreeMap<(String, String), BTreeMap<FactKey, String>>,
+    provider: &str,
+    model: &str,
+    key: FactKey,
+    value: String,
+) {
+    // Both callers order by provider and model, so every model's facts are
+    // contiguous and its identity needs allocating only once.
+    if let Some(mut entry) = models.last_entry() {
+        if entry.key().0 == provider && entry.key().1 == model {
+            entry.get_mut().insert(key, value);
+            return;
+        }
+    }
+    models
+        .entry((provider.to_string(), model.to_string()))
+        .or_default()
+        .insert(key, value);
 }

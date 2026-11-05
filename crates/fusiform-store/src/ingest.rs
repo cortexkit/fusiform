@@ -800,32 +800,26 @@ pub const CURRENT_VALUES_SQL: &str = "SELECT e.provider_id, e.model_id, e.fact_k
 impl CatalogStore {
     /// Every fact's current value, for one source.
     ///
-    /// "Current" is the era with the greatest boundary for each fact, computed
-    /// in the query rather than tracked in a flag. A flag needs a write on
-    /// every change and is wrong from the moment one of those writes is missed;
-    /// a MAX cannot disagree with itself.
+    /// Resolve each per-fact maximum in SQL and insert rows directly into the
+    /// model maps; a second catalog-sized row buffer would only be discarded.
     pub fn current_values(&self, source: SourceId) -> Result<CurrentValues, CatalogError> {
-        let rows = self.with_conn_rows(source)?;
         let mut out: CurrentValues = BTreeMap::new();
-        for (provider_id, model_id, fact_key, value_json) in rows {
-            out.entry((provider_id, model_id))
-                .or_default()
-                .insert(FactKey::from_stored(fact_key), value_json);
-        }
-        Ok(out)
-    }
-
-    fn with_conn_rows(
-        &self,
-        source: SourceId,
-    ) -> Result<Vec<(String, String, String, String)>, CatalogError> {
-        let rows = self.raw_conn(|conn| {
-            let mut stmt = conn.prepare(CURRENT_VALUES_SQL)?;
-            let mapped = stmt.query_map(rusqlite::params![source.as_str()], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-            })?;
-            mapped.collect::<rusqlite::Result<Vec<_>>>()
+        self.raw_conn(|conn| {
+            let sql =
+                format!("{CURRENT_VALUES_SQL} ORDER BY e.provider_id, e.model_id, e.fact_key");
+            let mut stmt = conn.prepare(&sql)?;
+            let mut rows = stmt.query(rusqlite::params![source.as_str()])?;
+            while let Some(row) = rows.next()? {
+                crate::serve::insert_streamed_fact(
+                    &mut out,
+                    crate::serve::row_text(row, 0)?,
+                    crate::serve::row_text(row, 1)?,
+                    FactKey::from_stored(row.get(2)?),
+                    row.get(3)?,
+                );
+            }
+            Ok(())
         })?;
-        Ok(rows)
+        Ok(out)
     }
 }
