@@ -520,10 +520,9 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
     let era_count = store.era_count(source).map_err(|e| store_error(&e))?;
     let catalog_version = store.catalog_version().map_err(|e| store_error(&e))?;
 
-    // The model count comes from the same read a consumer would get, so status
-    // and catalog.get cannot disagree about how many models exist.
-    let snapshot = store
-        .read_catalog(&CatalogQuery::current(source))
+    // Count visible existence and rate facts without materializing their values.
+    let (model_count, models_priced) = store
+        .catalog_counts(source, None)
         .map_err(|e| store_error(&e))?;
 
     // Failed polls across the whole history, not just the poll window.
@@ -563,10 +562,8 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
             .iter()
             .map(|f| f.key.to_string())
             .collect(),
-        model_count: snapshot.model_count(),
-        // Counted from the same snapshot as the model total, so the two cannot
-        // disagree about which models exist.
-        models_priced: Some(snapshot.priced_model_count()),
+        model_count,
+        models_priced: Some(models_priced),
         // The same read `refuse_before_the_record` uses, so the bound a
         // consumer is told and the bound it is refused at are one value.
         history_begins_at_ms: store

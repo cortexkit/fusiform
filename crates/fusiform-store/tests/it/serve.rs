@@ -672,3 +672,108 @@ fn a_read_at_a_boundary_instant_returns_the_new_value() {
         "the bulk and single-model reads must agree at a boundary instant"
     );
 }
+
+#[test]
+fn sql_catalog_counts_match_snapshot_with_withholding_and_withdrawal() {
+    use fusiform_core::Correction;
+    use fusiform_store::NewEra;
+
+    let f = fixture();
+    let row = |model: &str, key: &str, value: &str, at, kind| NewEra {
+        source: SourceId::ModelsDev,
+        provider_id: "counts".into(),
+        model_id: model.into(),
+        fact_key: FactKey::from_stored(key.into()),
+        value_json: value.into(),
+        boundary_at: Timestamp(at),
+        boundary_kind: kind,
+        observation_id: None,
+    };
+    let mut rows = Vec::new();
+    for model in [
+        "bad-existence",
+        "withdrawn",
+        "zero",
+        "unpriced",
+        "bad-rate",
+        "partial",
+    ] {
+        rows.push(row(
+            model,
+            "existence",
+            "\"present\"",
+            1_000,
+            BoundaryKind::Seed,
+        ));
+        if model != "unpriced" {
+            rows.push(row(
+                model,
+                "rate.input",
+                "{\"kind\":\"stated_zero\"}",
+                1_000,
+                BoundaryKind::Seed,
+            ));
+        }
+    }
+    rows.push(row(
+        "partial",
+        "rate.output",
+        "{}",
+        1_000,
+        BoundaryKind::Seed,
+    ));
+    rows.push(row(
+        "withdrawn",
+        "existence",
+        "\"retired\"",
+        1_400,
+        BoundaryKind::Asserted,
+    ));
+    for (model, key) in [
+        ("bad-existence", "existence"),
+        ("bad-rate", "rate.input"),
+        ("partial", "rate.input"),
+    ] {
+        rows.push(row(
+            model,
+            key,
+            "null",
+            3_000,
+            BoundaryKind::Corrected(Correction {
+                fields: vec![if key == "existence" {
+                    fusiform_core::FieldId::Existence
+                } else {
+                    fusiform_core::FieldId::Rate {
+                        class: fusiform_core::TokenClass::Input,
+                    }
+                }],
+                affected_from: Timestamp(1_200),
+                affected_until: Timestamp(2_000),
+                reason: "invalid recorded fact".into(),
+            }),
+        ));
+    }
+    f.store.append_eras(&rows).unwrap();
+    let at = Timestamp(1_500);
+    let snapshot = f
+        .store
+        .read_catalog(&CatalogQuery::at(SourceId::ModelsDev, at))
+        .unwrap();
+    assert_eq!(
+        (snapshot.model_count(), snapshot.priced_model_count()),
+        (4, 2)
+    );
+    for at in [1_000, 1_200, 1_500, 2_000, 2_001, 3_000] {
+        let snapshot = f
+            .store
+            .read_catalog(&CatalogQuery::at(SourceId::ModelsDev, Timestamp(at)))
+            .unwrap();
+        assert_eq!(
+            f.store
+                .catalog_counts(SourceId::ModelsDev, Some(Timestamp(at)))
+                .unwrap(),
+            (snapshot.model_count(), snapshot.priced_model_count()),
+            "at {at}"
+        );
+    }
+}

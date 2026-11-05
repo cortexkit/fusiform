@@ -285,6 +285,45 @@ pub const UNCERTAIN_FACTS_SQL: &str =
 pub type UncertaintyByFact = BTreeMap<(String, String, FactKey), (Timestamp, Timestamp)>;
 
 impl CatalogStore {
+    /// Present and priced model totals, with the same withholding as a snapshot.
+    /// A stated-zero rate still counts as priced; an absent rate does not.
+    pub fn catalog_counts(
+        &self,
+        source: SourceId,
+        at: Option<Timestamp>,
+    ) -> Result<(usize, usize), CatalogError> {
+        let at = at.unwrap_or_else(|| Timestamp(now_ms()));
+        let visible = |alias: &str| {
+            format!(
+                "{alias}.boundary_at_ms <= ?2 AND {alias}.boundary_at_ms = ( \
+                SELECT MAX(n.boundary_at_ms) FROM era n \
+                WHERE n.source = {alias}.source AND n.provider_id = {alias}.provider_id \
+                  AND n.model_id = {alias}.model_id AND n.fact_key = {alias}.fact_key \
+                  AND n.boundary_at_ms <= ?2) \
+             AND NOT EXISTS (SELECT 1 FROM era c \
+                WHERE c.source = {alias}.source AND c.provider_id = {alias}.provider_id \
+                  AND c.model_id = {alias}.model_id AND c.fact_key = {alias}.fact_key \
+                  AND c.boundary_kind = 'corrected' \
+                  AND c.affected_from_ms <= ?2 AND c.affected_until_ms >= ?2)"
+            )
+        };
+        let sql = format!(
+            "SELECT COUNT(*), COALESCE(SUM(EXISTS (SELECT 1 FROM era r \
+                WHERE r.source = e.source AND r.provider_id = e.provider_id \
+                  AND r.model_id = e.model_id AND r.fact_key >= 'rate.' \
+                  AND r.fact_key < 'rate/' AND {})), 0) \
+             FROM era e WHERE e.source = ?1 AND e.fact_key = 'existence' \
+               AND e.value_json = '\"present\"' AND {}",
+            visible("r"),
+            visible("e")
+        );
+        Ok(self.raw_conn(|conn| {
+            conn.query_row(&sql, params![source.as_str(), at.0], |r| {
+                Ok((r.get::<_, i64>(0)? as usize, r.get::<_, i64>(1)? as usize))
+            })
+        })?)
+    }
+
     /// Facts whose recorded value at an instant may already have been
     /// superseded, keyed by identity.
     ///

@@ -33,7 +33,6 @@ use std::sync::Arc;
 use fusiform_core::normalize::normalize_models_dev_with;
 use fusiform_core::{BoundaryKind, FailureClass, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::{catalog_digest, plan_ingest};
-use fusiform_store::serve::{CatalogQuery, CatalogSnapshot};
 use fusiform_store::{CatalogError, CatalogStore, NewObservation};
 
 use crate::fetch::{hash_bytes, FetchOutcome, Fetcher, SourceEndpoint};
@@ -200,18 +199,18 @@ pub fn apply(
     outcome: FetchOutcome,
     now_ms: i64,
 ) -> Result<TickReport, TickError> {
-    apply_with_catalog_reader(store, signals, source, outcome, now_ms, |store, source| {
-        store.read_catalog(&CatalogQuery::current(source))
+    apply_with_count_reader(store, signals, source, outcome, now_ms, |store, source| {
+        store.catalog_counts(source, None)
     })
 }
 
-fn apply_with_catalog_reader(
+fn apply_with_count_reader(
     store: &CatalogStore,
     signals: &Signals,
     source: SourceId,
     outcome: FetchOutcome,
     now_ms: i64,
-    mut read_catalog: impl FnMut(&CatalogStore, SourceId) -> Result<CatalogSnapshot, CatalogError>,
+    mut read_counts: impl FnMut(&CatalogStore, SourceId) -> Result<(usize, usize), CatalogError>,
 ) -> Result<TickReport, TickError> {
     let ctx = ApplyCtx {
         store,
@@ -396,12 +395,10 @@ fn apply_with_catalog_reader(
                 .store
                 .append_eras(&plan.eras)
                 .map_err(TickError::Store)?;
-            // This snapshot only refreshes health telemetry; its failure must not
+            // This count only refreshes health telemetry; its failure must not
             // turn an already-appended ingest into a failed poll.
-            match read_catalog(ctx.store, ctx.source) {
-                Ok(snapshot) => ctx
-                    .signals
-                    .set_model_counts(snapshot.model_count(), snapshot.priced_model_count()),
+            match read_counts(ctx.store, ctx.source) {
+                Ok((models, priced)) => ctx.signals.set_model_counts(models, priced),
                 Err(e) => {
                     ctx.signals.mark_model_counts_unknown();
                     eprintln!(
@@ -627,7 +624,7 @@ mod tests {
     use fusiform_core::SourceId;
     use fusiform_store::{CatalogError, CatalogStore};
 
-    use super::{apply_with_catalog_reader, FetchOutcome, TickOutcome};
+    use super::{apply_with_count_reader, FetchOutcome, TickOutcome};
     use crate::{health, signals::Signals};
 
     #[test]
@@ -646,7 +643,7 @@ mod tests {
         signals.attempted(1_000);
         signals.set_model_counts(50, 30);
 
-        let report = apply_with_catalog_reader(
+        let report = apply_with_count_reader(
             &store,
             &signals,
             SourceId::ModelsDev,
@@ -663,7 +660,7 @@ mod tests {
                     "the injected count read runs after the eras are appended"
                 );
                 Err(CatalogError::Invariant(
-                    "injected catalog snapshot read failure".to_string(),
+                    "injected catalog count read failure".to_string(),
                 ))
             },
         )

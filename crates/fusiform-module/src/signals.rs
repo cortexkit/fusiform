@@ -22,7 +22,6 @@
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 use fusiform_core::FailureClass;
-use fusiform_store::serve::CatalogQuery;
 use fusiform_store::CatalogStore;
 
 /// No failure in the current streak.
@@ -259,9 +258,9 @@ impl Signals {
     /// here is not fatal because the loop will write its own values shortly, but
     /// it must not silently pass as a fresh install.
     pub fn adopt_from_store(&self, store: &CatalogStore, source: fusiform_core::SourceId) {
-        match store.read_catalog(&CatalogQuery::current(source)) {
-            Ok(snapshot) => {
-                self.set_model_counts(snapshot.model_count(), snapshot.priced_model_count());
+        match store.catalog_counts(source, None) {
+            Ok((models, priced)) => {
+                self.set_model_counts(models, priced);
             }
             Err(e) => {
                 self.adoption_failed();
