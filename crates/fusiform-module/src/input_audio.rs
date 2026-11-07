@@ -8,14 +8,18 @@
 //! page that states audio input is priced per million tokens, quoted in the
 //! row; its eligible models are served as `rate.input_audio`.
 //!
-//! The table is used while normalizing a poll or the embedded seed, not when
-//! serving a read, because it adds no value of fusiform's own: the number is
+//! The pricing evidence is used while normalizing a poll or the embedded seed,
+//! because it adds no price of fusiform's own: the number is
 //! still the upstream's observation, and the file only decides whether it has
 //! an established unit. The resulting fact is stored as an era like every
 //! other models.dev rate, so a point-in-time read replays what was recorded
 //! then. The module converts the rows to `ChargeUnitEvidence` and passes that
 //! to `fusiform_core::normalize_models_dev_with`, so the core crate does no
 //! file IO.
+//!
+//! A row may also quote the provider's audio tokens per second. That conversion
+//! is joined only onto current served rows carrying `rate.input_audio`, never
+//! stored or applied to a point-in-time read.
 
 use std::collections::BTreeMap;
 
@@ -41,6 +45,17 @@ pub struct InputAudioSource {
     /// support, each with the reason. Their audio key stays unattributed.
     #[serde(default)]
     pub excluded_models: Vec<ExcludedModel>,
+    /// A documented tokenizer conversion, joined only onto current audio rates.
+    #[serde(default)]
+    pub audio_tokens_per_second: Option<AudioTokensPerSecond>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioTokensPerSecond {
+    pub value: u64,
+    pub source_ref: String,
+    pub quote: String,
 }
 
 /// A model left out although its provider is listed.
@@ -115,6 +130,12 @@ pub fn load_reporting_rejects(doc: &str) -> (InputAudioSources, Vec<String>) {
             Some("source_ref must be an https URL to the provider's pricing page")
         } else if !row.quote.contains("1M tokens") && !row.quote.contains("million tokens") {
             Some("quote must state the per-million-token unit it establishes")
+        } else if row.audio_tokens_per_second.as_ref().is_some_and(|audio| {
+            audio.value == 0
+                || !audio.source_ref.starts_with("https://")
+                || audio.quote.trim().is_empty()
+        }) {
+            Some("audio_tokens_per_second needs a positive integer, https source_ref and quote")
         } else if row.established_at_ms <= 0
             || row.review_by_ms.checked_sub(row.established_at_ms) != Some(REVIEW_INTERVAL_MS)
         {
@@ -262,6 +283,51 @@ mod tests {
         assert!(evidence().bills_input_audio_per_token("google", "gemini-3.8-flash"));
         assert!(!evidence().bills_input_audio_per_token("google", "gemini-3.1-flash-lite-preview"));
         assert!(!evidence().bills_input_audio_per_token("google-vertex", "gemini-3.8-flash"));
+        assert_eq!(
+            rows["google"]
+                .audio_tokens_per_second
+                .as_ref()
+                .unwrap()
+                .value,
+            32
+        );
+    }
+
+    #[test]
+    fn audio_tokens_per_second_is_optional_and_malformed_values_are_counted_rejects() {
+        let mut row = document()["providers"][0].clone();
+        row.as_object_mut()
+            .unwrap()
+            .remove("audio_tokens_per_second");
+        let (rows, rejects) = load_reporting_rejects(
+            &json!({"schema": SCHEMA, "providers": [row.clone()]}).to_string(),
+        );
+        assert!(rejects.is_empty(), "{rejects:?}");
+        assert!(rows["google"].audio_tokens_per_second.is_none());
+        let valid = json!({
+            "value": 32,
+            "source_ref": "https://ai.google.dev/gemini-api/docs/audio",
+            "quote": "Tokens: 32 tokens per second of audio (1 minute = 1,920 tokens)",
+        });
+        for (field, value) in [
+            ("value", json!(0)),
+            ("value", json!(-1)),
+            ("value", json!(1.5)),
+            ("value", json!("32")),
+            ("value", json!(null)),
+            ("source_ref", json!("http://example.com/audio")),
+            ("source_ref", json!("")),
+            ("quote", json!(" ")),
+            ("unknown", json!(true)),
+        ] {
+            row["audio_tokens_per_second"] = valid.clone();
+            row["audio_tokens_per_second"][field] = value;
+            let (rows, rejects) = load_reporting_rejects(
+                &json!({"schema": SCHEMA, "providers": [row.clone()]}).to_string(),
+            );
+            assert!(rows.is_empty(), "{field}: {rows:?}");
+            assert_eq!(rejects.len(), 1, "{field}: {rejects:?}");
+        }
     }
 
     #[test]

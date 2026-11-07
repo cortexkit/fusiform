@@ -1123,6 +1123,11 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "present, absent, or retired. Absence is a withdrawal, not a gap.",
     },
     ServedFact {
+        key: "limit.audio_tokens_per_second",
+        class: FactClass::Advisory,
+        note: "integer audio tokens per second of input audio, curated from the provider's documentation; current reads only, on rows serving rate.input_audio from a provider whose docs state the figure; otherwise no fact.",
+    },
+    ServedFact {
         key: "limit.context",
         class: FactClass::ByteAffecting,
         note: "NEVER rendered into a request. It is the pressure signal for a \

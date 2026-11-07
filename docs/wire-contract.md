@@ -136,6 +136,7 @@ value would do to a consumer:
 | `quality.eq` | advisory | operator-assigned writing and judgment score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
 | `limit.context` | byte-affecting | integer token count, or `null` |
 | `limit.output` | byte-affecting | integer token count, or `null`; a sourced current-read override is disclosed in `fact_overrides` (§5.8) |
+| `limit.audio_tokens_per_second` | advisory | integer audio tokens per second of input audio, curated from the provider's documentation; current reads only, on rows serving `rate.input_audio` from a provider whose docs state the figure; otherwise no fact |
 | `capability.reasoning` | byte-affecting | `true`, `false` or `null` |
 | `capability.reasoning_options` | byte-affecting | the upstream's `reasoning_options` array verbatim, or `null` |
 | `capability.structured_output` | advisory | `true` or `false` only when published by models.dev; otherwise no fact |
@@ -264,6 +265,13 @@ refused whole, as before
 (`models_dev_normalization::an_evidenced_provider_prices_input_audio_per_token`,
 `models_dev_normalization::evidence_for_one_provider_does_not_attribute_another`,
 `models_dev_normalization::tiered_audio_is_not_served_even_with_evidence`).
+When the same provider row documents audio tokens per second, current reads
+also serve `limit.audio_tokens_per_second` on rows carrying `rate.input_audio`,
+including aliases borrowing that rate. Today Google's documented value is `32`.
+The conversion is never stored or included in `at_ms` reads. Selecting only
+the limit key still evaluates the rate gate and does not expose the internally
+fetched rate.
+
 The rate is stored as eras like every other models.dev rate, so `at_ms` reads
 before it was first stored lack it, and a curated alias carries it marked
 `inherited_from` with basis `alias`, like its other rates

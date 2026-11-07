@@ -121,6 +121,11 @@ fn read(store: &CatalogStore, args: serde_json::Value) -> serde_json::Value {
     }
 }
 
+pub(super) fn current_audio_response() -> serde_json::Value {
+    let (store, _dir) = store();
+    read(&store, serde_json::json!({"provider_id": "google"}))
+}
+
 fn rates(
     store: &CatalogStore,
     provider: &str,
@@ -135,6 +140,106 @@ fn rates(
     }
     let response = read(store, args);
     response["models"][format!("{provider}/{model}")].clone()
+}
+
+#[test]
+fn audio_tokens_per_second_is_current_only_and_never_stored() {
+    let (store, _dir) = store();
+    let args = serde_json::json!({"provider_id": "google", "model_id": "gemini-3.8-flash"});
+    let current = read(&store, args.clone());
+    let facts = &current["models"]["google/gemini-3.8-flash"];
+    assert!(facts.get("rate.input_audio").is_some());
+    assert_eq!(facts["limit.audio_tokens_per_second"], 32);
+
+    let mut historical_args = args;
+    historical_args["at_ms"] = POLLED_AT.into();
+    let historical = read(&store, historical_args);
+    let facts = &historical["models"]["google/gemini-3.8-flash"];
+    assert!(facts.get("rate.input_audio").is_some());
+    assert!(facts.get("limit.audio_tokens_per_second").is_none());
+    let stored = store
+        .read_model(SourceId::ModelsDev, "google", "gemini-3.8-flash", None)
+        .unwrap()
+        .0
+        .unwrap();
+    assert!(!stored
+        .facts
+        .keys()
+        .any(|key| key.as_str() == "limit.audio_tokens_per_second"));
+}
+
+#[test]
+fn audio_tokens_per_second_requires_a_served_audio_rate_and_provider_evidence() {
+    let (store, _dir) = store();
+    for (provider, model) in [
+        ("google", "gemini-3.1-flash-lite-preview"),
+        ("google-vertex", "gemini-3.8-flash"),
+        ("ofox", "google/gemini-3.8-flash"),
+    ] {
+        let response = read(
+            &store,
+            serde_json::json!({"provider_id": provider, "model_id": model}),
+        );
+        let facts = &response["models"][format!("{provider}/{model}")];
+        assert!(facts.get("rate.input").is_some(), "{response}");
+        assert!(facts.get("rate.input_audio").is_none(), "{response}");
+        assert!(
+            facts.get("limit.audio_tokens_per_second").is_none(),
+            "{response}"
+        );
+    }
+}
+
+#[test]
+fn audio_tokens_per_second_survives_prefix_only_and_plane_reads_including_aliases() {
+    let (store, _dir) = store();
+    for model in ["gemini-3.8-flash", "antigravity-gemini-3.8-flash"] {
+        for (named, auth_method) in [
+            (true, None),
+            (true, Some("apikey")),
+            (false, Some("apikey")),
+        ] {
+            let mut args = serde_json::json!({
+                "provider_id": "google",
+                "fact_prefixes": ["limit.audio_tokens_per_second"],
+            });
+            if named {
+                args["model_id"] = model.into();
+            }
+            if let Some(method) = auth_method {
+                args["auth_method"] = method.into();
+            }
+            let response = read(&store, args);
+            let facts = response["models"][format!("google/{model}")]
+                .as_object()
+                .unwrap();
+            assert_eq!(facts.len(), 1, "{response}");
+            assert_eq!(facts["limit.audio_tokens_per_second"], 32, "{response}");
+        }
+    }
+}
+
+#[test]
+fn audio_tokens_per_second_survives_paged_prefix_only_reads() {
+    let (store, _dir) = store();
+    let response = read(
+        &store,
+        serde_json::json!({"paged": true, "fact_prefixes": ["limit.audio_tokens_per_second"]}),
+    );
+    for model in ["gemini-3.8-flash", "antigravity-gemini-3.8-flash"] {
+        assert_eq!(
+            response["models"][format!("google/{model}")]["limit.audio_tokens_per_second"],
+            32,
+            "{response}"
+        );
+    }
+    for facts in response["models"].as_object().unwrap().values() {
+        assert!(facts
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|key| key == "limit.audio_tokens_per_second"));
+    }
 }
 
 /// An evidenced provider serves `rate.input_audio` on a `--rates` read, with

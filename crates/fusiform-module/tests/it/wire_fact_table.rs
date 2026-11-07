@@ -197,6 +197,14 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             }
         }
     }
+    let audio = super::input_audio_rates::current_audio_response();
+    for facts in audio["models"].as_object().unwrap().values() {
+        if facts.get("limit.audio_tokens_per_second").is_some() {
+            assert_eq!(facts["limit.audio_tokens_per_second"], 32);
+            assert!(facts.get("rate.input_audio").is_some());
+            curated.push("limit.audio_tokens_per_second".to_string());
+        }
+    }
     let unproduced = unproduced_tabled_facts(&produced, &curated, &tabled);
     assert!(unproduced.is_empty(), "{}", unproduced.join("\n"));
 
@@ -243,7 +251,7 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             "connection claims leave transport interpretation to the consumer"
         );
     }
-    for key in QUALITY_ONLY.iter().chain(LINEAGE_ONLY) {
+    for key in QUALITY_ONLY.iter().chain(LINEAGE_ONLY).chain(AUDIO_ONLY) {
         assert_eq!(
             SERVED_FACTS
                 .iter()
@@ -302,10 +310,14 @@ const WIRE_ONLY: &[&str] = &["wire.family"];
 /// only; normalization must not turn upstream claims into this curated fact.
 const CACHE_ONLY: &[&str] = &["capability.cache_lifetimes"];
 
+/// Audio-token conversions come from provider documentation at read time;
+/// the normalizer must not infer them from models.dev's catalog.
+const AUDIO_ONLY: &[&str] = &["limit.audio_tokens_per_second"];
+
 /// Tabled facts nothing emits, and curated-only facts the normalizer emits.
 ///
 /// A tabled fact must come from the normalizer, or be declared curated-only,
-/// addition-only, quality-only, lineage-only, wire-only or cache-only and be carried by at least one
+/// addition-only, quality-only, lineage-only, wire-only, cache-only or audio-only and be carried by at least one
 /// curated row, shipped addition row or actual served response (all passed in `curated`).
 fn unproduced_tabled_facts(
     normalized: &[String],
@@ -321,6 +333,7 @@ fn unproduced_tabled_facts(
             .chain(LINEAGE_ONLY)
             .chain(WIRE_ONLY)
             .chain(CACHE_ONLY)
+            .chain(AUDIO_ONLY)
     };
     for key in not_upstream() {
         if normalized.iter().any(|p| p == key) {
@@ -347,6 +360,13 @@ fn unproduced_tabled_facts(
 #[test]
 fn planted_unproduced_or_inferred_curated_only_fact_is_reported() {
     let strings = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
+    assert!(unproduced_tabled_facts(&[], &strings(AUDIO_ONLY), AUDIO_ONLY).is_empty());
+    assert_eq!(unproduced_tabled_facts(&[], &[], AUDIO_ONLY).len(), 1);
+    assert_eq!(
+        unproduced_tabled_facts(&strings(AUDIO_ONLY), &strings(AUDIO_ONLY), AUDIO_ONLY).len(),
+        1,
+        "audio-token conversions must be served from curation, never normalization"
+    );
     assert!(unproduced_tabled_facts(&[], &strings(CACHE_ONLY), CACHE_ONLY).is_empty());
     assert_eq!(unproduced_tabled_facts(&[], &[], CACHE_ONLY).len(), 1);
     assert_eq!(

@@ -20,7 +20,7 @@ that keep them honest.
 | `fact-overrides.json` | sourced values replacing one current upstream fact while upstream still publishes the value they replace, or adding one fact upstream publishes nothing for | at read time, current reads only (§10) |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
 | `cache-lifetimes.json` | first-party OpenAI and Anthropic prompt-cache lifetimes and exact write-price multipliers | at read time, current reads only |
-| `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio` (§8) |
+| `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models, and optional documented audio tokens per second | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio`; at read time: joins `limit.audio_tokens_per_second` onto current rows serving that rate (§8) |
 | `plan-prices.json` | subscription list prices, quota values and service-tier entitlements | prices written to `plan_price_era` at start; quota values and service tiers joined only on current reads |
 | `models-dev-seed.json` | a copy of the upstream catalog for offline first boot | written as seed eras into an empty store |
 | `engram-catalog.json` | the backup enrollment descriptor | written beside `store.db` at start; not otherwise read |
@@ -70,9 +70,10 @@ the source file of the same name under `crates/fusiform-module/src/`.
    table, `curated_model_era`, never as eras, and a point-in-time read serves
    the curated claim in force at its instant (§4, "Point-in-time reads").
    Among stored model facts the exception is `input-audio-per-token.json`
-   (§8), which adds no value of its own: it supplies evidence for interpreting
-   an upstream `cost.input_audio` during normalization, and an eligible
-   upstream price is then stored as an observed rate like any other.
+   (§8), whose pricing evidence adds no value of its own: it supplies evidence
+   for interpreting an upstream `cost.input_audio` during normalization, and an
+   eligible upstream price is then stored as an observed rate like any other.
+   The file's optional audio-token conversion is a current-read join, never stored.
 2. **An upstream row wins while upstream publishes it.** When models.dev
    currently publishes the same identity, the observed row is served and the
    curated claim is not. A curated model row also returns when upstream
@@ -524,6 +525,7 @@ Each row in `providers`:
 | `quote` | verbatim text from that page stating audio input is priced per million tokens; it must name the per-million-token unit |
 | `established_at_ms`, `review_by_ms` | when the page was read; exactly 60 days later |
 | `excluded_models` | models of this provider whose published `input_audio` the page does not support, each with `model_id` and `reason` |
+| `audio_tokens_per_second` | optional object with a positive integer `value`, an `https` `source_ref` and a verbatim `quote` from the provider's documentation stating the conversion; covered by the provider row's review date |
 
 `declined` records providers whose page was read and did not establish the
 unit (`provider_id`, `source_ref`, `quote`, `reason`). It changes nothing that
@@ -537,19 +539,30 @@ models whose `input_audio` differs from its `input`, check that the page's
 explicit audio row gives that number; exclude any model the page does not
 support, with the reason.
 
-This file is applied at ingest rather than at read time (§1, rule 1): it adds
-no value of its own and only decides whether the upstream's number has a
+The pricing evidence is applied at ingest rather than at read time (§1, rule 1):
+it adds no price of its own and only decides whether the upstream's number has a
 known unit. Listing a provider makes the next poll write one
 `rate.input_audio` era per listed model that publishes the key; removing one
 withdraws those facts on the next poll. Point-in-time reads replay what was
 stored then. The table is passed to `fusiform_core::normalize_models_dev_with`
 as data, so the core crate does no file IO.
 
+The optional `audio_tokens_per_second` is applied only on current reads as
+`limit.audio_tokens_per_second`, a JSON integer. It is joined onto a provider's
+served rows only when their facts contain `rate.input_audio`, including aliases
+borrowing that rate. Today only Google's row supplies it: its audio documentation
+states "Tokens: 32 tokens per second of audio (1 minute = 1,920 tokens)".
+The conversion is never stored or replayed on `at_ms` reads. Selecting only
+`limit.audio_tokens_per_second` still evaluates the audio-rate gate internally;
+the response contains only the facts the caller selected. An absent conversion
+is not a default or a zero.
+
 Gates (`input_audio.rs`): the shipped table loads without rejects
 (`shipped_sources_load_without_rejects`); malformed rows, duplicates, bad
 exclusions and bad declined rows are rejected
 (`malformed_and_duplicate_rows_are_counted_as_rejects`,
 `malformed_fields_are_rejected`,
+`audio_tokens_per_second_is_optional_and_malformed_values_are_counted_rejects`,
 `malformed_exclusions_and_declined_rows_are_rejected`); every listed provider
 and every exclusion matches rows in the embedded seed
 (`every_source_has_input_audio_rows_in_the_embedded_seed`,

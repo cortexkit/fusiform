@@ -945,6 +945,14 @@ fn serve_catalog_get_request(
                 wide.push("model.canonical_id".to_string());
                 wide.push("existence".to_string());
             }
+            if prefixes
+                .iter()
+                .any(|p| "limit.audio_tokens_per_second".starts_with(p))
+            {
+                // The conversion is served only alongside an established audio rate.
+                wide.push("rate.input_audio".to_string());
+                wide.push("existence".to_string());
+            }
             if prefixes.iter().any(|p| "wire.family".starts_with(p)) {
                 // Protocol verification needs the package and shape, and endpoint
                 // corrections must run before a route can advertise its protocol.
@@ -1816,6 +1824,17 @@ fn finish_plane_view(
         for (identity, facts) in &mut response.models {
             if let Some((provider, model)) = identity.split_once('/') {
                 crate::cache_lifetimes::apply(provider, model, facts);
+                if facts.contains_key("rate.input_audio") {
+                    if let Some(audio) = crate::input_audio::sources()
+                        .get(provider)
+                        .and_then(|row| row.audio_tokens_per_second.as_ref())
+                    {
+                        facts.insert(
+                            "limit.audio_tokens_per_second".to_string(),
+                            serde_json::json!(audio.value),
+                        );
+                    }
+                }
             }
         }
         apply_quality_scores(&mut response);
