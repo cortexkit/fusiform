@@ -75,6 +75,30 @@
       "review_by_ms": 1798934400000
     },
     {
+      "provider_id": "openai",
+      "model_id": "gpt-transcribe",
+      "auth_methods": ["apikey"],
+      "facts": {
+        "existence": "present",
+        "model.name": "GPT Transcribe",
+        "capability.input_modalities": ["audio", "text"],
+        "capability.output_modalities": ["text"],
+        "rate.input_audio.per_second": {
+          "state": "priced",
+          "units": 4500000,
+          "exponent": 9,
+          "currency": "USD",
+          "unit_provenance": {"kind": "stated"},
+          "per": 60,
+          "increment": {"kind": "unknown"},
+          "minimum_quantity": {"kind": "unknown"}
+        }
+      },
+      "source_ref": "Read 2026-11-07 at https://developers.openai.com/api/docs/models/gpt-transcribe: \"GPT Transcribe\"; \"Input modalities: audio, text\"; \"Output modalities: text\"; the \"Transcription audio duration\" table states \"Price | $0.0045 | minute\". https://developers.openai.com/api/docs/pricing, transcription table: \"gpt-transcribe | Transcription | - | - | $0.0045 / minute\". Served as $0.0045 per 60 seconds, not a per-token price. The token-rate columns are '-' so no token rate is served. Neither page states a rounding rule, a minimum, or a prompt/keyword text billing rule; those omissions do not establish that no rounding, minimum or text charge applies.",
+      "established_at_ms": 1794009600000,
+      "review_by_ms": 1799193600000
+    },
+    {
       "provider_id": "cloudflare-workers-ai",
       "model_id": "@cf/cloudflare/clef",
       "auth_methods": ["apikey"],

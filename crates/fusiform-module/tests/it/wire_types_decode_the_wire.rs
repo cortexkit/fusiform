@@ -198,7 +198,26 @@ fn every_served_rate_decodes_with_the_protocol_type() {
                 amount,
                 floor,
                 inherited_from,
+                per,
+                increment,
+                minimum_quantity,
             } => {
+                assert_eq!(per, raw.get("per").and_then(serde_json::Value::as_u64));
+                for (key, decoded) in [
+                    ("increment", serde_json::to_value(increment).unwrap()),
+                    (
+                        "minimum_quantity",
+                        serde_json::to_value(minimum_quantity).unwrap(),
+                    ),
+                ] {
+                    assert_eq!(
+                        decoded,
+                        raw.get(key)
+                            .cloned()
+                            .unwrap_or_else(|| serde_json::json!({"kind":"unknown"})),
+                        "the protocol must retain {key}: {raw}"
+                    );
+                }
                 // Asserted where it is decoded rather than in a test of its
                 // own: a marker that decodes to None on a row the producer
                 // marked is the failure this whole file exists to catch, and

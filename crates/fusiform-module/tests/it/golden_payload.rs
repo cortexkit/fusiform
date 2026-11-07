@@ -473,6 +473,10 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
     let (store, _dir) = super::curated_wire::store();
     for (label, arguments) in [
         (
+            "catalog.get — curated unit-billed transcription rate",
+            serde_json::json!({"provider_id":"openai","model_id":"gpt-transcribe"}),
+        ),
+        (
             "catalog.get — provider default endpoint",
             serde_json::json!({"provider_id":"openai","model_id":"gpt-6.1-sol"}),
         ),

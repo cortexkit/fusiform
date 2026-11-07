@@ -730,6 +730,11 @@ fn json_rate(value: &RateValue) -> String {
         RateValue::Priced {
             amount,
             floor: _,
+            // Unit-billed claims belong to curated_model_era, never to
+            // models.dev's upstream observation history.
+            per: _,
+            increment: _,
+            minimum_quantity: _,
             inherited_from: _,
         } => format!(
             r#"{{"state":"priced","units":{},"exponent":{},"currency":"{}"}}"#,

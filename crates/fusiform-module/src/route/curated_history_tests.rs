@@ -186,6 +186,79 @@ fn jev_input_units(response: &CatalogGetResponse) -> i64 {
         .expect("jev's input rate is priced")
 }
 
+#[test]
+fn transcribe_serves_a_unit_rate_and_records_its_denominator_only_in_curated_history() {
+    const MODEL: &str = "gpt-transcribe";
+    const ID: &str = "openai/gpt-transcribe";
+    const KEY: &str = "rate.input_audio.per_second";
+    let (store, _dir) = store();
+    let first = established_at("openai", MODEL);
+    apply_to_store(&store, &shipped(), first + DAY_MS).unwrap();
+    let expected = json!({
+        "state":"priced", "units":4_500_000, "exponent":9, "currency":"USD",
+        "unit_provenance":{"kind":"stated"}, "per":60,
+        "increment":{"kind":"unknown"}, "minimum_quantity":{"kind":"unknown"}
+    });
+    for args in [
+        json!({"provider_id":"openai"}),
+        json!({"provider_id":"openai", "at_ms":first}),
+    ] {
+        let response = get(&store, args.clone());
+        let facts = &response.models[ID];
+        let rates: BTreeMap<_, _> = facts
+            .iter()
+            .filter(|(key, _)| key.starts_with("rate."))
+            .map(|(key, value)| (key.as_str(), value.clone()))
+            .collect();
+        assert_eq!(rates, BTreeMap::from([(KEY, expected.clone())]), "{args}");
+        assert_eq!(facts["model.name"], "GPT Transcribe");
+        assert_eq!(
+            facts["capability.input_modalities"],
+            json!(["audio", "text"])
+        );
+        assert_eq!(facts["capability.output_modalities"], json!(["text"]));
+        assert!(!facts.contains_key("model.kind"));
+        assert!(response.curated.iter().any(|row| row.model == ID));
+    }
+    refused_at(&store, "openai", MODEL, first - 1);
+    let eras = store.curated_model_eras("openai", MODEL).unwrap();
+    assert_eq!(eras.len(), 1);
+    assert_eq!(eras[0].boundary_at_ms, first);
+    assert_eq!(eras[0].claim.as_ref().unwrap().facts[KEY], expected);
+    for key in [KEY, "rate.input", "rate.output"] {
+        assert!(
+            store
+                .fact_history(
+                    SourceId::ModelsDev,
+                    "openai",
+                    MODEL,
+                    &FactKey::from_stored(key.to_string())
+                )
+                .unwrap()
+                .is_empty(),
+            "curated prices must not enter upstream history: {key}"
+        );
+    }
+
+    // A denominator change is a price change even when the money is unchanged.
+    let changed = table(|doc| {
+        row_in(doc, "openai", MODEL)["facts"][KEY]["per"] = json!(120);
+    });
+    let boot = first + 2 * DAY_MS;
+    assert_eq!(apply_to_store(&store, &changed, boot).unwrap(), 1);
+    assert_eq!(
+        named_at(&store, "openai", MODEL, boot - 1).models[ID][KEY],
+        expected
+    );
+    let mut repriced = expected;
+    repriced["per"] = json!(120);
+    assert_eq!(
+        named_at(&store, "openai", MODEL, boot).models[ID][KEY],
+        repriced
+    );
+    assert_eq!(store.curated_model_eras("openai", MODEL).unwrap().len(), 2);
+}
+
 /// Jev at an instant inside its first era: the shipped rates, its other
 /// facts, and the disclosure, exactly as a current read serves them.
 #[test]
@@ -193,9 +266,9 @@ fn a_read_after_the_first_era_serves_jevs_recorded_rates_and_disclosure() {
     let (store, _dir) = store();
     let boot = jev_established_at() + 5 * DAY_MS;
     let written = apply_to_store(&store, &shipped(), boot).unwrap();
-    // The shipped file serves six rows and holds none, so a first boot
-    // writes one era per row.
-    assert_eq!(written, 6);
+    // The test table releases all seven curated rows, so the first boot writes
+    // one era per row.
+    assert_eq!(written, 7);
 
     let file_row = &shipped().models[&(TYPESAFE.to_string(), JEV.to_string())];
     for at in [
@@ -327,7 +400,7 @@ fn a_changed_curated_price_opens_an_era_dated_at_the_boot_that_carries_it() {
 fn re_applying_an_unchanged_or_only_redated_file_writes_nothing() {
     let (store, _dir) = store();
     let boot = jev_established_at() + DAY_MS;
-    assert_eq!(apply_to_store(&store, &shipped(), boot).unwrap(), 6);
+    assert_eq!(apply_to_store(&store, &shipped(), boot).unwrap(), 7);
     assert_eq!(
         apply_to_store(&store, &shipped(), boot + DAY_MS).unwrap(),
         0
@@ -431,8 +504,8 @@ fn a_row_held_from_its_first_boot_is_first_served_at_its_release() {
     let held_boot = jev_established_at() + DAY_MS;
     assert_eq!(
         apply_to_store(&store, &table(holding(TYPESAFE, JEV)), held_boot).unwrap(),
-        6,
-        "five served rows and one tombstone for the held row"
+        7,
+        "six served rows and one tombstone for the held row"
     );
     let released_at = held_boot + DAY_MS;
     assert_eq!(apply_to_store(&store, &shipped(), released_at).unwrap(), 1);

@@ -191,10 +191,20 @@ All four rows after `meta` are currently held: see "Held rows" below.
 | --- | --- |
 | `provider_id`, `model_id` | the served identity |
 | `auth_methods` | a non-empty allowlist of distinct login methods from `apikey`, `chatgpt`, `oauth`, `antigravity` |
-| `facts` | fact key to value; keys must be in `SERVED_FACTS` |
+| `facts` | fact key to value; keys must be in `SERVED_FACTS` or the curated loader's explicit unit-billed key allowlist |
 | `source_ref` | the evidence for the row: each page read, with the sentences it states quoted verbatim |
 | `established_by` | optional; who read the sources. Not served |
 | `established_at_ms`, `review_by_ms` | the review date must be exactly 60 days after establishment |
+
+`openai/gpt-transcribe` is curated with audio/text input and text output, no
+`model.kind`, and one rate: `rate.input_audio.per_second`, $0.0045 per 60
+seconds. The source states no rounding, minimum or prompt/keyword-text billing
+rule, so quantity terms are unknown rather than none. No token rate is served.
+The loader admits this unit-billed key by name, not a pattern, only after the
+spend-pricing consumer recognises it. It requires a positive `per` and explicit
+`increment` and `minimum_quantity`, and refuses `per` on token keys. The full
+rate, including its denominator, belongs to the curated row's stored claim in
+`curated_model_era`; it never enters models.dev's upstream fact eras.
 
 ### Held rows
 

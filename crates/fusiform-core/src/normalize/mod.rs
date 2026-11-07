@@ -893,6 +893,9 @@ fn rate_value(label: &str, field: &str, literal: &str) -> Result<RateValue, Norm
         // what they must conclude today, when the dimension does not exist.
         Ok(units) => Ok(RateValue::Priced {
             floor: fusiform_protocol::money::Floor::Unknown,
+            per: None,
+            increment: fusiform_protocol::money::Increment::Unknown,
+            minimum_quantity: fusiform_protocol::money::MinimumQuantity::Unknown,
             // `None` at NORMALIZATION, always: this is the upstream's own
             // published price for its own row. Inheritance is a serve-time
             // derivation that attaches one provider's price to another's row,

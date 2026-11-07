@@ -14,6 +14,11 @@ use std::collections::BTreeMap;
 
 const DOCUMENT: &str = include_str!("../data/curated-models.json");
 
+// Each unit-billed key must first be recognised by the consumer that prices
+// spend: an unknown rate key makes that consumer refuse a whole pricing day.
+// Grow this list one deliberate key at a time, never by a key pattern.
+const UNIT_BILLED_RATE_KEYS: &[&str] = &["rate.input_audio.per_second"];
+
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CuratedModel {
@@ -75,6 +80,7 @@ fn invalid_facts(row: &CuratedModel) -> Option<String> {
         if !fusiform_protocol::SERVED_FACTS
             .iter()
             .any(|fact| fact.key == key)
+            && !UNIT_BILLED_RATE_KEYS.contains(&key.as_str())
         {
             return Some(format!("fact key is not in SERVED_FACTS: {key}"));
         }
@@ -89,7 +95,8 @@ fn invalid_facts(row: &CuratedModel) -> Option<String> {
             ));
         }
         if key.starts_with("rate.") {
-            if let Some(reason) = invalid_rate(value) {
+            if let Some(reason) = invalid_rate(value, UNIT_BILLED_RATE_KEYS.contains(&key.as_str()))
+            {
                 return Some(format!("{key}: {reason}"));
             }
         }
@@ -101,32 +108,41 @@ fn invalid_facts(row: &CuratedModel) -> Option<String> {
 /// the served shape: a priced amount whose currency the source stated, or a
 /// stated zero. Curated rows never borrow a price, never refuse one, and never
 /// carry fields the published `RateValue` type would silently drop.
-fn invalid_rate(value: &serde_json::Value) -> Option<String> {
+fn invalid_rate(value: &serde_json::Value, unit_billed: bool) -> Option<String> {
     let keys: std::collections::BTreeSet<&str> = value
         .as_object()
         .map(|obj| obj.keys().map(String::as_str).collect())
         .unwrap_or_default();
+    let mut priced_keys = std::collections::BTreeSet::from([
+        "state",
+        "units",
+        "exponent",
+        "currency",
+        "unit_provenance",
+    ]);
+    if unit_billed {
+        priced_keys.extend(["per", "increment", "minimum_quantity"]);
+    }
     match serde_json::from_value::<fusiform_protocol::RateValue>(value.clone()) {
         Ok(fusiform_protocol::RateValue::Priced {
             amount,
+            per,
             inherited_from: None,
             ..
         }) if amount.units > 0
             && amount.unit_provenance == fusiform_protocol::money::UnitProvenance::Stated
-            && keys
-                == std::collections::BTreeSet::from([
-                    "state",
-                    "units",
-                    "exponent",
-                    "currency",
-                    "unit_provenance",
-                ]) =>
+            && keys == priced_keys
+            && if unit_billed {
+                per.is_some_and(|quantity| quantity > 0)
+            } else {
+                per.is_none()
+            } =>
         {
             None
         }
         Ok(fusiform_protocol::RateValue::StatedZero {
             inherited_from: None,
-        }) if keys == std::collections::BTreeSet::from(["state"]) => None,
+        }) if !unit_billed && keys == std::collections::BTreeSet::from(["state"]) => None,
         _ => Some(format!(
             "must be a priced rate with a stated currency, or a stated zero: {value}"
         )),
@@ -458,6 +474,7 @@ mod tests {
         ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
         ("meta", "muse-wonder-full-1.0"),
         ("openai", "gpt-6-luna-decisions"),
+        ("openai", "gpt-transcribe"),
         ("typesafe", "jev-1.13.0"),
     ];
 
@@ -648,6 +665,60 @@ mod tests {
         let doc = planted(|row| row["facts"]["model.unpublished"] = "unpublished".into());
         let reject = single_reject(&doc, "meta", "muse-wonder-full-1.0");
         assert!(reject.contains("not in SERVED_FACTS"));
+    }
+
+    #[test]
+    fn planted_unlisted_unit_rate_is_rejected() {
+        let doc = planted_in("openai", "gpt-transcribe", |row| {
+            let rate = row["facts"]
+                .as_object_mut()
+                .unwrap()
+                .remove("rate.input_audio.per_second")
+                .unwrap();
+            row["facts"]["rate.output.per_image"] = rate;
+        });
+        let reject = single_reject(&doc, "openai", "gpt-transcribe");
+        assert!(reject.contains("rate.output.per_image"), "{reject}");
+        assert!(reject.contains("not in SERVED_FACTS"), "{reject}");
+    }
+
+    #[test]
+    fn planted_unit_rate_without_explicit_quantity_terms_is_rejected() {
+        for field in ["per", "increment", "minimum_quantity"] {
+            let doc = planted_in("openai", "gpt-transcribe", |row| {
+                row["facts"]["rate.input_audio.per_second"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(field);
+            });
+            let reject = single_reject(&doc, "openai", "gpt-transcribe");
+            assert!(
+                reject.contains("rate.input_audio.per_second: must be a priced rate"),
+                "missing {field}: {reject}"
+            );
+        }
+        for per in [serde_json::json!(0), serde_json::json!(null)] {
+            let doc = planted_in("openai", "gpt-transcribe", |row| {
+                row["facts"]["rate.input_audio.per_second"]["per"] = per.clone();
+            });
+            let reject = single_reject(&doc, "openai", "gpt-transcribe");
+            assert!(
+                reject.contains("must be a priced rate"),
+                "per {per}: {reject}"
+            );
+        }
+    }
+
+    #[test]
+    fn planted_token_rate_with_a_unit_denominator_is_rejected() {
+        let doc = planted_in("typesafe", "jev-1.13.0", |row| {
+            row["facts"]["rate.input"]["per"] = 60.into();
+        });
+        let reject = single_reject(&doc, "typesafe", "jev-1.13.0");
+        assert!(
+            reject.contains("rate.input: must be a priced rate"),
+            "{reject}"
+        );
     }
 
     #[test]

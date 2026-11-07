@@ -177,6 +177,50 @@ pub enum Floor {
     Minimum { units: i64 },
 }
 
+/// The quantity to whose multiples a billable usage is rounded up.
+///
+/// Three states distinguish an established absence of rounding from an
+/// unpublished rule. `Unknown` does not mean `None`: a consumer cannot infer
+/// exact-quantity billing merely because the provider has not stated an increment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum Increment {
+    /// Nobody has established whether usage is rounded up.
+    Unknown,
+    /// Established that no rounding increment applies.
+    None,
+    /// Billable usage is rounded up to a multiple of this quantity of the key's unit.
+    Quantum { quantity: u64 },
+}
+
+impl Increment {
+    pub fn unknown() -> Self {
+        Self::Unknown
+    }
+}
+
+/// The minimum billable quantity, distinct from a minimum monetary charge.
+///
+/// Three states distinguish an established absence of a minimum from an
+/// unpublished rule. `Unknown` does not mean `None`: a consumer cannot conclude
+/// that arbitrarily small usage is billed without a minimum from missing data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum MinimumQuantity {
+    /// Nobody has established whether a minimum quantity applies.
+    Unknown,
+    /// Established that no minimum quantity applies.
+    None,
+    /// At least this quantity of the key's unit is billed.
+    Minimum { quantity: u64 },
+}
+
+impl MinimumQuantity {
+    pub fn unknown() -> Self {
+        Self::Unknown
+    }
+}
+
 /// A rate's value: priced, a stated zero, billed as another key, or unpriced.
 ///
 /// The upstream's three states have opposite consequences for a cap. Measured on
@@ -186,7 +230,7 @@ pub enum Floor {
 /// so it reports what was said instead of resolving it.
 /// A serve-time billing rule can additionally name another rate key rather
 /// than inventing a separate amount for a class billed at that key's rate.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "state")]
 pub enum RateValue {
     Priced {
@@ -216,6 +260,18 @@ pub enum RateValue {
         /// distinction the enum exists to hold, applied to its own rollout.
         #[serde(default = "Floor::unknown")]
         floor: Floor,
+        /// The quantity of the key's unit bought by this amount, such as 60
+        /// seconds. Absent on per-million-token rates.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        per: Option<u64>,
+        /// Quantity rounding, not a monetary floor. Missing older data remains
+        /// unknown rather than claiming that no rounding applies.
+        #[serde(default = "Increment::unknown")]
+        increment: Increment,
+        /// Minimum billable quantity, not a monetary floor. Missing older data
+        /// remains unknown rather than claiming that no minimum applies.
+        #[serde(default = "MinimumQuantity::unknown")]
+        minimum_quantity: MinimumQuantity,
         /// Present when this price is NOT this provider's own. The same
         /// marker, with the same meaning, rides on [`RateValue::StatedZero`]
         /// and [`RateValue::Unpriced`]: whatever state a borrowed rate is in,
@@ -269,6 +325,73 @@ pub enum RateValue {
         /// (for example to `rate.cache_write`) may leave it out.
         key: String,
     },
+}
+
+impl Serialize for RateValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Serde's field-local skip predicate cannot inspect `per`. The wire
+        // projection keeps unknown quantity terms explicit for unit rates while
+        // preserving the exact shape of existing token rates.
+        #[derive(Serialize)]
+        #[serde(rename_all = "snake_case", tag = "state")]
+        enum Wire<'a> {
+            Priced {
+                #[serde(flatten)]
+                amount: &'a Amount,
+                floor: &'a Floor,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                per: Option<u64>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                increment: Option<&'a Increment>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                minimum_quantity: Option<&'a MinimumQuantity>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                inherited_from: Option<&'a InheritedFrom>,
+            },
+            StatedZero {
+                #[serde(skip_serializing_if = "Option::is_none")]
+                inherited_from: Option<&'a InheritedFrom>,
+            },
+            Unpriced {
+                reason: &'a UnpricedReason,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                inherited_from: Option<&'a InheritedFrom>,
+            },
+            BilledAs {
+                key: &'a str,
+            },
+        }
+        let wire = match self {
+            Self::Priced {
+                amount,
+                floor,
+                per,
+                increment,
+                minimum_quantity,
+                inherited_from,
+            } => Wire::Priced {
+                amount,
+                floor,
+                per: *per,
+                increment: (per.is_some() || *increment != Increment::Unknown).then_some(increment),
+                minimum_quantity: (per.is_some() || *minimum_quantity != MinimumQuantity::Unknown)
+                    .then_some(minimum_quantity),
+                inherited_from: inherited_from.as_ref(),
+            },
+            Self::StatedZero { inherited_from } => Wire::StatedZero {
+                inherited_from: inherited_from.as_ref(),
+            },
+            Self::Unpriced {
+                reason,
+                inherited_from,
+            } => Wire::Unpriced {
+                reason,
+                inherited_from: inherited_from.as_ref(),
+            },
+            Self::BilledAs { key } => Wire::BilledAs { key },
+        };
+        wire.serialize(serializer)
+    }
 }
 
 /// Whose price this is, when it is not the serving provider's.
@@ -325,6 +448,93 @@ impl Floor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_unit_billed_rate_round_trips_its_quantity_terms() {
+        let bytes = serde_json::json!({
+            "state": "priced",
+            "units": 4500000,
+            "exponent": 9,
+            "currency": "USD",
+            "unit_provenance": {"kind": "stated"},
+            "floor": {"kind": "unknown"},
+            "per": 60,
+            "increment": {"kind": "unknown"},
+            "minimum_quantity": {"kind": "unknown"}
+        });
+        let decoded: RateValue = serde_json::from_value(bytes.clone()).expect("decodes");
+        assert_eq!(serde_json::to_value(decoded).unwrap(), bytes);
+    }
+
+    #[test]
+    fn priced_quantity_terms_distinguish_unknown_none_and_measured() {
+        for (increment, minimum_quantity) in [
+            (Increment::Unknown, MinimumQuantity::Unknown),
+            (Increment::None, MinimumQuantity::None),
+            (
+                Increment::Quantum { quantity: 15 },
+                MinimumQuantity::Minimum { quantity: 30 },
+            ),
+        ] {
+            for per in [None, Some(60)] {
+                let rate = RateValue::Priced {
+                    amount: Amount {
+                        units: 4500000,
+                        exponent: 9,
+                        currency: CurrencyCode::new("USD").unwrap(),
+                        unit_provenance: UnitProvenance::Stated,
+                    },
+                    floor: Floor::Unknown,
+                    per,
+                    increment: increment.clone(),
+                    minimum_quantity: minimum_quantity.clone(),
+                    inherited_from: None,
+                };
+                let wire = serde_json::to_value(&rate).unwrap();
+                assert_eq!(wire.get("per").is_some(), per.is_some());
+                assert_eq!(
+                    wire.get("increment").is_some(),
+                    per.is_some() || increment != Increment::Unknown
+                );
+                assert_eq!(
+                    wire.get("minimum_quantity").is_some(),
+                    per.is_some() || minimum_quantity != MinimumQuantity::Unknown
+                );
+                assert_eq!(serde_json::from_value::<RateValue>(wire).unwrap(), rate);
+            }
+        }
+    }
+
+    #[test]
+    fn a_token_rate_keeps_its_bytes_and_defaults_quantity_terms_to_unknown() {
+        let bytes = r#"{"state":"priced","units":4500000,"exponent":9,"currency":"USD","unit_provenance":{"kind":"stated"},"floor":{"kind":"unknown"}}"#;
+        let decoded: RateValue = serde_json::from_str(bytes).unwrap();
+        assert!(matches!(
+            decoded,
+            RateValue::Priced {
+                per: None,
+                increment: Increment::Unknown,
+                minimum_quantity: MinimumQuantity::Unknown,
+                ..
+            }
+        ));
+        assert_eq!(serde_json::to_string(&decoded).unwrap(), bytes);
+    }
+
+    #[test]
+    fn a_unit_rate_with_missing_quantity_rules_serializes_them_as_unknown() {
+        let decoded: RateValue = serde_json::from_value(serde_json::json!({
+            "state": "priced", "units": 4500000, "exponent": 9,
+            "currency": "USD", "unit_provenance": {"kind": "stated"}, "per": 60
+        }))
+        .unwrap();
+        let wire = serde_json::to_value(decoded).unwrap();
+        assert_eq!(wire["increment"], serde_json::json!({"kind": "unknown"}));
+        assert_eq!(
+            wire["minimum_quantity"],
+            serde_json::json!({"kind": "unknown"})
+        );
+    }
 
     /// A provider's OWN zero and unpriced rate keep the exact bytes they had
     /// before those states could carry a marker, in both directions.

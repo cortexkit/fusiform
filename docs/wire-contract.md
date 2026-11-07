@@ -337,7 +337,7 @@ A rate is a JSON object tagged by `state` (`RateValue` in
 
 | `state` | Fields | Meaning |
 | --- | --- | --- |
-| `priced` | `units`, `exponent`, `currency`, `unit_provenance`, `floor`, optional `inherited_from` | an exact amount: `units × 10^-exponent` of `currency` per million tokens |
+| `priced` | `units`, `exponent`, `currency`, `unit_provenance`, `floor`, optional `per`, `increment`, `minimum_quantity`, `inherited_from` | an exact amount: `units × 10^-exponent` of `currency`; per million tokens unless the key names a billing unit |
 | `stated_zero` | optional `inherited_from` | the source stated exactly zero; whether that is a real price is the consumer's policy |
 | `unpriced` | `reason`, optional `inherited_from` | no rate can be stated, for the reason given |
 | `billed_as` | `key` | on a billing-plane read, this class is billed at the rate of the full fact key named (see [`billing-planes.md`](billing-planes.md)) |
@@ -362,6 +362,23 @@ A rate is a JSON object tagged by `state` (`RateValue` in
 - `floor.kind` is `unknown`, `none` or `minimum` (with `units`). Every rate
   fusiform serves today has `floor` `unknown`: nobody has established whether
   a minimum charge applies.
+- Unit-billed keys use `rate.<role>.per_<unit>[.<selector>.<value>]...`, with
+  units `second`, `character`, `image` or `request`. They are per-model keys,
+  not enumerated base keys in `SERVED_FACTS`, like context-tier keys. Curated
+  admission allows only `rate.input_audio.per_second` today; new keys require
+  deliberate admission after the spend-pricing consumer recognises them.
+- A unit-billed price states `per`, the positive quantity of the key's unit
+  bought by the amount. `openai/gpt-transcribe` serves 4,500,000 × 10^-9 USD
+  per 60 seconds, with no token rates. No `per_` key segment means the
+  existing per-million-token meaning; token-rate bytes are unchanged.
+- Since protocol 0.52.0, `increment.kind` is `unknown`, `none` or `quantum`
+  (with `quantity`); it describes rounding billed usage up to a multiple.
+  `minimum_quantity.kind` is `unknown`, `none` or `minimum` (with `quantity`);
+  it is a minimum usage quantity, not the monetary `floor`. Unknown means
+  unestablished, not no rounding or no minimum. Missing fields decode as
+  unknown. Unknown terms are omitted on serialization only when `per` is
+  absent, preserving existing token-rate bytes; unit rates state both terms
+  even when unknown. Curated unit rates must explicitly carry all three fields.
 - Every state the producer writes decodes with the protocol crate's type
   (`wire_types_decode_the_wire::every_served_rate_decodes_with_the_protocol_type`,
   `wire_types_decode_the_wire::the_fixture_carries_every_rate_state`).

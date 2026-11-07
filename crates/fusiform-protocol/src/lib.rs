@@ -1330,6 +1330,11 @@ pub struct ServedFact {
     /// A tiered rate appends `.above_context.<threshold>` — the threshold comes
     /// from the upstream and is not fusiform's to enumerate, so tiered keys are
     /// matched by prefix rather than listed.
+    /// Unit-billed keys (`rate.<role>.per_<unit>`) are also per-model facts,
+    /// not entries in this base-key table. Their priced values carry an
+    /// explicit `per` denominator; absence of a `per_` segment retains the
+    /// per-million-token meaning. Curated admission is an explicit key
+    /// allowlist so a new unit-billed role cannot reach an unprepared consumer.
     ///
     /// # What a tiered key states, and what it does NOT
     ///
