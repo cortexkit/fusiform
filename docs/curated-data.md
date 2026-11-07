@@ -19,6 +19,7 @@ that keep them honest.
 | `wire-families.json` | verified package-and-shape request protocols | at read time, current reads only (§13) |
 | `fact-overrides.json` | sourced values replacing one current upstream fact while upstream still publishes the value they replace, or adding one fact upstream publishes nothing for | at read time, current reads only (§10) |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
+| `cache-lifetimes.json` | first-party OpenAI and Anthropic prompt-cache lifetimes and exact write-price multipliers | at read time, current reads only |
 | `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio` (§8) |
 | `plan-prices.json` | subscription list prices, quota values and service-tier entitlements | prices written to `plan_price_era` at start; quota values and service tiers joined only on current reads |
 | `models-dev-seed.json` | a copy of the upstream catalog for offline first boot | written as seed eras into an empty store |
@@ -26,6 +27,20 @@ that keep them honest.
 
 Billing planes and plan prices have their own documents,
 [`billing-planes.md`](billing-planes.md) and [`plan-prices.md`](plan-prices.md).
+
+`cache-lifetimes.json` explicitly lists first-party OpenAI and Anthropic models,
+their shortest-first lifetimes, quoted sources and a 60-day review deadline.
+Write multipliers are exact numerator/denominator pairs relative to input;
+retention-only OpenAI rows have no multipliers. On current reads the table adds
+`capability.cache_lifetimes` and `rate.cache_write[.above_context.<tokens>].ttl.<lifetime>`.
+No TTL prices are served for a row unless its base and every context tier's own
+published short write price exactly equals input times the shortest multiplier.
+The lifetime list remains available when that guard fails. The prices retain
+the row's own write-rate provenance and never change stored facts or plain rates.
+API-key planes carry these prices; Anthropic OAuth marks them as quota weights.
+In `route::apply_billing_plane`, OpenAI ChatGPT strips TTL selectors and the
+lifetime list before its cache-write-as-input rule, alongside the existing
+quota-plane mode stripping. Historical reads carry neither lifetimes nor TTL prices.
 
 The optional `service_tiers` field on a plan-price cell curates `fast` and
 `ultrafast` entitlements and their exact included-usage and purchased-credit

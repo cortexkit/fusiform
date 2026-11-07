@@ -429,6 +429,10 @@ fn render_planes() -> String {
 /// Consumers pin one document, while the two producers retain isolated stores.
 fn render_all() -> String {
     let mut ordinary: serde_json::Value = serde_json::from_str(&render()).unwrap();
+    ordinary
+        .as_object_mut()
+        .unwrap()
+        .extend(render_cache_lifetimes());
     let planes: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
     for (label, case) in planes.as_object().unwrap() {
         assert!(
@@ -467,6 +471,24 @@ fn render_all() -> String {
     let mut text = serde_json::to_string_pretty(&ordinary).unwrap();
     text.push('\n');
     text
+}
+
+/// Keep consumer price vectors separate so adding seed rows changes no
+/// unrelated status counts or existing fixture model cards.
+pub(super) fn render_cache_lifetimes() -> serde_json::Map<String, serde_json::Value> {
+    let (store, _dir) = super::cache_lifetimes::store(None);
+    let mut cases = serde_json::Map::new();
+    for (provider, model) in [("anthropic", "claude-opus-5-5"), ("openai", "gpt-6.1-sol")] {
+        let request = serde_json::json!({"name":"catalog.get", "arguments":{"provider_id":provider, "model_id":model}});
+        let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+        let mut response = serde_json::to_value(response).unwrap();
+        response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+        cases.insert(
+            format!("catalog.get — cache lifetimes {provider}/{model}"),
+            serde_json::json!({"request":request, "response":response}),
+        );
+    }
+    cases
 }
 
 fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
@@ -788,13 +810,18 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
     for (text, expected) in [
         (
             GOLDEN.to_string(),
-            cases().len() + plain_plane_cases + 5 + curated_wire.len(),
+            cases().len()
+                + plain_plane_cases
+                + 5
+                + curated_wire.len()
+                + render_cache_lifetimes().len(),
         ),
         (
             serde_json::to_string(&curated_wire).unwrap(),
             curated_wire.len(),
         ),
         (render(), cases().len()),
+        (serde_json::to_string(&render_cache_lifetimes()).unwrap(), 2),
         (serde_json::json!({"paged":render_paged()}).to_string(), 1),
         (
             serde_json::json!({"canonical":render_canonical_link()}).to_string(),

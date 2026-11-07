@@ -1,0 +1,77 @@
+{
+  "schema": "cache-lifetimes/v1",
+  "rules": [
+    {
+      "provider_id": "openai",
+      "model_ids": [
+        "gpt-5.6",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-6-astra",
+        "gpt-6-luna",
+        "gpt-6-sol",
+        "gpt-6.1-sol",
+        "gpt-6.1-terra"
+      ],
+      "lifetimes": ["30m", "12h"],
+      "multipliers": {
+        "30m": { "numerator": 5, "denominator": 4 },
+        "12h": { "numerator": 5, "denominator": 2 }
+      },
+      "source_ref": "https://developers.openai.com/api/docs/guides/prompt-caching; https://developers.openai.com/api/docs/pricing",
+      "quote": "For GPT-5.6 and later: \"In the Responses API, set `prompt_cache_options.ttl` to choose the minimum cache lifetime\", with values \"30m\" (default) and \"12h\". \"These are total write rates, not surcharges on top of ordinary input\": 1.25x input for 30m and 2.5x input for 12h. The pricing page lists gpt-6.1-sol writes at $2.50/$5.00, long context $5/$10, and gpt-6-luna at $0.125/$0.25.",
+      "established_at_ms": 1794009600000,
+      "review_by_ms": 1799193600000
+    },
+    {
+      "provider_id": "openai",
+      "model_ids": ["gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1"],
+      "lifetimes": ["in_memory", "24h"],
+      "source_ref": "https://developers.openai.com/api/docs/guides/prompt-caching",
+      "quote": "Earlier models: \"Use `prompt_cache_retention`, with supported values that depend on the model\". Values are `in_memory` and `24h`. The named extended-retention models are gpt-5.5, gpt-5.5-pro, gpt-5.4, gpt-5.2, gpt-5.1-codex-max, gpt-5.1, gpt-5.1-codex, gpt-5.1-codex-mini, gpt-5.1-chat-latest, gpt-5, gpt-5-codex and gpt-4.1. Earlier models have \"No additional cache-write charge\". Only the listed rows present in the seed are curated here; no TTL write prices are claimed for them.",
+      "established_at_ms": 1794009600000,
+      "review_by_ms": 1799193600000
+    },
+    {
+      "provider_id": "openai",
+      "model_ids": ["gpt-5.5", "gpt-5.5-pro"],
+      "lifetimes": ["24h"],
+      "source_ref": "https://developers.openai.com/api/docs/guides/prompt-caching",
+      "quote": "\"GPT-5.5 and GPT-5.5 Pro support `24h` only\". Earlier models have \"No additional cache-write charge\". These retention-only rows have no TTL write-price claim.",
+      "established_at_ms": 1794009600000,
+      "review_by_ms": 1799193600000
+    },
+    {
+      "provider_id": "anthropic",
+      "model_ids": [
+        "claude-fable-5",
+        "claude-fable-5-1",
+        "claude-haiku-4-5",
+        "claude-haiku-4-5-20251001",
+        "claude-haiku-5-5",
+        "claude-opus-4-5",
+        "claude-opus-4-5-20251101",
+        "claude-opus-4-6",
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-opus-5",
+        "claude-opus-5-5",
+        "claude-sonnet-4-5",
+        "claude-sonnet-4-5-20250929",
+        "claude-sonnet-4-6",
+        "claude-sonnet-5",
+        "claude-sonnet-5-5"
+      ],
+      "lifetimes": ["5m", "1h"],
+      "multipliers": {
+        "5m": { "numerator": 5, "denominator": 4 },
+        "1h": { "numerator": 2, "denominator": 1 }
+      },
+      "source_ref": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching#pricing; https://platform.claude.com/docs/en/api/messages; https://platform.claude.com/docs/en/about-claude/pricing",
+      "quote": "Caching is supported on \"all active Claude models\". \"Cache write tokens with a 5-minute TTL are 1.25 times the base input tokens price.\" \"Cache write tokens with a 1-hour TTL are 2 times the base input tokens price.\" The Messages API types set the default ttl to 5m. The pricing page lists claude-opus-5-5 input at $4, 5m writes at $5, and 1h writes at $8.",
+      "established_at_ms": 1794009600000,
+      "review_by_ms": 1799193600000
+    }
+  ]
+}

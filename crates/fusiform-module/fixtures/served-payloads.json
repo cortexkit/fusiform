@@ -12,6 +12,10 @@
       "models": {
         "anthropic/claude-sonnet-4-5": {
           "capability.attachment": true,
+          "capability.cache_lifetimes": [
+            "5m",
+            "1h"
+          ],
           "capability.input_modalities": [
             "image",
             "pdf",
@@ -50,6 +54,26 @@
             "units": 300000000
           },
           "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3750000000
+          },
+          "rate.cache_write.ttl.1h": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 6000000000
+          },
+          "rate.cache_write.ttl.5m": {
             "currency": "USD",
             "exponent": 9,
             "state": "priced",
@@ -254,6 +278,10 @@
       "models": {
         "openai/gpt-5.6-luna": {
           "capability.attachment": true,
+          "capability.cache_lifetimes": [
+            "30m",
+            "12h"
+          ],
           "capability.input_modalities": [
             "image",
             "pdf",
@@ -338,6 +366,26 @@
             },
             "units": 500000000
           },
+          "rate.cache_write.above_context.272000.ttl.12h": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1000000000
+          },
+          "rate.cache_write.above_context.272000.ttl.30m": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 500000000
+          },
           "rate.cache_write.mode.fast": {
             "currency": "USD",
             "exponent": 9,
@@ -347,6 +395,26 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 500000000
+          },
+          "rate.cache_write.ttl.12h": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 500000000
+          },
+          "rate.cache_write.ttl.30m": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 250000000
           },
           "rate.input": {
             "currency": "USD",
@@ -1696,6 +1764,502 @@
       ]
     }
   },
+  "catalog.get — cache lifetimes anthropic/claude-opus-5-5": {
+    "request": {
+      "arguments": {
+        "model_id": "claude-opus-5-5",
+        "provider_id": "anthropic"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1793404800000,
+          "established_by": "fusiform",
+          "fact_key": "capability.mid_conversation_system",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "claude-opus-5-5",
+          "notes": "Covers only persistent role: \"system\" messages inside messages, not the beta turn-scoped clear_at variant. Applies only to this anthropic row when it exists, never to resellers, Bedrock, Vertex or Code Assist aliases.",
+          "provider_id": "anthropic",
+          "quote": "\"This feature is available on Claude Fable 5.1, Claude Mythos 5.1, Claude Fable 5, Claude Mythos 5, Claude Opus 5.5, Claude Opus 4.8, Claude Opus 5, Claude Sonnet 5.5, and Claude Haiku 5.5.\" \"No beta header is required for mid-conversation system messages.\"",
+          "reason": "models.dev publishes no mid-conversation system message field. Anthropic explicitly lists Claude Opus 5.5 as supporting persistent system messages inside messages without a beta header.",
+          "replaces": null,
+          "review_by_ms": 1798588800000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages (accessed 2026-10-31)",
+          "value": true
+        },
+        {
+          "established_at_ms": 1792972800000,
+          "established_by": "fusiform",
+          "fact_key": "capability.server_side_fallback",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "claude-opus-5-5",
+          "notes": "https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts marks id 'claude-opus-5-5' serverSideFallback: true. The page names no dated snapshot ids. Server-side fallback is in beta on the Claude API and on Claude Models on Google Cloud (Anthropic managed), so the fact is not projected onto alias routes that reach the model another way. Live check 2026-10-28 about 16:05Z: a Claude subscription (OAuth) request to claude-opus-5-5 with fallbacks set to default and the server-side-fallback-2026-07-01 beta returned HTTP 200 and handed off mid-reply to claude-opus-4-8 (response sha256 fdec66cc43c189769f8571c01e861be2370abc82729f5791733b89dfb5f39259).",
+          "provider_id": "anthropic",
+          "quote": "\"Claude Fable 5.1, Claude Fable 5, Claude Opus 5.5, Claude Opus 5, Claude Sonnet 5.5, and Claude Haiku 5.5 include safety classifiers that can decline a request.\" \"Set the `fallbacks` parameter to the string `\"default\"` and send the `server-side-fallback-2026-07-01` beta header. The API then applies the requested model's server-defined default routing, which selects a recommended fallback model based on the refusal category the classifier reports, so refused requests are served without you maintaining a model list as recommendations change.\" \"Claude Haiku 5.5 has no server-side fallback: with `fallbacks: \"default\"`, a declined request stays declined, and a list of fallback models returns a 400 error.\"",
+          "reason": "models.dev publishes no server-side fallback field. Anthropic's page names six models with safety classifiers, Claude Opus 5.5 among them, states the fallback generally for the Claude API, and excludes only Haiku 5.5. anthropic-auth's model table (a9b4c35) also marks this model true. This is a reading of the page's structure, not a sentence naming Claude Opus 5.5.",
+          "replaces": null,
+          "review_by_ms": 1798156800000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-10-26); https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts",
+          "value": true
+        }
+      ],
+      "models": {
+        "anthropic/claude-opus-5-5": {
+          "capability.attachment": true,
+          "capability.cache_lifetimes": [
+            "5m",
+            "1h"
+          ],
+          "capability.input_modalities": [
+            "image",
+            "pdf",
+            "text"
+          ],
+          "capability.mid_conversation_system": true,
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            }
+          ],
+          "capability.server_side_fallback": true,
+          "capability.structured_output": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1000000,
+          "limit.output": 128000,
+          "model.canonical_id": "anthropic/claude-opus-5-5",
+          "model.family": "claude-opus",
+          "model.lineage": "claude",
+          "model.name": "Claude Opus 5.5",
+          "model.open_weights": false,
+          "model.status": null,
+          "provider.name": "Anthropic",
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 200000000
+          },
+          "rate.cache_read.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 400000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 5000000000
+          },
+          "rate.cache_write.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 10000000000
+          },
+          "rate.cache_write.ttl.1h": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 8000000000
+          },
+          "rate.cache_write.ttl.5m": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 5000000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4000000000
+          },
+          "rate.input.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 8000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 20000000000
+          },
+          "rate.output.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 40000000000
+          },
+          "wire.api": {
+            "from": "curated",
+            "value": "https://api.anthropic.com/v1"
+          },
+          "wire.family": "anthropic.messages",
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/anthropic"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev",
+      "wire_corrections": [
+        {
+          "established_at_ms": 1792713600000,
+          "established_by": "fusiform",
+          "field": "wire.api",
+          "model": "claude-opus-5-5",
+          "provider": "anthropic",
+          "review_by_ms": 1797897600000,
+          "source_ref": {
+            "commit": "accessed 2026-10-23",
+            "file": "https://docs.anthropic.com/claude/reference/getting-started-with-the-api; https://docs.anthropic.com/en/api/messages#messages-create",
+            "repo": "https://docs.anthropic.com"
+          },
+          "withheld": false
+        }
+      ]
+    }
+  },
+  "catalog.get — cache lifetimes openai/gpt-6.1-sol": {
+    "request": {
+      "arguments": {
+        "model_id": "gpt-6.1-sol",
+        "provider_id": "openai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "openai/gpt-6.1-sol": {
+          "capability.attachment": true,
+          "capability.cache_lifetimes": [
+            "30m",
+            "12h"
+          ],
+          "capability.input_modalities": [
+            "image",
+            "pdf",
+            "text"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1050000,
+          "limit.output": 128000,
+          "model.canonical_id": "openai/gpt-6.1-sol",
+          "model.family": "gpt-sol",
+          "model.lineage": "gpt",
+          "model.name": "GPT-6.1 Sol",
+          "model.open_weights": false,
+          "model.status": null,
+          "provider.name": "OpenAI",
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 100000000
+          },
+          "rate.cache_read.above_context.272000": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 200000000
+          },
+          "rate.cache_read.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 200000000
+          },
+          "rate.cache_read.mode.ultrafast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 600000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2500000000
+          },
+          "rate.cache_write.above_context.272000": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 5000000000
+          },
+          "rate.cache_write.above_context.272000.ttl.12h": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 10000000000
+          },
+          "rate.cache_write.above_context.272000.ttl.30m": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 5000000000
+          },
+          "rate.cache_write.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 5000000000
+          },
+          "rate.cache_write.mode.ultrafast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 15000000000
+          },
+          "rate.cache_write.ttl.12h": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 5000000000
+          },
+          "rate.cache_write.ttl.30m": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2500000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2000000000
+          },
+          "rate.input.above_context.272000": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4000000000
+          },
+          "rate.input.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4000000000
+          },
+          "rate.input.mode.ultrafast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 12000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 10000000000
+          },
+          "rate.output.above_context.272000": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 15000000000
+          },
+          "rate.output.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 20000000000
+          },
+          "rate.output.mode.ultrafast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 60000000000
+          },
+          "wire.api": {
+            "from": "curated",
+            "value": "https://api.openai.com/v1"
+          },
+          "wire.family": "openai.responses",
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev",
+      "wire_corrections": [
+        {
+          "established_at_ms": 1792713600000,
+          "established_by": "fusiform",
+          "field": "wire.api",
+          "model": "gpt-6.1-sol",
+          "provider": "openai",
+          "review_by_ms": 1797897600000,
+          "source_ref": {
+            "commit": "accessed 2026-10-23",
+            "file": "https://platform.openai.com/docs/api-reference/responses/create?lang=csharp#example",
+            "repo": "https://platform.openai.com"
+          },
+          "withheld": false
+        }
+      ]
+    }
+  },
   "catalog.get — curated unit-billed transcription rate": {
     "request": {
       "arguments": {
@@ -2027,6 +2591,26 @@
             },
             "units": 500000000
           },
+          "rate.cache_write.above_context.272000.ttl.12h": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1000000000
+          },
+          "rate.cache_write.above_context.272000.ttl.30m": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 500000000
+          },
           "rate.cache_write.mode.fast": {
             "currency": "USD",
             "exponent": 9,
@@ -2036,6 +2620,26 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 500000000
+          },
+          "rate.cache_write.ttl.12h": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 500000000
+          },
+          "rate.cache_write.ttl.30m": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 250000000
           },
           "rate.input": {
             "currency": "USD",
@@ -2138,6 +2742,10 @@
       "models": {
         "anthropic/claude-sonnet-4-5": {
           "capability.attachment": true,
+          "capability.cache_lifetimes": [
+            "5m",
+            "1h"
+          ],
           "capability.input_modalities": [
             "image",
             "pdf",
@@ -2176,6 +2784,26 @@
             "units": 300000000
           },
           "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3750000000
+          },
+          "rate.cache_write.ttl.1h": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 6000000000
+          },
+          "rate.cache_write.ttl.5m": {
             "currency": "USD",
             "exponent": 9,
             "state": "priced",
@@ -2757,6 +3385,10 @@
       "models": {
         "openai/gpt-6.1-sol": {
           "capability.attachment": true,
+          "capability.cache_lifetimes": [
+            "30m",
+            "12h"
+          ],
           "capability.input_modalities": [
             "image",
             "pdf",
@@ -2850,6 +3482,26 @@
             },
             "units": 5000000000
           },
+          "rate.cache_write.above_context.272000.ttl.12h": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 10000000000
+          },
+          "rate.cache_write.above_context.272000.ttl.30m": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 5000000000
+          },
           "rate.cache_write.mode.fast": {
             "currency": "USD",
             "exponent": 9,
@@ -2869,6 +3521,26 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "rate.cache_write.ttl.12h": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 5000000000
+          },
+          "rate.cache_write.ttl.30m": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2500000000
           },
           "rate.input": {
             "currency": "USD",
@@ -3151,6 +3823,10 @@
       "models": {
         "anthropic/claude-opus-5-5": {
           "capability.attachment": true,
+          "capability.cache_lifetimes": [
+            "5m",
+            "1h"
+          ],
           "capability.input_modalities": [
             "image",
             "pdf",
@@ -3410,6 +4086,7 @@
         "limit.output",
         "capability.reasoning",
         "capability.reasoning_options",
+        "capability.cache_lifetimes",
         "capability.structured_output",
         "capability.tool_call",
         "capability.server_side_fallback",
@@ -4637,6 +5314,10 @@
       "models": {
         "anthropic/claude-sonnet-4-5": {
           "capability.attachment": true,
+          "capability.cache_lifetimes": [
+            "5m",
+            "1h"
+          ],
           "capability.input_modalities": [
             "image",
             "pdf",
@@ -4675,6 +5356,26 @@
             "units": 300000000
           },
           "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3750000000
+          },
+          "rate.cache_write.ttl.1h": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 6000000000
+          },
+          "rate.cache_write.ttl.5m": {
             "currency": "USD",
             "exponent": 9,
             "state": "priced",
@@ -5771,6 +6472,10 @@
       "models": {
         "anthropic/claude-sonnet-4-5": {
           "capability.attachment": true,
+          "capability.cache_lifetimes": [
+            "5m",
+            "1h"
+          ],
           "capability.input_modalities": [
             "image",
             "pdf",
@@ -5814,6 +6519,36 @@
             "units": 300000000
           },
           "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "claude-sonnet",
+              "provider_id": "anthropic"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3750000000
+          },
+          "rate.cache_write.ttl.1h": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "claude-sonnet",
+              "provider_id": "anthropic"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 6000000000
+          },
+          "rate.cache_write.ttl.5m": {
             "currency": "USD",
             "exponent": 9,
             "inherited_from": {

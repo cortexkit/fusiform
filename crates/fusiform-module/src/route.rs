@@ -920,6 +920,16 @@ fn serve_catalog_get_request(
     if request.at_ms.is_none() {
         request.fact_prefixes = request.fact_prefixes.as_ref().map(|prefixes| {
             let mut wide = prefixes.clone();
+            if prefixes.iter().any(|prefix| {
+                "capability.cache_lifetimes".starts_with(prefix)
+                    || "rate.cache_write".starts_with(prefix)
+                    || prefix.starts_with("rate.cache_write")
+            }) {
+                // TTL prices need the input and cache-write rates to validate
+                // every tier, even when only one derived key was requested.
+                wide.push("rate.".to_string());
+                wide.push("existence".to_string());
+            }
             if ["quality.elo", "quality.eq"]
                 .iter()
                 .any(|key| prefixes.iter().any(|p| key.starts_with(p)))
@@ -1803,6 +1813,11 @@ fn finish_plane_view(
     current: bool,
 ) -> Result<CatalogGetResponse, RouteError> {
     if current {
+        for (identity, facts) in &mut response.models {
+            if let Some((provider, model)) = identity.split_once('/') {
+                crate::cache_lifetimes::apply(provider, model, facts);
+            }
+        }
         apply_quality_scores(&mut response);
         apply_model_lineage(&mut response);
     }
@@ -2030,6 +2045,13 @@ fn apply_billing_plane(
     facts: &mut BTreeMap<String, serde_json::Value>,
     plane: &Plane,
 ) -> Vec<BillingRuleWire> {
+    if plane.provider_id == "openai" && plane.auth_method == "chatgpt" {
+        // ChatGPT bills cache writes as input and accepts no cache lifetime.
+        facts.retain(|key, _| {
+            key != "capability.cache_lifetimes"
+                && !(key.starts_with(fusiform_store::prefix::RATE) && key.contains(".ttl."))
+        });
+    }
     if plane.kind == PlaneKind::QuotaProxy {
         // A subscription may not offer an API service mode. Keeping its price
         // would claim a charge for a mode whose availability is not established.

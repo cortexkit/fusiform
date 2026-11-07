@@ -163,6 +163,40 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
                     .cloned()
             }),
     );
+    // Use real served vectors, not an exemption for a current-only fact.
+    for case in super::golden_payload::render_cache_lifetimes().values() {
+        for facts in case["response"]["models"].as_object().unwrap().values() {
+            for key in facts
+                .as_object()
+                .unwrap()
+                .keys()
+                .filter(|key| CACHE_ONLY.contains(&key.as_str()) || key.contains(".ttl."))
+            {
+                if let Some((base, ttl)) = key.split_once(".ttl.") {
+                    assert!(
+                        ["5m", "1h", "30m", "12h"].contains(&ttl),
+                        "invalid TTL selector: {key}"
+                    );
+                    if let Some((class, threshold)) = base.split_once(".above_context.") {
+                        assert_eq!(class, "rate.cache_write");
+                        assert!(
+                            threshold.parse::<u64>().is_ok(),
+                            "invalid context selector: {key}"
+                        );
+                    } else {
+                        assert_eq!(base, "rate.cache_write");
+                    }
+                }
+                let base = key.split(".ttl.").next().unwrap();
+                let base = base.split(".above_context.").next().unwrap();
+                assert!(
+                    tabled.contains(&base),
+                    "untabled cache lifetime fact: {key}"
+                );
+                curated.push(base.to_string());
+            }
+        }
+    }
     let unproduced = unproduced_tabled_facts(&produced, &curated, &tabled);
     assert!(unproduced.is_empty(), "{}", unproduced.join("\n"));
 
@@ -264,10 +298,14 @@ const LINEAGE_ONLY: &[&str] = &["model.lineage"];
 /// Request protocols are verified on current reads, never stored as upstream claims.
 const WIRE_ONLY: &[&str] = &["wire.family"];
 
+/// Cache lifetimes are curated for first-party OpenAI/Anthropic current reads
+/// only; normalization must not turn upstream claims into this curated fact.
+const CACHE_ONLY: &[&str] = &["capability.cache_lifetimes"];
+
 /// Tabled facts nothing emits, and curated-only facts the normalizer emits.
 ///
 /// A tabled fact must come from the normalizer, or be declared curated-only,
-/// addition-only, quality-only, lineage-only or wire-only and be carried by at least one
+/// addition-only, quality-only, lineage-only, wire-only or cache-only and be carried by at least one
 /// curated row, shipped addition row or actual served response (all passed in `curated`).
 fn unproduced_tabled_facts(
     normalized: &[String],
@@ -282,6 +320,7 @@ fn unproduced_tabled_facts(
             .chain(QUALITY_ONLY)
             .chain(LINEAGE_ONLY)
             .chain(WIRE_ONLY)
+            .chain(CACHE_ONLY)
     };
     for key in not_upstream() {
         if normalized.iter().any(|p| p == key) {
@@ -308,6 +347,13 @@ fn unproduced_tabled_facts(
 #[test]
 fn planted_unproduced_or_inferred_curated_only_fact_is_reported() {
     let strings = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
+    assert!(unproduced_tabled_facts(&[], &strings(CACHE_ONLY), CACHE_ONLY).is_empty());
+    assert_eq!(unproduced_tabled_facts(&[], &[], CACHE_ONLY).len(), 1);
+    assert_eq!(
+        unproduced_tabled_facts(&strings(CACHE_ONLY), &strings(CACHE_ONLY), CACHE_ONLY).len(),
+        1,
+        "cache lifetimes must be served from curation, never normalization"
+    );
     // Control: an upstream fact from the normalizer and the curated-only fact
     // from a curated row are both produced.
     assert!(unproduced_tabled_facts(

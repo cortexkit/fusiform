@@ -1173,6 +1173,20 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                from it and refuses any setting the list does not name.",
     },
     ServedFact {
+        key: "capability.cache_lifetimes",
+        class: FactClass::ByteAffecting,
+        note: "curated current-read lifetimes for first-party OpenAI and \
+               Anthropic only: duration strings or OpenAI's own in_memory, \
+               shortest first. Absent means not curated. Consumers choose a \
+               lifetime and encode the request themselves. TTL write rates use \
+               rate.cache_write.ttl.<lifetime>, or \
+               rate.cache_write.above_context.<tokens>.ttl.<lifetime>; these \
+               selectors refine rate.cache_write like context tiers and modes. \
+               A price is absent when the published short write rate does not \
+               exactly match the curated multiplier. Never fall back to the \
+               plain short-lifetime rate for a measured longer write.",
+    },
+    ServedFact {
         key: "capability.structured_output",
         class: FactClass::Advisory,
         note: "verbatim models.dev structured_output boolean. This is only the \

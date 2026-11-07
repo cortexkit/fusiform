@@ -6,6 +6,7 @@
 // Scope a run to one file with `cargo test -p fusiform-module --test it <file>::`.
 
 mod bootstrap;
+mod cache_lifetimes;
 mod conditional_get;
 mod correct_route;
 mod creator_table;
