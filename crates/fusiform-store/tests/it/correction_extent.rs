@@ -212,6 +212,9 @@ fn every_served_fact_has_a_field_id() {
         FieldId::Model {
             attribute: ModelAttributeId::Status,
         },
+        FieldId::Model {
+            attribute: ModelAttributeId::Type,
+        },
         FieldId::Wire {
             attribute: fusiform_core::WireAttributeId::Npm,
         },
@@ -258,6 +261,8 @@ fn the_closed_vocabulary_matches_the_normalizer() {
     let mut fixture: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
     fixture["anthropic"]["models"]["claude-sonnet-4-5"]["provider"] =
         serde_json::json!({"shape": "responses"});
+    fixture["anthropic"]["models"]["claude-sonnet-4-5"]["type"] =
+        serde_json::json!("transcription");
     let outcome = normalize_models_dev_with(
         &serde_json::to_vec(&fixture).unwrap(),
         &ChargeUnitEvidence::input_audio_per_token(["google"]),
@@ -389,10 +394,11 @@ fn a_backwards_correction_interval_is_refused() {
 }
 
 #[test]
-fn canonical_id_and_status_have_exact_correctable_field_names() {
+fn canonical_id_status_and_type_have_exact_correctable_field_names() {
     for (attribute, suffix) in [
         (ModelAttributeId::CanonicalId, "canonical_id"),
         (ModelAttributeId::Status, "status"),
+        (ModelAttributeId::Type, "type"),
     ] {
         let field = FieldId::Model { attribute };
         assert_eq!(

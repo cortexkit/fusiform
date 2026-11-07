@@ -18,10 +18,6 @@ const DECLARED_UNREAD: &[(&str, &str)] = &[
         "human-facing prose, not a served capacity, price or capability",
     ),
     (
-        "model.type",
-        "sparse model-kind labels with no consumer contract; not served",
-    ),
-    (
         "model.temperature",
         "request knob acceptance, not a model capacity; no served consumer contract",
     ),
@@ -204,6 +200,7 @@ fn every_seed_key_is_read_or_declared_unread() {
         "model.provider.shape",
         "model.canonical_model_id",
         "model.status",
+        "model.type",
         "model.limit.input",
         "model.cost.tiers.tier.type",
     ] {

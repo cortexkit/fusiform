@@ -3357,7 +3357,7 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 400,
+      "era_count": 401,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
@@ -3421,6 +3421,7 @@
         "model.open_weights",
         "model.canonical_id",
         "model.status",
+        "model.type",
         "model.kind",
         "rate.input",
         "rate.output",
@@ -4584,6 +4585,7 @@
           "model.name": "A model whose weights the creator publishes and prices",
           "model.open_weights": true,
           "model.status": "future-preview",
+          "model.type": "transcription",
           "provider.name": "Synthetic zai entry (models are synthetic, the id is real)",
           "rate.input": {
             "currency": "USD",

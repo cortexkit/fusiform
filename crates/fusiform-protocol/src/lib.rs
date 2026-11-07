@@ -1264,6 +1264,14 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                establish whether the provider still serves the model.",
     },
     ServedFact {
+        key: "model.type",
+        class: FactClass::Advisory,
+        note: "verbatim models.dev type: the upstream's own sparse model label, \
+               from its open-ended vocabulary. Absent or null upstream means \
+               no fact: unlabelled, never chat or text. Distinct from fusiform's \
+               curated model.kind (decision/extraction).",
+    },
+    ServedFact {
         key: "model.kind",
         class: FactClass::Advisory,
         note: "what kind of work the model does, from the closed set MODEL_KINDS: \

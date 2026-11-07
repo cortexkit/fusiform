@@ -68,6 +68,8 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
     let mut fixture: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
     fixture["anthropic"]["models"]["claude-sonnet-4-5"]["provider"] =
         serde_json::json!({"shape": "responses"});
+    fixture["anthropic"]["models"]["claude-sonnet-4-5"]["type"] =
+        serde_json::json!("transcription");
     let outcome = normalize_models_dev_with(
         &serde_json::to_vec(&fixture).unwrap(),
         &fusiform_module::input_audio::evidence(),

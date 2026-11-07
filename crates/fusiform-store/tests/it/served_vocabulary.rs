@@ -59,6 +59,7 @@ const SERVED_FACT_KEYS: &[&str] = &[
     "model.open_weights",
     "model.canonical_id",
     "model.status",
+    "model.type",
     "wire.npm",
     "wire.api",
     "wire.shape",
@@ -96,6 +97,8 @@ fn the_served_fact_set_is_exactly_this() {
     let mut fixture: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
     fixture["anthropic"]["models"]["claude-sonnet-4-5"]["provider"] =
         serde_json::json!({"shape": "responses"});
+    fixture["anthropic"]["models"]["claude-sonnet-4-5"]["type"] =
+        serde_json::json!("transcription");
     let outcome = normalize_models_dev_with(
         &serde_json::to_vec(&fixture).unwrap(),
         &ChargeUnitEvidence::input_audio_per_token(["google"]),
@@ -788,6 +791,7 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
     let row = &mut fixture["anthropic"]["models"]["claude-sonnet-4-5"];
     row["canonical_model_id"] = serde_json::json!("anthropic/claude-sonnet-4-5");
     row["status"] = serde_json::json!("future-preview");
+    row["type"] = serde_json::json!("transcription");
     row["provider"] =
         serde_json::json!({"npm": "@sdk/model", "api": "https://model/", "shape": "responses"});
     let outcome =
@@ -809,6 +813,7 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
         open_weights,
         canonical_id,
         status,
+        model_type,
         capabilities: _,
         limits: _,
         rates: _,
@@ -850,6 +855,7 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
         (open_weights.is_some(), "model.open_weights"),
         (canonical_id.is_some(), "model.canonical_id"),
         (status.is_some(), "model.status"),
+        (model_type.is_some(), "model.type"),
         (npm.is_some(), "wire.npm"),
         (api.is_some(), "wire.api"),
         (shape.is_some(), "wire.shape"),
@@ -865,8 +871,8 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
     }
 
     assert!(
-        canonical_id.is_some() && status.is_some(),
-        "fixture must exercise both new model claims"
+        canonical_id.is_some() && status.is_some() && model_type.is_some(),
+        "fixture must exercise canonical identity, lifecycle and model type"
     );
     assert!(
         family.is_some() || open_weights.is_some(),
@@ -907,4 +913,42 @@ fn canonical_identity_and_open_status_reach_stored_facts() {
             status
         );
     }
+}
+
+#[test]
+fn normalized_model_type_is_verbatim_and_sparse() {
+    use fusiform_store::ingest::facts_with_values;
+    let outcome = normalize_models_dev(
+        br#"{"p":{"models":{
+        "transcription":{"type":"transcription"},
+        "future":{"type":"Future Kind \"v2\""},
+        "empty":{"type":""},
+        "unpublished":{},
+        "null":{"type":null}
+    }}}"#,
+    )
+    .unwrap();
+    let mut checked = 0;
+    for model in outcome.catalog.models() {
+        let values: std::collections::BTreeMap<_, _> =
+            facts_with_values(model).into_iter().collect();
+        let expected = match model.key.model_id.as_str() {
+            "transcription" => Some("transcription"),
+            "future" => Some("Future Kind \"v2\""),
+            "empty" => Some(""),
+            "unpublished" | "null" => None,
+            other => panic!("unexpected model: {other}"),
+        };
+        let actual = values
+            .get(&FactKey::model("type"))
+            .map(|value| serde_json::from_str::<serde_json::Value>(value).unwrap());
+        assert_eq!(
+            actual,
+            expected.map(serde_json::Value::from),
+            "{}",
+            model.key.model_id
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 5);
 }

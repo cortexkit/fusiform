@@ -202,6 +202,7 @@ impl FactKey {
                 fusiform_core::ModelAttributeId::OpenWeights => "open_weights",
                 fusiform_core::ModelAttributeId::CanonicalId => "canonical_id",
                 fusiform_core::ModelAttributeId::Status => "status",
+                fusiform_core::ModelAttributeId::Type => "type",
             }),
             FieldId::Wire { attribute } => FactKey::wire(match attribute {
                 fusiform_core::WireAttributeId::Npm => "npm",

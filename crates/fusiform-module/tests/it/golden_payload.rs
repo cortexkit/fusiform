@@ -104,6 +104,7 @@ const INHERITANCE_PAIR: &str = r#"{
         "name": "A model whose weights the creator publishes and prices",
         "canonical_model_id": "zai/synthetic-glm-1.0",
         "status": "future-preview",
+        "type": "transcription",
         "provider": { "npm": "@sdk/model", "api": "https://model.example/v1//", "shape": "responses" },
         "family": "glm",
         "open_weights": true,
@@ -2243,5 +2244,10 @@ fn model_identity_and_open_status_are_served_with_unpublished_nulls() {
         assert!(facts.as_object().unwrap().contains_key("model.status"));
         assert_eq!(facts["model.canonical_id"], canonical);
         assert_eq!(facts["model.status"], status);
+        if provider == "zai" {
+            assert_eq!(facts["model.type"], "transcription");
+        } else {
+            assert!(!facts.as_object().unwrap().contains_key("model.type"));
+        }
     }
 }

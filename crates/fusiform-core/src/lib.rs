@@ -300,6 +300,7 @@ pub enum ModelAttributeId {
     OpenWeights,
     CanonicalId,
     Status,
+    Type,
 }
 
 /// Which capacity limit a correction names.

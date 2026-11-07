@@ -43,6 +43,8 @@ pub struct RawModel {
     pub family: Option<String>,
     pub canonical_model_id: Option<String>,
     pub status: Option<String>,
+    #[serde(rename = "type")]
+    pub model_type: Option<String>,
     pub release_date: Option<String>,
     pub last_updated: Option<String>,
     pub knowledge: Option<String>,

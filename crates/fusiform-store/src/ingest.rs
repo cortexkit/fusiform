@@ -333,6 +333,7 @@ pub const SERVED_FACT_NAMESPACE: &[&str] = &[
     // A lifecycle label is upstream's claim about this row, not proof that
     // sibling providers have the same availability or lifecycle.
     "model.status",
+    "model.type",
     "wire.npm",
     "wire.api",
     "wire.shape",
@@ -447,6 +448,11 @@ fn facts_of(model: &NormalizedModel) -> Vec<(FactKey, String)> {
         if let Some(name) = name {
             facts.push((key, json_opt_str(Some(name))));
         }
+    }
+
+    // The upstream's sparse label makes no claim when absent, not even chat.
+    if let Some(model_type) = model.model_type.as_deref() {
+        facts.push((FactKey::model("type"), json_opt_str(Some(model_type))));
     }
 
     // Whether models.dev says the model supports structured output.

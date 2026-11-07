@@ -2393,12 +2393,14 @@ fn render(
                 // instead of presenting as an absent fact.
                 serde_json::Value::String(raw.clone())
             });
-            // Withdrawn connection claims and display names stay in history as
-            // null eras, but a catalog read must not advertise an unknown value.
+            // Withdrawn connection claims, display names and sparse model types
+            // stay in history as null eras, not advertised unknown values.
             if key.as_str().starts_with(fusiform_store::prefix::WIRE) && value.is_null() {
                 continue;
             }
-            if matches!(key.as_str(), "model.name" | "provider.name") && value.is_null() {
+            if matches!(key.as_str(), "model.name" | "provider.name" | "model.type")
+                && value.is_null()
+            {
                 continue;
             }
             name_the_provenance_of_a_pre_0_11_row(&mut value);
@@ -4044,6 +4046,24 @@ mod alias_tests {
             serde_json::json!(true),
             "the target row retains the upstream's published claim"
         );
+    }
+
+    #[test]
+    fn model_type_is_projected_onto_an_alias_verbatim() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-3.8-flash", 300_000_000);
+        store
+            .append_eras(&[era_at(
+                "gemini-3.8-flash",
+                "model.type",
+                r#""future-kind""#,
+                2_000,
+            )])
+            .unwrap();
+        for args in [named(""), r#"{"provider_id":"google"}"#.to_owned()] {
+            let response = get(&store, &args).expect("the alias is served");
+            assert_eq!(response.models[ALIAS]["model.type"], "future-kind");
+        }
     }
 
     #[test]

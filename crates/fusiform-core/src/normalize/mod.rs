@@ -130,6 +130,8 @@ pub struct NormalizedModel {
     pub canonical_id: Option<String>,
     /// The upstream's lifecycle label, including values fusiform has not seen.
     pub status: Option<String>,
+    /// The upstream's sparse model-type label, not the curated `model.kind`.
+    pub model_type: Option<String>,
     pub release_date: Option<String>,
     pub last_updated: Option<String>,
     pub knowledge_cutoff: Option<String>,
@@ -499,6 +501,7 @@ fn normalize_model(
         family,
         canonical_model_id,
         status,
+        model_type,
         release_date,
         last_updated,
         knowledge,
@@ -631,6 +634,7 @@ fn normalize_model(
         family: (*family).clone(),
         canonical_id: (*canonical_model_id).clone(),
         status: (*status).clone(),
+        model_type: (*model_type).clone(),
         release_date: (*release_date).clone(),
         last_updated: (*last_updated).clone(),
         knowledge_cutoff: (*knowledge).clone(),

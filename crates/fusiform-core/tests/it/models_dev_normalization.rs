@@ -891,6 +891,33 @@ fn status_preserves_unknown_and_empty_strings_and_absence() {
     assert_eq!(model(&outcome, "p/unpublished").status, None);
 }
 
+#[test]
+fn model_type_preserves_verbatim_labels_and_absence() {
+    let outcome = normalize_models_dev(
+        br#"{"p":{"models":{
+        "transcription":{"type":"transcription"},
+        "future":{"type":"Future Kind \"v2\""},
+        "empty":{"type":""},
+        "unpublished":{},
+        "null":{"type":null}
+    }}}"#,
+    )
+    .unwrap();
+    for (id, expected) in [
+        ("transcription", Some("transcription")),
+        ("future", Some("Future Kind \"v2\"")),
+        ("empty", Some("")),
+        ("unpublished", None),
+        ("null", None),
+    ] {
+        assert_eq!(
+            model(&outcome, &format!("p/{id}")).model_type.as_deref(),
+            expected,
+            "{id}"
+        );
+    }
+}
+
 /// A missing structured-output claim is not a negative capability claim.
 #[test]
 fn structured_output_preserves_absence_and_published_booleans() {

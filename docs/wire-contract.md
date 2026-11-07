@@ -149,6 +149,7 @@ value would do to a consumer:
 | `model.open_weights` | advisory | `true`, `false` or `null` |
 | `model.canonical_id` | advisory | upstream canonical model id, or `null` |
 | `model.status` | advisory | upstream lifecycle label verbatim, or `null`; on current reads, `"deprecated"` may come from a sourced override of the stored `null`, disclosed in `fact_overrides` (§5.8) when the vendor deprecates a model models.dev has not yet marked |
+| `model.type` | advisory | models.dev's own sparse type label, verbatim from its open-ended vocabulary; absent or null upstream means no fact: unlabelled, never chat or text; distinct from curated `model.kind` |
 | `model.kind` | advisory | `"decision"` or `"extraction"`, on curated rows only; otherwise no fact (§4.6) |
 | `wire.npm` | advisory | `{"value": "<published client package>", "from": "model" or "provider"}`; otherwise no fact |
 | `wire.api` | advisory | `{"value": "<base URL>", "from": "model", "provider" or "curated"}`; otherwise no fact; corrections/withholding disclosed in `wire_corrections` |
@@ -279,6 +280,13 @@ in `fusiform-protocol` 0.40.0.
 Structured output is a model-level claim only: it is omitted when models.dev
 has no key, and it does not establish that any particular route enforces JSON
 schema. Route behavior may differ, so alias projection does not carry this fact.
+
+`model.type` follows the upstream's vocabulary rather than fusiform's curated
+`model.kind` (`decision`/`extraction`). Unknown and empty strings are preserved,
+not mapped to a closed set or inferred from modalities. Like `model.status`,
+the label is included on an alias when the target publishes it. Curated rows are
+served whole from `curated-models.json`, so they do not inherit either label
+from an upstream row; no `model.type` labels are added to that table.
 
 The table matches what the producer emits, in both directions
 (`wire_fact_table::the_wire_fact_table_matches_what_the_producer_emits`,
