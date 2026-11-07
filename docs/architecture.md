@@ -33,8 +33,9 @@ models.dev/api.json
         │
         ▼
   route (fusiform-module) ── point-in-time read, then serve-time layers:
-        │                    open-weight inheritance, aliases, curated rows,
-        │                    billing planes
+        │                    overrides, wire corrections, open-weight
+        │                    inheritance, aliases, curated rows, cache
+        │                    lifetimes, lineage, quality scores, billing planes
         ▼
   tools: catalog.get / history / status / correct / mark_artifact /
          retract_artifact, plan.prices
@@ -48,9 +49,10 @@ the compiled file.
 
 ## 3. The rules that shape everything else
 
-1. **Fusiform describes; it never dispatches.** It says what a model is, never
-   how to speak to it. Upstream fields that select a request renderer are
-   parsed, quarantined and never served
+1. **Fusiform describes; it never dispatches.** It says what a model is and
+   what the upstream publishes about its endpoint (`wire.npm`, `wire.api`,
+   `wire.shape`, and the verified protocol `wire.family`), never how to encode
+   a request. Request header and body overrides are parsed and never served
    ([`wire-contract.md`](wire-contract.md) §4.5).
 2. **The upstream is data, not authority.** A field whose meaning cannot be
    established becomes an explicit unknown or stops the parse; it never gets a
@@ -64,8 +66,9 @@ the compiled file.
 5. **History is append-only.** Nothing is updated or deleted. Withdrawals are
    tombstone eras, corrections are eras that mark a window, and artifact marks
    and retractions are events ([`data-model.md`](data-model.md) §3, §5, §6).
-6. **Serve-time layers are never stored.** Inheritance, aliases, curated rows
-   and billing planes are applied when a read is served, and only on current
+6. **Serve-time layers are never stored.** Inheritance, aliases, curated rows,
+   overrides, cache lifetimes, lineage, quality scores and billing planes are
+   applied when a read is served, and only on current
    reads, so a point-in-time read replays what the upstream published. The one
    exception is curated model rows: their history is recorded in its own
    table, and a point-in-time read serves the curated claim in force at its
@@ -88,8 +91,11 @@ the compiled file.
   fresh install with no network can answer reads. The eras written from it
   have boundary kind `seed`, which records where the store started rather
   than a change the upstream made.
-- One poll loop writes; tool calls read on separate read-only connections and
-  run off the connection reader, so health and other calls stay responsive.
+- One poll loop writes; tool calls read on four separate read-only connections
+  and run off the thread that reads the supervisor connection, so health and
+  other calls stay
+  responsive. Whole-catalog reads run one at a time, so overlapping readers
+  never hold several catalog copies in memory at once.
 - Health is computed from in-memory signals with no I/O
   ([`module-surface.md`](module-surface.md) §6).
 - Fusiform emits no pushes. Consumers pull, and compare `catalog_version` to
@@ -100,8 +106,9 @@ the compiled file.
 - It does not convert currencies. models.dev states no currency; its rates are
   served as USD under the policy `models-dev-usd-v1`, and every rate names that
   policy in its `unit_provenance`.
-- It does not choose a wire family, a request renderer, or which request
-  selects a mode.
+- It does not choose a request renderer, request parameters, or which request
+  selects a mode. `wire.family` states a verified protocol; the consumer
+  decides how to send it.
 - It does not say whether a published list price applies to a particular
   route, subscription or contract. That is the consumer's knowledge.
 - It does not infer identity from similar names: aliases and creators are

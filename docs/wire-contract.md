@@ -142,6 +142,7 @@ value would do to a consumer:
 | `capability.tool_call` | advisory | `true`, `false` or `null` |
 | `capability.server_side_fallback` | advisory | `true` or `false` on current reads of the `anthropic` rows Anthropic's documentation covers, from sourced additions disclosed in `fact_overrides` (§5.8); otherwise no fact, which means not stated, never `false` |
 | `capability.mid_conversation_system` | advisory | `true` or `false` for persistent `role: "system"` messages inside `messages`, without a beta header, not the beta turn-scoped `clear_at` variant; sourced current-read-only additions on documented `anthropic` rows, disclosed in `fact_overrides` (§5.8), never stored or inherited by resellers, Bedrock, Vertex or Code Assist aliases; any upstream value wins; otherwise no fact, which means not stated, never `false` |
+| `capability.cache_lifetimes` | advisory | prompt-cache lifetimes the model offers, shortest first: durations (`"5m"`, `"30m"`, `"1h"`, `"12h"`, `"24h"`) or OpenAI's `"in_memory"`; curated, first-party `openai` and `anthropic` rows only, current reads only; otherwise no fact ([`curated-data.md`](curated-data.md)) |
 | `capability.attachment` | advisory | `true`, `false` or `null` |
 | `capability.input_modalities` | advisory | list of modality strings, or `null` |
 | `capability.output_modalities` | advisory | list of modality strings, or `null` |
@@ -375,6 +376,16 @@ A rate is a JSON object tagged by `state` (`RateValue` in
   not enumerated base keys in `SERVED_FACTS`, like context-tier keys. Curated
   admission allows only `rate.input_audio.per_second` today; new keys require
   deliberate admission after the spend-pricing consumer recognises them.
+- A cache-write price per cache lifetime is served as
+  `rate.cache_write.ttl.<lifetime>`, and on a context tier as
+  `rate.cache_write.above_context.<tokens>.ttl.<lifetime>`. These are token
+  rates (per million tokens) on the rows that list
+  `capability.cache_lifetimes`, current reads only. Each lifetime the model
+  offers has its own key, its default included, so a write measured at a
+  lifetime prices only at that key. Plain `rate.cache_write` keeps its meaning,
+  the vendor's default lifetime. They are absent on the `(openai, chatgpt)`
+  billing plane, the ChatGPT subscription login, which takes no cache
+  lifetime ([`billing-planes.md`](billing-planes.md)).
 - A unit-billed price states `per`, the positive quantity of the key's unit
   bought by the amount. `openai/gpt-transcribe` serves 4,500,000 × 10^-9 USD
   per 60 seconds, with no token rates. No `per_` key segment means the
@@ -443,13 +454,15 @@ The marker survives decoding in every rate state
 
 ### 4.5 Never served
 
-Fields that select how a request is rendered (`provider.npm`, per-model
-provider overrides, and the request-selecting parts of `experimental`) are
-parsed, quarantined and never served
-(`models_dev_normalization::renderer_selecting_fields_are_quarantined`,
-`served_vocabulary::unreliable_and_renderer_selecting_fields_are_not_facts`).
-These unserved request overrides are distinct from `wire.family`, which states
-a verified request protocol without supplying header or body overrides.
+Request header and body overrides are never served: the per-model `provider`
+override block and the request-selecting parts of `experimental` (the
+parameters and headers that switch a mode on)
+(`served_vocabulary::unreliable_and_renderer_selecting_fields_are_not_facts`,
+`served_vocabulary::mode_request_bytes_never_reach_a_fact`). The upstream's
+endpoint claims are served instead as `wire.npm`, `wire.api` and `wire.shape`
+(§4.1), never under their upstream names, and `wire.family` states a verified
+request protocol. None of them supplies header or body overrides; how to encode
+a request stays with the consumer.
 
 ### 4.6 `model.kind`
 
