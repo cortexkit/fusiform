@@ -24,13 +24,12 @@ import tempfile
 
 ERREXIT = re.compile(r"^\s*set\s+(-[A-Za-z]*e[A-Za-z]*\b|.*-o\s+errexit\b)")
 EXIT_TRAP = re.compile(r"^\s*trap\s+.*\bEXIT\b")
-FINISHED = re.compile(r"^\s*finished=1\s*$")
+# `finished=1`, or a prefixed name such as `train_push_finished=1`.
+FINISHED = re.compile(r"^\s*(\w+_)?finished=1\s*$")
 
 # Copied from another repository and replaced whole when re-lifted, so a fix
 # belongs upstream. Each entry names who owns the fix.
-LIFTED = {
-    "scripts/train-push.sh": "lifted from AFT's train scripts; fix reported upstream",
-}
+LIFTED = {}
 
 
 def code_lines(text):
@@ -84,10 +83,20 @@ def check(root):
 def self_test():
     unguarded = "#!/usr/bin/env bash\nset -euo pipefail\ntrap 'rm -f x' EXIT\necho done\n"
     guarded = unguarded + "finished=1\n"
+    prefixed = unguarded + "train_push_finished=1\n"
+    # `unfinished=1` is a different variable, not the guard.
+    lookalike = unguarded + "unfinished=1\n"
     # A commented-out `finished=1` is not a guard.
     commented = unguarded + "# finished=1\n"
     no_errexit = "#!/usr/bin/env bash\nset -uo pipefail\ntrap 'rm -f x' EXIT\n"
-    cases = [(unguarded, 1), (commented, 1), (guarded, 0), (no_errexit, 0)]
+    cases = [
+        (unguarded, 1),
+        (commented, 1),
+        (lookalike, 1),
+        (guarded, 0),
+        (prefixed, 0),
+        (no_errexit, 0),
+    ]
     for body, want in cases:
         with tempfile.TemporaryDirectory() as root:
             os.makedirs(os.path.join(root, "scripts"))
@@ -101,7 +110,10 @@ def self_test():
             if got != want:
                 print("self-test FAILED: expected exit %d, got %d for:\n%s" % (want, got, body), file=sys.stderr)
                 return 1
-    print("shell-exit-guard self-test: refuses an unguarded and a commented guard, accepts a guarded script and one without errexit")
+    print(
+        "shell-exit-guard self-test: refuses an unguarded, a commented and a look-alike guard;"
+        " accepts a guarded, a prefixed-guard and a no-errexit script"
+    )
     return 0
 
 
