@@ -72,17 +72,6 @@ fn bounded_output(command: &mut Command, budget: Duration, label: &str) -> Outpu
     }
 }
 
-/// Where cargo put the binary `name` for this test profile, with the platform's
-/// executable suffix (`.exe` on Windows, where a bare name finds nothing and
-/// the probe below would skip both binaries).
-fn binary(name: &str) -> std::path::PathBuf {
-    let mut path = std::env::current_exe().expect("test binary path");
-    path.pop(); // deps/
-    path.pop(); // profile dir
-    path.push(format!("{name}{}", std::env::consts::EXE_SUFFIX));
-    path
-}
-
 /// A link to `built` named `ckdev-<suffix>`, in a scratch directory this test owns.
 ///
 /// On this machine a `ck-` process name means a production binary placed in the
@@ -117,23 +106,22 @@ fn a_hung_version_probe_is_killed_at_its_deadline() {
     );
 }
 
+/// `ck-models` only: cargo names its path for this package's tests
+/// (`CARGO_BIN_EXE_ck-models`), so the test never guesses where the binary was
+/// built. `ck-fusiform` belongs to fusiform-module, and its version probe lives
+/// in that package's `manifest_probe` test for the same reason.
 #[test]
-fn both_binaries_answer_version_with_no_arguments_and_no_daemon() {
-    let mut checked = 0;
+fn the_cli_answers_version_with_no_arguments_and_no_daemon() {
     // Not `tempfile::tempdir()`: on a Mac that is under /var/folders, where a
     // fresh executable can be held long enough to trip the probe's deadline.
     let scratch = tempfile::Builder::new()
         .prefix("fusiform-exec-")
         .tempdir_in(fusiform_testkit::exec_scratch_base())
         .expect("scratch dir for ckdev links");
-    for name in ["ck-fusiform", "ck-models"] {
-        let built = binary(name);
-        if !built.exists() {
-            eprintln!("skipping {name}: not built in this profile");
-            continue;
-        }
-        checked += 1;
-        let path = ckdev_link(&built, scratch.path());
+    {
+        let name = "ck-models";
+        let built = std::path::Path::new(env!("CARGO_BIN_EXE_ck-models"));
+        let path = ckdev_link(built, scratch.path());
 
         for flag in ["--version", "-V"] {
             let out = bounded_output(
@@ -170,10 +158,4 @@ fn both_binaries_answer_version_with_no_arguments_and_no_daemon() {
             );
         }
     }
-
-    assert!(
-        checked > 0,
-        "no binary was found to check — this test would pass while proving \
-         nothing, which is the shape it exists to prevent elsewhere"
-    );
 }

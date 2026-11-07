@@ -83,7 +83,7 @@ schema can use every argument the route accepts
 
 `ck-fusiform --manifest` prints the manifest as JSON with an empty top-level
 `runtime_computed` array, without connecting to a daemon
-(`manifest_probe::the_daemon_binary_prints_its_registration_manifest_with_no_daemon`).
+(`manifest_probe::the_daemon_binary_answers_manifest_and_version_with_no_daemon`).
 `ck-fusiform --version` (or `-V`) prints the binary version, the build
 revision and the protocol crate version, also without a daemon.
 
