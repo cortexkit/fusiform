@@ -198,6 +198,8 @@
           "model.open_weights": true,
           "model.status": null,
           "provider.name": "DeepSeek",
+          "quality.elo": 1649,
+          "quality.eq": 1812,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -260,6 +262,10 @@
         "review_by_ms": 1796515200000,
         "source_ref": "https://api-docs.deepseek.com/api/create-chat-completion"
       },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
+      },
       "resolved_at_ms": -1,
       "source": "models.dev"
     }
@@ -316,6 +322,8 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "OpenAI",
+          "quality.elo": 1479,
+          "quality.eq": 1555,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -492,6 +500,10 @@
         "kind": "upstream",
         "provider_id": "openai"
       },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
+      },
       "resolved_at_ms": -1,
       "source": "models.dev",
       "wire_corrections": [
@@ -570,6 +582,8 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "xAI",
+          "quality.elo": 660,
+          "quality.eq": 1347,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -656,6 +670,10 @@
         "review_by_ms": 1796515200000,
         "source_ref": "https://docs.x.ai/developers/advanced-api-usage/prompt-caching/usage-and-pricing"
       },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
+      },
       "resolved_at_ms": -1,
       "source": "models.dev",
       "wire_corrections": [
@@ -727,6 +745,8 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "Google",
+          "quality.elo": 1834,
+          "quality.eq": 2133,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -800,6 +820,10 @@
           "wire.family": "google.code_assist"
         }
       },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
+      },
       "resolved_at_ms": -1,
       "source": "models.dev"
     }
@@ -858,6 +882,8 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "Google",
+          "quality.elo": 1586,
+          "quality.eq": 1715,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -930,6 +956,10 @@
           },
           "wire.family": "google.code_assist"
         }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
@@ -1068,8 +1098,14 @@
           "model.family": "muse",
           "model.lineage": "llama",
           "model.name": "Muse Wonder Full",
-          "model.open_weights": false
+          "model.open_weights": false,
+          "quality.elo": 1881,
+          "quality.eq": 1815
         }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
@@ -1661,6 +1697,8 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "Google",
+          "quality.elo": 1586,
+          "quality.eq": 1715,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -1717,6 +1755,10 @@
           },
           "wire.family": "google.code_assist"
         }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
@@ -1849,6 +1891,8 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "Anthropic",
+          "quality.elo": 2315,
+          "quality.eq": 2273,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -1960,6 +2004,10 @@
           }
         }
       },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
+      },
       "resolved_at_ms": -1,
       "source": "models.dev",
       "wire_corrections": [
@@ -2030,6 +2078,8 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "OpenAI",
+          "quality.elo": 1931,
+          "quality.eq": 1660,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -2240,6 +2290,10 @@
             "value": "@ai-sdk/openai"
           }
         }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -2513,6 +2567,8 @@
           "model.lineage": "llama",
           "model.name": "Muse Wonder Full",
           "model.open_weights": false,
+          "quality.elo": 1881,
+          "quality.eq": 1815,
           "wire.family": "openai.responses"
         }
       },
@@ -2522,6 +2578,10 @@
         "provider_id": "meta",
         "review_by_ms": 1797033600000,
         "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with 12 ids including muse-wonder-full-1.0; POST https://api.meta.ai/v1/responses with muse-wonder-full-1.0 at 16:42:45Z returned 200. Protocol: https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L9-L17 credential_persona_route selects OpenAiResponses at https://api.meta.ai/v1 for meta/oauth. https://dev.meta.ai/docs/api-reference states 'Meta Model API is an HTTP API served at https://api.meta.ai/v1 and authenticated with a bearer token' and 'POST /v1/responses and related endpoints ... OpenAI-compatible'; https://dev.meta.ai/docs/protocols/responses says 'Call POST /v1/responses with a model and input.' The docs establish the protocol, not subscription credential eligibility; the pinned client policy and successful probe establish this plane."
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
@@ -2903,6 +2963,8 @@
           "model.open_weights": true,
           "model.status": null,
           "provider.name": "OpenCode Go",
+          "quality.elo": 1311,
+          "quality.eq": 1520,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -2974,6 +3036,10 @@
           }
         }
       },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
+      },
       "resolved_at_ms": -1,
       "source": "models.dev",
       "wire_corrections": [
@@ -3043,6 +3109,8 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "OpenCode Go",
+          "quality.elo": 1621,
+          "quality.eq": 1912,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -3137,6 +3205,10 @@
           }
         }
       },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
+      },
       "resolved_at_ms": -1,
       "source": "models.dev",
       "wire_corrections": [
@@ -3199,6 +3271,8 @@
           "model.open_weights": true,
           "model.status": null,
           "provider.name": "OpenCode Go",
+          "quality.elo": 1703,
+          "quality.eq": 1819,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -3248,6 +3322,10 @@
             "value": "observed-shape"
           }
         }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -3302,6 +3380,8 @@
           "model.open_weights": true,
           "model.status": "deprecated",
           "provider.name": "OpenCode Go",
+          "quality.elo": 884,
+          "quality.eq": 1510,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -3351,6 +3431,10 @@
             "value": "observed-shape"
           }
         }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -3423,6 +3507,8 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "OpenAI",
+          "quality.elo": 1931,
+          "quality.eq": 1660,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -3633,6 +3719,10 @@
             "value": "@ai-sdk/openai"
           }
         }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -4583,6 +4673,8 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "OpenAI",
+          "quality.elo": 1479,
+          "quality.eq": 1555,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -4734,6 +4826,10 @@
         "provider_id": "openai",
         "review_by_ms": 1796515200000,
         "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -5101,6 +5197,8 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "OpenAI",
+          "quality.elo": 1479,
+          "quality.eq": 1555,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -5216,6 +5314,10 @@
         "provider_id": "openai",
         "review_by_ms": 1796515200000,
         "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -5584,6 +5686,8 @@
           "model.open_weights": true,
           "model.status": null,
           "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.elo": 1703,
+          "quality.eq": 1819,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -5691,6 +5795,8 @@
           "model.open_weights": true,
           "model.status": null,
           "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.elo": 1703,
+          "quality.eq": 1819,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -5917,6 +6023,10 @@
         "provider_id": "kimi-code-plan-global",
         "review_by_ms": 1797552000000,
         "source_ref": "https://www.kimi.com/code/docs/en/kimi-code/membership.html"
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
@@ -6278,6 +6388,8 @@
           "model.open_weights": true,
           "model.status": null,
           "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.elo": 1703,
+          "quality.eq": 1819,
           "rate.cache_read": {
             "state": "stated_zero"
           },
@@ -6333,6 +6445,8 @@
           "model.open_weights": true,
           "model.status": null,
           "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.elo": 1703,
+          "quality.eq": 1819,
           "rate.cache_read": {
             "state": "stated_zero"
           },
@@ -6456,6 +6570,10 @@
             "value": "@ai-sdk/openai-compatible"
           }
         }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794262652603,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
