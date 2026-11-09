@@ -852,14 +852,33 @@ mod tests {
             store.append_plan_prices(&store_rows(&rows)).unwrap(),
             rows.len()
         );
-        // Change the quota value, its observation time and review date, without
-        // changing the price claim that append_plan_prices compares.
-        doc["cells"][0]["quota_value"]["low"]["units"] = 580.into();
-        doc["cells"][0]["quota_value"]["as_of_ms"] = 1791590400000i64.into();
-        doc["cells"][0]["quota_value"]["review_by_ms"] = 1794268800000i64.into();
+        // Change a measured quota value, its observation time and review date,
+        // without changing the price claim that append_plan_prices compares.
+        // The cell is found by state, not position, so re-curating which rows
+        // are measured does not break this test.
+        let i = doc["cells"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|cell| cell["quota_value"]["state"] == "measured")
+            .expect("the shipped file has a measured quota value");
+        let quota = &mut doc["cells"][i]["quota_value"];
+        let as_of = quota["as_of_ms"].as_i64().unwrap();
+        quota["low"]["units"] = (quota["low"]["units"].as_i64().unwrap() + 1).into();
+        quota["as_of_ms"] = (as_of + 86_400_000).into();
+        quota["review_by_ms"] = (as_of + 31 * 86_400_000).into();
         let (changed, rejects) = load_reporting_rejects(&doc.to_string());
-        assert!(rejects.is_empty());
-        assert_ne!(rows[0].quota_value, changed[0].quota_value);
+        assert!(rejects.is_empty(), "{rejects:?}");
+        let quotas = |rows: &[PlanPrice]| {
+            rows.iter()
+                .map(|r| r.quota_value.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_ne!(
+            quotas(&rows),
+            quotas(&changed),
+            "the edit must change a loaded quota value"
+        );
         assert_eq!(store.append_plan_prices(&store_rows(&changed)).unwrap(), 0);
         let conn = rusqlite::Connection::open(path).unwrap();
         let count: i64 = conn

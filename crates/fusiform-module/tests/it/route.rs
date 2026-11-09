@@ -2657,42 +2657,31 @@ fn plan_prices_joins_quota_values_and_omits_them_for_tombstones() {
         high,
         source_ref,
         ..
-    }) = &find("anthropic", "max_20x").quota_value
+    }) = &find("openai", "pro_200").quota_value
     else {
         panic!("the compiled measurement must reach the route");
     };
     assert_eq!(
         *low,
         QuotaDecimal {
-            units: 574,
+            units: 215,
             exponent: 1
         }
     );
     assert_eq!(
         *high,
         QuotaDecimal {
-            units: 608,
+            units: 220,
             exponent: 1
         }
     );
     assert_eq!(
         source_ref,
-        "astrocyte multiplier_observation, read 2026-10-09"
+        "astrocyte daily multiplier rows marked routing_eligible, read 2026-11-09"
     );
-    assert!(matches!(
-        find("openai", "pro_200").quota_value,
-        Some(QuotaValueWire::Measured {
-            low: QuotaDecimal {
-                units: 228,
-                exponent: 1
-            },
-            high: QuotaDecimal {
-                units: 409,
-                exponent: 1
-            },
-            ..
-        })
-    ));
+    assert!(
+        matches!(&find("anthropic", "max_20x").quota_value, Some(QuotaValueWire::NotEstablished { refusal_reason, .. }) if refusal_reason.contains("withdrawn"))
+    );
     assert!(
         matches!(&find("anthropic", "max_5x").quota_value, Some(QuotaValueWire::NotEstablished { refusal_reason, .. }) if refusal_reason.contains("No Max 5x account"))
     );
@@ -2707,7 +2696,7 @@ fn plan_prices_joins_quota_values_and_omits_them_for_tombstones() {
     // by subscription dollars, so serving a retired price must omit its value.
     let remaining: Vec<_> = curated
         .into_iter()
-        .filter(|r| !(r.provider_id == "anthropic" && r.tier == "max_20x"))
+        .filter(|r| !(r.provider_id == "openai" && r.tier == "pro_200"))
         .collect();
     assert_eq!(f.store.append_plan_prices(&remaining).unwrap(), 1);
     let ToolResponse::PlanPrices(response) =
@@ -2718,7 +2707,7 @@ fn plan_prices_joins_quota_values_and_omits_them_for_tombstones() {
     let retired = response
         .prices
         .iter()
-        .find(|r| r.provider_id == "anthropic" && r.tier == "max_20x")
+        .find(|r| r.provider_id == "openai" && r.tier == "pro_200")
         .unwrap();
     assert!(retired.price.is_none());
     assert!(retired
