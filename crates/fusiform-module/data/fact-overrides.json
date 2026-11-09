@@ -45,6 +45,20 @@
     },
     {
       "provider_id": "anthropic",
+      "model_id": "claude-fable-5-2",
+      "fact_key": "capability.server_side_fallback",
+      "value": true,
+      "replaces": null,
+      "reason": "models.dev publishes no server-side fallback field. Anthropic's page for Claude Fable 5.2 states that everything in Refusals and fallback applies to it and names its permitted fallback targets, and the general page excludes only Haiku 5.5.",
+      "source_ref": "https://platform.claude.com/docs/en/models/fable-5-2/whats-new-fable-5-2 (accessed 2026-11-09); https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-11-09)",
+      "quote": "\"Claude Fable 5.2 runs safety classifiers, and everything in Refusals and fallback applies.\" \"Server-side fallback is in beta on the Claude API and Claude Models on Google Cloud (Anthropic managed). With it, `fallbacks: \"default\"` retries a declined request on the model Anthropic recommends for that category. For categories with no recommended fallback, such as `reasoning_extraction`, the refusal stands. The permitted fallback targets for Claude Fable 5.2 are Claude Opus 4.8 and Claude Opus 5.\" \"Set the `fallbacks` parameter to the string `\"default\"` and send the `server-side-fallback-2026-07-01` beta header.\" \"Claude Haiku 5.5 has no server-side fallback: with `fallbacks: \"default\"`, a declined request stays declined, and a list of fallback models returns a 400 error.\"",
+      "notes": "Unlike the earlier rows, the model's own page names it directly. The pages show the dateless id claude-fable-5-2 as both the API id and the alias. Server-side fallback is in beta on the Claude API and on Claude Models on Google Cloud (Anthropic managed), so the fact is not projected onto alias routes that reach the model another way.",
+      "established_by": "fusiform",
+      "established_at_ms": 1794182400000,
+      "review_by_ms": 1799366400000
+    },
+    {
+      "provider_id": "anthropic",
       "model_id": "claude-opus-5",
       "fact_key": "capability.server_side_fallback",
       "value": true,
@@ -84,6 +98,20 @@
       "established_by": "fusiform",
       "established_at_ms": 1792972800000,
       "review_by_ms": 1798156800000
+    },
+    {
+      "provider_id": "anthropic",
+      "model_id": "claude-fable-5-2",
+      "fact_key": "capability.mid_conversation_system",
+      "value": true,
+      "replaces": null,
+      "reason": "models.dev publishes no mid-conversation system message field. Anthropic's supported-models list for persistent system messages inside messages names Claude Fable 5.2, and no beta header is needed for the persistent form.",
+      "source_ref": "https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages (accessed 2026-11-09)",
+      "quote": "Supported models on the Messages API: \"Claude Fable 5.2, Claude Mythos 5.2, Claude Fable 5.1, Claude Mythos 5.1, Claude Fable 5, Claude Mythos 5, Claude Mythos Preview, Claude Opus 5.5, Claude Opus 5, Claude Sonnet 5.5, Claude Haiku 5.5, Claude Opus 4.8\". The beta header mid-conversation-system-clear-at-2026-08-21 is required only for turn-scoped messages using clear_at: \"next_user_message\".",
+      "notes": "Covers only persistent role: \"system\" messages inside messages, not the beta turn-scoped clear_at variant. Applies only to this anthropic row when it exists, never to resellers, Bedrock, Vertex or Code Assist aliases. Anthropic's Fable 5.2 page warns that changing the system prompt before a kept thinking block invalidates that block, so a reader should add system messages rather than edit the top-level system prompt.",
+      "established_by": "fusiform",
+      "established_at_ms": 1794182400000,
+      "review_by_ms": 1799366400000
     },
     {
       "provider_id": "anthropic",

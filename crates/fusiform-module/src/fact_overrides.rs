@@ -438,7 +438,7 @@ mod tests {
     fn shipped_overrides_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 17);
+        assert_eq!(rows.len(), 19);
         let row = argon();
         assert_eq!(row.value, json!(65_536));
         assert_eq!(row.replaces, json!(32_768));
@@ -457,6 +457,7 @@ mod tests {
         for model in [
             "claude-fable-5",
             "claude-fable-5-1",
+            "claude-fable-5-2",
             "claude-opus-5",
             "claude-opus-5-5",
         ] {
@@ -494,6 +495,7 @@ mod tests {
     #[test]
     fn mid_conversation_system_rows_match_the_documented_models() {
         let expected = BTreeMap::from([
+            ("claude-fable-5-2", true),
             ("claude-fable-5-1", true),
             ("claude-fable-5", true),
             ("claude-opus-5-5", true),

@@ -332,23 +332,23 @@ fn lineage_seed_parity_with_dated_routing_globs_has_only_explicit_differences() 
         }
     }
     assert!(allowed.is_empty(), "stale routing differences: {allowed:?}");
-    assert_eq!(newly_classified, 1458);
+    assert_eq!(newly_classified, 1475);
     assert_eq!(disagreements, 129);
     assert_eq!(
         coverage,
         BTreeMap::from([
-            ("claude".into(), 850),
-            ("deepseek".into(), 643),
-            ("gemini".into(), 801),
-            ("glm".into(), 755),
-            ("gpt".into(), 1558),
-            ("grok".into(), 275),
-            ("kimi".into(), 406),
-            ("llama".into(), 313),
-            ("minimax".into(), 299),
-            ("mistral".into(), 324),
-            ("qwen".into(), 1087),
-            ("other".into(), 1625),
+            ("claude".into(), 853),
+            ("deepseek".into(), 659),
+            ("gemini".into(), 802),
+            ("glm".into(), 762),
+            ("gpt".into(), 1544),
+            ("grok".into(), 273),
+            ("kimi".into(), 420),
+            ("llama".into(), 312),
+            ("minimax".into(), 289),
+            ("mistral".into(), 344),
+            ("qwen".into(), 1073),
+            ("other".into(), 1614),
         ])
     );
     println!("seed lineage coverage: {coverage:?}; newly classified={newly_classified}; disagreements={disagreements}");

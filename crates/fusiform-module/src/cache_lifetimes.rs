@@ -230,7 +230,7 @@ mod tests {
     fn cache_lifetime_shipped_rules_are_valid_reviewed_and_in_seed() {
         let (rules, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rules.len(), 33);
+        assert_eq!(rules.len(), 34);
         let seed = serde_json::from_str(include_str!("../data/models-dev-seed.json")).unwrap();
         assert!(missing_seed_rows(&rules, &seed).is_empty());
         let now = std::time::SystemTime::now()
