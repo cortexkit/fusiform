@@ -103,4 +103,13 @@ echo "→ wrote $meta"
 echo
 echo "Review the diff before committing. A seed refresh changes what a fresh"
 echo "install believes before its first poll."
+echo
+echo "Then regenerate the golden fixture and lineage audit on the Linux runner:"
+echo "  UPDATE_GOLDEN=1 cargo test --locked -p fusiform-module --test it golden_payload::"
+echo "  UPDATE_LINEAGE_AUDIT=1 cargo test --locked -p fusiform-module --lib lineage_seed_parity_with_dated_routing_globs_has_only_explicit_differences"
+echo "Return each regenerated file with its runner call's return_paths:"
+echo '  ["crates/fusiform-module/fixtures/served-payloads.json"]'
+echo '  ["crates/fusiform-module/src/route/model_lineage_routing_differences.json"]'
+echo "Review both diffs. New lineage disagreements need a hand-written reason;"
+echo "update mode only adds newly classified rows and drops seed-absent rows."
 finished=1

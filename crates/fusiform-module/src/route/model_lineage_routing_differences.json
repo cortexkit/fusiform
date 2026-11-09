@@ -1,4 +1,5 @@
-[
+{
+  "groups": [
   {
     "reason": "The globs missed reseller, nested, case-varied or related-family ids; the exact upstream family establishes the routing lineage.",
     "rows": {
@@ -1628,4 +1629,23 @@
       "zenmux/deepseek/deepseek-v3.2-exp": ["deepseek", "other"]
     }
   }
-]
+  ],
+  "counts": {
+    "coverage": {
+      "claude": 853,
+      "deepseek": 659,
+      "gemini": 802,
+      "glm": 762,
+      "gpt": 1544,
+      "grok": 273,
+      "kimi": 420,
+      "llama": 312,
+      "minimax": 289,
+      "mistral": 344,
+      "other": 1614,
+      "qwen": 1073
+    },
+    "newly_classified": 1475,
+    "disagreements": 129
+  }
+}

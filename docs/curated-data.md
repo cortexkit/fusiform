@@ -478,6 +478,28 @@ the snapshot is older than 14 days (`seed.rs`: `the_embedded_seed_is_not_stale`)
 Refresh it with `scripts/refresh-seed.sh`. The seed is models.dev's data under
 its MIT license; see `THIRD-PARTY-NOTICES.md`.
 
+After each seed refresh, regenerate the golden fixture and lineage parity audit
+on the remote Linux runner (`runon: "linux,2c"`):
+
+```sh
+UPDATE_GOLDEN=1 cargo test --locked -p fusiform-module --test it golden_payload::
+UPDATE_LINEAGE_AUDIT=1 cargo test --locked -p fusiform-module --lib lineage_seed_parity_with_dated_routing_globs_has_only_explicit_differences
+```
+
+Set `return_paths: ["crates/fusiform-module/fixtures/served-payloads.json"]`
+on the golden runner call and
+`return_paths: ["crates/fusiform-module/src/route/model_lineage_routing_differences.json"]`
+on the lineage runner call. The runner must return these regenerated files to
+the local worktree; otherwise their writes are not retained. Review both diffs
+alongside the seed and metadata before committing.
+
+The lineage audit updates coverage counts, removes allowed rows no longer in
+the seed, and adds newly classified rows where the retired routing globs said
+`other`. A new disagreement with a non-`other` routing lineage still fails in
+update mode, naming every unreviewed row. Each needs a hand-written reason group
+in `model_lineage_routing_differences.json`; update mode never invents a reason.
+Rows still in the seed whose reviewed transition changes also need review.
+
 ## 7. When a review gate fires
 
 Plan prices, quota values, service tiers, billing planes and rules, aliases, canonical links, wire corrections, fact overrides,
@@ -498,7 +520,8 @@ To clear one:
 4. Commit the file. Confirming a claim unchanged is a real result; the diff is
    the provenance change alone.
 
-To refresh the seed, run `scripts/refresh-seed.sh` and commit both seed files.
+To refresh the seed, follow §6, including regeneration and diff review, and
+commit both seed files with any regenerated fixture and audit changes.
 
 Extending a date without reading the source is possible, as with any gate; the
 commit then records who made that decision.

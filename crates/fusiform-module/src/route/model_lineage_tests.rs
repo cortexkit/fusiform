@@ -254,26 +254,399 @@ fn matches_reference_glob(value: &str, pattern: &str) -> bool {
     unreachable!()
 }
 
-#[test]
-fn lineage_seed_parity_with_dated_routing_globs_has_only_explicit_differences() {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct DifferenceGroup {
-        reason: String,
-        rows: BTreeMap<String, [String; 2]>,
-    }
-    let groups: Vec<DifferenceGroup> =
-        serde_json::from_str(include_str!("model_lineage_routing_differences.json")).unwrap();
-    let mut allowed = BTreeMap::new();
-    for group in groups {
-        assert!(!group.reason.trim().is_empty());
-        for (key, transition) in group.rows {
-            assert!(
-                allowed.insert(key, transition).is_none(),
-                "duplicate allowlist row"
-            );
+type DifferenceRows = Vec<(String, [String; 2])>;
+
+fn deserialize_difference_rows<'de, D>(deserializer: D) -> Result<DifferenceRows, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct Rows;
+    impl<'de> serde::de::Visitor<'de> for Rows {
+        type Value = DifferenceRows;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("an object mapping seed identities to lineage transitions")
+        }
+
+        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            let mut rows = Vec::new();
+            while let Some(row) = map.next_entry()? {
+                rows.push(row);
+            }
+            Ok(rows)
         }
     }
+    // Map order is part of the audit's readable diff: existing reviewed rows
+    // stay in place, and new classifications are appended in sorted order.
+    deserializer.deserialize_map(Rows)
+}
+
+fn serialize_difference_rows<S>(rows: &DifferenceRows, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::ser::SerializeMap;
+
+    let mut map = serializer.serialize_map(Some(rows.len()))?;
+    for (key, transition) in rows {
+        map.serialize_entry(key, transition)?;
+    }
+    map.end()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct DifferenceGroup {
+    reason: String,
+    #[serde(
+        deserialize_with = "deserialize_difference_rows",
+        serialize_with = "serialize_difference_rows"
+    )]
+    rows: DifferenceRows,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct LineageCounts {
+    coverage: BTreeMap<String, usize>,
+    newly_classified: usize,
+    disagreements: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct LineageAudit {
+    groups: Vec<DifferenceGroup>,
+    counts: LineageCounts,
+}
+
+const NEWLY_CLASSIFIED_REASON: &str =
+    "The globs missed reseller, nested, case-varied or related-family ids";
+
+fn compare_lineage_seed(
+    seed: &Value,
+    audit: &LineageAudit,
+    response: &CatalogGetResponse,
+    update: bool,
+) -> Result<LineageAudit, String> {
+    let mut allowed = BTreeMap::new();
+    for group in &audit.groups {
+        if group.reason.trim().is_empty() {
+            return Err("routing difference group needs a reason".into());
+        }
+        for (key, transition) in &group.rows {
+            if allowed.insert(key.clone(), transition.clone()).is_some() {
+                return Err(format!("duplicate allowlist row: {key}"));
+            }
+        }
+    }
+    let mut counts = LineageCounts::default();
+    let mut errors = Vec::new();
+    let mut seed_keys = BTreeSet::new();
+    let mut additions = BTreeMap::new();
+    let mut updated = audit.clone();
+    for (provider, data) in seed.as_object().unwrap() {
+        for model in data["models"].as_object().unwrap().keys() {
+            let key = format!("{provider}/{model}");
+            seed_keys.insert(key.clone());
+            let expected = ROUTING_GLOBS_2026_10_29
+                .iter()
+                .find(|(_, globs)| globs.iter().any(|glob| matches_reference_glob(&key, glob)))
+                .unwrap()
+                .0;
+            let Some(facts) = response.models.get(&key) else {
+                errors.push(format!("missing seed row: {key}"));
+                continue;
+            };
+            let actual = facts
+                .get("model.lineage")
+                .map(|value| value.as_str().unwrap());
+            if actual == Some("other") {
+                errors.push(format!("{key}: other must be absence"));
+            }
+            let actual = actual.unwrap_or("other");
+            *counts.coverage.entry(actual.into()).or_default() += 1;
+            if expected != actual {
+                let transition = [expected.into(), actual.into()];
+                match allowed.remove(&key) {
+                    Some(reviewed) if reviewed == transition => {}
+                    None if update && expected == "other" => {
+                        additions.insert(key, transition);
+                    }
+                    _ => errors.push(format!(
+                        "unreviewed lineage difference: {key}: {transition:?}; add a hand-written reason group"
+                    )),
+                }
+                if expected == "other" {
+                    counts.newly_classified += 1;
+                } else {
+                    counts.disagreements += 1;
+                }
+            }
+        }
+    }
+    for (key, transition) in allowed {
+        // A seed refresh can remove a row, but a changed transition on a row
+        // still present in the seed must not silently lose its reviewed reason.
+        if update && !seed_keys.contains(&key) {
+            for group in &mut updated.groups {
+                group.rows.retain(|(row, _)| row != &key);
+            }
+        } else {
+            errors.push(format!("stale routing difference: {key}: {transition:?}"));
+        }
+    }
+    if update {
+        updated.counts = counts;
+        if !additions.is_empty() {
+            if let Some(group) = updated
+                .groups
+                .iter_mut()
+                .find(|group| group.reason.starts_with(NEWLY_CLASSIFIED_REASON))
+            {
+                group.rows.extend(additions);
+            } else {
+                errors.push(format!(
+                    "missing newly-classified reason group for rows: {additions:?}"
+                ));
+            }
+        }
+    } else {
+        for lineage in counts
+            .coverage
+            .keys()
+            .chain(audit.counts.coverage.keys())
+            .collect::<BTreeSet<_>>()
+        {
+            let expected = audit.counts.coverage.get(lineage);
+            let actual = counts.coverage.get(lineage);
+            if expected != actual {
+                errors.push(format!("lineage coverage mismatch: {lineage}: expected {expected:?}, actual {actual:?}"));
+            }
+        }
+        if counts.newly_classified != audit.counts.newly_classified {
+            errors.push(format!(
+                "newly_classified count mismatch: expected {}, actual {}",
+                audit.counts.newly_classified, counts.newly_classified
+            ));
+        }
+        if counts.disagreements != audit.counts.disagreements {
+            errors.push(format!(
+                "disagreements count mismatch: expected {}, actual {}",
+                audit.counts.disagreements, counts.disagreements
+            ));
+        }
+    }
+    if errors.is_empty() {
+        Ok(updated)
+    } else {
+        Err(errors.join("\n"))
+    }
+}
+
+fn render_lineage_audit(audit: &LineageAudit) -> String {
+    use std::fmt::Write;
+
+    // Preserve the fixture's group indentation and compact transitions so a
+    // refresh changes only the affected rows and counts, not every array.
+    let mut rendered = String::from("{\n  \"groups\": [\n");
+    for (index, group) in audit.groups.iter().enumerate() {
+        if index > 0 {
+            rendered.push_str(",\n");
+        }
+        writeln!(
+            rendered,
+            "  {{\n    \"reason\": {},\n    \"rows\": {{",
+            serde_json::to_string(&group.reason).unwrap()
+        )
+        .unwrap();
+        for (index, (key, [before, after])) in group.rows.iter().enumerate() {
+            if index > 0 {
+                rendered.push_str(",\n");
+            }
+            write!(
+                rendered,
+                "      {}: [{}, {}]",
+                serde_json::to_string(key).unwrap(),
+                serde_json::to_string(before).unwrap(),
+                serde_json::to_string(after).unwrap()
+            )
+            .unwrap();
+        }
+        rendered.push_str("\n    }\n  }");
+    }
+    rendered.push_str("\n  ],\n  \"counts\": ");
+    rendered.push_str(
+        &serde_json::to_string_pretty(&audit.counts)
+            .unwrap()
+            .replace('\n', "\n  "),
+    );
+    rendered.push_str("\n}\n");
+    rendered
+}
+
+fn planted_lineage_audit() -> (Value, LineageAudit, CatalogGetResponse) {
+    let seed = json!({"reseller": {"models": {"new": {}}}});
+    let audit = LineageAudit {
+        groups: vec![DifferenceGroup {
+            reason: format!("{NEWLY_CLASSIFIED_REASON}; the upstream family establishes lineage."),
+            rows: vec![("reseller/gone".into(), ["other".into(), "gpt".into()])],
+        }],
+        counts: LineageCounts {
+            coverage: BTreeMap::from([("gpt".into(), 1)]),
+            newly_classified: 1,
+            disagreements: 0,
+        },
+    };
+    let (store, _dir) = empty_store();
+    let mut response = get(&store, json!({}));
+    response.models.insert(
+        "reseller/new".into(),
+        BTreeMap::from([("model.lineage".into(), json!("qwen"))]),
+    );
+    (seed, audit, response)
+}
+
+#[test]
+fn lineage_audit_update_adds_newly_classified_and_drops_seed_absent_rows() {
+    let (seed, audit, response) = planted_lineage_audit();
+    let updated = compare_lineage_seed(&seed, &audit, &response, true).unwrap();
+    assert_eq!(updated.groups[0].reason, audit.groups[0].reason);
+    assert_eq!(
+        updated.groups[0].rows,
+        vec![("reseller/new".into(), ["other".into(), "qwen".into()])]
+    );
+    assert_eq!(
+        updated.counts.coverage,
+        BTreeMap::from([("qwen".into(), 1)])
+    );
+    assert_eq!(updated.counts.newly_classified, 1);
+    assert_eq!(updated.counts.disagreements, 0);
+    let rendered = render_lineage_audit(&updated);
+    assert!(rendered.contains("\"reseller/new\": [\"other\", \"qwen\"]"));
+    let reparsed = serde_json::from_str(&rendered).unwrap();
+    assert_eq!(
+        compare_lineage_seed(&seed, &reparsed, &response, false).unwrap(),
+        updated
+    );
+    let again = compare_lineage_seed(&seed, &reparsed, &response, true).unwrap();
+    assert_eq!(render_lineage_audit(&again), rendered);
+}
+
+#[test]
+fn lineage_audit_update_rejects_every_unreviewed_disagreement_by_name() {
+    let (_, mut audit, mut response) = planted_lineage_audit();
+    audit.groups[0].rows.clear();
+    let seed = json!({"openai": {"models": {"new": {}}}, "anthropic": {"models": {"new": {}}}});
+    for key in ["openai/new", "anthropic/new"] {
+        response.models.insert(
+            key.into(),
+            BTreeMap::from([("model.lineage".into(), json!("kimi"))]),
+        );
+    }
+    let error = compare_lineage_seed(&seed, &audit, &response, true).unwrap_err();
+    assert!(
+        error.contains("unreviewed lineage difference: openai/new"),
+        "{error}"
+    );
+    assert!(
+        error.contains("unreviewed lineage difference: anthropic/new"),
+        "{error}"
+    );
+}
+
+#[test]
+fn lineage_audit_strict_names_unlisted_stale_and_count_mismatches() {
+    let (seed, mut audit, response) = planted_lineage_audit();
+    audit.counts.newly_classified = 99;
+    audit.counts.disagreements = 99;
+    let error = compare_lineage_seed(&seed, &audit, &response, false).unwrap_err();
+    for expected in [
+        "unreviewed lineage difference: reseller/new",
+        "stale routing difference: reseller/gone",
+        "lineage coverage mismatch: qwen",
+        "lineage coverage mismatch: gpt",
+        "newly_classified count mismatch",
+        "disagreements count mismatch",
+    ] {
+        assert!(error.contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn lineage_audit_update_preserves_reviewed_disagreements_and_rejects_changed_rows() {
+    let (_, mut audit, mut response) = planted_lineage_audit();
+    let seed = json!({"openai": {"models": {"reviewed": {}}}});
+    audit.groups.push(DifferenceGroup {
+        reason: "The upstream family, rather than the provider, establishes lineage.".into(),
+        rows: vec![("openai/reviewed".into(), ["gpt".into(), "kimi".into()])],
+    });
+    response.models.insert(
+        "openai/reviewed".into(),
+        BTreeMap::from([("model.lineage".into(), json!("kimi"))]),
+    );
+    let updated = compare_lineage_seed(&seed, &audit, &response, true).unwrap();
+    assert_eq!(updated.groups[1], audit.groups[1]);
+    assert_eq!(updated.counts.disagreements, 1);
+    compare_lineage_seed(&seed, &updated, &response, false).unwrap();
+
+    response
+        .models
+        .get_mut("openai/reviewed")
+        .unwrap()
+        .insert("model.lineage".into(), json!("qwen"));
+    let error = compare_lineage_seed(&seed, &updated, &response, true).unwrap_err();
+    assert!(
+        error.contains("unreviewed lineage difference: openai/reviewed"),
+        "{error}"
+    );
+    response
+        .models
+        .get_mut("openai/reviewed")
+        .unwrap()
+        .insert("model.lineage".into(), json!("gpt"));
+    let error = compare_lineage_seed(&seed, &updated, &response, true).unwrap_err();
+    assert!(
+        error.contains("stale routing difference: openai/reviewed"),
+        "{error}"
+    );
+}
+
+#[test]
+fn lineage_audit_update_requires_existing_reason_and_keeps_schema_closed() {
+    let (seed, mut audit, response) = planted_lineage_audit();
+    audit.groups.clear();
+    let error = compare_lineage_seed(&seed, &audit, &response, true).unwrap_err();
+    assert!(
+        error.contains("missing newly-classified reason group"),
+        "{error}"
+    );
+    assert!(error.contains("reseller/new"), "{error}");
+    for path in [vec![], vec!["counts"], vec!["groups", "0"]] {
+        let mut document = serde_json::to_value(planted_lineage_audit().1).unwrap();
+        let mut object = &mut document;
+        for key in path {
+            object = if key == "0" {
+                &mut object[0]
+            } else {
+                &mut object[key]
+            };
+        }
+        object
+            .as_object_mut()
+            .unwrap()
+            .insert("unexpected".into(), json!(true));
+        assert!(serde_json::from_value::<LineageAudit>(document).is_err());
+    }
+}
+
+#[test]
+fn lineage_seed_parity_with_dated_routing_globs_has_only_explicit_differences() {
+    let audit: LineageAudit =
+        serde_json::from_str(include_str!("model_lineage_routing_differences.json")).unwrap();
     // These checks pin the glob interpreter's slash, case and prefix behavior,
     // independently of the curated map and the expected difference fixture.
     assert!(matches_reference_glob(
@@ -296,60 +669,27 @@ fn lineage_seed_parity_with_dated_routing_globs_has_only_explicit_differences() 
     crate::seed::seed_if_empty(&store).unwrap();
     // The parity audit needs every seed row, not a frame-limited first page.
     let response = serve_catalog_get_with_limits(&store, b"{}", usize::MAX, usize::MAX).unwrap();
-    let mut coverage: BTreeMap<String, usize> = BTreeMap::new();
-    let mut newly_classified = 0;
-    let mut disagreements = 0;
-    for (provider, data) in seed.as_object().unwrap() {
-        for model in data["models"].as_object().unwrap().keys() {
-            let key = format!("{provider}/{model}");
-            let expected = ROUTING_GLOBS_2026_10_29
-                .iter()
-                .find(|(_, globs)| globs.iter().any(|glob| matches_reference_glob(&key, glob)))
-                .unwrap()
-                .0;
-            let facts = response
-                .models
-                .get(&key)
-                .unwrap_or_else(|| panic!("missing seed row: {key}"));
-            let actual = facts
-                .get("model.lineage")
-                .map(|value| value.as_str().unwrap());
-            assert_ne!(actual, Some("other"), "{key}: other must be absence");
-            let actual = actual.unwrap_or("other");
-            *coverage.entry(actual.into()).or_default() += 1;
-            if expected != actual {
-                assert_eq!(
-                    allowed.remove(&key),
-                    Some([expected.into(), actual.into()]),
-                    "unreviewed lineage difference: {key}"
-                );
-                if expected == "other" {
-                    newly_classified += 1;
-                } else {
-                    disagreements += 1;
-                }
-            }
+    let update = std::env::var("UPDATE_LINEAGE_AUDIT").is_ok_and(|value| value == "1");
+    let checked = compare_lineage_seed(&seed, &audit, &response, update).unwrap();
+    let rendered = render_lineage_audit(&checked);
+    if update {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/route/model_lineage_routing_differences.json"
+        );
+        std::fs::write(path, rendered).unwrap();
+        eprintln!("lineage audit regenerated at {path} — review the diff");
+    } else {
+        let fixture = include_str!("model_lineage_routing_differences.json");
+        if rendered != fixture {
+            let difference = rendered
+                .lines()
+                .zip(fixture.lines())
+                .enumerate()
+                .find(|(_, (actual, expected))| actual != expected)
+                .map(|(index, lines)| (index + 1, lines));
+            panic!("lineage audit formatting must be stable: first differing line {difference:?}; rendered lines={}, fixture lines={}", rendered.lines().count(), fixture.lines().count());
         }
     }
-    assert!(allowed.is_empty(), "stale routing differences: {allowed:?}");
-    assert_eq!(newly_classified, 1475);
-    assert_eq!(disagreements, 129);
-    assert_eq!(
-        coverage,
-        BTreeMap::from([
-            ("claude".into(), 853),
-            ("deepseek".into(), 659),
-            ("gemini".into(), 802),
-            ("glm".into(), 762),
-            ("gpt".into(), 1544),
-            ("grok".into(), 273),
-            ("kimi".into(), 420),
-            ("llama".into(), 312),
-            ("minimax".into(), 289),
-            ("mistral".into(), 344),
-            ("qwen".into(), 1073),
-            ("other".into(), 1614),
-        ])
-    );
-    println!("seed lineage coverage: {coverage:?}; newly classified={newly_classified}; disagreements={disagreements}");
+    println!("seed lineage counts: {:?}", checked.counts);
 }
