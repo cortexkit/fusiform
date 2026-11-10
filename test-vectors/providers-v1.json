@@ -467,7 +467,7 @@
     },
     {
       "id": "brave",
-      "name": "Brave Search API",
+      "name": "Brave Search",
       "doc": "https://api-dashboard.search.brave.com/documentation",
       "source": "hand_kept",
       "kind": "web_search",
@@ -820,7 +820,7 @@
     },
     {
       "id": "exa",
-      "name": "Exa Search API",
+      "name": "Exa",
       "doc": "https://exa.ai/docs/search/quickstart",
       "source": "hand_kept",
       "kind": "web_search",
@@ -2010,8 +2010,8 @@
     },
     {
       "id": "parallel",
-      "name": "Parallel Search API",
-      "doc": "https://docs.parallel.ai/search/search-quickstart.md",
+      "name": "Parallel",
+      "doc": "https://docs.parallel.ai/search/search-quickstart",
       "source": "hand_kept",
       "kind": "web_search",
       "env": [],
@@ -2531,7 +2531,7 @@
     },
     {
       "id": "tavily",
-      "name": "Tavily Search",
+      "name": "Tavily",
       "doc": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
       "source": "hand_kept",
       "kind": "web_search",
@@ -2637,7 +2637,7 @@
     },
     {
       "id": "tinyfish",
-      "name": "TinyFish Web Agent",
+      "name": "TinyFish",
       "doc": "https://docs.tinyfish.ai/",
       "source": "hand_kept",
       "kind": "web_search",

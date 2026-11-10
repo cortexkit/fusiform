@@ -4,7 +4,7 @@
   "providers": [
     {
       "id": "brave",
-      "name": "Brave Search API",
+      "name": "Brave Search",
       "doc": "https://api-dashboard.search.brave.com/documentation",
       "source_ref": "https://api-dashboard.search.brave.com/documentation",
       "kind": "web_search",
@@ -21,7 +21,7 @@
     },
     {
       "id": "exa",
-      "name": "Exa Search API",
+      "name": "Exa",
       "doc": "https://exa.ai/docs/search/quickstart",
       "source_ref": "https://exa.ai/docs/search/quickstart",
       "kind": "web_search",
@@ -73,8 +73,8 @@
     },
     {
       "id": "parallel",
-      "name": "Parallel Search API",
-      "doc": "https://docs.parallel.ai/search/search-quickstart.md",
+      "name": "Parallel",
+      "doc": "https://docs.parallel.ai/search/search-quickstart",
       "source_ref": "https://docs.parallel.ai/search/search-quickstart.md",
       "kind": "web_search",
       "established_at_ms": 1794268800000,
@@ -123,7 +123,7 @@
     },
     {
       "id": "tavily",
-      "name": "Tavily Search",
+      "name": "Tavily",
       "doc": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
       "source_ref": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
       "kind": "web_search",
@@ -132,7 +132,7 @@
     },
     {
       "id": "tinyfish",
-      "name": "TinyFish Web Agent",
+      "name": "TinyFish",
       "doc": "https://docs.tinyfish.ai/",
       "source_ref": "https://docs.tinyfish.ai/faq",
       "kind": "web_search",
