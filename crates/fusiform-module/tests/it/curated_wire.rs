@@ -43,6 +43,7 @@ fn store_with_anthropic_api(api: Option<&str>) -> (CatalogStore, tempfile::TempD
         ("openai", vec!["gpt-6.1-sol"]),
         ("anthropic", vec!["claude-opus-5-5", "claude-sonnet-5-5"]),
         ("xai", vec!["grok-4.7"]),
+        ("cerebras", vec!["qwen-3.8-27b"]),
     ] {
         upstream[provider] = seed[provider].clone();
         upstream[provider]["models"] = json!({});
@@ -133,6 +134,10 @@ fn provider_api_defaults_fill_only_missing_current_endpoints() {
             "https://generativelanguage.googleapis.com/v1beta",
         ),
         ("xai", "grok-4.7", "https://api.x.ai/v1"),
+        // models.dev names only the SDK package for Cerebras and leaves the
+        // endpoint to that SDK's default, so without this row a runner that
+        // opens rows through wire.api cannot open Cerebras at all.
+        ("cerebras", "qwen-3.8-27b", "https://api.cerebras.ai/v1"),
     ] {
         let identity = format!("{provider}/{id}");
         for arguments in [

@@ -66,6 +66,22 @@
       "review_by_ms": 1797897600000
     },
     {
+      "provider": "cerebras",
+      "model": "*",
+      "field": "wire.api",
+      "value": "https://api.cerebras.ai/v1",
+      "withheld": false,
+      "source_ref": {
+        "repo": "https://inference-docs.cerebras.ai",
+        "commit": "accessed 2026-11-11",
+        "file": "https://inference-docs.cerebras.ai/resources/openai.md"
+      },
+      "quote": "| Base URL | `https://api.cerebras.ai/v1` |",
+      "established_by": "fusiform",
+      "established_at_ms": 1794355200000,
+      "review_by_ms": 1799539200000
+    },
+    {
       "provider": "opencode-go",
       "model": "beam-free",
       "field": "wire.api",
