@@ -711,8 +711,9 @@ reads: `limit.images_per_request`,
 "no limit" statement therefore produces no fact. These values are never stored
 or replayed on `at_ms` reads.
 
-`limit.documents_per_request` is an agreed name, not yet served by any provider
-and not registered in `SERVED_FACTS`. It can join the served vocabulary when a
+`limit.documents_per_request` is the name reserved for a per-request document
+count, which apps reading these limits already expect. No provider's docs state
+one yet, so it is not served and not registered in `SERVED_FACTS`. It can join the served vocabulary when a
 vendor states a document count and a real served value can be pinned in the
 golden fixture.
 
