@@ -62,6 +62,26 @@ HEAD_REV="$(git rev-parse HEAD)"
 STAGE="$HOME/ck-stage/fusiform-$(date -u +%Y%m%dT%H%M%SZ)"
 IDENTITY="$FUSIFORM_SIGNING_IDENTITY"
 
+# The certificate is part of the designated requirement, so signing with a
+# different one (this keychain holds Apple Development, Apple Distribution and
+# Developer ID certificates for the same team) makes macOS treat the build as a
+# different program: macOS privacy grants and keychain access tied to the old
+# requirement stop applying, and the fleet's placement check, which compares
+# the staged signature with the running one, refuses it. Compare against the
+# deployed module before building, and change certificates only on purpose.
+DEPLOYED="$HOME/.local/share/cortexkit/bin/ck-fusiform"
+if [[ -f "$DEPLOYED" ]]; then
+  deployed_signature="$(codesign -dvv "$DEPLOYED" 2>&1 || true)"
+  # The first Authority line is the leaf certificate, the identity's name.
+  deployed_identity="$(printf '%s\n' "$deployed_signature" | sed -n 's/^Authority=//p' | sed -n 1p)"
+  if [[ "$deployed_identity" != "$IDENTITY" && "${FUSIFORM_SIGNING_CHANGE:-}" != "1" ]]; then
+    echo "stage.sh: FUSIFORM_SIGNING_IDENTITY is \"$IDENTITY\"" >&2
+    echo "  but the deployed module is signed by \"${deployed_identity:-<none>}\"." >&2
+    echo "  Use the deployed identity, or set FUSIFORM_SIGNING_CHANGE=1 and say so on the card." >&2
+    exit 1
+  fi
+fi
+
 # Run a staged binary under a `ckdev-` name.
 #
 # On this machine a running `ck-` process means a production binary placed in
