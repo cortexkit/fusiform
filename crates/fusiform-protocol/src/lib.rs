@@ -1140,7 +1140,12 @@ pub const SERVED_FACTS: &[ServedFact] = &[
     ServedFact {
         key: "limit.image_long_edge_px",
         class: FactClass::Advisory,
-        note: "documented integer image long-edge limit in pixels valid at any image count, on image-input rows of first-party providers; current reads only. Absent means unknown, never unlimited.",
+        note: "documented integer image long-edge limit in pixels with no count condition, on image-input rows of first-party providers; current reads only. Check limit.image_long_edge_px.above_images.<n> for stricter bounds. Absent means unknown, never unlimited.",
+    },
+    ServedFact {
+        key: "limit.image_long_edge_px.above_images.<n>",
+        class: FactClass::Advisory,
+        note: "documented stricter integer image long-edge limit in pixels when more than n image and document blocks occur across the whole request, history included; n is a positive decimal integer without leading zeros. Image-input rows of first-party providers, current reads only, never aliases or gateways. Absent means no stated condition. A reader unable to count must take the smaller of the base and conditional values.",
     },
     ServedFact {
         key: "limit.document_pages",
@@ -1422,7 +1427,9 @@ pub const MODEL_KINDS: &[&str] = &["decision", "extraction"];
 /// One served fact and what a consumer may do with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ServedFact {
-    /// The exact key as it appears in [`CatalogGetResponse::models`].
+    /// The key as it appears in [`CatalogGetResponse::models`], or a registered
+    /// selector family. A trailing `<n>` represents a positive decimal integer
+    /// without leading zeros; [`served_fact_key_matches`] validates instances.
     ///
     /// A tiered rate appends `.above_context.<threshold>` — the threshold comes
     /// from the upstream and is not fusiform's to enumerate, so tiered keys are
@@ -1500,6 +1507,20 @@ pub struct ServedFact {
     /// What the value means, in one line, for a consumer deciding what to do
     /// with it.
     pub note: &'static str,
+}
+
+/// Match an exact served-fact key or a concrete instance of a registered `<n>` family.
+/// Numeric selectors are positive decimal integers without leading zeros.
+pub fn served_fact_key_matches(registered: &str, key: &str) -> bool {
+    if let Some(prefix) = registered.strip_suffix("<n>") {
+        key.strip_prefix(prefix).is_some_and(|suffix| {
+            suffix
+                .parse::<u64>()
+                .is_ok_and(|n| n > 0 && suffix == n.to_string())
+        })
+    } else {
+        registered == key
+    }
 }
 
 /// What a wrong value in this fact would do to a consumer.

@@ -956,6 +956,9 @@ fn serve_catalog_get_request(
             if crate::attachment_limits::KEYS
                 .iter()
                 .any(|key| prefixes.iter().any(|prefix| key.starts_with(prefix)))
+                || prefixes
+                    .iter()
+                    .any(|prefix| prefix.starts_with("limit.image_long_edge_px.above_images."))
             {
                 // Attachment bounds need modalities and sometimes context even
                 // when the caller selected only a derived bound.

@@ -220,7 +220,7 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
         for facts in case["response"]["models"].as_object().unwrap().values() {
             for (key, value) in facts.as_object().unwrap() {
                 assert!(
-                    ATTACHMENT_ONLY.contains(&key.as_str()),
+                    attachment_fact_is_registered(key, &tabled),
                     "untabled attachment fact: {key}"
                 );
                 assert!(value.as_u64().is_some_and(|n| n > 0), "{key}: {value}");
@@ -353,6 +353,33 @@ const AUDIO_ONLY: &[&str] = &["limit.audio_tokens_per_second"];
 /// Provider attachment bounds are joined on current reads, never normalized.
 const ATTACHMENT_ONLY: &[&str] = fusiform_module::attachment_limits::KEYS;
 
+fn attachment_fact_is_registered(key: &str, tabled: &[&str]) -> bool {
+    (ATTACHMENT_ONLY.contains(&key)
+        || fusiform_protocol::served_fact_key_matches(
+            fusiform_module::attachment_limits::IMAGE_COUNT_FAMILY,
+            key,
+        ))
+        && tabled
+            .iter()
+            .any(|registered| fusiform_protocol::served_fact_key_matches(registered, key))
+}
+
+#[test]
+fn image_count_selector_family_is_checked_in_both_vocabulary_directions() {
+    let family = fusiform_module::attachment_limits::IMAGE_COUNT_FAMILY;
+    for suffix in ["many", "0", "020", "<n>"] {
+        let key = format!("limit.image_long_edge_px.above_images.{suffix}");
+        assert!(!attachment_fact_is_registered(&key, &[family]), "{key}");
+        assert_eq!(unproduced_tabled_facts(&[], &[key], &[family]).len(), 1);
+    }
+    let key = "limit.image_long_edge_px.above_images.20".to_string();
+    assert!(attachment_fact_is_registered(&key, &[family]));
+    assert!(!attachment_fact_is_registered(&key, ATTACHMENT_ONLY));
+    assert!(unproduced_tabled_facts(&[], std::slice::from_ref(&key), &[family]).is_empty());
+    assert_eq!(unproduced_tabled_facts(&[], &[], &[family]).len(), 1);
+    assert!(!unproduced_tabled_facts(&[key], &[], &[family]).is_empty());
+}
+
 /// Tabled facts nothing emits, and curated-only facts the normalizer emits.
 ///
 /// A tabled fact must come from the normalizer, or be declared curated-only,
@@ -374,9 +401,15 @@ fn unproduced_tabled_facts(
             .chain(CACHE_ONLY)
             .chain(AUDIO_ONLY)
             .chain(ATTACHMENT_ONLY)
+            .chain(std::iter::once(
+                &fusiform_module::attachment_limits::IMAGE_COUNT_FAMILY,
+            ))
     };
     for key in not_upstream() {
-        if normalized.iter().any(|p| p == key) {
+        if normalized
+            .iter()
+            .any(|p| fusiform_protocol::served_fact_key_matches(key, p))
+        {
             problems.push(format!(
                 "the normalizer emits {key:?}, which only curated rows may state"
             ));
@@ -384,7 +417,9 @@ fn unproduced_tabled_facts(
     }
     for key in tabled {
         let produced = if not_upstream().any(|k| k == key) {
-            curated.iter().any(|p| p == key)
+            curated
+                .iter()
+                .any(|p| fusiform_protocol::served_fact_key_matches(key, p))
         } else {
             normalized.iter().any(|p| p == key)
         };

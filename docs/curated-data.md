@@ -711,10 +711,12 @@ override under its provider
 
 ## Attachment limits (`attachment-limits.json`)
 
-The compiled provider table supplies five integer facts on current
+The compiled provider table supplies five base integer facts on current
 reads: `limit.images_per_request`,
 `limit.image_bytes`, `limit.image_long_edge_px`, `limit.document_pages` and
-`limit.document_bytes`. Absence always means unknown, never unlimited. A vendor's
+`limit.document_bytes`, plus the conditional family
+`limit.image_long_edge_px.above_images.<n>`. Absent base facts mean unknown,
+never unlimited; an absent conditional key means no stated condition. A vendor's
 "no limit" statement therefore produces no fact. These values are never stored
 or replayed on `at_ms` reads.
 
@@ -737,16 +739,27 @@ Only first-party provider ids in the table qualify. Image facts require
 backend's limits. Each published value carries a first-party `source_ref`, its
 verbatim `quote`, and a review interval of exactly 60 days. Review-date and
 embedded-seed fences require the evidence to stay current and applicable.
-Aliases already inherit other serve-time limits, so they inherit these from
-their target as well, including cross-provider aliases. An alias of an
-Anthropic row uses Anthropic's bounds, not the alias provider's bounds.
+Aliases do not inherit attachment limits: their receiving backend differs
+from the first-party endpoint whose documentation establishes the bound.
 
 Byte limits describe raw files. Decimal MB means 1,000,000 bytes; MiB means
 1,048,576. Anthropic's 10 MB base64-encoded image limit becomes 7,500,000 raw
-bytes (10,000,000 × 3/4). Image dimensions use the bound that holds at any
-image count: Anthropic allows 8000×8000 pixels up to 20 images but only 3000
-pixels per side above that; DeepSeek allows 8192 pixels per side below 15
-images but only 4096 from 15 images onward.
+bytes (10,000,000 × 3/4). Image dimensions serve the base bound without a
+count condition, plus any stricter bound in
+`limit.image_long_edge_px.above_images.<n>`. The condition applies when the
+request contains **more than n image and document blocks across the whole
+request, history included**. A reader unable to count must take the smaller
+of the base and conditional values. Anthropic serves base 8000 and
+`above_images.20` = 3000; DeepSeek serves base 8192 and `above_images.14` = 4096
+(15 or more means more than 14).
+
+An `image_count` rule contains the base `value` and a nonempty `conditions`
+array. Each condition has a positive `above_images` threshold, a smaller
+positive `value`, and its own verbatim `quote` from the limit's `source_ref`.
+The limit's top-level quote supports the base value. Duplicate thresholds,
+missing quotes, and count conditions on facts other than image dimensions
+are rejected. Thresholds are provider data, not enumerated wire vocabulary:
+the registered family matches positive decimal suffixes without leading zeros.
 
 Anthropic's image count depends on the row's `limit.context`: exactly 200,000
 tokens gives 100 images, any other known context gives 600. Its PDF page cap

@@ -13,6 +13,8 @@ const KEYS: &[&str] = &[
     "limit.documents_per_request",
     "limit.image_bytes",
     "limit.image_long_edge_px",
+    "limit.image_long_edge_px.above_images.20",
+    "limit.image_long_edge_px.above_images.14",
     "limit.document_pages",
     "limit.document_bytes",
 ];
@@ -107,7 +109,7 @@ fn attachment_limits_match_each_first_party_provider_exactly() {
     for (provider, expected) in [
         (
             "anthropic",
-            json!({"limit.images_per_request":100,"limit.image_bytes":7500000,"limit.image_long_edge_px":3000,"limit.document_pages":100}),
+            json!({"limit.images_per_request":100,"limit.image_bytes":7500000,"limit.image_long_edge_px":8000,"limit.image_long_edge_px.above_images.20":3000,"limit.document_pages":100}),
         ),
         (
             "openai",
@@ -125,7 +127,7 @@ fn attachment_limits_match_each_first_party_provider_exactly() {
         ("moonshotai", json!({})),
         (
             "deepseek",
-            json!({"limit.images_per_request":600,"limit.image_bytes":33554432,"limit.image_long_edge_px":4096}),
+            json!({"limit.images_per_request":600,"limit.image_bytes":33554432,"limit.image_long_edge_px":8192,"limit.image_long_edge_px.above_images.14":4096}),
         ),
     ] {
         assert_eq!(
@@ -157,6 +159,54 @@ fn attachment_limits_match_each_first_party_provider_exactly() {
 }
 
 #[test]
+fn attachment_limits_serve_conditional_image_dimensions() {
+    let (store, _dir) = store();
+    for (provider, expected) in [
+        (
+            "anthropic",
+            json!({"limit.image_long_edge_px":8000,"limit.image_long_edge_px.above_images.20":3000}),
+        ),
+        (
+            "deepseek",
+            json!({"limit.image_long_edge_px":8192,"limit.image_long_edge_px.above_images.14":4096}),
+        ),
+    ] {
+        for args in [
+            json!({"provider_id":provider,"model_id":"image","fact_prefixes":["limit.image_long_edge_px"]}),
+            json!({"provider_id":provider,"model_id":"image","auth_method":"apikey","fact_prefixes":["limit.image_long_edge_px"]}),
+            json!({"provider_id":provider,"fact_prefixes":["limit.image_long_edge_px"]}),
+            json!({"paged":true,"fact_prefixes":["limit.image_long_edge_px"]}),
+        ] {
+            let response = get(&store, args.clone());
+            assert_eq!(
+                response["models"][format!("{provider}/image")],
+                expected,
+                "{args}"
+            );
+        }
+        let conditional = expected
+            .as_object()
+            .unwrap()
+            .iter()
+            .find(|(key, _)| key.contains(".above_images."))
+            .unwrap();
+        for prefix in [
+            "limit.image_long_edge_px.above_images.",
+            conditional.0.as_str(),
+        ] {
+            let response = get(
+                &store,
+                json!({"provider_id":provider,"model_id":"image","fact_prefixes":[prefix]}),
+            );
+            assert_eq!(
+                response["models"][format!("{provider}/image")],
+                json!({(conditional.0):conditional.1})
+            );
+        }
+    }
+}
+
+#[test]
 fn attachment_limits_derive_anthropic_counts_only_from_known_context() {
     let (store, _dir) = store();
     let response = get(&store, json!({"provider_id":"anthropic"}));
@@ -171,7 +221,7 @@ fn attachment_limits_derive_anthropic_counts_only_from_known_context() {
     }
     assert_eq!(
         limits(&response["models"]["anthropic/unknown"]),
-        json!({"limit.image_bytes":7500000,"limit.image_long_edge_px":3000})
+        json!({"limit.image_bytes":7500000,"limit.image_long_edge_px":8000,"limit.image_long_edge_px.above_images.20":3000})
     );
 }
 

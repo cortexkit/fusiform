@@ -2046,7 +2046,8 @@ fn attachment_bound_cases_pin_values_and_gateway_absence() {
         serde_json::json!({
             "limit.images_per_request":600,
             "limit.image_bytes":7500000,
-            "limit.image_long_edge_px":3000,
+            "limit.image_long_edge_px":8000,
+            "limit.image_long_edge_px.above_images.20":3000,
             "limit.document_pages":600,
         })
     );
@@ -2063,6 +2064,11 @@ fn attachment_bound_cases_pin_values_and_gateway_absence() {
         .iter()
         .all(|key| gateway.get(key).is_none()));
     assert!(gateway.get("limit.documents_per_request").is_none());
+    assert!(gateway
+        .as_object()
+        .unwrap()
+        .keys()
+        .all(|key| !key.starts_with("limit.image_long_edge_px.above_images.")));
 }
 
 /// Every field of every READ response appears somewhere in the fixture.
@@ -2325,10 +2331,37 @@ fn missing_served_fact_keys(
 
     let missing = keys
         .iter()
-        .filter(|k| !present.contains(**k))
+        .filter(|k| {
+            !present
+                .iter()
+                .any(|key| fusiform_protocol::served_fact_key_matches(k, key))
+        })
         .map(|k| (*k).to_string())
         .collect();
     (keys.len(), missing)
+}
+
+#[test]
+fn image_count_selector_family_requires_concrete_golden_coverage() {
+    let family = fusiform_module::attachment_limits::IMAGE_COUNT_FAMILY;
+    let src = format!("pub const SERVED_FACTS: &[ServedFact] = &[\nkey: \"{family}\"\n];");
+    for suffix in ["", "many", "0", "020", "<n>"] {
+        let present = std::collections::BTreeSet::from([format!(
+            "limit.image_long_edge_px.above_images.{suffix}"
+        )]);
+        assert_eq!(
+            missing_served_fact_keys(&src, &present).1,
+            vec![family],
+            "{suffix}"
+        );
+    }
+    assert_eq!(
+        missing_served_fact_keys(&src, &std::collections::BTreeSet::new()).1,
+        vec![family]
+    );
+    let present =
+        std::collections::BTreeSet::from(["limit.image_long_edge_px.above_images.20".to_string()]);
+    assert!(missing_served_fact_keys(&src, &present).1.is_empty());
 }
 
 #[test]

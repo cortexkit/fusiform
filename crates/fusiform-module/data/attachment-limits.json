@@ -16,10 +16,20 @@
         },
         {
           "fact": "limit.image_long_edge_px",
-          "rule": {"kind": "fixed", "value": 3000},
+          "rule": {
+            "kind": "image_count",
+            "value": 8000,
+            "conditions": [
+              {
+                "above_images": 20,
+                "value": 3000,
+                "quote": "If a single API request contains more than 20 images, a stricter per-image dimension limit applies ... All `image` blocks in the request count toward this threshold, including images from earlier conversation turns that you resend ... resize each image so that neither dimension exceeds 3,000 px, or keep the request to 20 or fewer image and document blocks."
+              }
+            ]
+          },
           "source_ref": "https://platform.claude.com/docs/en/build-with-claude/vision",
-          "quote": "resize each image so that neither dimension exceeds 3,000 px",
-          "notes": "8000 px per side applies at up to 20 images; above 20 the bound is 3000 px per side. Serve 3000 so the bound holds at any allowed image count."
+          "quote": "The maximum dimensions for each image are 8000x8000 px.",
+          "notes": "Serve the 8000 px base with a stricter 3000 px bound above 20 image and document blocks across the whole request, history included. A reader unable to count takes the smaller bound."
         },
         {
           "fact": "limit.image_bytes",
@@ -154,10 +164,20 @@
         },
         {
           "fact": "limit.image_long_edge_px",
-          "rule": {"kind": "fixed", "value": 4096},
+          "rule": {
+            "kind": "image_count",
+            "value": 8192,
+            "conditions": [
+              {
+                "above_images": 14,
+                "value": 4096,
+                "quote": "8192 px per side; drops to 4096 px per side when a request contains 15 or more images"
+              }
+            ]
+          },
           "source_ref": "https://api-docs.deepseek.com/guides/vision.md",
           "quote": "8192 px per side; drops to 4096 px per side when a request contains 15 or more images",
-          "notes": "8192 px applies below 15 images; 4096 applies from 15 onward. Serve 4096 so the bound holds at any allowed image count."
+          "notes": "15 or more means more than 14: serve the 8192 px base with a stricter 4096 px bound above 14 image and document blocks across the whole request, history included. A reader unable to count takes the smaller bound."
         }
       ]
     }

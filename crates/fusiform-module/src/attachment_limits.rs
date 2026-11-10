@@ -51,11 +51,25 @@ pub const KEYS: &[&str] = &[
     "limit.document_bytes",
 ];
 
+pub const IMAGE_COUNT_FAMILY: &str = "limit.image_long_edge_px.above_images.<n>";
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageCountCondition {
+    pub above_images: u64,
+    pub value: u64,
+    pub quote: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Rule {
     Fixed {
         value: u64,
+    },
+    ImageCount {
+        value: u64,
+        conditions: Vec<ImageCountCondition>,
     },
     ContextEquals {
         context: u64,
@@ -72,7 +86,7 @@ pub enum Rule {
 impl Rule {
     fn value(&self, context: Option<u64>) -> Option<u64> {
         match *self {
-            Self::Fixed { value } => Some(value),
+            Self::Fixed { value } | Self::ImageCount { value, .. } => Some(value),
             Self::ContextEquals {
                 context: threshold,
                 equal,
@@ -93,18 +107,30 @@ impl Rule {
     }
 
     fn valid(&self) -> bool {
-        match *self {
-            Self::Fixed { value } => value > 0,
+        match self {
+            Self::Fixed { value } => *value > 0,
+            Self::ImageCount { value, conditions } => {
+                let mut thresholds = BTreeSet::new();
+                *value > 0
+                    && !conditions.is_empty()
+                    && conditions.iter().all(|condition| {
+                        condition.above_images > 0
+                            && thresholds.insert(condition.above_images)
+                            && condition.value > 0
+                            && condition.value < *value
+                            && !condition.quote.trim().is_empty()
+                    })
+            }
             Self::ContextEquals {
                 context,
                 equal,
                 other,
-            } => context > 0 && equal > 0 && other > 0,
+            } => *context > 0 && *equal > 0 && *other > 0,
             Self::ContextAtLeast {
                 context,
                 below,
                 at_least,
-            } => context > 0 && below > 0 && at_least > 0,
+            } => *context > 0 && *below > 0 && *at_least > 0,
         }
     }
 }
@@ -182,6 +208,8 @@ pub fn load(text: &str) -> (Sources, Vec<String>) {
             || row.limits.iter().any(|limit| {
                 !facts.insert(limit.fact)
                     || !limit.rule.valid()
+                    || (matches!(limit.rule, Rule::ImageCount { .. })
+                        && limit.fact != Fact::ImageLongEdgePx)
                     || !first_party_source(&row.provider_id, &limit.source_ref)
                     || limit.quote.trim().is_empty()
                     || limit.notes.trim().is_empty()
@@ -224,6 +252,18 @@ pub fn apply(provider: &str, facts: &mut BTreeMap<String, Value>) {
         if accepts {
             if let Some(value) = limit.rule.value(context) {
                 facts.insert(limit.fact.key().into(), value.into());
+            }
+            if let Rule::ImageCount { conditions, .. } = &limit.rule {
+                for condition in conditions {
+                    facts.insert(
+                        format!(
+                            "{}.above_images.{}",
+                            limit.fact.key(),
+                            condition.above_images
+                        ),
+                        condition.value.into(),
+                    );
+                }
             }
         }
     }
@@ -340,6 +380,32 @@ mod tests {
     }
 
     #[test]
+    fn image_count_attachment_rules_require_stricter_quoted_unique_conditions() {
+        let doc: Value = serde_json::from_str(DATA).unwrap();
+        for rule in [
+            json!({"kind":"image_count","value":0,"conditions":[{"above_images":20,"value":3000,"quote":"sourced"}]}),
+            json!({"kind":"image_count","value":8000,"conditions":[]}),
+            json!({"kind":"image_count","value":8000,"conditions":[{"above_images":0,"value":3000,"quote":"sourced"}]}),
+            json!({"kind":"image_count","value":8000,"conditions":[{"above_images":"020","value":3000,"quote":"sourced"}]}),
+            json!({"kind":"image_count","value":8000,"conditions":[{"above_images":20,"value":0,"quote":"sourced"}]}),
+            json!({"kind":"image_count","value":8000,"conditions":[{"above_images":20,"value":8000,"quote":"sourced"}]}),
+            json!({"kind":"image_count","value":8000,"conditions":[{"above_images":20,"value":9000,"quote":"sourced"}]}),
+            json!({"kind":"image_count","value":8000,"conditions":[{"above_images":20,"value":3000,"quote":" "}]}),
+            json!({"kind":"image_count","value":8000,"conditions":[{"above_images":20,"value":3000}]}),
+            json!({"kind":"image_count","value":8000,"conditions":[{"above_images":20,"value":3000,"quote":"sourced"},{"above_images":20,"value":2000,"quote":"sourced"}]}),
+        ] {
+            let mut bad = doc.clone();
+            bad["providers"][0]["limits"][1]["rule"] = rule.clone();
+            let (rows, rejects) = load(&bad.to_string());
+            assert_eq!(rows.len(), 5, "{rule}");
+            assert_eq!(rejects.len(), 1, "{rule}");
+        }
+        let mut bad = doc;
+        bad["providers"][0]["limits"][0]["rule"] = bad["providers"][0]["limits"][1]["rule"].clone();
+        assert_eq!(load(&bad.to_string()).1.len(), 1);
+    }
+
+    #[test]
     fn attachment_limits_are_within_their_review_dates() {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -425,6 +491,7 @@ mod tests {
             }
             apply("anthropic", &mut facts);
             assert!(KEYS.iter().all(|key| !facts.contains_key(*key)));
+            assert!(facts.keys().all(|key| !key.contains(".above_images.")));
         }
     }
 }
