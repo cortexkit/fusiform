@@ -263,7 +263,7 @@
         "source_ref": "https://api-docs.deepseek.com/api/create-chat-completion"
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -501,7 +501,7 @@
         "provider_id": "openai"
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -671,7 +671,7 @@
         "source_ref": "https://docs.x.ai/developers/advanced-api-usage/prompt-caching/usage-and-pricing"
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -821,7 +821,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -958,7 +958,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -1104,7 +1104,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -1757,7 +1757,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -2005,7 +2005,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -2292,7 +2292,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -2580,7 +2580,7 @@
         "source_ref": "Probes with the operator's Meta coding-plan login (vault credential oauth:meta) on 2026-10-13: GET https://api.meta.ai/v1/models at 16:42:35Z returned 200 with 12 ids including muse-wonder-full-1.0; POST https://api.meta.ai/v1/responses with muse-wonder-full-1.0 at 16:42:45Z returned 200. Protocol: https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L9-L17 credential_persona_route selects OpenAiResponses at https://api.meta.ai/v1 for meta/oauth. https://dev.meta.ai/docs/api-reference states 'Meta Model API is an HTTP API served at https://api.meta.ai/v1 and authenticated with a bearer token' and 'POST /v1/responses and related endpoints ... OpenAI-compatible'; https://dev.meta.ai/docs/protocols/responses says 'Call POST /v1/responses with a model and input.' The docs establish the protocol, not subscription credential eligibility; the pinned client policy and successful probe establish this plane."
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -3037,7 +3037,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -3206,7 +3206,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -3324,7 +3324,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -3433,7 +3433,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -3721,7 +3721,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -4828,7 +4828,7 @@
         "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -5316,7 +5316,7 @@
         "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -6025,7 +6025,7 @@
         "source_ref": "https://www.kimi.com/code/docs/en/kimi-code/membership.html"
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -6572,7 +6572,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794262652603,
+        "graded_at_ms": 1794316550587,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,

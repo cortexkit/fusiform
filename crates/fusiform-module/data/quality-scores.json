@@ -1,6 +1,6 @@
 {
   "graded_by": "operator",
-  "graded_at_ms": 1794262652603,
+  "graded_at_ms": 1794316550587,
   "purpose": "Operator-assigned model quality scores for routing selection, not upstream facts.",
   "rows": [
     {"model": "alibaba-token-plan/deepseek-v3.2", "elo": 710, "eq": 1366},
@@ -65,6 +65,7 @@
     {"model": "ibm/granite-4.2-8b", "elo": 537, "eq": 1298},
     {"model": "inception/mercury-2", "elo": 526, "eq": 1294},
     {"model": "inception/mercury-2.5", "elo": 579, "eq": 1315},
+    {"model": "inception/mercury-3", "elo": 1439, "eq": 1555},
     {"model": "inclusionai/ling-3.0-flash", "elo": 855, "eq": 1423},
     {"model": "inclusionai/ling-3.0-flash-fin", "elo": 943, "eq": 1458},
     {"model": "inclusionai/ling-3.0-flash-vl", "elo": 1014, "eq": 1486},
