@@ -466,6 +466,15 @@
       ]
     },
     {
+      "id": "brave",
+      "name": "Brave Search API",
+      "doc": "https://api-dashboard.search.brave.com/documentation",
+      "source": "hand_kept",
+      "kind": "web_search",
+      "env": [],
+      "output_modalities": []
+    },
+    {
       "id": "cerebras",
       "name": "Cerebras",
       "doc": "https://inference-docs.cerebras.ai/models/overview",
@@ -810,6 +819,15 @@
       ]
     },
     {
+      "id": "exa",
+      "name": "Exa Search API",
+      "doc": "https://exa.ai/docs/search/quickstart",
+      "source": "hand_kept",
+      "kind": "web_search",
+      "env": [],
+      "output_modalities": []
+    },
+    {
       "id": "fastrouter",
       "name": "FastRouter",
       "doc": "https://fastrouter.ai/models",
@@ -822,6 +840,15 @@
         "text",
         "video"
       ]
+    },
+    {
+      "id": "firecrawl",
+      "name": "Firecrawl",
+      "doc": "https://docs.firecrawl.dev/api-reference/v2-introduction",
+      "source": "hand_kept",
+      "kind": "web_search",
+      "env": [],
+      "output_modalities": []
     },
     {
       "id": "fireworks-ai",
@@ -1209,6 +1236,24 @@
       "output_modalities": [
         "text"
       ]
+    },
+    {
+      "id": "jina",
+      "name": "Jina AI",
+      "doc": "https://docs.jina.ai/",
+      "source": "hand_kept",
+      "kind": "web_search",
+      "env": [],
+      "output_modalities": []
+    },
+    {
+      "id": "kagi",
+      "name": "Kagi",
+      "doc": "https://kagi.com/api/docs",
+      "source": "hand_kept",
+      "kind": "web_search",
+      "env": [],
+      "output_modalities": []
     },
     {
       "id": "kenari",
@@ -1964,6 +2009,15 @@
       ]
     },
     {
+      "id": "parallel",
+      "name": "Parallel Search API",
+      "doc": "https://docs.parallel.ai/search/search-quickstart.md",
+      "source": "hand_kept",
+      "kind": "web_search",
+      "env": [],
+      "output_modalities": []
+    },
+    {
       "id": "pareto",
       "name": "Pareto Inference",
       "doc": "https://docs.paretoinference.com/",
@@ -2291,6 +2345,15 @@
       ]
     },
     {
+      "id": "searxng",
+      "name": "SearXNG",
+      "doc": "https://docs.searxng.org/",
+      "source": "hand_kept",
+      "kind": "web_search",
+      "env": [],
+      "output_modalities": []
+    },
+    {
       "id": "sensenova",
       "name": "SenseNova (China)",
       "doc": "https://platform.sensenova.cn/docs",
@@ -2467,6 +2530,15 @@
       ]
     },
     {
+      "id": "tavily",
+      "name": "Tavily Search",
+      "doc": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
+      "source": "hand_kept",
+      "kind": "web_search",
+      "env": [],
+      "output_modalities": []
+    },
+    {
       "id": "tempr",
       "name": "Tempr Gateway",
       "doc": "https://temprhq.io/docs/gateway-reference.html",
@@ -2562,6 +2634,15 @@
       "output_modalities": [
         "text"
       ]
+    },
+    {
+      "id": "tinyfish",
+      "name": "TinyFish Web Agent",
+      "doc": "https://docs.tinyfish.ai/",
+      "source": "hand_kept",
+      "kind": "web_search",
+      "env": [],
+      "output_modalities": []
     },
     {
       "id": "togetherai",

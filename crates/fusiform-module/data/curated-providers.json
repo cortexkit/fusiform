@@ -3,10 +3,37 @@
   "purpose": "Provider identities absent from models.dev, for the pinned provider vector only. Re-read each first-party source within 60 days; remove a row when models.dev lists its id.",
   "providers": [
     {
+      "id": "brave",
+      "name": "Brave Search API",
+      "doc": "https://api-dashboard.search.brave.com/documentation",
+      "source_ref": "https://api-dashboard.search.brave.com/documentation",
+      "kind": "web_search",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
       "id": "elevenlabs",
       "name": "ElevenLabs",
       "doc": "https://elevenlabs.io/docs/overview/intro",
       "source_ref": "https://elevenlabs.io/docs/overview/intro.md",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "id": "exa",
+      "name": "Exa Search API",
+      "doc": "https://exa.ai/docs/search/quickstart",
+      "source_ref": "https://exa.ai/docs/search/quickstart",
+      "kind": "web_search",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "id": "firecrawl",
+      "name": "Firecrawl",
+      "doc": "https://docs.firecrawl.dev/api-reference/v2-introduction",
+      "source_ref": "https://firecrawl.dev/",
+      "kind": "web_search",
       "established_at_ms": 1794268800000,
       "review_by_ms": 1799452800000
     },
@@ -19,10 +46,37 @@
       "review_by_ms": 1799452800000
     },
     {
+      "id": "jina",
+      "name": "Jina AI",
+      "doc": "https://docs.jina.ai/",
+      "source_ref": "https://docs.jina.ai/",
+      "kind": "web_search",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "id": "kagi",
+      "name": "Kagi",
+      "doc": "https://kagi.com/api/docs",
+      "source_ref": "https://help.kagi.com/kagi/api/search.html",
+      "kind": "web_search",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
       "id": "kiro",
       "name": "Kiro",
       "doc": "https://kiro.dev/docs/",
       "source_ref": "https://kiro.dev/docs/",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "id": "parallel",
+      "name": "Parallel Search API",
+      "doc": "https://docs.parallel.ai/search/search-quickstart.md",
+      "source_ref": "https://docs.parallel.ai/search/search-quickstart.md",
+      "kind": "web_search",
       "established_at_ms": 1794268800000,
       "review_by_ms": 1799452800000
     },
@@ -43,6 +97,15 @@
       "review_by_ms": 1799452800000
     },
     {
+      "id": "searxng",
+      "name": "SearXNG",
+      "doc": "https://docs.searxng.org/",
+      "source_ref": "https://docs.searxng.org/",
+      "kind": "web_search",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
       "id": "singularityapi",
       "name": "SingularityAPI",
       "doc": "https://docs.singularityapi.dev/get-started/quickstart",
@@ -55,6 +118,24 @@
       "name": "Singularity API reserved lane",
       "doc": "https://singularityapi.tech/how-it-works",
       "source_ref": "https://singularityapi.tech/terms",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "id": "tavily",
+      "name": "Tavily Search",
+      "doc": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
+      "source_ref": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
+      "kind": "web_search",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "id": "tinyfish",
+      "name": "TinyFish Web Agent",
+      "doc": "https://docs.tinyfish.ai/",
+      "source_ref": "https://docs.tinyfish.ai/faq",
+      "kind": "web_search",
       "established_at_ms": 1794268800000,
       "review_by_ms": 1799452800000
     },

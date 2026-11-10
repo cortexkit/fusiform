@@ -500,14 +500,20 @@ Provider changes reach it only when a reviewed vault commit updates that pin.
 
 The test-side generator reads the embedded `models-dev-seed.json` using the
 existing raw models.dev types, then adds `curated-providers.json` for vendors
-models.dev does not list. The hand-kept table currently adds ElevenLabs, Kiro,
-Baidu Qianfan, SingularityAPI's inference gateway and reserved-lane offering,
-TypeSafe, and Yolo-Auto. Each row has
+models.dev does not list. The hand-kept table covers model providers and web
+search services so consumers can read both from one provider list. Each row has
 `id`, `name`, `doc`, the first-party page actually read in `source_ref`, and
 `established_at_ms` / `review_by_ms` exactly 60 days apart. A real-clock test fails
 after review expires and asks for re-verification or removal. A separate test
 rejects any hand-kept id already in the seed: the upstream entry wins, so remove
 the hand-kept row rather than overriding it.
+
+Curated rows may also have `kind`, whose closed set of values is currently
+`["web_search"]`. `kind: "web_search"` identifies a web search service; absent
+`kind` means a model provider. An unknown kind is a counted loader reject, and
+the vector's byte-comparison test fails if the loader reports any rejects instead
+of silently dropping a provider.
+Search services do not infer or add model rows or output modalities.
 
 The generated file has stable key order, providers sorted by `id`, pretty JSON
 and a trailing newline. There is no generation timestamp.
@@ -519,8 +525,9 @@ and a trailing newline. There is no generation timestamp.
 | `providers` | one entry per provider id, including providers with no model rows |
 | `id`, `name`, `doc` | the provider id, published display name and documentation URL |
 | `source` | `models.dev` or `hand_kept` |
+| `kind` | `web_search` for curated web search services; omitted for model providers, including all seed providers |
 | `env` | models.dev's provider environment-variable list verbatim, preserving order and duplicates; `[]` for hand-kept rows |
-| `output_modalities` | for seed providers, the sorted, deduplicated union of their model `modalities.output` values, plus `embedding` if any model has `type: embedding`; for hand-kept providers, the sorted, deduplicated union of `capability.output_modalities` from their served model rows; `[]` when none are recorded |
+| `output_modalities` | for seed providers, the sorted, deduplicated union of their model `modalities.output` values, plus `embedding` if any model has `type: embedding`; for hand-kept model providers, the sorted, deduplicated union of `capability.output_modalities` from their served model rows; `[]` when none are recorded, and always `[]` for web search services |
 
 The generator seeds a fresh store and pages the real `catalog.get` serving path
 to collect hand-kept providers' output modalities, including curated models and

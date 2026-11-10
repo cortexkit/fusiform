@@ -21,6 +21,12 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 type ServedModels = BTreeMap<String, BTreeMap<String, serde_json::Value>>;
 type ProviderOutputs = BTreeMap<String, BTreeSet<String>>;
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum ProviderKind {
+    WebSearch,
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HandKeptProvider {
@@ -28,6 +34,7 @@ struct HandKeptProvider {
     name: String,
     doc: String,
     source_ref: String,
+    kind: Option<ProviderKind>,
     established_at_ms: i64,
     review_by_ms: i64,
 }
@@ -35,7 +42,7 @@ struct HandKeptProvider {
 #[derive(Deserialize)]
 struct HandKeptDoc {
     schema: String,
-    providers: Vec<HandKeptProvider>,
+    providers: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -44,6 +51,8 @@ struct Provider {
     name: String,
     doc: String,
     source: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<ProviderKind>,
     env: Vec<String>,
     output_modalities: Vec<String>,
 }
@@ -56,10 +65,10 @@ struct ProvidersVector {
 }
 
 fn hand_kept() -> Vec<HandKeptProvider> {
-    let doc: HandKeptDoc = serde_json::from_str(HAND_KEPT).expect("curated provider table parses");
-    assert_eq!(doc.schema, "curated-providers/v1");
+    let (providers, rejects) = load_hand_kept_reporting_rejects(HAND_KEPT);
+    assert!(rejects.is_empty(), "curated provider rejects: {rejects:?}");
     let mut ids = BTreeSet::new();
-    for row in &doc.providers {
+    for row in &providers {
         assert!(
             [&row.id, &row.name, &row.doc, &row.source_ref]
                 .iter()
@@ -68,7 +77,22 @@ fn hand_kept() -> Vec<HandKeptProvider> {
         );
         assert!(ids.insert(&row.id), "duplicate hand-kept id: {}", row.id);
     }
-    doc.providers
+    providers
+}
+
+fn load_hand_kept_reporting_rejects(input: &str) -> (Vec<HandKeptProvider>, Vec<String>) {
+    let doc: HandKeptDoc = serde_json::from_str(input).expect("curated provider table parses");
+    assert_eq!(doc.schema, "curated-providers/v1");
+    let mut providers = Vec::new();
+    let mut rejects = Vec::new();
+    for (index, row) in doc.providers.into_iter().enumerate() {
+        let id = row["id"].as_str().unwrap_or("<missing id>").to_owned();
+        match serde_json::from_value(row) {
+            Ok(provider) => providers.push(provider),
+            Err(error) => rejects.push(format!("row {index} ({id}): {error}")),
+        }
+    }
+    (providers, rejects)
 }
 
 fn seed() -> BTreeMap<String, RawProvider> {
@@ -194,22 +218,26 @@ fn vector(
                 name: raw.name.expect("seed providers have published names"),
                 doc: raw.doc.expect("seed providers have documentation URLs"),
                 source: "models.dev",
+                kind: None,
                 env: raw.env,
                 output_modalities: outputs.into_iter().collect(),
             }
         })
-        .chain(rows.into_iter().map(|row| {
-            Provider {
-                output_modalities: served_outputs
+        .chain(rows.into_iter().map(|row| Provider {
+            output_modalities: if row.kind == Some(ProviderKind::WebSearch) {
+                Vec::new()
+            } else {
+                served_outputs
                     .get(&row.id)
                     .map(|outputs| outputs.iter().cloned().collect())
-                    .unwrap_or_default(),
-                id: row.id,
-                name: row.name,
-                doc: row.doc,
-                source: "hand_kept",
-                env: Vec::new(),
-            }
+                    .unwrap_or_default()
+            },
+            id: row.id,
+            name: row.name,
+            doc: row.doc,
+            source: "hand_kept",
+            kind: row.kind,
+            env: Vec::new(),
         }))
         .collect();
     providers.sort_by(|a, b| a.id.cmp(&b.id));
@@ -311,6 +339,67 @@ fn review_deadline_requires_reverification_or_removal() {
 }
 
 #[test]
+fn unknown_provider_kind_is_a_counted_reject() {
+    let row = serde_json::json!({
+        "id": "search", "name": "Search", "doc": "https://example.test/docs",
+        "source_ref": "https://example.test/docs", "kind": "web_search",
+        "established_at_ms": 1, "review_by_ms": 1 + REVIEW_INTERVAL_MS
+    });
+    let mut unknown = row.clone();
+    unknown["id"] = "unknown".into();
+    unknown["kind"] = "web_serach".into();
+    let mut model = row.clone();
+    model["id"] = "model".into();
+    model.as_object_mut().unwrap().remove("kind");
+    let doc = serde_json::json!({
+        "schema": "curated-providers/v1", "providers": [row, unknown, model]
+    });
+    let (providers, rejects) = load_hand_kept_reporting_rejects(&doc.to_string());
+    assert_eq!(
+        rejects.len(),
+        1,
+        "unknown kinds must be counted: {rejects:?}"
+    );
+    assert!(rejects[0].contains("unknown"), "{:?}", rejects[0]);
+    assert!(rejects[0].contains("web_serach"), "{:?}", rejects[0]);
+    assert_eq!(
+        providers
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
+        ["search", "model"]
+    );
+}
+
+#[test]
+fn web_search_kind_is_preserved_without_model_outputs() {
+    let row = HandKeptProvider {
+        id: "search".into(),
+        name: "Search".into(),
+        doc: "https://example.test/docs".into(),
+        source_ref: "https://example.test/docs".into(),
+        kind: Some(ProviderKind::WebSearch),
+        established_at_ms: 1,
+        review_by_ms: 1 + REVIEW_INTERVAL_MS,
+    };
+    let outputs = BTreeMap::from([("search".into(), BTreeSet::from(["text".into()]))]);
+    let vector = vector(
+        BTreeMap::new(),
+        vec![row],
+        "seed-timestamp".into(),
+        &outputs,
+    );
+    let serialized = serde_json::to_value(&vector).unwrap();
+    assert_eq!(
+        serialized["providers"],
+        serde_json::json!([{
+            "id": "search", "name": "Search", "doc": "https://example.test/docs",
+            "source": "hand_kept", "kind": "web_search", "env": [], "output_modalities": []
+        }])
+    );
+}
+
+#[test]
 fn vector_preserves_metadata_and_unions_outputs_without_inference() {
     let seed = serde_json::from_str(
         r#"{
@@ -333,6 +422,7 @@ fn vector_preserves_metadata_and_unions_outputs_without_inference() {
         name: "Hand-kept synthetic".into(),
         doc: "https://example.test/hand-kept".into(),
         source_ref: "https://example.test/hand-kept".into(),
+        kind: None,
         established_at_ms: 1,
         review_by_ms: 1 + REVIEW_INTERVAL_MS,
     };
@@ -379,6 +469,7 @@ fn vector_preserves_metadata_and_unions_outputs_without_inference() {
             name: "Synthetic".into(),
             doc: "https://example.test/docs".into(),
             source: "models.dev",
+            kind: None,
             env: vec!["SECOND_KEY".into(), "FIRST_KEY".into(), "SECOND_KEY".into()],
             output_modalities: vec![
                 "audio".into(),
@@ -388,4 +479,8 @@ fn vector_preserves_metadata_and_unions_outputs_without_inference() {
             ],
         }
     );
+    let serialized = serde_json::to_value(&vector).unwrap();
+    for provider in serialized["providers"].as_array().unwrap() {
+        assert!(provider.get("kind").is_none(), "{provider}");
+    }
 }
