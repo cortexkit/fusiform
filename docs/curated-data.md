@@ -476,8 +476,9 @@ Provider changes reach it only when a reviewed vault commit updates that pin.
 
 The test-side generator reads the embedded `models-dev-seed.json` using the
 existing raw models.dev types, then adds `curated-providers.json` for vendors
-models.dev does not list. The hand-kept table currently adds ElevenLabs, sourced
-from [its documentation](https://elevenlabs.io/docs/overview/intro). Each row has
+models.dev does not list. The hand-kept table currently adds ElevenLabs, Kiro,
+Baidu Qianfan, SingularityAPI's inference gateway and reserved-lane offering,
+TypeSafe, and Yolo-Auto. Each row has
 `id`, `name`, `doc`, the first-party page actually read in `source_ref`, and
 `established_at_ms` / `review_by_ms` exactly 60 days apart. A real-clock test fails
 after review expires and asks for re-verification or removal. A separate test
@@ -495,7 +496,16 @@ and a trailing newline. There is no generation timestamp.
 | `id`, `name`, `doc` | the provider id, published display name and documentation URL |
 | `source` | `models.dev` or `hand_kept` |
 | `env` | models.dev's provider environment-variable list verbatim, preserving order and duplicates; `[]` for hand-kept rows |
-| `output_modalities` | sorted, deduplicated union of all the provider's model `modalities.output` values, plus `embedding` if any model has `type: embedding`; `[]` for hand-kept rows until they have model rows |
+| `output_modalities` | for seed providers, the sorted, deduplicated union of their model `modalities.output` values, plus `embedding` if any model has `type: embedding`; for hand-kept providers, the sorted, deduplicated union of `capability.output_modalities` from their served model rows; `[]` when none are recorded |
+
+The generator seeds a fresh store and pages the real `catalog.get` serving path
+to collect hand-kept providers' output modalities, including curated models and
+aliases. It does not guess capabilities from provider names or documentation.
+A coverage fence requires every provider id in those served pages to appear in
+the committed vector. The read includes retired rows so held curated models
+and retired aliases cannot lose their provider identity; a row that serves only
+`existence: absent` contributes no output modalities. New row-producing tables
+therefore pass through the same fence without a separate list of data files.
 
 `env: []` does not mean no credentials or no API key: hand-kept rows have no
 credential-variable claim. `output_modalities: []` means no output modality is

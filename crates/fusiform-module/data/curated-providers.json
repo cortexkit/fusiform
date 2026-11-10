@@ -9,6 +9,54 @@
       "source_ref": "https://elevenlabs.io/docs/overview/intro.md",
       "established_at_ms": 1794268800000,
       "review_by_ms": 1799452800000
+    },
+    {
+      "id": "kiro",
+      "name": "Kiro",
+      "doc": "https://kiro.dev/docs/",
+      "source_ref": "https://kiro.dev/docs/",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "id": "qianfan",
+      "name": "百度千帆·大模型服务及Agent开发平台",
+      "doc": "https://cloud.baidu.com/doc/qianfan/index.html",
+      "source_ref": "https://cloud.baidu.com/doc/qianfan/index.html",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "id": "singularityapi",
+      "name": "SingularityAPI",
+      "doc": "https://docs.singularityapi.dev/get-started/quickstart",
+      "source_ref": "https://singularityapi.dev",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "id": "singularityapi-reserved",
+      "name": "Singularity API reserved lane",
+      "doc": "https://singularityapi.tech/how-it-works",
+      "source_ref": "https://singularityapi.tech/terms",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "id": "typesafe",
+      "name": "TypeSafe",
+      "doc": "https://docs.typesafe.ai/introduction",
+      "source_ref": "https://docs.typesafe.ai/introduction",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "id": "yolo-auto",
+      "name": "Yolo-Auto",
+      "doc": "https://yolo-auto.com/docs",
+      "source_ref": "https://yolo-auto.com/docs",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
     }
   ]
 }
