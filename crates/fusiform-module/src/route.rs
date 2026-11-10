@@ -1860,14 +1860,17 @@ fn finish_plane_view(
         for (identity, facts) in &mut response.models {
             if let Some((provider, model)) = identity.split_once('/') {
                 crate::cache_lifetimes::apply(provider, model, facts);
-                // Aliases already inherit the target's serve-time limits. Use
-                // that target's evidence, not the alias provider's unrelated cap.
-                let attachment_provider = response
+                // Attachment limits are rules of the endpoint that receives the
+                // request, not of the model. An alias routes through another
+                // backend (Code Assist for the Antigravity rows), whose limits no
+                // source states, so it gets none rather than its target's.
+                let is_alias = response
                     .aliased
                     .iter()
-                    .find(|alias| alias.model == *identity)
-                    .map_or(provider, |alias| alias.target_provider_id.as_str());
-                crate::attachment_limits::apply(attachment_provider, facts);
+                    .any(|alias| alias.model == *identity);
+                if !is_alias {
+                    crate::attachment_limits::apply(provider, facts);
+                }
                 if facts.contains_key("rate.input_audio") {
                     if let Some(audio) = crate::input_audio::sources()
                         .get(provider)

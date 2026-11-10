@@ -219,7 +219,7 @@ fn attachment_limits_exclude_gateways_and_historical_reads_and_never_write() {
 #[test]
 fn attachment_limits_survive_prefix_plane_paged_and_alias_reads() {
     let (store, _dir) = store();
-    for model in ["gemini-3.8-flash", "antigravity-gemini-3.8-flash"] {
+    for model in ["gemini-3.8-flash"] {
         for args in [
             json!({"provider_id":"google","model_id":model,"fact_prefixes":["limit.images_per_request"]}),
             json!({"provider_id":"google","model_id":model,"auth_method":"apikey","fact_prefixes":["limit.images_per_request"]}),
@@ -249,12 +249,31 @@ fn attachment_limits_survive_prefix_plane_paged_and_alias_reads() {
         response["models"]["anthropic/million"],
         json!({"limit.document_pages":600})
     );
-    let response = get(
-        &store,
-        json!({"provider_id":"google","model_id":"antigravity-claude-sonnet-5-5","fact_prefixes":["limit.image", "limit.document"]}),
-    );
-    assert_eq!(
-        response["models"]["google/antigravity-claude-sonnet-5-5"],
-        json!({"limit.images_per_request":600,"limit.image_bytes":7500000,"limit.image_long_edge_px":3000,"limit.document_pages":600})
-    );
+    // An alias is served by another backend (Code Assist), whose attachment
+    // limits no source states, so it carries none of its target's limits.
+    for model in [
+        "antigravity-claude-sonnet-5-5",
+        "antigravity-gemini-3.8-flash",
+    ] {
+        let response = get(
+            &store,
+            json!({"provider_id":"google","model_id":model,"fact_prefixes":["limit.image", "limit.document"]}),
+        );
+        let facts = response["models"][format!("google/{model}")]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            facts
+                .keys()
+                .all(|key| !key.starts_with("limit.image") && !key.starts_with("limit.document")),
+            "{model}: {facts:?}"
+        );
+        assert!(
+            response["aliased"]
+                .as_array()
+                .is_some_and(|a| !a.is_empty()),
+            "{model} must still be read as an alias"
+        );
+    }
 }

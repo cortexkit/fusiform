@@ -747,10 +747,6 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
-          "limit.document_pages": 600,
-          "limit.image_bytes": 7500000,
-          "limit.image_long_edge_px": 3000,
-          "limit.images_per_request": 600,
           "limit.output": 128000,
           "model.canonical_id": "anthropic/claude-sonnet-5-5",
           "model.family": "claude-sonnet",
@@ -1423,9 +1419,6 @@
           "existence": "present",
           "limit.audio_tokens_per_second": 32,
           "limit.context": 1048576,
-          "limit.document_bytes": 50000000,
-          "limit.document_pages": 1000,
-          "limit.images_per_request": 3600,
           "limit.output": 65536,
           "model.canonical_id": "google/gemini-3.8-flash",
           "model.family": "gemini-flash",
@@ -2322,9 +2315,6 @@
       "models": {
         "google/antigravity-gemini-4-argon": {
           "limit.context": 1048576,
-          "limit.document_bytes": 50000000,
-          "limit.document_pages": 1000,
-          "limit.images_per_request": 3600,
           "limit.output": 65536
         }
       },
@@ -2377,9 +2367,6 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
-          "limit.document_bytes": 50000000,
-          "limit.document_pages": 1000,
-          "limit.images_per_request": 3600,
           "limit.output": 65536,
           "model.canonical_id": "google/gemini-3.8-flash",
           "model.family": "gemini-flash",
