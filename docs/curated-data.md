@@ -21,6 +21,7 @@ that keep them honest.
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
 | `cache-lifetimes.json` | first-party OpenAI and Anthropic prompt-cache lifetimes and exact write-price multipliers | at read time, current reads only |
 | `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models, and optional documented audio tokens per second | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio`; at read time: joins `limit.audio_tokens_per_second` onto current rows serving that rate (§8) |
+| `output-audio-per-token.json` | providers with separately sourced output-audio token units and optional excluded models | at ingest: lets eligible unconditional `cost.output_audio` become `rate.output_audio`; conditional audio remains unpriced |
 | `plan-prices.json` | subscription list prices, quota values and service-tier entitlements | prices written to `plan_price_era` at start; quota values and service tiers joined only on current reads |
 | `models-dev-seed.json` | a copy of the upstream catalog for offline first boot | written as seed eras into an empty store |
 | `curated-providers.json` | sourced provider identities models.dev does not list | test-side provider vector generation only; never joined into served model rows |
@@ -222,6 +223,29 @@ spend-pricing consumer recognises it. It requires a positive `per` and explicit
 `increment` and `minimum_quantity`, and refuses `per` on token keys. The full
 rate, including its denominator, belongs to the curated row's stored claim in
 `curated_model_era`; it never enters models.dev's upstream fact eras.
+
+`google/gemini-3.8-flash-tts` is curated as speech with text input and audio
+output: $0.50/M text input, $9/M audio output, and 25 output audio tokens per
+second. The source says both prices double on 2027-01-01; only the current
+prices are served. `elevenlabs/eleven_flash_v2_5` uses the explicitly admitted
+`rate.input.per_character`, $0.04 per 1,000 characters, with unknown increment
+and minimum. Its documented 40,000-character request cap is not a token limit.
+Neither row borrows a text-output price or an input-audio conversion.
+
+A curated row may declare a sourced HTTPS `wire.api` as exactly
+`{value, from: "curated"}` and a verified `wire.family` token. These are the
+row's own claims, disclosed through `curated`, not provider-default wire
+corrections. Rows without declarations still carry no wire facts, and the
+loader rejects unknown protocol tokens, non-curated endpoint origins and
+`wire.npm`/`wire.shape` declarations. A recorded curated claim keeps its own
+declarations on historical reads; current-read-only derivation describes the
+upstream package rules, not these recorded facts.
+
+The output-audio source gate is independent of the input gate: Google and
+OpenAI pricing pages explicitly establish per-million-token output billing.
+Other providers, excluded models and conditional audio prices remain
+unattributed. Both source documents use the same 60-day review validation;
+output tokenization is model-specific rather than a provider-wide conversion.
 
 ### Held rows
 
@@ -966,7 +990,11 @@ makes no fact, never a fallback to a different protocol.
 
 Only `anthropic.messages`, `openai.responses`, `openai.chat_completions`,
 `openai.chatgpt_responses`, `google.generate_content`, `google.code_assist` and
-`aws.bedrock_converse` are admitted. The loader counts rejects for unknown
+`aws.bedrock_converse` are admitted.
+`elevenlabs.text_to_speech` is also admitted, verified from
+https://elevenlabs.io/docs/api-reference/text-to-speech/convert:
+`POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}`, header `xi-api-key`.
+The loader counts rejects for unknown
 tokens, malformed rules, missing provenance and duplicate selectors; shipped
 rules must have zero rejects. Alias and billing-plane loaders reject unknown
 protocol tokens too.
@@ -996,7 +1024,7 @@ row's value; unspecified planes inherit it. Only these planes override today:
 Curated plane-only and System One rows have no package-derived protocol. The
 Meta plane has an explicit verified value; no protocol is inferred for the
 Cloudflare or TypeSafe curated rows from their decision/extraction kind.
-`wire.family` is never stored, appears only on current reads, is omitted on
+For upstream rows, derived `wire.family` is never stored, appears only on current reads, is omitted on
 `at_ms` reads, and respects `wire.family` and `wire.` fact-prefix filters.
 `tests/it/wire_families.rs` exercises real seed witnesses, endpoint withholding,
 aliases, planes, history and filters through the served route.

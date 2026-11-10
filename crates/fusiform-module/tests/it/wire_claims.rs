@@ -51,7 +51,19 @@ fn published_wire_claims_reach_plain_reads_and_wire_namespace_reads() {
         "the curated population must be exercised"
     );
     for row in curated.values() {
-        assert!(!row.facts.keys().any(|key| key.starts_with("wire.")));
+        let wire: std::collections::BTreeMap<_, _> = row
+            .facts
+            .iter()
+            .filter(|(key, _)| key.starts_with("wire."))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        assert_eq!(
+            wire,
+            super::media_catalog::expected_curated_wire(&format!(
+                "{}/{}",
+                row.provider_id, row.model_id
+            ))
+        );
     }
 
     for arguments in [
@@ -94,8 +106,14 @@ fn published_wire_claims_reach_plain_reads_and_wire_namespace_reads() {
             assert!(!unknown.keys().any(|key| key.starts_with("wire.")));
         }
         for (provider, model) in curated.keys() {
-            if let Some(facts) = response.models.get(&format!("{provider}/{model}")) {
-                assert!(!facts.keys().any(|key| key.starts_with("wire.")));
+            let identity = format!("{provider}/{model}");
+            if let Some(facts) = response.models.get(&identity) {
+                let wire: std::collections::BTreeMap<_, _> = facts
+                    .iter()
+                    .filter(|(key, _)| key.starts_with("wire."))
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+                assert_eq!(wire, super::media_catalog::expected_curated_wire(&identity));
             }
         }
     }

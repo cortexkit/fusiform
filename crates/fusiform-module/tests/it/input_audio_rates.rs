@@ -333,8 +333,9 @@ fn the_alias_carries_its_targets_input_audio_marked() {
 }
 
 /// Ingesting the embedded seed with the shipped evidence over a store seeded
-/// without it writes exactly one `rate.input_audio` era per evidenced model
-/// that publishes `cost.input_audio`, and nothing for any other fact.
+/// without it writes exactly one era per evidenced input/output audio key,
+/// and nothing for any other fact. A model publishing both directions must
+/// open two independently attributable eras.
 ///
 /// This is the first poll after deploy, at full size. The expected count is
 /// computed from the raw seed JSON, not from the normalizer under test.
@@ -387,33 +388,73 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
 
     let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
     let mut expected = BTreeMap::new();
-    for (provider, row) in fusiform_module::input_audio::sources() {
-        for (model, published) in seed[provider]["models"].as_object().unwrap() {
-            let excluded = row.excluded_models.iter().any(|m| &m.model_id == model);
-            if published["cost"].get("input_audio").is_some() && !excluded {
-                expected.insert((provider.clone(), model.clone()), ());
+    for (cost_key, sources) in [
+        ("input_audio", fusiform_module::input_audio::sources()),
+        ("output_audio", fusiform_module::output_audio::sources()),
+    ] {
+        for (provider, row) in sources {
+            for (model, published) in seed[provider]["models"].as_object().unwrap() {
+                let excluded = row.excluded_models.iter().any(|m| &m.model_id == model);
+                if published["cost"].get(cost_key).is_some() && !excluded {
+                    expected.insert(
+                        (provider.clone(), model.clone(), format!("rate.{cost_key}")),
+                        (),
+                    );
+                }
             }
         }
     }
-    let written: BTreeMap<(String, String), ()> = plan
+    let written: BTreeMap<(String, String, String), ()> = plan
         .eras
         .iter()
         .map(|era| {
-            assert_eq!(
-                era.fact_key.as_str(),
-                "rate.input_audio",
-                "{}/{}: only the audio rate may open an era",
+            assert!(
+                ["rate.input_audio", "rate.output_audio"].contains(&era.fact_key.as_str()),
+                "{}/{}: only the evidenced audio rates may open eras",
                 era.provider_id,
                 era.model_id
             );
-            ((era.provider_id.clone(), era.model_id.clone()), ())
+            (
+                (
+                    era.provider_id.clone(),
+                    era.model_id.clone(),
+                    era.fact_key.as_str().into(),
+                ),
+                (),
+            )
         })
         .collect();
-    assert_eq!(written.len(), plan.eras.len(), "one era per model");
+    assert_eq!(
+        written.len(),
+        plan.eras.len(),
+        "one era per model and audio direction"
+    );
     assert_eq!(written, expected);
     assert_eq!(plan.new_models, 0);
     assert_eq!(plan.disappeared_models, 0);
     // The count a deploy should expect, pinned so a reviewer sees it move:
-    // google's 14 rows publishing input_audio, less its one excluded model.
-    assert_eq!(plan.eras.len(), 13, "{:?}", written.keys());
+    // Google's 13 eligible input rows, plus two Google output rows and one
+    // OpenAI output row. Live Preview carries both independent audio facts.
+    assert_eq!(plan.eras.len(), 16, "{:?}", written.keys());
+    assert_eq!(
+        written
+            .keys()
+            .filter(|(_, _, key)| key == "rate.input_audio")
+            .count(),
+        13
+    );
+    assert_eq!(
+        written
+            .keys()
+            .filter(|(_, _, key)| key == "rate.output_audio")
+            .count(),
+        3
+    );
+    for key in ["rate.input_audio", "rate.output_audio"] {
+        assert!(written.contains_key(&(
+            "google".into(),
+            "gemini-3.1-flash-live-preview".into(),
+            key.into()
+        )));
+    }
 }

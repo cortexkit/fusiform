@@ -33,7 +33,7 @@ fn observation(store: &CatalogStore, at: i64) -> i64 {
         .unwrap()
 }
 
-fn fixture() -> (CatalogStore, tempfile::TempDir) {
+pub(super) fn fixture() -> (CatalogStore, tempfile::TempDir) {
     let (store, dir) = empty_store();
     let mut upstream = serde_json::Map::new();
     for i in 0..6 {

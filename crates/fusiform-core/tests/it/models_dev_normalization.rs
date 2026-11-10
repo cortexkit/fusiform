@@ -503,6 +503,44 @@ fn tiered_audio_is_not_served_even_with_evidence() {
     assert!(audio_rate(model(&outcome, "p/m")).is_some());
 }
 
+#[test]
+fn output_audio_requires_its_own_evidence_and_refuses_conditional_prices() {
+    let doc =
+        serde_json::json!({"p":{"models":{"m":{"cost":{"input_audio":32,"output_audio":64}}}}});
+    let input_only = ChargeUnitEvidence::input_audio_per_token(["p"]);
+    let output = input_only.clone().with_output_audio_per_token(["p"]);
+    let has_output = |doc: &serde_json::Value, evidence: &ChargeUnitEvidence| {
+        let outcome =
+            normalize_models_dev_with(&serde_json::to_vec(doc).unwrap(), evidence).unwrap();
+        model(&outcome, "p/m").rates.iter().any(|rate| {
+            rate.basis
+                == ChargeBasis::PerMillionTokens {
+                    class: TokenClass::OutputAudio,
+                }
+        })
+    };
+    assert!(!has_output(&doc, &ChargeUnitEvidence::none()));
+    assert!(!has_output(&doc, &input_only));
+    assert!(has_output(&doc, &output));
+    assert!(!has_output(
+        &doc,
+        &output.clone().excluding_output_audio_of("p", "m")
+    ));
+    assert!(!has_output(
+        &doc,
+        &ChargeUnitEvidence::none().with_output_audio_per_token(["other"])
+    ));
+    for field in ["tiers", "context_over_200k"] {
+        let mut tiered = doc.clone();
+        tiered["p"]["models"]["m"]["cost"]["tiers"] =
+            serde_json::json!([{"output_audio":96,"tier":{"type":"context","size":32000}}]);
+        if field == "context_over_200k" {
+            tiered["p"]["models"]["m"]["cost"][field] = serde_json::json!({"output_audio":96});
+        }
+        assert!(!has_output(&tiered, &output), "{field}");
+    }
+}
+
 /// Legacy presence flags remain available alongside served connection claims.
 #[test]
 fn renderer_selecting_fields_are_quarantined() {

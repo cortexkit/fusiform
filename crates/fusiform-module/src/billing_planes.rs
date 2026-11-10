@@ -392,6 +392,7 @@ pub fn class_name(class: TokenClass) -> &'static str {
         TokenClass::CacheWrite => "cache_write",
         TokenClass::Reasoning => "reasoning",
         TokenClass::InputAudio => "input_audio",
+        TokenClass::OutputAudio => "output_audio",
     }
 }
 

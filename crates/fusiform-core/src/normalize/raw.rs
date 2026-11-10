@@ -242,13 +242,21 @@ impl RawCost {
     /// structures for an audio price that would otherwise be invisible to the
     /// normalizer.
     pub fn prices_input_audio_conditionally(&self) -> bool {
-        self.tiers
-            .iter()
-            .any(|tier| tier.scalars.contains_key("input_audio"))
+        self.prices_audio_conditionally("input_audio")
+    }
+
+    /// Output audio has no served tier selector either: keep the whole key
+    /// unattributed when serving only its base would understate a tiered bill.
+    pub fn prices_output_audio_conditionally(&self) -> bool {
+        self.prices_audio_conditionally("output_audio")
+    }
+
+    fn prices_audio_conditionally(&self, key: &str) -> bool {
+        self.tiers.iter().any(|tier| tier.scalars.contains_key(key))
             || self
                 .context_over_200k
                 .as_ref()
-                .is_some_and(|legacy| legacy.contains_key("input_audio"))
+                .is_some_and(|legacy| legacy.contains_key(key))
     }
 }
 

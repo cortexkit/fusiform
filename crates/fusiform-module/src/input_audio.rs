@@ -84,6 +84,12 @@ pub type InputAudioSources = BTreeMap<String, InputAudioSource>;
 /// one. Declined rows are validated too, and one naming a listed provider is
 /// a reject: the file cannot both accept and decline the same source.
 pub fn load_reporting_rejects(doc: &str) -> (InputAudioSources, Vec<String>) {
+    load_for_schema(doc, SCHEMA)
+}
+
+/// The two directions share source validation, not unit evidence: each has its
+/// own schema, source document and normalizer allowlist.
+pub(crate) fn load_for_schema(doc: &str, schema: &str) -> (InputAudioSources, Vec<String>) {
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Doc {
@@ -101,11 +107,11 @@ pub fn load_reporting_rejects(doc: &str) -> (InputAudioSources, Vec<String>) {
             )
         }
     };
-    if doc.schema != SCHEMA {
+    if doc.schema != schema {
         return (
             BTreeMap::new(),
             vec![format!(
-                "input-audio sources declare schema {:?}, expected {SCHEMA:?}",
+                "audio sources declare schema {:?}, expected {schema:?}",
                 doc.schema
             )],
         );
@@ -213,7 +219,7 @@ pub fn evidence_from(rows: &InputAudioSources) -> ChargeUnitEvidence {
 
 /// The evidence production ingest and seeding normalize with.
 pub fn evidence() -> ChargeUnitEvidence {
-    evidence_from(sources())
+    crate::output_audio::add_evidence(evidence_from(sources()))
 }
 
 /// Listed providers the embedded seed does not carry, or carries with no

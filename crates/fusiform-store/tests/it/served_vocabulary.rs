@@ -50,6 +50,7 @@ const SERVED_FACT_KEYS: &[&str] = &[
     // providers whose own pricing page bills audio per token. Absent
     // elsewhere, which means the unit is not established, never free.
     "rate.input_audio",
+    "rate.output_audio",
     // What the model IS, as upstream states it, independent of who serves it.
     // Admitted deliberately: `family` is published identically by every
     // provider serving the same weights, and `open_weights` marks the
@@ -99,9 +100,16 @@ fn the_served_fact_set_is_exactly_this() {
         serde_json::json!({"shape": "responses"});
     fixture["anthropic"]["models"]["claude-sonnet-4-5"]["type"] =
         serde_json::json!("transcription");
+    let seed: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../fusiform-module/data/models-dev-seed.json"
+    ))
+    .unwrap();
+    fixture["google"]["models"]["gemini-3.1-flash-live-preview"] =
+        seed["google"]["models"]["gemini-3.1-flash-live-preview"].clone();
     let outcome = normalize_models_dev_with(
         &serde_json::to_vec(&fixture).unwrap(),
-        &ChargeUnitEvidence::input_audio_per_token(["google"]),
+        &ChargeUnitEvidence::input_audio_per_token(["google"])
+            .with_output_audio_per_token(["google"]),
     )
     .expect("fixture normalizes");
 

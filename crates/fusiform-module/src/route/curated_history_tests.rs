@@ -266,9 +266,9 @@ fn a_read_after_the_first_era_serves_jevs_recorded_rates_and_disclosure() {
     let (store, _dir) = store();
     let boot = jev_established_at() + 5 * DAY_MS;
     let written = apply_to_store(&store, &shipped(), boot).unwrap();
-    // The test table releases all seven curated rows, so the first boot writes
+    // The test table releases all nine curated rows, so the first boot writes
     // one era per row.
-    assert_eq!(written, 7);
+    assert_eq!(written, 9);
 
     let file_row = &shipped().models[&(TYPESAFE.to_string(), JEV.to_string())];
     for at in [
@@ -400,7 +400,7 @@ fn a_changed_curated_price_opens_an_era_dated_at_the_boot_that_carries_it() {
 fn re_applying_an_unchanged_or_only_redated_file_writes_nothing() {
     let (store, _dir) = store();
     let boot = jev_established_at() + DAY_MS;
-    assert_eq!(apply_to_store(&store, &shipped(), boot).unwrap(), 7);
+    assert_eq!(apply_to_store(&store, &shipped(), boot).unwrap(), 9);
     assert_eq!(
         apply_to_store(&store, &shipped(), boot + DAY_MS).unwrap(),
         0
@@ -504,8 +504,8 @@ fn a_row_held_from_its_first_boot_is_first_served_at_its_release() {
     let held_boot = jev_established_at() + DAY_MS;
     assert_eq!(
         apply_to_store(&store, &table(holding(TYPESAFE, JEV)), held_boot).unwrap(),
-        7,
-        "six served rows and one tombstone for the held row"
+        9,
+        "eight served rows and one tombstone for the held row"
     );
     let released_at = held_boot + DAY_MS;
     assert_eq!(apply_to_store(&store, &shipped(), released_at).unwrap(), 1);

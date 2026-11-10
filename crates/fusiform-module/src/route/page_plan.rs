@@ -22,6 +22,7 @@ struct PagePlan {
     providers: Vec<(String, ProviderContribution)>,
     ranges: Vec<ProviderRange>,
     envelope_bytes: usize,
+    quality_bytes: usize,
 }
 
 static PAGE_PLAN: Mutex<Option<Arc<PagePlan>>> = Mutex::new(None);
@@ -45,6 +46,7 @@ impl PagePlan {
         let mut estimate = PageEstimate {
             bytes: self.envelope_bytes,
             present: [false; 10],
+            pending_quality_bytes: self.quality_bytes,
         };
         let mut through = None;
         for (index, (provider, contribution)) in remaining.iter().enumerate() {
@@ -273,16 +275,19 @@ fn build_plan(
     };
     let mut envelope = render(source, snapshot, request.at_ms.map(Timestamp), None, None);
     envelope.quality_scores = quality.clone();
+    let quality_bytes = quality_disclosure_size(quality.as_ref())?;
     // Width rather than a cached timestamp keeps page one's resolved_at a read
     // instant, while allowing the plan to survive ordinary clock ticks.
     let envelope_bytes =
-        compact_size(&envelope)? - envelope.resolved_at_ms.to_string().len() + key.timestamp_width;
+        compact_size(&envelope)? - quality_bytes - envelope.resolved_at_ms.to_string().len()
+            + key.timestamp_width;
     let mut plan = PagePlan {
         key,
         budget,
         providers,
         ranges: Vec::new(),
         envelope_bytes,
+        quality_bytes,
     };
     let mut after = None;
     loop {
@@ -305,6 +310,48 @@ fn build_plan(
 mod tests {
     use super::*;
     use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+
+    #[test]
+    fn ungraded_provider_pages_do_not_pay_for_quality_disclosure() {
+        let (store, _dir) = super::super::paging_tests::fixture();
+        let mut request = CatalogGetRequest::default();
+        let cache = Mutex::new(None);
+        let whole = serve_catalog_get_request(
+            &store,
+            request.clone(),
+            usize::MAX,
+            usize::MAX,
+            &cache,
+            None,
+        )
+        .unwrap();
+        assert!(
+            whole.quality_scores.is_some(),
+            "later providers must actually carry grades"
+        );
+        let mut expected = whole.clone();
+        scope_page(
+            &mut expected,
+            &BTreeSet::from(["cloudflare-workers-ai".into(), "elevenlabs".into()]),
+        );
+        assert!(expected.quality_scores.is_none());
+        expected.next_page_token = Some(format!(
+            "v1:{}:{}:elevenlabs",
+            whole.catalog_version, whole.resolved_at_ms,
+        ));
+        // Both ungraded providers fit exactly when measured as a real reply;
+        // charging a later provider's quality disclosure would evict ElevenLabs.
+        let budget = serde_json::to_vec(&expected).unwrap().len();
+        request.paged = true;
+        let page =
+            serve_catalog_get_request(&store, request, budget, usize::MAX, &cache, None).unwrap();
+        assert_eq!(
+            page.models.keys().collect::<Vec<_>>(),
+            expected.models.keys().collect::<Vec<_>>()
+        );
+        assert!(page.quality_scores.is_none());
+        assert_eq!(serde_json::to_vec(&page).unwrap().len(), budget);
+    }
 
     #[test]
     fn planned_seed_pages_match_the_original_whole_render_packer() {
@@ -353,6 +400,10 @@ mod tests {
                     None,
                 )
                 .unwrap();
+                assert!(
+                    serde_json::to_vec(&page).unwrap().len() <= CATALOG_PAGE_BYTES,
+                    "the real seed page exceeds the 3 MiB budget"
+                );
                 let mut reference = whole.clone();
                 reference.resolved_at_ms = page.resolved_at_ms;
                 let reference =

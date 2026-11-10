@@ -257,9 +257,8 @@ fn apply_with_count_reader(
             duration,
         } => {
             let raw_hash = hash_bytes(&bytes);
-            // Pass the curated input-audio evidence, so an eligible row with an
-            // unconditional per-token audio price normalizes as
-            // `rate.input_audio`.
+            // Pass separately sourced input/output audio evidence so only
+            // documented unconditional token prices become audio rate facts.
             let outcome_parse = normalize_models_dev_with(&bytes, &crate::input_audio::evidence());
 
             let catalog = match outcome_parse {

@@ -21,6 +21,7 @@ mod http_stub;
 mod input_audio_rates;
 mod live;
 mod manifest_probe;
+mod media_catalog;
 mod mode_rates;
 mod model_type;
 mod providers_vector;

@@ -169,6 +169,9 @@ fn every_served_fact_has_a_field_id() {
         FieldId::Rate {
             class: TokenClass::InputAudio,
         },
+        FieldId::Rate {
+            class: TokenClass::OutputAudio,
+        },
         FieldId::Limit {
             limit: LimitId::Context,
         },
@@ -257,15 +260,23 @@ fn the_closed_vocabulary_matches_the_normalizer() {
     const FIXTURE: &[u8] =
         include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
     // With evidence for the fixture's google provider, as the module's shipped
-    // input-audio table states, so `rate.input_audio` is produced.
+    // audio source tables state, so both audio rate keys are produced. The
+    // older excerpt predates output audio; use a real seed row as its witness.
     let mut fixture: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
     fixture["anthropic"]["models"]["claude-sonnet-4-5"]["provider"] =
         serde_json::json!({"shape": "responses"});
     fixture["anthropic"]["models"]["claude-sonnet-4-5"]["type"] =
         serde_json::json!("transcription");
+    let seed: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../fusiform-module/data/models-dev-seed.json"
+    ))
+    .unwrap();
+    fixture["google"]["models"]["gemini-3.1-flash-live-preview"] =
+        seed["google"]["models"]["gemini-3.1-flash-live-preview"].clone();
     let outcome = normalize_models_dev_with(
         &serde_json::to_vec(&fixture).unwrap(),
-        &ChargeUnitEvidence::input_audio_per_token(["google"]),
+        &ChargeUnitEvidence::input_audio_per_token(["google"])
+            .with_output_audio_per_token(["google"]),
     )
     .unwrap();
 

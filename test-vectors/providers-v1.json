@@ -768,7 +768,9 @@
       "doc": "https://elevenlabs.io/docs/overview/intro",
       "source": "hand_kept",
       "env": [],
-      "output_modalities": []
+      "output_modalities": [
+        "audio"
+      ]
     },
     {
       "id": "empiriolabs",

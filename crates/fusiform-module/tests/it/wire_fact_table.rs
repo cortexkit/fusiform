@@ -70,6 +70,10 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
         serde_json::json!({"shape": "responses"});
     fixture["anthropic"]["models"]["claude-sonnet-4-5"]["type"] =
         serde_json::json!("transcription");
+    let seed: serde_json::Value =
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+    fixture["google"]["models"]["gemini-3.1-flash-live-preview"] =
+        seed["google"]["models"]["gemini-3.1-flash-live-preview"].clone();
     let outcome = normalize_models_dev_with(
         &serde_json::to_vec(&fixture).unwrap(),
         &fusiform_module::input_audio::evidence(),
@@ -281,6 +285,7 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
 /// as a statement. `model.kind` is absent on every upstream row, which means
 /// "not stated", never "chat".
 pub(crate) const CURATED_ONLY: &[&str] = &[
+    "limit.output_audio_tokens_per_second",
     "model.kind",
     "route.reasoning_wire_ids",
     "route.reasoning_default",

@@ -359,14 +359,15 @@ pub struct NormalizeOutcome {
 /// that models.dev publishes without one.
 ///
 /// The payload's key name is never the evidence. models.dev puts
-/// `input_audio` beside the per-token rates on rows whose providers bill audio
+/// audio cost keys beside the per-token rates on rows whose providers bill audio
 /// in different units, so the key alone cannot say what a number charges
 /// for. A provider joins this set only when its OWN pricing page states that
-/// audio input is priced per million tokens; that decision is curated and
-/// reviewed outside this crate (the module's `input-audio-per-token.json`),
+/// the corresponding audio direction is priced per million tokens; that decision
+/// is curated and reviewed outside this crate (the module's separate input and
+/// output audio source files),
 /// and handed in here as data so normalization stays free of file IO.
 ///
-/// With no evidence supplied, every `input_audio` stays
+/// With no evidence supplied, every audio cost key stays
 /// `Unpriced(UnknownChargeBasis)` and is counted. Poll and seed normalization
 /// supply the curated evidence; a listed provider can still exclude single
 /// models whose audio price its page does not support.
@@ -376,6 +377,8 @@ pub struct ChargeUnitEvidence {
     /// `(provider_id, model_id)` rows left unattributed although the provider
     /// is listed.
     input_audio_excluded: std::collections::BTreeSet<(String, String)>,
+    output_audio_per_token: std::collections::BTreeSet<String>,
+    output_audio_excluded: std::collections::BTreeSet<(String, String)>,
 }
 
 impl ChargeUnitEvidence {
@@ -394,6 +397,7 @@ impl ChargeUnitEvidence {
         Self {
             input_audio_per_token: providers.into_iter().map(Into::into).collect(),
             input_audio_excluded: Default::default(),
+            ..Self::default()
         }
     }
 
@@ -416,18 +420,47 @@ impl ChargeUnitEvidence {
                 .input_audio_excluded
                 .contains(&(provider_id.to_string(), model_id.to_string()))
     }
+
+    /// Add providers whose own pricing page establishes output-audio tokens.
+    pub fn with_output_audio_per_token<I, S>(mut self, providers: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.output_audio_per_token = providers.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Leave an unsupported model unpriced even when its provider is listed.
+    pub fn excluding_output_audio_of(
+        mut self,
+        provider_id: impl Into<String>,
+        model_id: impl Into<String>,
+    ) -> Self {
+        self.output_audio_excluded
+            .insert((provider_id.into(), model_id.into()));
+        self
+    }
+
+    /// Whether this row's output-audio cost has an established token unit.
+    pub fn bills_output_audio_per_token(&self, provider_id: &str, model_id: &str) -> bool {
+        self.output_audio_per_token.contains(provider_id)
+            && !self
+                .output_audio_excluded
+                .contains(&(provider_id.to_string(), model_id.to_string()))
+    }
 }
 
 /// Normalize a models.dev document with no charge-unit evidence.
 ///
-/// Every `input_audio` stays unpriced. Production ingest uses
+/// Every audio cost key stays unpriced. Production ingest uses
 /// [`normalize_models_dev_with`] and the curated evidence.
 pub fn normalize_models_dev(bytes: &[u8]) -> Result<NormalizeOutcome, NormalizeError> {
     normalize_models_dev_with(bytes, &ChargeUnitEvidence::none())
 }
 
 /// Normalize a models.dev document, using `evidence` to attribute eligible
-/// `input_audio` values as per-token rates. Excluded models, and cost blocks
+/// input/output audio values as per-token rates. Excluded models, and cost blocks
 /// that also price audio in a context tier or the legacy `context_over_200k`
 /// block, stay unattributed.
 pub fn normalize_models_dev_with(
@@ -458,7 +491,7 @@ pub fn normalize_models_dev_with(
                 raw_model,
                 npm.as_deref(),
                 api.as_deref(),
-                evidence.bills_input_audio_per_token(&provider_id, model_id),
+                evidence,
                 &mut findings,
             )?;
             model.provider_name = name.clone().filter(|name| !name.is_empty());
@@ -487,7 +520,7 @@ fn normalize_model(
     raw: &RawModel,
     provider_npm: Option<&str>,
     provider_api: Option<&str>,
-    input_audio_per_token: bool,
+    evidence: &ChargeUnitEvidence,
     findings: &mut Vec<NormalizeError>,
 ) -> Result<NormalizedModel, NormalizeError> {
     let label = format!("{provider_id}/{model_id}");
@@ -601,7 +634,13 @@ fn normalize_model(
     };
 
     let mut rates = match cost.as_ref() {
-        Some(cost) => normalize_rates(&label, cost, input_audio_per_token, findings)?,
+        Some(cost) => normalize_rates(
+            &label,
+            cost,
+            evidence.bills_input_audio_per_token(provider_id, model_id),
+            evidence.bills_output_audio_per_token(provider_id, model_id),
+            findings,
+        )?,
         // No cost object at all. Measured on 420 models. Recording nothing here
         // is correct: the absence is expressed by there being no rate rows, and
         // a consumer asking for a rate gets `NoCatalogCoverage` from the store
@@ -675,6 +714,7 @@ fn normalize_rates(
     label: &str,
     cost: &raw::RawCost,
     input_audio_per_token: bool,
+    output_audio_per_token: bool,
     findings: &mut Vec<NormalizeError>,
 ) -> Result<Vec<NormalizedRate>, NormalizeError> {
     let mut rates = Vec::new();
@@ -710,6 +750,19 @@ fn normalize_rates(
             rates.push(NormalizedRate {
                 basis: ChargeBasis::PerMillionTokens {
                     class: TokenClass::InputAudio,
+                },
+                condition: RateCondition::Always,
+                value: rate_value(label, key, &cost.scalars[key.as_str()])?,
+            });
+            continue;
+        }
+        if key == "output_audio"
+            && output_audio_per_token
+            && !cost.prices_output_audio_conditionally()
+        {
+            rates.push(NormalizedRate {
+                basis: ChargeBasis::PerMillionTokens {
+                    class: TokenClass::OutputAudio,
                 },
                 condition: RateCondition::Always,
                 value: rate_value(label, key, &cost.scalars[key.as_str()])?,

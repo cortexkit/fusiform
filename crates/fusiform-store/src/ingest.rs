@@ -354,6 +354,7 @@ pub const SERVED_FACT_NAMESPACE: &[&str] = &[
     // Audio input per million tokens, produced only for providers whose own
     // pricing documentation establishes per-token audio billing.
     "rate.input_audio",
+    "rate.output_audio",
 ];
 
 /// The facts a model contributes, with their stored values.

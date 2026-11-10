@@ -186,8 +186,9 @@ recorded history, with the provider label in force at that instant (§3 item
 facts, not live labels. Name eras can be corrected independently through
 `{"field":"model","attribute":"name"}` and `{"field":"provider_name"}`.
 
-Except for explicitly disclosed corrections, `wire.npm`, `wire.api` and
-`wire.shape` are models.dev's claims, not fusiform's transport policy.
+Except for explicitly disclosed corrections and a curated row's own sourced
+endpoint, `wire.npm`, `wire.api` and `wire.shape` are models.dev's claims,
+not fusiform's transport policy.
 For each field independently, a model's `provider.npm` or `provider.api` wins
 over its provider's `npm` or `api` default; `from` names the level that supplied
 the value. `provider.shape` exists only on models. Missing fields create **no
@@ -195,7 +196,8 @@ fact**: absence means unknown, never an inferred default. Strings pass through
 verbatim, including empty strings, URL spelling and trailing slashes. `wire.api`
 is a base URL, not a request protocol token. Consumers own runner support and
 transport quirks. Alias rows do not
-inherit these backend-specific claims (§5.5), and curated rows carry none.
+inherit these backend-specific claims (§5.5), and they are not projected onto
+curated rows (which may state their own sourced endpoint).
 
 `wire.family` is a fact about the wire: this route's request protocol is
 verified, from its client package or the provider's own docs. It is not a
@@ -207,7 +209,10 @@ another grammar.
 
 The only tokens are `anthropic.messages`, `openai.responses`,
 `openai.chat_completions`, `openai.chatgpt_responses`,
-`google.generate_content`, `google.code_assist` and `aws.bedrock_converse`.
+`google.generate_content`, `google.code_assist`, `aws.bedrock_converse` and
+`elevenlabs.text_to_speech`. The ElevenLabs token is verified from its
+[text-to-speech endpoint](https://elevenlabs.io/docs/api-reference/text-to-speech/convert),
+`POST /v1/text-to-speech/{voice_id}` with `xi-api-key` authentication.
 For plain upstream rows, the compiled-in `wire-families.json` matches the exact
 `wire.npm` package and `wire.shape` (including absence). Today's verification is
 broca's pinned `wire_family` table at
@@ -224,8 +229,26 @@ value with the optional `wire_family` in `billing-planes.json`: `openai/chatgpt`
 uses `openai.chatgpt_responses`, and `meta/oauth` uses `openai.responses`.
 Other planes inherit the row's value. Curated plane-only and System One rows
 have no package-derived protocol; a plane's verified value can still apply.
-These facts are computed only on current reads, never stored, and omitted on
+These derived facts are computed only on current upstream reads, never stored, and omitted on
 `at_ms` reads. `fact_prefixes: ["wire.family"]` and `["wire."]` select them.
+
+Curated rows may state their own sourced `wire.api` (`from: curated`)
+and verified `wire.family`, without inheriting a provider default or a
+package-derived rule. The endpoint must be HTTPS and the family must be an
+admitted verified token. These declarations belong to the recorded curated
+claim and may therefore also appear on its historical reads. A curated row
+without declarations still carries neither fact; `wire.npm` and `wire.shape`
+are never inferred or copied onto it. Gemini Flash TTS uses
+`google.generate_content`, verified from the model page's supported
+[GenerateContent method](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash-tts).
+
+`rate.output_audio` is USD per million output-audio tokens, not seconds or text
+tokens. Upstream audio output passes a separate sourced unit gate from input
+audio. `limit.output_audio_tokens_per_second` is a model's documented output
+conversion, distinct from the input-only `limit.audio_tokens_per_second`.
+ElevenLabs Flash uses `rate.input.per_character`: $0.04 per 1,000 characters,
+with unknown `increment` and `minimum_quantity`, in the same unit-billed shape
+as transcription's `rate.input_audio.per_second`.
 
 Current reads correct OpenCode Go's `wire.api` to the per-model base in
 `@earendil-works/pi-ai` 1.4.0's catalog, verified against its provider code at

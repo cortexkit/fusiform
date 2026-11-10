@@ -1090,7 +1090,7 @@ pub const SERVED_FACTS: &[ServedFact] = &[
     ServedFact {
         key: "wire.family",
         class: FactClass::ByteAffecting,
-        note: "verified request protocol token; selects the request grammar, not runner support. Current reads only, never stored. Absent means the request protocol is not verified. wire.api is a URL, not this token.",
+        note: "verified request protocol token; selects the request grammar, not runner support. Derived only on current upstream reads; curated rows may declare their own sourced token in their recorded claim. Absent means the request protocol is not verified. wire.api is a URL, not this token.",
     },
     ServedFact {
         key: "wire.npm",
@@ -1107,7 +1107,7 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                wins over the provider default. from is model or provider, except \
                sourced current-read corrections use curated and are disclosed in \
                wire_corrections. Withheld endpoints are absent and disclosed there. \
-               No URL normalization. Not projected onto aliases or curated rows.",
+               No URL normalization. Not projected onto aliases or curated rows; a curated row may declare its own sourced endpoint with from: curated, disclosed in curated.",
     },
     ServedFact {
         key: "wire.shape",
@@ -1126,6 +1126,11 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         key: "limit.audio_tokens_per_second",
         class: FactClass::Advisory,
         note: "integer audio tokens per second of input audio, curated from the provider's documentation; current reads only, on rows serving rate.input_audio from a provider whose docs state the figure; otherwise no fact.",
+    },
+    ServedFact {
+        key: "limit.output_audio_tokens_per_second",
+        class: FactClass::Advisory,
+        note: "documented output-audio tokens per second for this model; distinct from the input-audio conversion. Absent means unknown, never a default.",
     },
     ServedFact {
         key: "limit.context",
@@ -1333,6 +1338,11 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "per million audio input tokens, served only for providers whose \
                docs establish per-token audio billing; absent elsewhere means \
                not established, never free",
+    },
+    ServedFact {
+        key: "rate.output_audio",
+        class: FactClass::Money,
+        note: "per million audio output tokens; upstream values require provider documentation establishing the token unit, curated values quote their own source. Absent means not established, never free.",
     },
 ];
 

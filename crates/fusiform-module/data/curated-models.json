@@ -3,6 +3,51 @@
   "purpose": "Provider rows models.dev does not carry: models published only at lab level, and providers models.dev does not list. Current reads serve these rows from this file; every start also records each row's claim in the store, so a point-in-time read serves the claim in force at its instant. Login methods are an allowlist, not a preference.",
   "models": [
     {
+      "provider_id": "google",
+      "model_id": "gemini-3.8-flash-tts",
+      "auth_methods": ["apikey"],
+      "facts": {
+        "existence": "present",
+        "model.name": "Gemini 3.8 Flash TTS",
+        "model.type": "speech",
+        "capability.input_modalities": ["text"],
+        "capability.output_modalities": ["audio"],
+        "limit.context": 8192,
+        "limit.output": 16384,
+        "limit.output_audio_tokens_per_second": 25,
+        "rate.input": {"state": "priced", "units": 50, "exponent": 2, "currency": "USD", "unit_provenance": {"kind": "stated"}},
+        "rate.output_audio": {"state": "priced", "units": 9, "exponent": 0, "currency": "USD", "unit_provenance": {"kind": "stated"}},
+        "wire.api": {"value": "https://generativelanguage.googleapis.com/v1beta", "from": "curated"},
+        "wire.family": "google.generate_content"
+      },
+      "source_ref": "Read 2026-11-10. https://ai.google.dev/gemini-api/docs/pricing: \"Paid Tier, per 1M tokens in USD\"; input \"$0.50 (text) through December 31, 2026.\"; output \"$9.00 (audio) through December 31, 2026.\"; \"Audio tokens correspond to 25 tokens per second of audio.\" Both prices double on 2027-01-01 to $1.00 input and $18.00 audio output; those future prices are not served. https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash-tts: \"Gemini 3.8 Flash TTS\"; \"Input token limit 8,192\"; \"Output token limit 16,384\"; supported methods include \"GenerateContent\". https://ai.google.dev/gemini-api/docs/speech-generation: model id \"gemini-3.8-flash-tts\"; text input and audio output. No text-output rate is stated, so no rate.output is served.",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "provider_id": "elevenlabs",
+      "model_id": "eleven_flash_v2_5",
+      "auth_methods": ["apikey"],
+      "facts": {
+        "existence": "present",
+        "provider.name": "ElevenLabs",
+        "model.name": "Eleven Flash v2.5",
+        "model.type": "speech",
+        "capability.input_modalities": ["text"],
+        "capability.output_modalities": ["audio"],
+        "rate.input.per_character": {
+          "state": "priced", "units": 4, "exponent": 2, "currency": "USD",
+          "unit_provenance": {"kind": "stated"}, "per": 1000,
+          "increment": {"kind": "unknown"}, "minimum_quantity": {"kind": "unknown"}
+        },
+        "wire.api": {"value": "https://api.elevenlabs.io/v1", "from": "curated"},
+        "wire.family": "elevenlabs.text_to_speech"
+      },
+      "source_ref": "Read 2026-11-10. https://elevenlabs.io/pricing/api: \"API usage is billed in US dollars, not credits. Text to Speech $0.08 per 1,000 characters (multilingual models) or $0.04 (Flash/Turbo).\"; \"Text to Speech is billed per character.\" https://elevenlabs.io/docs/overview/models: \"eleven_flash_v2_5\", \"Eleven Flash v2.5\", \"40,000 characters per request\". This is a character request cap, not a token context limit, and is not served as limit.context. https://elevenlabs.io/docs/api-reference/text-to-speech/convert: \"POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}\"; header \"xi-api-key\". The endpoint converts text to audio. Served as $0.04 per 1,000 characters using the typed unit-billed shape; the page states no rounding or minimum, so increment and minimum_quantity are unknown, not none. No per-token or output rate is stated.",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
       "provider_id": "meta",
       "model_id": "muse-wonder-full-1.0",
       "auth_methods": ["oauth"],

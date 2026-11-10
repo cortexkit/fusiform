@@ -215,7 +215,15 @@ fn provider_api_defaults_fill_only_missing_current_endpoints() {
             ));
     }
     for row in &response.curated {
-        assert!(!response.models[&row.model].contains_key("wire.api"));
+        let wire: std::collections::BTreeMap<_, _> = response.models[&row.model]
+            .iter()
+            .filter(|(key, _)| key.starts_with("wire."))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        assert_eq!(
+            wire,
+            super::media_catalog::expected_curated_wire(&row.model)
+        );
         assert!(!response
             .wire_corrections
             .iter()

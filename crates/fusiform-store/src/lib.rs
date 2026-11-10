@@ -361,6 +361,7 @@ fn token_class_str(class: fusiform_core::TokenClass) -> &'static str {
         CacheWrite => "cache_write",
         Reasoning => "reasoning",
         InputAudio => "input_audio",
+        OutputAudio => "output_audio",
     }
 }
 

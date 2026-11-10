@@ -496,6 +496,14 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
     let (store, _dir) = super::curated_wire::store();
     for (label, arguments) in [
         (
+            "catalog.get — Gemini Flash TTS",
+            serde_json::json!({"provider_id":"google","model_id":"gemini-3.8-flash-tts"}),
+        ),
+        (
+            "catalog.get — Eleven Flash TTS",
+            serde_json::json!({"provider_id":"elevenlabs","model_id":"eleven_flash_v2_5"}),
+        ),
+        (
             "catalog.get — curated unit-billed transcription rate",
             serde_json::json!({"provider_id":"openai","model_id":"gpt-transcribe"}),
         ),

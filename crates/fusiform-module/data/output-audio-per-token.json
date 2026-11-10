@@ -1,0 +1,19 @@
+{
+  "schema": "output-audio-per-token/v1",
+  "providers": [
+    {
+      "provider_id": "google",
+      "source_ref": "https://ai.google.dev/gemini-api/docs/pricing",
+      "quote": "Gemini 3.8 Live, Gemini 3.8 Live Extended Thinking, and Gemini 3.1 Flash Live Preview: \"Paid Tier, per 1M tokens in USD\"; \"Output price (including thinking tokens)\": \"$4.50 (text)\" and \"$12.00 or $0.018/min (audio)\". The time-based expression is an equivalent alongside the token-denominated audio price.",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "provider_id": "openai",
+      "source_ref": "https://platform.openai.com/docs/pricing",
+      "quote": "\"Prices per 1M tokens unless noted.\" Audio, Realtime & Audio, columns Model / Type / Input / Output / Cached Input: \"gpt-realtime-2.1 | Audio | $32.00 | $64.00 | $0.40\". The separately priced GPT-Live voice-session product is billed by time, not this output-audio token rate.",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    }
+  ]
+}

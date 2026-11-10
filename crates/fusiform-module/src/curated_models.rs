@@ -17,7 +17,7 @@ const DOCUMENT: &str = include_str!("../data/curated-models.json");
 // Each unit-billed key must first be recognised by the consumer that prices
 // spend: an unknown rate key makes that consumer refuse a whole pricing day.
 // Grow this list one deliberate key at a time, never by a key pattern.
-const UNIT_BILLED_RATE_KEYS: &[&str] = &["rate.input_audio.per_second"];
+const UNIT_BILLED_RATE_KEYS: &[&str] = &["rate.input_audio.per_second", "rate.input.per_character"];
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -92,6 +92,28 @@ fn invalid_facts(row: &CuratedModel) -> Option<String> {
             return Some(format!(
                 "model.kind must be one of {:?}: {value}",
                 fusiform_protocol::MODEL_KINDS
+            ));
+        }
+        if key == "wire.api" {
+            let valid = value.as_object().is_some_and(|object| {
+                object.len() == 2
+                    && object.get("from").is_some_and(|from| from == "curated")
+                    && object
+                        .get("value")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(|api| reqwest::Url::parse(api).ok())
+                        .is_some_and(|api| api.scheme() == "https" && api.host_str().is_some())
+            });
+            if !valid {
+                return Some("wire.api must be a sourced HTTPS endpoint with from: curated".into());
+            }
+        } else if key == "wire.family" {
+            if !value.as_str().is_some_and(crate::wire_families::is_known) {
+                return Some("wire.family must name a verified protocol token".into());
+            }
+        } else if key.starts_with("wire.") {
+            return Some(format!(
+                "curated rows may declare only wire.api and wire.family, not {key}"
             ));
         }
         if key.starts_with("rate.") {
@@ -472,6 +494,8 @@ mod tests {
         ("cloudflare-workers-ai", "@cf/cloudflare/clairic"),
         ("cloudflare-workers-ai", "@cf/cloudflare/clef"),
         ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
+        ("elevenlabs", "eleven_flash_v2_5"),
+        ("google", "gemini-3.8-flash-tts"),
         ("meta", "muse-wonder-full-1.0"),
         ("openai", "gpt-6-luna-decisions"),
         ("openai", "gpt-transcribe"),
@@ -665,6 +689,41 @@ mod tests {
         let doc = planted(|row| row["facts"]["model.unpublished"] = "unpublished".into());
         let reject = single_reject(&doc, "meta", "muse-wonder-full-1.0");
         assert!(reject.contains("not in SERVED_FACTS"));
+    }
+
+    #[test]
+    fn curated_wire_claims_require_sourced_endpoints_and_known_protocols() {
+        for (key, value) in [
+            (
+                "wire.api",
+                serde_json::json!({"value":"https://api.elevenlabs.io/v1","from":"provider"}),
+            ),
+            (
+                "wire.api",
+                serde_json::json!({"value":"http://api.elevenlabs.io/v1","from":"curated"}),
+            ),
+            ("wire.api", serde_json::json!({"value":"","from":"curated"})),
+            (
+                "wire.api",
+                serde_json::json!({"value":"https://api.elevenlabs.io/v1","from":"curated","extra":true}),
+            ),
+            ("wire.family", serde_json::json!("unverified.protocol")),
+            ("wire.family", serde_json::json!(null)),
+            (
+                "wire.npm",
+                serde_json::json!({"value":"@sdk/inferred","from":"provider"}),
+            ),
+            (
+                "wire.shape",
+                serde_json::json!({"value":"inferred","from":"model"}),
+            ),
+        ] {
+            let doc = planted_in("elevenlabs", "eleven_flash_v2_5", |row| {
+                row["facts"][key] = value.clone()
+            });
+            let reject = single_reject(&doc, "elevenlabs", "eleven_flash_v2_5");
+            assert!(reject.contains(key), "{reject}");
+        }
     }
 
     #[test]

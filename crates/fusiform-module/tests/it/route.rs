@@ -1153,6 +1153,9 @@ fn every_field_id() -> Vec<fusiform_core::FieldId> {
         FieldId::Rate {
             class: TokenClass::InputAudio,
         },
+        FieldId::Rate {
+            class: TokenClass::OutputAudio,
+        },
         // One representative: mode names are the upstream's and cannot be
         // enumerated, so the list names the variant rather than every key.
         FieldId::ModeRate {

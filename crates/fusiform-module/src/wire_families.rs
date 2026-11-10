@@ -11,6 +11,8 @@ pub const TOKENS: &[&str] = &[
     "google.generate_content",
     "google.code_assist",
     "aws.bedrock_converse",
+    // https://elevenlabs.io/docs/api-reference/text-to-speech/convert
+    "elevenlabs.text_to_speech",
 ];
 
 pub fn is_known(token: &str) -> bool {

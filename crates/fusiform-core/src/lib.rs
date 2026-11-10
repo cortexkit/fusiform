@@ -356,6 +356,9 @@ pub enum TokenClass {
     /// tokens (see [`normalize::ChargeUnitEvidence`]); models.dev's
     /// `cost.input_audio` key alone does not establish the unit.
     InputAudio,
+    /// Audio output billed per token, admitted only with provider pricing
+    /// evidence rather than inferred from models.dev's cost key.
+    OutputAudio,
 }
 
 /// A provider's named quality level for a generated artifact.
