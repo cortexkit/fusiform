@@ -978,6 +978,18 @@ impl CatalogStore {
         Ok(rows)
     }
 
+    /// Check the store's pages without taking the poll writer's lock or lease.
+    ///
+    /// Only the first SQLite result is retained. An error running the check is
+    /// evidence that the check could not pass, not an implicit `ok`.
+    pub fn quick_check(&self) -> String {
+        self.readers
+            .with_conn(|conn| {
+                conn.query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0))
+            })
+            .unwrap_or_else(|error| error.to_string())
+    }
+
     /// Run a read against a pooled read-only connection.
     ///
     /// Reads only. Writes go through `with_conn_fenced`, which checks that this

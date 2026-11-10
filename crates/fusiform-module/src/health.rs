@@ -1,7 +1,7 @@
 //! Health, derived mechanically.
 //!
-//! This module contains no I/O and takes no lock. It reads atomics and does
-//! arithmetic, because a health reply that queues behind a degraded resource is
+//! This module contains no I/O and takes no blocking lock. It reads in-memory
+//! signals, because a health reply that queues behind a degraded resource is
 //! useless exactly when it is needed.
 //!
 //! # What the statuses mean here
@@ -11,9 +11,9 @@
 //!
 //! - **Ok** — fusiform observed the upstream recently enough that its catalog
 //!   is current, and it can answer reads.
-//! - **Degraded** — fusiform can answer reads, but its knowledge is aging: the
-//!   upstream is unreachable, or polls keep failing. Consumers still get
-//!   correct answers about a world that may have moved. This is not an outage;
+//! - **Degraded** — fusiform can answer reads, but its knowledge is aging or
+//!   the startup page check did not pass. Serving continues; the detail names
+//!   the problem and the operator's next step. This is not a dispatch outage;
 //!   escalating it as one trains an operator to ignore it.
 //! - **Failing** — fusiform cannot do its job at all: no store, so no read can
 //!   be answered. This is dispatch impairment and is the only state that should
@@ -98,6 +98,23 @@ pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
                 format!("{d}; also, {CATALOG_WRITE_FAILED_DETAIL}")
             }
             _ => CATALOG_WRITE_FAILED_DETAIL.to_string(),
+        });
+        if report.status == HealthStatus::Ok {
+            report.status = HealthStatus::Degraded;
+        }
+    }
+    // A page check cannot establish that dispatch is impaired. Keep serving
+    // problems first, but do not hide a failed check behind one of them.
+    if let Some(check) = signals.store_quick_check().filter(|c| c.result != "ok") {
+        let detail = format!(
+            "store quick_check returned: {}. Serving and polling continue; \
+             investigate the reported check result and, if store damage is confirmed, \
+             restore from backup per docs/backup-and-restore.md",
+            check.result
+        );
+        report.detail = Some(match report.detail.take() {
+            Some(d) if report.status != HealthStatus::Ok => format!("{d}; also, {detail}"),
+            _ => detail,
         });
         if report.status == HealthStatus::Ok {
             report.status = HealthStatus::Degraded;
@@ -320,11 +337,13 @@ fn describe_failure(signals: &Signals) -> &'static str {
 
 /// The metrics an operator reads.
 ///
-/// # Two scopes, and the names say which
+/// # Metric scopes
 ///
 /// A `process_` prefix means the value counts what THIS PROCESS has done since
-/// it started. Everything else describes the CATALOG, and survives a restart by
-/// being adopted from the store.
+/// it started. Catalog-history metrics survive a restart by being adopted from
+/// the store. `store_open` describes the current handle; `store_quick_check`
+/// describes the store's pages at its own `checked_at_ms`, measured anew at
+/// startup rather than adopted from history.
 ///
 /// The distinction is not pedantry. Before it, `poll_attempts` read `1` on a
 /// module that had been running all day against a store holding fourteen
@@ -373,13 +392,19 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
             FailureClass::Parse => "parse",
             FailureClass::Implausible => "implausible",
         }),
-        // Catalog-scoped from here down: adopted from the store at startup, so
+        // Catalog history: adopted from the store at startup, so
         // these describe the catalog rather than the process reading it.
         "observation_age_ms": signals.observation_age_ms(now_ms),
         "last_write_age_ms": signals.last_write_age_ms(now_ms),
         "model_count": model_count,
         "models_priced": models_priced,
         "store_open": signals.store_is_open(),
+        // A fresh observation of the store at startup, not adopted history.
+        "store_quick_check": signals.store_quick_check().map(|check| serde_json::json!({
+            "result": check.result,
+            "checked_at_ms": check.checked_at_ms,
+            "duration_ms": check.duration_ms,
+        })),
         // Process-scoped: set when THIS process failed to write the backup
         // enrollment descriptor at startup, and cleared only by a restart that
         // writes it.
@@ -430,6 +455,96 @@ mod tests {
             r.status,
             HealthStatus::Ok,
             "a module that started a minute ago must not page anyone"
+        );
+    }
+
+    #[test]
+    fn store_quick_check_failure_is_degraded_with_the_sqlite_result() {
+        let s = open_store();
+        s.observed(0);
+        s.record_store_quick_check("Page 17: free space corruption".into(), 100, 3);
+        let r = report(&s, 1_000);
+        assert_eq!(r.status, HealthStatus::Degraded);
+        let detail = r.detail.unwrap();
+        assert!(
+            detail.contains("Page 17: free space corruption"),
+            "{detail}"
+        );
+        assert!(detail.contains("Serving and polling continue"), "{detail}");
+        assert!(detail.contains("if store damage is confirmed"), "{detail}");
+        assert!(detail.contains("docs/backup-and-restore.md"), "{detail}");
+    }
+
+    #[test]
+    fn store_quick_check_failure_keeps_the_serving_problem_first() {
+        let s = open_store();
+        s.observed(0);
+        s.record_store_quick_check("Page 17: free space corruption".into(), 100, 3);
+        let r = report(&s, STALE_AFTER_MS + 1);
+        assert_eq!(r.status, HealthStatus::Degraded);
+        let detail = r.detail.unwrap();
+        assert!(
+            detail.starts_with("the poll loop has not attempted"),
+            "{detail}"
+        );
+        assert!(
+            detail.contains("Page 17: free space corruption"),
+            "{detail}"
+        );
+
+        let none = Signals::new();
+        none.record_store_quick_check("check could not run".into(), 100, 3);
+        let r = report(&none, 1_000);
+        assert_eq!(r.status, HealthStatus::Failing);
+        let detail = r.detail.unwrap();
+        assert!(detail.starts_with("store is not open"), "{detail}");
+        assert!(detail.contains("check could not run"), "{detail}");
+    }
+
+    #[test]
+    fn store_quick_check_ok_leaves_status_and_detail_unchanged() {
+        for (s, now) in [
+            (open_store(), 1_000),
+            (open_store(), STALE_AFTER_MS + 1),
+            (Signals::new(), 1_000),
+        ] {
+            s.observed(0);
+            let before = report(&s, now);
+            s.record_store_quick_check("ok".into(), 100, 3);
+            let after = report(&s, now);
+            assert_eq!(after.status, before.status);
+            assert_eq!(after.detail, before.detail);
+        }
+    }
+
+    #[test]
+    fn store_quick_check_metric_is_null_or_the_recorded_observation() {
+        let s = Signals::new();
+        let metrics = report(&s, 2_000).metrics.unwrap();
+        assert_eq!(
+            metrics.get("store_quick_check"),
+            Some(&serde_json::Value::Null)
+        );
+
+        s.store_opened();
+        s.record_store_quick_check("ok".into(), 1_750, 3);
+        let metrics = report(&s, 2_000).metrics.unwrap();
+        assert_eq!(
+            metrics["store_quick_check"],
+            serde_json::json!({"result": "ok", "checked_at_ms": 1_750, "duration_ms": 3})
+        );
+        println!("health metrics sample: {metrics}");
+    }
+
+    #[test]
+    fn store_quick_check_keeps_the_first_startup_observation() {
+        let s = open_store();
+        s.record_store_quick_check("first check failed".into(), 100, 3);
+        s.record_store_quick_check("ok".into(), 200, 4);
+        let metrics = report(&s, 1_000).metrics.unwrap();
+        assert_eq!(
+            metrics["store_quick_check"],
+            serde_json::json!({"result": "first check failed", "checked_at_ms": 100, "duration_ms": 3})
         );
     }
 

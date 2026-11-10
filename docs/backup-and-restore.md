@@ -112,3 +112,40 @@ A consumer can tell a restored store from a historical read: after a restore,
 
 Backup coverage is not what keeps the catalog version monotonic; the
 derivation from the wall clock is (see [`data-model.md`](data-model.md) §4).
+
+## 4. After an unclean stop
+
+After a power loss or other unclean stop, a recorded poll shows that SQLite
+recovered the WAL and committed a write; it does not check every stored page.
+Read `store_quick_check` in the supervisor's health metrics instead of opening
+the module's private data folder. On every startup, after migrations and before
+seeding, curated writes or polling, fusiform runs `PRAGMA quick_check` using a
+read-only pooled connection on a blocking thread. Health requests only read
+the cached result; they never run a check themselves.
+
+For example:
+
+```json
+"store_quick_check": {
+  "result": "ok",
+  "checked_at_ms": 1750000000000,
+  "duration_ms": 190
+}
+```
+
+`result` is `ok` or SQLite's first result row. If the check cannot run, it is
+the error text, not a pass. `checked_at_ms` is the check's start time in Unix
+milliseconds; `duration_ms` is its elapsed time. The metric is `null` before a
+check runs, including when the store never opens. A successful check describes
+the pages observed at startup, not the integrity of later writes or the
+accuracy of catalog facts.
+
+A non-`ok` result makes otherwise healthy serving `Degraded`, with the result
+and recovery guidance in the detail. An existing serving problem stays first
+in the detail. Serving and polling continue, and the check result remains until
+restart. Investigate the reported SQLite result and the module's stderr; an
+I/O error running the check is not itself proof of damaged pages. If damage is
+confirmed, stop the module and restore a known-good whole-database backup via
+engram rather than replacing a live database file. Restart and read the new
+check result and timestamp. Section 3 describes the history and catalog changes
+to expect after restoring an older copy.

@@ -92,16 +92,19 @@ revision and the protocol crate version, also without a daemon.
 1. The module connects to the supervisor. The handshake acknowledgement carries
    the storage descriptor; the store is opened from it, never from a path the
    module derives itself.
-2. An empty store is seeded from the embedded snapshot
+2. After migrations, a read-only pooled connection runs `PRAGMA quick_check`
+   on the blocking pool, before seeding or curated writes. Its result, time and
+   duration are retained for health; a failed check does not stop startup.
+3. An empty store is seeded from the embedded snapshot
    (`bootstrap::a_fresh_install_with_no_network_answers_a_read`). Seeding twice
    writes nothing (`bootstrap::seeding_twice_does_not_rewrite_history`).
-3. The curated plan-price file is applied, on every start
+4. The curated plan-price file is applied, on every start
    ([`plan-prices.md`](plan-prices.md) §6).
-4. Health signals are adopted from the store, so a restart does not reset the
+5. Health signals are adopted from the store, so a restart does not reset the
    catalog's age or failure history
    (`restart_health::a_restart_does_not_reset_the_staleness_clock`,
    `restart_adoption::a_restart_adopts_the_failure_count`).
-5. The poll loop starts, running its first tick immediately and then every 30
+6. The poll loop starts, running its first tick immediately and then every 30
    minutes. If a tick comes due while the previous one is still running, or
    while the machine is suspended, it is skipped: the loop does not run
    catch-up polls in a burst.
@@ -167,6 +170,7 @@ The health report is computed from in-memory signals only: no lock, no disk.
 | `degraded` | the startup read of the store failed, so the catalog's age is unknown (`health.rs`: `a_failed_startup_read_is_not_a_fresh_install`) |
 | `degraded` | the last successful observation is more than 2 hours old; the detail names the failure class if polls are failing (`health_detail::a_stale_catalog_names_its_cause`) |
 | `degraded` | 4 or more consecutive fetch failures (`health.rs`: `a_failure_streak_is_degraded_before_the_staleness_clock_fires`) |
+| `degraded` | the startup page check returned anything other than `ok`, including an error running the check (`health.rs`: `store_quick_check_failure_is_degraded_with_the_sqlite_result`) |
 | `ok` | otherwise, including a fresh install with no observation yet (`health.rs`: `a_fresh_install_with_no_observation_yet_is_ok`) |
 
 A missing store and a write failure are checked before staleness, so the
@@ -174,10 +178,17 @@ detail names the cause rather than its symptom. A stale catalog is
 `degraded`, not `failing`: fusiform can still answer reads correctly about a
 world that may have moved (`health.rs`: `a_stale_catalog_is_degraded_not_failing`).
 
+The startup page check is considered after serving checks. A non-`ok` result
+lowers `ok` to `degraded`, never raises health to `failing`, and is appended to
+the detail when serving is already unhealthy. Serving and polling continue;
+see [`backup-and-restore.md`](backup-and-restore.md) §4 for investigation and
+restore guidance.
+
 Every report carries the metrics it was derived from
 (`health.rs`: `the_report_always_carries_the_numbers_it_was_derived_from`).
 Names starting `process_` count what the current process has done since it
-started; the others describe the catalog and survive a restart
+started; catalog-history metrics survive a restart, while `store_open` and
+`store_quick_check` describe the current handle and the pages checked at startup
 (`restart_adoption::every_metric_is_process_scoped_by_name_or_survives_a_restart`,
 `restart_adoption::the_metric_names_are_pinned`):
 
@@ -189,8 +200,16 @@ started; the others describe the catalog and survive a restart
 | `failures_ever`, `last_failure_age_ms`, `last_failure_class` | catalog |
 | `observation_age_ms`, `last_write_age_ms`, `model_count`, `models_priced` | catalog |
 | `store_open` | process state |
+| `store_quick_check` | startup observation of store pages: `{ result, checked_at_ms, duration_ms }`, or `null` before the check runs |
 
 Model counts are cached from the same catalog snapshot used by `catalog.status`,
 at startup and after each changed poll; they remain unchanged on unchanged polls.
 Before the first successful count, `model_count` and `models_priced` are `null`.
 An age that has never been set is `null`, not zero.
+
+`store_quick_check.result` is `ok` or the first row returned by SQLite; if the
+check itself errors, it holds the error text instead. `checked_at_ms` is the
+Unix-epoch time when the check started and `duration_ms` is its elapsed time.
+The check runs once at startup and is not repeated by health requests, so it
+does not certify writes made later in the process's lifetime. Health reads
+the retained observation without I/O or a blocking lock.

@@ -149,6 +149,20 @@ impl ModuleHandler for Fusiform {
 
         self.signals.store_opened();
 
+        // Inspect the previous process's pages before seed or curated writes.
+        // A read-pool connection avoids the poll writer, and the blocking pool
+        // keeps the SQLite scan off the async runtime's reader thread.
+        let check_store = Arc::clone(&store);
+        let checked_at_ms = now_ms();
+        let started = std::time::Instant::now();
+        let result = tokio::task::spawn_blocking(move || check_store.quick_check())
+            .await
+            .unwrap_or_else(|error| format!("quick_check task did not complete: {error}"));
+        let duration_ms = started.elapsed().as_millis() as u64;
+        eprintln!("fusiform: store quick_check: {result:?} ({duration_ms} ms)");
+        self.signals
+            .record_store_quick_check(result, checked_at_ms, duration_ms);
+
         // Enroll the store with engram, the fleet's backup owner, by writing its
         // descriptor beside the database. Placed by the path the store actually
         // opened, so the descriptor's relative `store.db` names this database.
@@ -243,9 +257,9 @@ impl ModuleHandler for Fusiform {
         // whose upstream has been unreachable for hours would report healthy
         // the moment it restarts, which is precisely when an operator is
         // looking. Read once here on the startup path; the health path itself
-        // still touches nothing but atomics.
-        // Adopt what the store knows before the loop starts. The signals are
-        // atomics, so a restart empties them and a module with real history
+        // still reads only in-memory signals.
+        // Adopt what the store knows before the loop starts. History signals
+        // are atomics, so a restart empties them and a module with real history
         // would report as a fresh install — healthy, never written, nothing
         // observed — at exactly the moment an operator is looking.
         //
@@ -263,7 +277,7 @@ impl ModuleHandler for Fusiform {
     }
 
     async fn health(&self) -> HealthReport {
-        // Reads atomics and does arithmetic. No lock, no disk, no subprocess:
+        // Reads in-memory signals. No blocking lock, no disk, no subprocess:
         // a health reply that queues behind a degraded resource is useless
         // exactly when it is needed.
         health::report(&self.signals, now_ms())

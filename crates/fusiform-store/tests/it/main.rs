@@ -17,6 +17,7 @@ mod history;
 mod ingest;
 mod journal_mode;
 mod mode_rates;
+mod quick_check;
 mod schema_doc;
 mod seed_boundary;
 mod serve;

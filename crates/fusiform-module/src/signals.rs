@@ -1,8 +1,8 @@
 //! The mechanical signals the health path reads.
 //!
-//! Every value here is an atomic stamped by the code that does the work, and
-//! read by nothing but [`crate::health`]. That shape is the whole point: a
-//! health path that asks a component how it is doing gets an opinion, and a
+//! Values here are atomics or set-once startup records stamped by the code
+//! that does the work, and read by nothing but [`crate::health`]. That shape is
+//! the whole point: asking a component how it is doing gets an opinion, and a
 //! wedged component's opinion is that it is fine. A counter that only advances
 //! when a poll actually completes cannot say a poll completed.
 //!
@@ -20,6 +20,7 @@
 //!   outage or pages someone for a stale catalog.
 
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::OnceLock;
 
 use fusiform_core::FailureClass;
 use fusiform_store::CatalogStore;
@@ -158,6 +159,16 @@ pub struct Signals {
     /// needed and there is nothing to restore. Serving is unaffected, so health
     /// reports Degraded rather than Failing.
     catalog_write_failed: AtomicU64,
+    /// Published once after the startup page check; health never waits for it.
+    store_quick_check: OnceLock<StoreQuickCheck>,
+}
+
+/// The startup check's observation, not a claim about later writes.
+#[derive(Debug)]
+pub struct StoreQuickCheck {
+    pub result: String,
+    pub checked_at_ms: i64,
+    pub duration_ms: u64,
 }
 
 /// A value meaning "never happened", chosen so ordinary arithmetic on it is
@@ -187,6 +198,7 @@ impl Signals {
             store_open: AtomicU64::new(0),
             adoption_failed: AtomicU64::new(0),
             catalog_write_failed: AtomicU64::new(0),
+            store_quick_check: OnceLock::new(),
         }
     }
 
@@ -381,7 +393,7 @@ impl Signals {
     ///
     /// This does NOT make the health path touch the store. The read happens at
     /// open time, on the startup path, and only the resulting instant is
-    /// stamped into an atomic; the health path still reads atomics alone.
+    /// stamped into an atomic; health reads only the cached instant.
     ///
     /// Deliberately does not touch `poll_attempts`: that counter is a heartbeat
     /// for THIS process's loop, and priming it would claim polls this process
@@ -500,6 +512,20 @@ impl Signals {
     /// Record that the store is open and usable.
     pub fn store_opened(&self) {
         self.store_open.store(1, Ordering::Relaxed);
+    }
+
+    /// Retain the first startup page check, even if startup is invoked again.
+    pub fn record_store_quick_check(&self, result: String, checked_at_ms: i64, duration_ms: u64) {
+        let _ = self.store_quick_check.set(StoreQuickCheck {
+            result,
+            checked_at_ms,
+            duration_ms,
+        });
+    }
+
+    /// Read without waiting for an in-progress check or touching the store.
+    pub fn store_quick_check(&self) -> Option<&StoreQuickCheck> {
+        self.store_quick_check.get()
     }
 
     /// How many polls reached a verdict, successful or failed.

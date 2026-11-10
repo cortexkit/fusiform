@@ -109,9 +109,16 @@ fn seed_history(dir: &std::path::Path, at: Timestamp) {
 /// instants itself, and a mutation deleting the adoption from the startup path
 /// reddened nothing — it proved the helper worked, not that anything called it.
 fn restart(dir: &std::path::Path) -> (CatalogStore, Signals) {
+    restart_at(dir, 10 * HOUR)
+}
+
+fn restart_at(dir: &std::path::Path, checked_at_ms: i64) -> (CatalogStore, Signals) {
     let store = open(dir);
     let signals = Signals::new();
     signals.store_opened();
+    let started = std::time::Instant::now();
+    let result = store.quick_check();
+    signals.record_store_quick_check(result, checked_at_ms, started.elapsed().as_millis() as u64);
     signals.adopt_from_store(&store, SourceId::ModelsDev);
     (store, signals)
 }
@@ -193,7 +200,8 @@ fn the_two_constructors_agree_about_never() {
     );
 }
 
-/// Every metric is either process-scoped by name, or survives a restart.
+/// Metrics are process-scoped by name or survive a restart, except for the
+/// explicitly timestamped store-page observation, which is measured again.
 ///
 /// The convention SUBC drew out of the null-write-age defect: a process-scoped
 /// and a subject-scoped metric need different names or different values, never
@@ -211,13 +219,18 @@ fn every_metric_is_process_scoped_by_name_or_survives_a_restart() {
     let now = 10 * HOUR;
     seed_history(dir.path(), Timestamp(now - 3 * HOUR));
 
-    let (_store, signals) = restart(dir.path());
+    let (first_store, first_signals) = restart_at(dir.path(), now - HOUR);
+    let first_metrics = health::report(&first_signals, now - HOUR).metrics.unwrap();
+    drop(first_store);
+
+    let (_store, signals) = restart_at(dir.path(), now);
     let metrics = health::report(&signals, now).metrics.unwrap();
     let object = metrics.as_object().expect("metrics is an object");
 
     // A restart against a store with real history. Anything describing the
-    // CATALOG must have been adopted and therefore be non-null; anything
-    // describing the PROCESS is legitimately empty and must say so in its name.
+    // CATALOG history must have been adopted and therefore be non-null;
+    // the timestamped page check is measured anew. Anything describing the
+    // PROCESS is legitimately empty and must say so in its name.
     for (key, value) in object {
         if key.starts_with("process_") {
             continue;
@@ -226,6 +239,27 @@ fn every_metric_is_process_scoped_by_name_or_survives_a_restart() {
         // than an adopted instant, and it is true here because the store opened.
         if key == "store_open" {
             assert_eq!(value, true, "the store is open in this fixture");
+            continue;
+        }
+        // This one key describes the store, not process activity, and carries
+        // its own checked_at_ms. A restart replaces the page observation with
+        // a fresh measurement of the same subject instead of adopting history.
+        if key == "store_quick_check" {
+            let duration_ms = value["duration_ms"]
+                .as_u64()
+                .expect("check duration is a non-negative integer");
+            assert_eq!(
+                value,
+                &serde_json::json!({
+                    "result": "ok",
+                    "checked_at_ms": now,
+                    "duration_ms": duration_ms,
+                })
+            );
+            assert_ne!(
+                value["checked_at_ms"], first_metrics[key]["checked_at_ms"],
+                "the new process must re-measure, not carry over the previous check"
+            );
             continue;
         }
         // `last_failure_class` is null when there is no current failure, which
@@ -292,7 +326,7 @@ fn the_metric_names_are_pinned() {
 
     // Process-scoped: what this process has done since it started. Reset by a
     // restart, and the prefix says so.
-    // Catalog-scoped: adopted from the store, so a restart does not erase it.
+    // Catalog history is adopted; the timestamped page check is re-measured.
     let expected = [
         "failures_ever",
         "last_failure_age_ms",
@@ -308,13 +342,15 @@ fn the_metric_names_are_pinned() {
         "process_polls_recorded",
         "process_polls_unrecorded",
         "store_open",
+        "store_quick_check",
     ];
 
     assert_eq!(
         actual, expected,
         "the metric names changed. Each one is either process-scoped (prefixed \
          `process_`, reset by a restart) or describes the catalog (adopted from \
-         the store at startup). Pick one and add the name here."
+         the store at startup), except for the explicitly timestamped page \
+         check, which is re-measured. Pick the scope and add the name here."
     );
 }
 
