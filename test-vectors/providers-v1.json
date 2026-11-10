@@ -836,6 +836,14 @@
       ]
     },
     {
+      "id": "fireworks-fire-pass",
+      "name": "Fire Pass",
+      "doc": "https://docs.fireworks.ai/firepass",
+      "source": "hand_kept",
+      "env": [],
+      "output_modalities": []
+    },
+    {
       "id": "freemodel",
       "name": "FreeModel",
       "doc": "https://freemodel.dev",
@@ -2112,6 +2120,14 @@
       "output_modalities": [
         "text"
       ]
+    },
+    {
+      "id": "qwen-portal",
+      "name": "Qwen OAuth",
+      "doc": "https://qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/",
+      "source": "hand_kept",
+      "env": [],
+      "output_modalities": []
     },
     {
       "id": "reflection",

@@ -11,6 +11,14 @@
       "review_by_ms": 1799452800000
     },
     {
+      "id": "fireworks-fire-pass",
+      "name": "Fire Pass",
+      "doc": "https://docs.fireworks.ai/firepass",
+      "source_ref": "https://docs.fireworks.ai/firepass.md",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
       "id": "kiro",
       "name": "Kiro",
       "doc": "https://kiro.dev/docs/",
@@ -23,6 +31,14 @@
       "name": "Baidu Qianfan",
       "doc": "https://cloud.baidu.com/doc/qianfan/index.html",
       "source_ref": "https://intl.cloud.baidu.com/en/product/qianfan.html",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "id": "qwen-portal",
+      "name": "Qwen OAuth",
+      "doc": "https://qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/",
+      "source_ref": "https://qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/",
       "established_at_ms": 1794268800000,
       "review_by_ms": 1799452800000
     },
