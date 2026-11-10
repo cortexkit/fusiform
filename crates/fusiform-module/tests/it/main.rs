@@ -23,6 +23,7 @@ mod live;
 mod manifest_probe;
 mod mode_rates;
 mod model_type;
+mod providers_vector;
 mod reasoning_options;
 mod request_serving;
 mod restart_adoption;

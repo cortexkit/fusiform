@@ -1,0 +1,14 @@
+{
+  "schema": "curated-providers/v1",
+  "purpose": "Provider identities absent from models.dev, for the pinned provider vector only. Re-read each first-party source within 60 days; remove a row when models.dev lists its id.",
+  "providers": [
+    {
+      "id": "elevenlabs",
+      "name": "ElevenLabs",
+      "doc": "https://elevenlabs.io/docs/overview/intro",
+      "source_ref": "https://elevenlabs.io/docs/overview/intro.md",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    }
+  ]
+}
