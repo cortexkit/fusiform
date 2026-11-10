@@ -31,7 +31,7 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 ///
 /// Limits are plain integers that nothing else derives at serve time. Other
 /// facts already have their own curated mechanism or serve-time derivation
-/// (rates: inheritance and billing planes; `wire.*`: wire corrections;
+/// (most rates: inheritance and billing planes; `wire.*`: wire corrections;
 /// `model.canonical_id`: canonical links), and a second mechanism writing the
 /// same fact would make the served value depend on which one ran last.
 ///
@@ -44,20 +44,25 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 /// vendor marks it deprecated before models.dev does. Consumers stop routing
 /// to deprecated rows, so leaving the mark off serves a dead model as live
 /// until models.dev catches up.
-pub const OVERRIDABLE_FACTS: [&str; 5] = [
+/// The image model's mixed output price is split with a guarded text-rate
+/// replacement and an image-rate addition, before alias and plane projection.
+pub const OVERRIDABLE_FACTS: [&str; 7] = [
     "limit.context",
     "limit.output",
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
     "model.status",
+    "rate.output",
+    "rate.output_image",
 ];
 
 /// The facts only an addition row can serve, because models.dev publishes no
 /// value for them. A read filtered to one of these must still reach the rows
 /// an addition applies to, even though the store holds no matching fact.
-pub const ADDED_FACTS: [&str; 2] = [
+pub const ADDED_FACTS: [&str; 3] = [
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
+    "rate.output_image",
 ];
 
 /// Whether a row supplies a fact the stored row lacks (an addition), rather
@@ -72,6 +77,26 @@ fn is_addition(row: &FactOverride) -> bool {
 /// invalid.
 fn invalid_values(row: &FactOverride) -> Option<&'static str> {
     match row.fact_key.as_str() {
+        "rate.output" => {
+            if crate::curated_models::invalid_rate(&row.value, false).is_some()
+                || !plain_token_rate(&row.replaces)
+            {
+                Some("rate.output needs a sourced token rate and a plain upstream token rate to replace")
+            } else if matches_replaced(row, &row.value) {
+                Some("value must differ from the upstream value it replaces")
+            } else {
+                None
+            }
+        }
+        "rate.output_image" => {
+            if crate::curated_models::invalid_rate(&row.value, false).is_some()
+                || !row.replaces.is_null()
+            {
+                Some("rate.output_image must add a sourced token rate with replaces null")
+            } else {
+                None
+            }
+        }
         // Limits are always stored, as null when models.dev omits them, so an
         // absent limit only means a correction withheld it. An addition could
         // therefore never apply except over a withholding, which it must not
@@ -107,8 +132,52 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
-        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system and model.status may be overridden"),
+        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system, model.status, rate.output and rate.output_image may be overridden"),
     }
+}
+
+fn plain_token_rate(value: &serde_json::Value) -> bool {
+    let mut annotated = value.clone();
+    let Some(object) = annotated.as_object_mut() else {
+        return false;
+    };
+    if object.contains_key("unit_provenance") {
+        return false;
+    }
+    object.insert(
+        "unit_provenance".into(),
+        serde_json::json!({"kind":"stated"}),
+    );
+    crate::curated_models::invalid_rate(&annotated, false).is_none()
+}
+
+/// Storage omits currency provenance; rendering adds that annotation before
+/// overrides run. Compare the upstream amount, not the renderer's annotation,
+/// so the same guard works against both seed facts and current served facts.
+fn matches_replaced(row: &FactOverride, value: &serde_json::Value) -> bool {
+    if row.fact_key == "rate.output" {
+        let mut plain = value.clone();
+        if let Some(object) = plain.as_object_mut() {
+            object.remove("unit_provenance");
+        }
+        plain == row.replaces
+    } else {
+        value == &row.replaces
+    }
+}
+
+fn disclosed_replacement(row: &FactOverride) -> serde_json::Value {
+    let mut value = row.replaces.clone();
+    if row.fact_key == "rate.output" {
+        // A stored models.dev rate has no provenance field. Its wire disclosure
+        // needs the same named currency policy as an ordinary served rate so
+        // consumers can decode every monetary value with the published type.
+        value["unit_provenance"] = serde_json::json!({
+            "kind":"assumed_by_policy",
+            "policy":fusiform_core::PolicyId::models_dev_usd_v1().0,
+        });
+    }
+    value
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -299,7 +368,7 @@ fn stale_row(
     let applies = if is_addition(row) {
         published.is_none()
     } else {
-        published == Some(&row.replaces)
+        published.is_some_and(|value| matches_replaced(row, value))
     };
     (!applies).then(|| {
         let published = published.map_or("no value".to_string(), |v| v.to_string());
@@ -370,7 +439,7 @@ fn apply_rows(
             let Some(served) = facts.get_mut(fact_key) else {
                 continue;
             };
-            if *served != row.replaces {
+            if !matches_replaced(row, served) {
                 continue;
             }
             *served = row.value.clone();
@@ -381,7 +450,7 @@ fn apply_rows(
             model_id: row.model_id.clone(),
             fact_key: row.fact_key.clone(),
             value: row.value.clone(),
-            replaces: row.replaces.clone(),
+            replaces: disclosed_replacement(row),
             reason: row.reason.clone(),
             source_ref: row.source_ref.clone(),
             quote: row.quote.clone(),
@@ -438,7 +507,7 @@ mod tests {
     fn shipped_overrides_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 19);
+        assert_eq!(rows.len(), 21);
         let row = argon();
         assert_eq!(row.value, json!(65_536));
         assert_eq!(row.replaces, json!(32_768));
@@ -447,6 +516,63 @@ mod tests {
         assert!(row.notes.as_ref().unwrap().contains(
             "cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts"
         ));
+    }
+
+    #[test]
+    fn image_rate_rows_validate_shape_and_yield_to_upstream_or_withholding() {
+        let rows = overrides();
+        let output = &rows[&(
+            "google".into(),
+            "gemini-3.1-flash-image".into(),
+            "rate.output".into(),
+        )];
+        let image = &rows[&(
+            "google".into(),
+            "gemini-3.1-flash-image".into(),
+            "rate.output_image".into(),
+        )];
+        for row in [output, image] {
+            let mut raw = document()["overrides"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|raw| raw["fact_key"] == row.fact_key && raw["model_id"] == row.model_id)
+                .unwrap()
+                .clone();
+            raw["value"]["per"] = json!(1000);
+            assert_eq!(
+                load_reporting_rejects(&json!({"overrides":[raw]}).to_string())
+                    .1
+                    .len(),
+                1
+            );
+        }
+        let mut facts = BTreeMap::from([
+            ("rate.output".into(), output.replaces.clone()),
+            ("rate.output_image".into(), json!(null)),
+        ]);
+        let applied = apply_rows(
+            rows,
+            "google",
+            "gemini-3.1-flash-image",
+            &mut facts,
+            None,
+            &[],
+        );
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].fact_key, "rate.output");
+        assert!(facts["rate.output_image"].is_null());
+        facts.remove("rate.output_image");
+        let applied = apply_rows(
+            rows,
+            "google",
+            "gemini-3.1-flash-image",
+            &mut facts,
+            None,
+            &["rate.output_image"],
+        );
+        assert!(applied.is_empty());
+        assert!(!facts.contains_key("rate.output_image"));
     }
 
     #[test]
@@ -588,7 +714,11 @@ mod tests {
             .remove("claude-haiku-5-5");
         let stale = stale_against_seed(overrides(), &seed);
         assert_eq!(stale.len(), 2, "{stale:?}");
-        for key in ADDED_FACTS {
+        for row in overrides()
+            .values()
+            .filter(|row| row.provider_id == "anthropic" && row.model_id == "claude-haiku-5-5")
+        {
+            let key = &row.fact_key;
             assert!(
                 stale
                     .iter()
@@ -659,13 +789,25 @@ mod tests {
                 ("source_ref", json!(" "), "empty identity"),
                 ("review_by_ms", json!(1), "review_by_ms"),
             ] {
-                let mut row = addition_row();
-                row["fact_key"] = json!(key);
+                let doc = document();
+                let mut row = doc["overrides"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|row| row["fact_key"] == key)
+                    .unwrap()
+                    .clone();
                 row[field] = value;
                 let (rows, rejects) =
                     load_reporting_rejects(&json!({"overrides": [row]}).to_string());
                 assert!(rows.is_empty(), "{field}");
                 assert_eq!(rejects.len(), 1, "{field}");
+                let reason = if key == "rate.output_image" && matches!(field, "value" | "replaces")
+                {
+                    "must add a sourced token rate"
+                } else {
+                    reason
+                };
                 assert!(rejects[0].contains(reason), "{field}: {rejects:?}");
             }
         }

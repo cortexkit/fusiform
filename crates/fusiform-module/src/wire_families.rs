@@ -13,6 +13,10 @@ pub const TOKENS: &[&str] = &[
     "aws.bedrock_converse",
     // https://elevenlabs.io/docs/api-reference/text-to-speech/convert
     "elevenlabs.text_to_speech",
+    // https://platform.openai.com/docs/models/gpt-image-2.6-flare
+    "openai.images",
+    // https://ai.google.dev/gemini-api/docs/omni
+    "google.interactions",
 ];
 
 pub fn is_known(token: &str) -> bool {

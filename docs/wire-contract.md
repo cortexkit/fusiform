@@ -210,7 +210,13 @@ another grammar.
 The only tokens are `anthropic.messages`, `openai.responses`,
 `openai.chat_completions`, `openai.chatgpt_responses`,
 `google.generate_content`, `google.code_assist`, `aws.bedrock_converse` and
-`elevenlabs.text_to_speech`. The ElevenLabs token is verified from its
+`elevenlabs.text_to_speech`, `openai.images` and `google.interactions`.
+`openai.images` is verified from the Flare model's
+[supported image endpoints](https://platform.openai.com/docs/models/gpt-image-2.6-flare)
+(`/v1/images/generations` and `/v1/images/edits`, not Responses).
+`google.interactions` is verified from the
+[Omni guide](https://ai.google.dev/gemini-api/docs/omni)
+(`POST /v1beta/interactions`). The ElevenLabs token is verified from its
 [text-to-speech endpoint](https://elevenlabs.io/docs/api-reference/text-to-speech/convert),
 `POST /v1/text-to-speech/{voice_id}` with `xi-api-key` authentication.
 For plain upstream rows, the compiled-in `wire-families.json` matches the exact
@@ -249,6 +255,15 @@ conversion, distinct from the input-only `limit.audio_tokens_per_second`.
 ElevenLabs Flash uses `rate.input.per_character`: $0.04 per 1,000 characters,
 with unknown `increment` and `minimum_quantity`, in the same unit-billed shape
 as transcription's `rate.input_audio.per_second`.
+
+Image and video token prices use `rate.input_image`, `rate.output_image` and
+`rate.output_video` (USD per million tokens of the named modality, never per
+image or second). An unstated modality price remains absent, not zero or the
+text price. Gemini Omni's output conversion keys are
+`limit.output_video_tokens_per_second.resolution.<resolution>` for `360p`,
+`720p`, `1080p` and `4k`. The last two include upsampling. The explicit
+resolution selector follows the same dotted selector convention as rate
+context and TTL selectors; it does not select a different video price.
 
 Current reads correct OpenCode Go's `wire.api` to the per-model base in
 `@earendil-works/pi-ai` 1.4.0's catalog, verified against its provider code at

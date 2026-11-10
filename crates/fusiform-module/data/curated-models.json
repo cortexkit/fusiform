@@ -3,6 +3,51 @@
   "purpose": "Provider rows models.dev does not carry: models published only at lab level, and providers models.dev does not list. Current reads serve these rows from this file; every start also records each row's claim in the store, so a point-in-time read serves the claim in force at its instant. Login methods are an allowlist, not a preference.",
   "models": [
     {
+      "provider_id": "openai",
+      "model_id": "gpt-image-2.6-flare",
+      "auth_methods": ["apikey"],
+      "facts": {
+        "existence": "present",
+        "model.name": "GPT Image 2.6 Flare",
+        "model.type": "image",
+        "capability.input_modalities": ["image", "text"],
+        "capability.output_modalities": ["image"],
+        "rate.input": {"state": "priced", "units": 5, "exponent": 0, "currency": "USD", "unit_provenance": {"kind": "stated"}},
+        "rate.cache_read": {"state": "priced", "units": 125, "exponent": 2, "currency": "USD", "unit_provenance": {"kind": "stated"}},
+        "rate.input_image": {"state": "priced", "units": 8, "exponent": 0, "currency": "USD", "unit_provenance": {"kind": "stated"}},
+        "rate.output_image": {"state": "priced", "units": 30, "exponent": 0, "currency": "USD", "unit_provenance": {"kind": "stated"}},
+        "wire.api": {"value": "https://api.openai.com/v1", "from": "curated"},
+        "wire.family": "openai.images"
+      },
+      "source_ref": "Read 2026-11-10. https://platform.openai.com/docs/models/gpt-image-2.6-flare: \"gpt-image-2.6-flare\", \"GPT Image 2.6 Flare\". Text: \"Input | $5 | 1M tokens\", \"Cached input | $1.25 | 1M tokens\". Image: \"Input | $8 | 1M tokens\", \"Cached input | $2 | 1M tokens\", \"Output | $30 | 1M tokens\". Supported endpoints: \"/v1/images/generations\" and \"/v1/images/edits\"; Responses is not supported. https://platform.openai.com/docs/pricing: Flare text output \"-\", so no rate.output is served. Cached image input is unserved: there is no cached-image role, and the guide states cached pricing applies only through the Responses API, which this model does not support. The text cache-read price is retained as the model page states it; endpoint applicability must be checked by the caller. Text and image input produce image output.",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "provider_id": "google",
+      "model_id": "gemini-omni-1.2-flash",
+      "auth_methods": ["apikey"],
+      "facts": {
+        "existence": "present",
+        "model.name": "Gemini Omni 1.2 Flash",
+        "model.type": "video",
+        "capability.input_modalities": ["image", "text", "video"],
+        "capability.output_modalities": ["text", "video"],
+        "rate.input": {"state": "priced", "units": 150, "exponent": 2, "currency": "USD", "unit_provenance": {"kind": "stated"}},
+        "rate.output": {"state": "priced", "units": 9, "exponent": 0, "currency": "USD", "unit_provenance": {"kind": "stated"}},
+        "rate.output_video": {"state": "priced", "units": 12, "exponent": 0, "currency": "USD", "unit_provenance": {"kind": "stated"}},
+        "limit.output_video_tokens_per_second.resolution.360p": 1931,
+        "limit.output_video_tokens_per_second.resolution.720p": 5792,
+        "limit.output_video_tokens_per_second.resolution.1080p": 8688,
+        "limit.output_video_tokens_per_second.resolution.4k": 17376,
+        "wire.api": {"value": "https://generativelanguage.googleapis.com/v1beta", "from": "curated"},
+        "wire.family": "google.interactions"
+      },
+      "source_ref": "Read 2026-11-10. https://ai.google.dev/gemini-api/docs/pricing: per 1M tokens in USD, input \"$1.50 (text / image / video)\"; output \"$9.00 (text)\", \"$12.00 (video)\"; \"calculated at a rate of 5,792 tokens per second of 720p video\"; 360p \"1,931 tokens/s\", 1080p with upsampling \"8,688 tokens/s\", 4K with upsampling \"17,376 tokens/s\". https://ai.google.dev/gemini-api/docs/models/gemini-omni-flash: Stable \"gemini-omni-1.2-flash\", \"Gemini Omni 1.2 Flash\". https://ai.google.dev/gemini-api/docs/omni: \"Interactions API\", \"POST https://generativelanguage.googleapis.com/v1beta/interactions\". Image, text and video input; text and video output. Output conversions are resolution-selected token counts, not time-billed rates; 1080p and 4K include upsampling. No unstated context, output limit or audio conversion is served.",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
       "provider_id": "google",
       "model_id": "gemini-3.8-flash-tts",
       "auth_methods": ["apikey"],

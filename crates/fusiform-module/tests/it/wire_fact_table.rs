@@ -285,6 +285,12 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
 /// as a statement. `model.kind` is absent on every upstream row, which means
 /// "not stated", never "chat".
 pub(crate) const CURATED_ONLY: &[&str] = &[
+    "rate.input_image",
+    "rate.output_video",
+    "limit.output_video_tokens_per_second.resolution.360p",
+    "limit.output_video_tokens_per_second.resolution.720p",
+    "limit.output_video_tokens_per_second.resolution.1080p",
+    "limit.output_video_tokens_per_second.resolution.4k",
     "limit.output_audio_tokens_per_second",
     "model.kind",
     "route.reasoning_wire_ids",
@@ -298,6 +304,7 @@ pub(crate) const CURATED_ONLY: &[&str] = &[
 /// normalizer must never produce one. Unlike it, these are served on upstream
 /// rows, so the golden fixture must always carry them.
 pub(crate) const ADDITION_ONLY: &[&str] = &[
+    "rate.output_image",
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
 ];

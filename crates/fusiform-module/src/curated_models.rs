@@ -130,7 +130,7 @@ fn invalid_facts(row: &CuratedModel) -> Option<String> {
 /// the served shape: a priced amount whose currency the source stated, or a
 /// stated zero. Curated rows never borrow a price, never refuse one, and never
 /// carry fields the published `RateValue` type would silently drop.
-fn invalid_rate(value: &serde_json::Value, unit_billed: bool) -> Option<String> {
+pub(crate) fn invalid_rate(value: &serde_json::Value, unit_billed: bool) -> Option<String> {
     let keys: std::collections::BTreeSet<&str> = value
         .as_object()
         .map(|obj| obj.keys().map(String::as_str).collect())
@@ -496,8 +496,10 @@ mod tests {
         ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
         ("elevenlabs", "eleven_flash_v2_5"),
         ("google", "gemini-3.8-flash-tts"),
+        ("google", "gemini-omni-1.2-flash"),
         ("meta", "muse-wonder-full-1.0"),
         ("openai", "gpt-6-luna-decisions"),
+        ("openai", "gpt-image-2.6-flare"),
         ("openai", "gpt-transcribe"),
         ("typesafe", "jev-1.13.0"),
     ];

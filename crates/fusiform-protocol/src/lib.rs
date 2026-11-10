@@ -1133,6 +1133,26 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "documented output-audio tokens per second for this model; distinct from the input-audio conversion. Absent means unknown, never a default.",
     },
     ServedFact {
+        key: "limit.output_video_tokens_per_second.resolution.360p",
+        class: FactClass::Advisory,
+        note: "documented output video tokens per second at 360p; absent means unknown.",
+    },
+    ServedFact {
+        key: "limit.output_video_tokens_per_second.resolution.720p",
+        class: FactClass::Advisory,
+        note: "documented output video tokens per second at 720p; absent means unknown.",
+    },
+    ServedFact {
+        key: "limit.output_video_tokens_per_second.resolution.1080p",
+        class: FactClass::Advisory,
+        note: "documented output video tokens per second at 1080p with upsampling; absent means unknown.",
+    },
+    ServedFact {
+        key: "limit.output_video_tokens_per_second.resolution.4k",
+        class: FactClass::Advisory,
+        note: "documented output video tokens per second at 4K with upsampling; absent means unknown.",
+    },
+    ServedFact {
         key: "limit.context",
         class: FactClass::ByteAffecting,
         note: "NEVER rendered into a request. It is the pressure signal for a \
@@ -1344,6 +1364,21 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         class: FactClass::Money,
         note: "per million audio output tokens; upstream values require provider documentation establishing the token unit, curated values quote their own source. Absent means not established, never free.",
     },
+    ServedFact {
+        key: "rate.input_image",
+        class: FactClass::Money,
+        note: "per million image input tokens, not an image-count price; absent means not established, never free.",
+    },
+    ServedFact {
+        key: "rate.output_image",
+        class: FactClass::Money,
+        note: "per million image output tokens, distinct from text output; absent means not established, never free.",
+    },
+    ServedFact {
+        key: "rate.output_video",
+        class: FactClass::Money,
+        note: "per million video output tokens, not seconds; absent means not established, never free.",
+    },
 ];
 
 /// Every value `model.kind` can carry, as a closed set.
@@ -1522,6 +1557,8 @@ pub struct FactOverrideWire {
     pub value: serde_json::Value,
     /// The upstream value it replaces. The override applies only while the
     /// stored upstream value is exactly this.
+    /// Token-rate comparison uses the stored amount before serve-time currency
+    /// provenance; this disclosure includes that policy annotation for decoding.
     ///
     /// For an ADDITION, `replaces` is null because upstream publishes no value
     /// for the fact; the addition applies only while the stored upstream row

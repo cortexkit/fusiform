@@ -767,9 +767,11 @@ an addition is always written as one. Each fact key has its own rule:
 | `capability.server_side_fallback` | addition only | `true` or `false` | `null` |
 | `capability.mid_conversation_system` | addition only | `true` or `false` | `null` |
 | `model.status` | replacement of the stored `null` only | `"deprecated"` | `null` |
+| `rate.output` | replacement only | sourced per-million-token rate | exact stored upstream token-rate object, without serve-time currency provenance |
+| `rate.output_image` | addition only | sourced per-million-image-token rate | `null` |
 
 No other fact may be overridden: other facts have their own curated mechanism
-or serve-time derivation (rates: inheritance and billing planes; `wire.*`: §9;
+or serve-time derivation (other rates: inheritance and billing planes; `wire.*`: §9;
 `model.canonical_id`: §5), and two mechanisms writing one fact would make the
 served value depend on which ran last. Limits cannot be added: an unpublished
 limit is stored as `null`, so a limit is absent only when a correction
@@ -802,6 +804,15 @@ value, disclosed under the alias id. `capability.server_side_fallback` and
 they describe what the Claude API accepts and an alias route reaches the model
 another way. Curated model rows (§4) are
 fusiform's own data and are never overridden.
+
+Gemini 3.1 Flash Image splits its published $60/M image-output price from
+$3/M text/thinking output. The `rate.output` replacement matches only the exact
+upstream $60/M object; `rate.output_image` is an addition and yields if upstream
+records that key. Both flow through its Antigravity alias, with borrowed-rate
+markers retained in the disclosed served values. Vertex is not overridden.
+The [Google pricing page](https://ai.google.dev/gemini-api/docs/pricing)
+also quotes image output token counts (747 at 0.5K, 1120 at 1K,
+1680 at 2K, 2520 at 4K); these are evidence in the note, not new served facts.
 
 One replacement row serves `limit.output` 65,536 for `google/gemini-4-argon`.
 models.dev changed it from 65,536 to 32,768 on 2026-10-13; 32,768 is Google's
@@ -991,6 +1002,12 @@ makes no fact, never a fallback to a different protocol.
 Only `anthropic.messages`, `openai.responses`, `openai.chat_completions`,
 `openai.chatgpt_responses`, `google.generate_content`, `google.code_assist` and
 `aws.bedrock_converse` are admitted.
+`openai.images` is verified from
+https://platform.openai.com/docs/models/gpt-image-2.6-flare
+(`/v1/images/generations` and `/v1/images/edits`, not Responses).
+`google.interactions` is verified from
+https://ai.google.dev/gemini-api/docs/omni
+(`POST https://generativelanguage.googleapis.com/v1beta/interactions`).
 `elevenlabs.text_to_speech` is also admitted, verified from
 https://elevenlabs.io/docs/api-reference/text-to-speech/convert:
 `POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}`, header `xi-api-key`.

@@ -5836,9 +5836,28 @@ fn aliased_response(
     // so each override disclosure now describes the alias entry. It keeps the
     // target's provider_id and model_id, which name the row the override is
     // declared for.
-    response
-        .fact_overrides
-        .retain(|row| facts.get(&row.fact_key) == Some(&row.value));
+    response.fact_overrides.retain_mut(|row| {
+        let Some(served) = facts.get(&row.fact_key) else {
+            return false;
+        };
+        if served == &row.value {
+            return true;
+        }
+        // Alias prices acquire a borrowed-rate marker above. Keep the
+        // source disclosure when that marker is the only difference, and
+        // disclose the actual served value rather than the unmarked price.
+        if row.fact_key.starts_with(fusiform_store::prefix::RATE) {
+            let mut unmarked = served.clone();
+            if let Some(object) = unmarked.as_object_mut() {
+                object.remove("inherited_from");
+            }
+            if unmarked == row.value {
+                row.value = served.clone();
+                return true;
+            }
+        }
+        false
+    });
     for row in &mut response.fact_overrides {
         row.model = alias_key.clone();
     }

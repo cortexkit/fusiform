@@ -14,6 +14,11 @@ pub(crate) fn expected_curated_wire(model: &str) -> std::collections::BTreeMap<S
         "elevenlabs/eleven_flash_v2_5" => {
             ("https://api.elevenlabs.io/v1", "elevenlabs.text_to_speech")
         }
+        "openai/gpt-image-2.6-flare" => ("https://api.openai.com/v1", "openai.images"),
+        "google/gemini-omni-1.2-flash" => (
+            "https://generativelanguage.googleapis.com/v1beta",
+            "google.interactions",
+        ),
         _ => return std::collections::BTreeMap::new(),
     };
     std::collections::BTreeMap::from([
@@ -141,13 +146,137 @@ fn output_audio_is_sourced_and_seeded() {
 }
 
 #[test]
-fn speech_catalog_has_no_unadmitted_image_or_video_roles() {
+fn image_and_video_roles_are_explicitly_admitted() {
     for role in ["rate.input_image", "rate.output_image", "rate.output_video"] {
-        assert!(!fusiform_protocol::SERVED_FACTS
+        assert!(fusiform_protocol::SERVED_FACTS
             .iter()
             .any(|fact| fact.key == role));
-        assert!(!fusiform_module::curated_models::models()
+        assert!(fusiform_module::curated_models::models()
             .values()
             .any(|row| row.facts.contains_key(role)));
     }
+}
+
+#[test]
+fn flare_serves_only_documented_image_facts() {
+    assert_curated(
+        "openai",
+        "gpt-image-2.6-flare",
+        json!({
+            "existence":"present", "model.name":"GPT Image 2.6 Flare", "model.type":"image",
+            "model.lineage":"gpt",
+            "capability.input_modalities":["image","text"], "capability.output_modalities":["image"],
+            "rate.input":price(5,0), "rate.cache_read":price(125,2),
+            "rate.input_image":price(8,0), "rate.output_image":price(30,0),
+            "wire.api":{"value":"https://api.openai.com/v1","from":"curated"},
+            "wire.family":"openai.images"
+        }),
+    );
+    assert!(fusiform_module::wire_families::is_known("openai.images"));
+}
+
+#[test]
+fn omni_serves_only_documented_video_facts() {
+    assert_curated(
+        "google",
+        "gemini-omni-1.2-flash",
+        json!({
+            "existence":"present", "model.name":"Gemini Omni 1.2 Flash", "model.type":"video",
+            "model.lineage":"gemini",
+            "capability.input_modalities":["image","text","video"], "capability.output_modalities":["text","video"],
+            "rate.input":price(150,2), "rate.output":price(9,0), "rate.output_video":price(12,0),
+            "limit.output_video_tokens_per_second.resolution.360p":1931,
+            "limit.output_video_tokens_per_second.resolution.720p":5792,
+            "limit.output_video_tokens_per_second.resolution.1080p":8688,
+            "limit.output_video_tokens_per_second.resolution.4k":17376,
+            "wire.api":{"value":"https://generativelanguage.googleapis.com/v1beta","from":"curated"},
+            "wire.family":"google.interactions"
+        }),
+    );
+    assert!(fusiform_module::wire_families::is_known(
+        "google.interactions"
+    ));
+}
+
+fn image_store(output: i64) -> (CatalogStore, tempfile::TempDir) {
+    let seed: Value =
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+    let mut doc = json!({});
+    for provider in ["google", "google-vertex"] {
+        let mut row = seed[provider]["models"]["gemini-3.1-flash-image"].clone();
+        assert!(row.is_object());
+        if provider == "google" {
+            row["cost"]["output"] = json!(output);
+        }
+        doc[provider] = seed[provider].clone();
+        doc[provider]["models"] = json!({"gemini-3.1-flash-image":row});
+    }
+    let catalog = fusiform_core::normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+        .unwrap()
+        .catalog;
+    let (store, dir) = empty_store();
+    let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
+    store.append_eras(&plan.eras).unwrap();
+    (store, dir)
+}
+
+#[test]
+fn flash_image_split_is_guarded_inherited_and_current_only() {
+    let (store, _dir) = image_store(60);
+    for model in [
+        "gemini-3.1-flash-image",
+        "antigravity-gemini-3.1-flash-image",
+    ] {
+        let response =
+            super::curated_wire::get(&store, json!({"provider_id":"google","model_id":model}));
+        let facts = &response.models[&format!("google/{model}")];
+        assert_eq!(facts["rate.output"]["units"], 3_000_000_000i64);
+        assert_eq!(facts["rate.output_image"]["units"], 60_000_000_000i64);
+        assert_eq!(
+            response.fact_overrides.len(),
+            2,
+            "{model}: both split prices must be disclosed"
+        );
+        for row in &response.fact_overrides {
+            assert_eq!(row.value, facts[&row.fact_key]);
+            if row.fact_key == "rate.output" {
+                serde_json::from_value::<fusiform_protocol::RateValue>(row.replaces.clone())
+                    .unwrap();
+            }
+        }
+    }
+    let historical = super::curated_wire::get(
+        &store,
+        json!({"provider_id":"google","model_id":"gemini-3.1-flash-image","at_ms":1000}),
+    );
+    let old = &historical.models["google/gemini-3.1-flash-image"];
+    assert_eq!(old["rate.output"]["units"], 60_000_000_000i64);
+    assert!(!old.contains_key("rate.output_image"));
+    assert!(historical.fact_overrides.is_empty());
+    let vertex = super::curated_wire::get(
+        &store,
+        json!({"provider_id":"google-vertex","model_id":"gemini-3.1-flash-image"}),
+    );
+    assert_eq!(
+        vertex.models["google-vertex/gemini-3.1-flash-image"]["rate.output"]["units"],
+        60_000_000_000i64
+    );
+    assert!(
+        !vertex.models["google-vertex/gemini-3.1-flash-image"].contains_key("rate.output_image")
+    );
+    assert!(vertex.fact_overrides.is_empty());
+
+    let (changed, _dir) = image_store(7);
+    let response = super::curated_wire::get(
+        &changed,
+        json!({"provider_id":"google","model_id":"gemini-3.1-flash-image"}),
+    );
+    assert_eq!(
+        response.models["google/gemini-3.1-flash-image"]["rate.output"]["units"],
+        7_000_000_000i64
+    );
+    assert!(response
+        .fact_overrides
+        .iter()
+        .all(|row| row.fact_key != "rate.output"));
 }

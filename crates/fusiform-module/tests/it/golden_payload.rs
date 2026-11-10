@@ -496,6 +496,22 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
     let (store, _dir) = super::curated_wire::store();
     for (label, arguments) in [
         (
+            "catalog.get — GPT Image Flare",
+            serde_json::json!({"provider_id":"openai","model_id":"gpt-image-2.6-flare"}),
+        ),
+        (
+            "catalog.get — Gemini Omni video",
+            serde_json::json!({"provider_id":"google","model_id":"gemini-omni-1.2-flash"}),
+        ),
+        (
+            "catalog.get — Gemini Flash Image split rates",
+            serde_json::json!({"provider_id":"google","model_id":"gemini-3.1-flash-image","fact_prefixes":["rate."]}),
+        ),
+        (
+            "catalog.get — Gemini Flash Image alias split rates",
+            serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-3.1-flash-image","fact_prefixes":["rate."]}),
+        ),
+        (
             "catalog.get — Gemini Flash TTS",
             serde_json::json!({"provider_id":"google","model_id":"gemini-3.8-flash-tts"}),
         ),
