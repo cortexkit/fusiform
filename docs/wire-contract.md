@@ -137,6 +137,11 @@ value would do to a consumer:
 | `limit.context` | byte-affecting | integer token count, or `null` |
 | `limit.output` | byte-affecting | integer token count, or `null`; a sourced current-read override is disclosed in `fact_overrides` (§5.8) |
 | `limit.audio_tokens_per_second` | advisory | integer audio tokens per second of input audio, curated from the provider's documentation; current reads only, on rows serving `rate.input_audio` from a provider whose docs state the figure; otherwise no fact |
+| `limit.images_per_request` | advisory | documented integer image count per request, only on first-party image-input rows; current reads only; absent means unknown, never unlimited |
+| `limit.image_bytes` | advisory | integer raw-file bytes per image, only on first-party image-input rows; current reads only; absent means unknown, never unlimited |
+| `limit.image_long_edge_px` | advisory | integer image long edge in pixels valid at any image count, only on first-party image-input rows; current reads only; absent means unknown, never unlimited |
+| `limit.document_pages` | advisory | integer pages per document, only on first-party PDF-input rows; current reads only; absent means unknown, never unlimited |
+| `limit.document_bytes` | advisory | integer raw-file bytes per document, only on first-party PDF-input rows; current reads only; absent means unknown, never unlimited |
 | `capability.reasoning` | byte-affecting | `true`, `false` or `null` |
 | `capability.reasoning_options` | byte-affecting | the upstream's `reasoning_options` array verbatim, or `null` |
 | `capability.structured_output` | advisory | `true` or `false` only when published by models.dev; otherwise no fact |

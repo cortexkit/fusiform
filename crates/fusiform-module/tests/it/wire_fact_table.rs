@@ -209,6 +209,18 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             curated.push("limit.audio_tokens_per_second".to_string());
         }
     }
+    for case in super::golden_payload::render_attachment_limits().values() {
+        for facts in case["response"]["models"].as_object().unwrap().values() {
+            for (key, value) in facts.as_object().unwrap() {
+                assert!(
+                    ATTACHMENT_ONLY.contains(&key.as_str()),
+                    "untabled attachment fact: {key}"
+                );
+                assert!(value.as_u64().is_some_and(|n| n > 0), "{key}: {value}");
+                curated.push(key.clone());
+            }
+        }
+    }
     let unproduced = unproduced_tabled_facts(&produced, &curated, &tabled);
     assert!(unproduced.is_empty(), "{}", unproduced.join("\n"));
 
@@ -255,7 +267,12 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             "connection claims leave transport interpretation to the consumer"
         );
     }
-    for key in QUALITY_ONLY.iter().chain(LINEAGE_ONLY).chain(AUDIO_ONLY) {
+    for key in QUALITY_ONLY
+        .iter()
+        .chain(LINEAGE_ONLY)
+        .chain(AUDIO_ONLY)
+        .chain(ATTACHMENT_ONLY)
+    {
         assert_eq!(
             SERVED_FACTS
                 .iter()
@@ -326,10 +343,13 @@ const CACHE_ONLY: &[&str] = &["capability.cache_lifetimes"];
 /// the normalizer must not infer them from models.dev's catalog.
 const AUDIO_ONLY: &[&str] = &["limit.audio_tokens_per_second"];
 
+/// Provider attachment bounds are joined on current reads, never normalized.
+const ATTACHMENT_ONLY: &[&str] = fusiform_module::attachment_limits::KEYS;
+
 /// Tabled facts nothing emits, and curated-only facts the normalizer emits.
 ///
 /// A tabled fact must come from the normalizer, or be declared curated-only,
-/// addition-only, quality-only, lineage-only, wire-only, cache-only or audio-only and be carried by at least one
+/// addition-only, quality-only, lineage-only, wire-only, cache-only, audio-only or attachment-only and be carried by at least one
 /// curated row, shipped addition row or actual served response (all passed in `curated`).
 fn unproduced_tabled_facts(
     normalized: &[String],
@@ -346,6 +366,7 @@ fn unproduced_tabled_facts(
             .chain(WIRE_ONLY)
             .chain(CACHE_ONLY)
             .chain(AUDIO_ONLY)
+            .chain(ATTACHMENT_ONLY)
     };
     for key in not_upstream() {
         if normalized.iter().any(|p| p == key) {
@@ -372,6 +393,20 @@ fn unproduced_tabled_facts(
 #[test]
 fn planted_unproduced_or_inferred_curated_only_fact_is_reported() {
     let strings = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
+    assert!(unproduced_tabled_facts(&[], &strings(ATTACHMENT_ONLY), ATTACHMENT_ONLY).is_empty());
+    assert_eq!(
+        unproduced_tabled_facts(&[], &[], ATTACHMENT_ONLY).len(),
+        ATTACHMENT_ONLY.len()
+    );
+    assert_eq!(
+        unproduced_tabled_facts(
+            &strings(ATTACHMENT_ONLY),
+            &strings(ATTACHMENT_ONLY),
+            ATTACHMENT_ONLY
+        )
+        .len(),
+        ATTACHMENT_ONLY.len()
+    );
     assert!(unproduced_tabled_facts(&[], &strings(AUDIO_ONLY), AUDIO_ONLY).is_empty());
     assert_eq!(unproduced_tabled_facts(&[], &[], AUDIO_ONLY).len(), 1);
     assert_eq!(

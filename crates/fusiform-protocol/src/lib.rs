@@ -1128,6 +1128,31 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "integer audio tokens per second of input audio, curated from the provider's documentation; current reads only, on rows serving rate.input_audio from a provider whose docs state the figure; otherwise no fact.",
     },
     ServedFact {
+        key: "limit.images_per_request",
+        class: FactClass::Advisory,
+        note: "documented integer image count per request, on image-input rows of first-party providers; current reads only. Absent means unknown, never unlimited.",
+    },
+    ServedFact {
+        key: "limit.image_bytes",
+        class: FactClass::Advisory,
+        note: "documented integer raw-file byte limit per image, on image-input rows of first-party providers; current reads only. Absent means unknown, never unlimited.",
+    },
+    ServedFact {
+        key: "limit.image_long_edge_px",
+        class: FactClass::Advisory,
+        note: "documented integer image long-edge limit in pixels valid at any image count, on image-input rows of first-party providers; current reads only. Absent means unknown, never unlimited.",
+    },
+    ServedFact {
+        key: "limit.document_pages",
+        class: FactClass::Advisory,
+        note: "documented integer page limit per document, on PDF-input rows of first-party providers; current reads only. Absent means unknown, never unlimited.",
+    },
+    ServedFact {
+        key: "limit.document_bytes",
+        class: FactClass::Advisory,
+        note: "documented integer raw-file byte limit per document, on PDF-input rows of first-party providers; current reads only. Absent means unknown, never unlimited.",
+    },
+    ServedFact {
         key: "limit.output_audio_tokens_per_second",
         class: FactClass::Advisory,
         note: "documented output-audio tokens per second for this model; distinct from the input-audio conversion. Absent means unknown, never a default.",

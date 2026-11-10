@@ -682,6 +682,53 @@ and every exclusion matches rows in the embedded seed
 (`input_audio_sources_are_within_their_review_dates`,
 `planted_overdue_source_requires_rereading_or_removal`).
 
+## Attachment limits (`attachment-limits.json`)
+
+The compiled provider table supplies five integer facts on current
+reads: `limit.images_per_request`,
+`limit.image_bytes`, `limit.image_long_edge_px`, `limit.document_pages` and
+`limit.document_bytes`. Absence always means unknown, never unlimited. A vendor's
+"no limit" statement therefore produces no fact. These values are never stored
+or replayed on `at_ms` reads.
+
+`limit.documents_per_request` is an agreed name, not yet served by any provider
+and not registered in `SERVED_FACTS`. It can join the served vocabulary when a
+vendor states a document count and a real served value can be pinned in the
+golden fixture.
+
+Moonshot's file-upload documentation states "Each file can be up to 100 MiB"
+([source](https://platform.kimi.ai/docs/api/files-upload)), or 104,857,600 bytes,
+but no `moonshotai` row in the embedded seed accepts PDF input. No Moonshot
+attachment evidence ships until there is an eligible row. The seed fence
+requires every shipped limit to reach at least one eligible model, so dormant
+evidence cannot silently accumulate review obligations.
+
+Only first-party provider ids in the table qualify. Image facts require
+`image` in the served `capability.input_modalities`; document facts require
+`pdf`. Gateways and resellers, including `google-vertex`, do not inherit the
+backend's limits. Each published value carries a first-party `source_ref`, its
+verbatim `quote`, and a review interval of exactly 60 days. Review-date and
+embedded-seed fences require the evidence to stay current and applicable.
+Aliases already inherit other serve-time limits, so they inherit these from
+their target as well, including cross-provider aliases. An alias of an
+Anthropic row uses Anthropic's bounds, not the alias provider's bounds.
+
+Byte limits describe raw files. Decimal MB means 1,000,000 bytes; MiB means
+1,048,576. Anthropic's 10 MB base64-encoded image limit becomes 7,500,000 raw
+bytes (10,000,000 × 3/4). Image dimensions use the bound that holds at any
+image count: Anthropic allows 8000×8000 pixels up to 20 images but only 3000
+pixels per side above that; DeepSeek allows 8192 pixels per side below 15
+images but only 4096 from 15 images onward.
+
+Anthropic's image count depends on the row's `limit.context`: exactly 200,000
+tokens gives 100 images, any other known context gives 600. Its PDF page cap
+is 100 below 1,000,000 context tokens and 600 at or above that. Missing or null
+context gives neither context-dependent fact. Whole-request byte caps,
+recommended dimensions and page-extraction truncation are not per-file limits
+and are deliberately omitted. OpenAI's 50,000,000-byte per-file PDF limit also
+has a 50 MB combined-request limit; the per-file fact alone does not promise
+that several maximum-sized files fit in one request.
+
 ## 9. Wire corrections (`wire-corrections.json`)
 
 Each `corrections` row names `provider`, `model`, `field` (currently only

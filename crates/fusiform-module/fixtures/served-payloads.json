@@ -35,6 +35,10 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
+          "limit.document_pages": 600,
+          "limit.image_bytes": 7500000,
+          "limit.image_long_edge_px": 3000,
+          "limit.images_per_request": 600,
           "limit.output": 64000,
           "model.canonical_id": null,
           "model.family": "claude-sonnet",
@@ -190,6 +194,9 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
+          "limit.image_bytes": 33554432,
+          "limit.image_long_edge_px": 4096,
+          "limit.images_per_request": 600,
           "limit.output": 393216,
           "model.canonical_id": "deepseek/deepseek-v4.1-flash-1017",
           "model.family": "deepseek-flash",
@@ -314,6 +321,8 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1050000,
+          "limit.document_bytes": 50000000,
+          "limit.images_per_request": 1500,
           "limit.output": 128000,
           "model.canonical_id": null,
           "model.family": "gpt-luna",
@@ -574,6 +583,7 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
+          "limit.image_bytes": 20971520,
           "limit.output": 30000,
           "model.canonical_id": null,
           "model.family": "grok",
@@ -737,6 +747,10 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
+          "limit.document_pages": 600,
+          "limit.image_bytes": 7500000,
+          "limit.image_long_edge_px": 3000,
+          "limit.images_per_request": 600,
           "limit.output": 128000,
           "model.canonical_id": "anthropic/claude-sonnet-5-5",
           "model.family": "claude-sonnet",
@@ -917,6 +931,7 @@
             "image"
           ],
           "existence": "present",
+          "limit.images_per_request": 1500,
           "model.lineage": "gpt",
           "model.name": "GPT Image 2.6 Flare",
           "model.type": "image",
@@ -1315,6 +1330,7 @@
             "video"
           ],
           "existence": "present",
+          "limit.images_per_request": 3600,
           "limit.output_video_tokens_per_second.resolution.1080p": 8688,
           "limit.output_video_tokens_per_second.resolution.360p": 1931,
           "limit.output_video_tokens_per_second.resolution.4k": 17376,
@@ -1407,6 +1423,9 @@
           "existence": "present",
           "limit.audio_tokens_per_second": 32,
           "limit.context": 1048576,
+          "limit.document_bytes": 50000000,
+          "limit.document_pages": 1000,
+          "limit.images_per_request": 3600,
           "limit.output": 65536,
           "model.canonical_id": "google/gemini-3.8-flash",
           "model.family": "gemini-flash",
@@ -1733,6 +1752,112 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — a gateway without attachment bounds": {
+    "request": {
+      "arguments": {
+        "model_id": "anthropic/claude-opus-4-6",
+        "provider_id": "anyapi"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "anyapi/anthropic/claude-opus-4-6": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "pdf",
+            "text"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "toggle"
+            },
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            {
+              "max": 127999,
+              "min": 1024,
+              "type": "budget_tokens"
+            }
+          ],
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1000000,
+          "limit.output": 128000,
+          "model.canonical_id": null,
+          "model.family": "claude-opus",
+          "model.lineage": "claude",
+          "model.name": "Claude Opus 4.6",
+          "model.open_weights": false,
+          "model.status": null,
+          "provider.name": "AnyAPI",
+          "rate.cache_read.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          },
+          "rate.cache_write.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 37500000000
+          },
+          "rate.input.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 30000000000
+          },
+          "rate.output.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 150000000000
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.anyapi.ai/v1"
+          },
+          "wire.family": "openai.chat_completions",
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — a model priced only in a mode, with no base rate": {
     "request": {
       "arguments": {
@@ -1996,6 +2121,33 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — a per-document byte bound": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "limit.images_per_request",
+          "limit.image_bytes",
+          "limit.image_long_edge_px",
+          "limit.document_pages",
+          "limit.document_bytes"
+        ],
+        "model_id": "gpt-5.4",
+        "provider_id": "openai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "openai/gpt-5.4": {
+          "limit.document_bytes": 50000000,
+          "limit.images_per_request": 1500
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — a provider served only through curated rows": {
     "request": {
       "arguments": {
@@ -2170,6 +2322,9 @@
       "models": {
         "google/antigravity-gemini-4-argon": {
           "limit.context": 1048576,
+          "limit.document_bytes": 50000000,
+          "limit.document_pages": 1000,
+          "limit.images_per_request": 3600,
           "limit.output": 65536
         }
       },
@@ -2222,6 +2377,9 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
+          "limit.document_bytes": 50000000,
+          "limit.document_pages": 1000,
+          "limit.images_per_request": 3600,
           "limit.output": 65536,
           "model.canonical_id": "google/gemini-3.8-flash",
           "model.family": "gemini-flash",
@@ -2416,6 +2574,10 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
+          "limit.document_pages": 600,
+          "limit.image_bytes": 7500000,
+          "limit.image_long_edge_px": 3000,
+          "limit.images_per_request": 600,
           "limit.output": 128000,
           "model.canonical_id": "anthropic/claude-opus-5-5",
           "model.family": "claude-opus",
@@ -2603,6 +2765,8 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1050000,
+          "limit.document_bytes": 50000000,
+          "limit.images_per_request": 1500,
           "limit.output": 128000,
           "model.canonical_id": "openai/gpt-6.1-sol",
           "model.family": "gpt-sol",
@@ -2934,6 +3098,35 @@
       },
       "next_page_token": "v1:0:1000:000-page",
       "resolved_at_ms": 1000,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — first-party attachment bounds": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "limit.images_per_request",
+          "limit.image_bytes",
+          "limit.image_long_edge_px",
+          "limit.document_pages",
+          "limit.document_bytes"
+        ],
+        "model_id": "claude-opus-5-5",
+        "provider_id": "anthropic"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "anthropic/claude-opus-5-5": {
+          "limit.document_pages": 600,
+          "limit.image_bytes": 7500000,
+          "limit.image_long_edge_px": 3000,
+          "limit.images_per_request": 600
+        }
+      },
+      "resolved_at_ms": -1,
       "source": "models.dev"
     }
   },
@@ -3359,6 +3552,10 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
+          "limit.document_pages": 600,
+          "limit.image_bytes": 7500000,
+          "limit.image_long_edge_px": 3000,
+          "limit.images_per_request": 600,
           "limit.output": 64000,
           "model.canonical_id": null,
           "model.family": "claude-sonnet",
@@ -4032,6 +4229,8 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1050000,
+          "limit.document_bytes": 50000000,
+          "limit.images_per_request": 1500,
           "limit.output": 128000,
           "model.canonical_id": "openai/gpt-6.1-sol",
           "model.family": "gpt-sol",
@@ -4392,6 +4591,9 @@
       "models": {
         "google/gemini-4-argon": {
           "limit.context": 1048576,
+          "limit.document_bytes": 50000000,
+          "limit.document_pages": 1000,
+          "limit.images_per_request": 3600,
           "limit.output": 65536
         }
       },
@@ -4707,6 +4909,11 @@
         "wire.shape",
         "existence",
         "limit.audio_tokens_per_second",
+        "limit.images_per_request",
+        "limit.image_bytes",
+        "limit.image_long_edge_px",
+        "limit.document_pages",
+        "limit.document_bytes",
         "limit.output_audio_tokens_per_second",
         "limit.output_video_tokens_per_second.resolution.360p",
         "limit.output_video_tokens_per_second.resolution.720p",
@@ -4782,6 +4989,7 @@
           "capability.tool_call": false,
           "existence": "present",
           "limit.context": null,
+          "limit.images_per_request": 1500,
           "limit.output": null,
           "model.canonical_id": null,
           "model.family": "gpt-image",
@@ -5207,6 +5415,8 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1050000,
+          "limit.document_bytes": 50000000,
+          "limit.images_per_request": 1500,
           "limit.output": 128000,
           "model.canonical_id": null,
           "model.family": "gpt-luna",
@@ -5339,6 +5549,7 @@
           "capability.tool_call": false,
           "existence": "present",
           "limit.context": null,
+          "limit.images_per_request": 1500,
           "limit.output": null,
           "model.canonical_id": null,
           "model.family": "gpt-image",
@@ -5731,6 +5942,8 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1050000,
+          "limit.document_bytes": 50000000,
+          "limit.images_per_request": 1500,
           "limit.output": 128000,
           "model.canonical_id": null,
           "model.family": "gpt-luna",
@@ -5983,6 +6196,10 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
+          "limit.document_pages": 600,
+          "limit.image_bytes": 7500000,
+          "limit.image_long_edge_px": 3000,
+          "limit.images_per_request": 600,
           "limit.output": 64000,
           "model.canonical_id": null,
           "model.family": "claude-sonnet",
@@ -7157,6 +7374,10 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
+          "limit.document_pages": 600,
+          "limit.image_bytes": 7500000,
+          "limit.image_long_edge_px": 3000,
+          "limit.images_per_request": 600,
           "limit.output": 64000,
           "model.canonical_id": null,
           "model.family": "claude-sonnet",

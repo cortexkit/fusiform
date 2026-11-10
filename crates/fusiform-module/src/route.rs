@@ -953,6 +953,16 @@ fn serve_catalog_get_request(
                 wide.push("rate.input_audio".to_string());
                 wide.push("existence".to_string());
             }
+            if crate::attachment_limits::KEYS
+                .iter()
+                .any(|key| prefixes.iter().any(|prefix| key.starts_with(prefix)))
+            {
+                // Attachment bounds need modalities and sometimes context even
+                // when the caller selected only a derived bound.
+                wide.push("capability.input_modalities".to_string());
+                wide.push("limit.context".to_string());
+                wide.push("existence".to_string());
+            }
             if prefixes.iter().any(|p| "wire.family".starts_with(p)) {
                 // Protocol verification needs the package and shape, and endpoint
                 // corrections must run before a route can advertise its protocol.
@@ -1850,6 +1860,14 @@ fn finish_plane_view(
         for (identity, facts) in &mut response.models {
             if let Some((provider, model)) = identity.split_once('/') {
                 crate::cache_lifetimes::apply(provider, model, facts);
+                // Aliases already inherit the target's serve-time limits. Use
+                // that target's evidence, not the alias provider's unrelated cap.
+                let attachment_provider = response
+                    .aliased
+                    .iter()
+                    .find(|alias| alias.model == *identity)
+                    .map_or(provider, |alias| alias.target_provider_id.as_str());
+                crate::attachment_limits::apply(attachment_provider, facts);
                 if facts.contains_key("rate.input_audio") {
                     if let Some(audio) = crate::input_audio::sources()
                         .get(provider)

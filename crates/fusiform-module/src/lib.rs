@@ -9,6 +9,7 @@
 //! exports as unused.
 
 pub mod aliases;
+pub mod attachment_limits;
 pub mod billing_planes;
 pub mod cache_lifetimes;
 pub mod canonical_links;

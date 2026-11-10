@@ -433,6 +433,10 @@ fn render_all() -> String {
         .as_object_mut()
         .unwrap()
         .extend(render_cache_lifetimes());
+    ordinary
+        .as_object_mut()
+        .unwrap()
+        .extend(render_attachment_limits());
     let planes: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
     for (label, case) in planes.as_object().unwrap() {
         assert!(
@@ -486,6 +490,36 @@ pub(super) fn render_cache_lifetimes() -> serde_json::Map<String, serde_json::Va
         cases.insert(
             format!("catalog.get — cache lifetimes {provider}/{model}"),
             serde_json::json!({"request":request, "response":response}),
+        );
+    }
+    cases
+}
+
+pub(super) fn render_attachment_limits() -> serde_json::Map<String, serde_json::Value> {
+    let (store, _dir) = super::cache_lifetimes::store(None);
+    let mut cases = serde_json::Map::new();
+    for (label, provider, model) in [
+        (
+            "catalog.get — first-party attachment bounds",
+            "anthropic",
+            "claude-opus-5-5",
+        ),
+        (
+            "catalog.get — a per-document byte bound",
+            "openai",
+            "gpt-5.4",
+        ),
+    ] {
+        let request = serde_json::json!({
+            "name":"catalog.get",
+            "arguments":{"provider_id":provider,"model_id":model,"fact_prefixes":fusiform_module::attachment_limits::KEYS}
+        });
+        let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+        let mut response = serde_json::to_value(response).unwrap();
+        response["resolved_at_ms"] = NOW_PLACEHOLDER.into();
+        cases.insert(
+            label.into(),
+            serde_json::json!({"request":request,"response":response}),
         );
     }
     cases
@@ -838,7 +872,8 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
                 + plain_plane_cases
                 + 5
                 + curated_wire.len()
-                + render_cache_lifetimes().len(),
+                + render_cache_lifetimes().len()
+                + render_attachment_limits().len(),
         ),
         (
             serde_json::to_string(&curated_wire).unwrap(),
@@ -846,6 +881,10 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         ),
         (render(), cases().len()),
         (serde_json::to_string(&render_cache_lifetimes()).unwrap(), 2),
+        (
+            serde_json::to_string(&render_attachment_limits()).unwrap(),
+            2,
+        ),
         (serde_json::json!({"paged":render_paged()}).to_string(), 1),
         (
             serde_json::json!({"canonical":render_canonical_link()}).to_string(),
@@ -1583,6 +1622,11 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
 fn cases() -> Vec<(&'static str, String)> {
     vec![
         (
+            // Backend bounds do not establish what a gateway accepts.
+            "catalog.get — a gateway without attachment bounds",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"anyapi","model_id":"anthropic/claude-opus-4-6"}}"#.to_string(),
+        ),
+        (
             "catalog.get — one model, current",
             r#"{"name":"catalog.get","arguments":{"provider_id":"anthropic","model_id":"claude-sonnet-4-5"}}"#.to_string(),
         ),
@@ -1990,6 +2034,35 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
              dropped a case this file exists to hold"
         );
     }
+}
+
+#[test]
+fn attachment_bound_cases_pin_values_and_gateway_absence() {
+    let golden: serde_json::Value = serde_json::from_str(GOLDEN).unwrap();
+    let anthropic = &golden["catalog.get — first-party attachment bounds"]["response"]["models"]
+        ["anthropic/claude-opus-5-5"];
+    assert_eq!(
+        *anthropic,
+        serde_json::json!({
+            "limit.images_per_request":600,
+            "limit.image_bytes":7500000,
+            "limit.image_long_edge_px":3000,
+            "limit.document_pages":600,
+        })
+    );
+    let openai =
+        &golden["catalog.get — a per-document byte bound"]["response"]["models"]["openai/gpt-5.4"];
+    assert_eq!(
+        *openai,
+        serde_json::json!({"limit.images_per_request":1500,"limit.document_bytes":50000000})
+    );
+    let gateway = &golden["catalog.get — a gateway without attachment bounds"]["response"]
+        ["models"]["anyapi/anthropic/claude-opus-4-6"];
+    assert!(gateway.as_object().is_some_and(|facts| !facts.is_empty()));
+    assert!(fusiform_module::attachment_limits::KEYS
+        .iter()
+        .all(|key| gateway.get(key).is_none()));
+    assert!(gateway.get("limit.documents_per_request").is_none());
 }
 
 /// Every field of every READ response appears somewhere in the fixture.

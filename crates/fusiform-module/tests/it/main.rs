@@ -5,6 +5,7 @@
 // supplies its own main) belongs beside this directory as tests/<name>.rs.
 // Scope a run to one file with `cargo test -p fusiform-module --test it <file>::`.
 
+mod attachment_limits;
 mod bootstrap;
 mod cache_lifetimes;
 mod conditional_get;

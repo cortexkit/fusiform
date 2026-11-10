@@ -1,0 +1,165 @@
+{
+  "schema": "attachment-limits/v1",
+  "providers": [
+    {
+      "provider_id": "anthropic",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000,
+      "notes": "Claude API only. No document count is stated. The 128 MB PDF limit is for the whole request, not per document.",
+      "limits": [
+        {
+          "fact": "limit.images_per_request",
+          "rule": {"kind": "context_equals", "context": 200000, "equal": 100, "other": 600},
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/vision",
+          "quote": "100 for each request on the API, for models with a 200k-token context window; 600 for each request on the API, for all other models",
+          "notes": "Exactly 200000 context tokens gives 100 images; every other known context gives 600. Unknown context supplies no count."
+        },
+        {
+          "fact": "limit.image_long_edge_px",
+          "rule": {"kind": "fixed", "value": 3000},
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/vision",
+          "quote": "resize each image so that neither dimension exceeds 3,000 px",
+          "notes": "8000 px per side applies at up to 20 images; above 20 the bound is 3000 px per side. Serve 3000 so the bound holds at any allowed image count."
+        },
+        {
+          "fact": "limit.image_bytes",
+          "rule": {"kind": "fixed", "value": 7500000},
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/vision",
+          "quote": "10 MB (base64-encoded) on the Claude API",
+          "notes": "Decimal MB is 1000000 bytes. Base64 expands by 4/3, so the raw-file bound is 10000000 * 3 / 4 = 7500000 bytes."
+        },
+        {
+          "fact": "limit.document_pages",
+          "rule": {"kind": "context_at_least", "context": 1000000, "below": 100, "at_least": 600},
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/pdf-support",
+          "quote": "600 (100 when the request's context window is under 1M tokens)",
+          "notes": "At least 1000000 context tokens gives 600 pages, below gives 100. Unknown context supplies no page count."
+        }
+      ]
+    },
+    {
+      "provider_id": "openai",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000,
+      "notes": "No per-image byte limit: 512 MB is the total payload. Long edge depends on model and detail. No page or document count is stated.",
+      "limits": [
+        {
+          "fact": "limit.images_per_request",
+          "rule": {"kind": "fixed", "value": 1500},
+          "source_ref": "https://platform.openai.com/docs/guides/images-vision",
+          "quote": "Up to 1,500 images per request",
+          "notes": "Image count, not a payload byte allowance."
+        },
+        {
+          "fact": "limit.document_bytes",
+          "rule": {"kind": "fixed", "value": 50000000},
+          "source_ref": "https://platform.openai.com/docs/guides/pdf-files",
+          "quote": "each file must be under 50 MB. The combined limit across all files in the request is 50 MB",
+          "notes": "Decimal 50 MB = 50000000 bytes per file. A separate combined-request cap still applies; the per-file fact does not promise several files of this size fit together."
+        }
+      ]
+    },
+    {
+      "provider_id": "google",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000,
+      "notes": "Gemini API only, not google-vertex. The 20 MB inline cap is whole-request, not per image. No hard image dimension maximum or document count is stated.",
+      "limits": [
+        {
+          "fact": "limit.images_per_request",
+          "rule": {"kind": "fixed", "value": 3600},
+          "source_ref": "https://ai.google.dev/gemini-api/docs/image-understanding",
+          "quote": "Gemini models support a maximum of 3,600 image files per request.",
+          "notes": "Image count on the first-party Gemini API."
+        },
+        {
+          "fact": "limit.document_pages",
+          "rule": {"kind": "fixed", "value": 1000},
+          "source_ref": "https://ai.google.dev/gemini-api/docs/document-processing",
+          "quote": "Gemini supports PDF files up to 50MB or 1000 pages. This limit applies to both inline data and Files API uploads",
+          "notes": "Per-PDF page cap, not a request document count."
+        },
+        {
+          "fact": "limit.document_bytes",
+          "rule": {"kind": "fixed", "value": 50000000},
+          "source_ref": "https://ai.google.dev/gemini-api/docs/document-processing",
+          "quote": "Gemini supports PDF files up to 50MB or 1000 pages. This limit applies to both inline data and Files API uploads",
+          "notes": "Decimal 50 MB = 50000000 bytes."
+        }
+      ]
+    },
+    {
+      "provider_id": "xai",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000,
+      "notes": "Image count says No limit, which supplies no fact. Document pages conflict on 512 MB versus 50 MB, so no document bounds are served.",
+      "limits": [
+        {
+          "fact": "limit.image_bytes",
+          "rule": {"kind": "fixed", "value": 20971520},
+          "source_ref": "https://docs.x.ai/docs/guides/image-understanding",
+          "quote": "Maximum image size: 20MiB",
+          "notes": "20 * 1048576 = 20971520 bytes."
+        }
+      ]
+    },
+    {
+      "provider_id": "meta",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000,
+      "notes": "No document page cap: extracting text from the first 100 pages and images from the first 50 is truncation, not refusal. No document count is stated.",
+      "limits": [
+        {
+          "fact": "limit.images_per_request",
+          "rule": {"kind": "fixed", "value": 50},
+          "source_ref": "https://dev.meta.ai/docs/media-understanding",
+          "quote": "You can include up to 50 images",
+          "notes": "Per-request image count."
+        },
+        {
+          "fact": "limit.image_bytes",
+          "rule": {"kind": "fixed", "value": 50000000},
+          "source_ref": "https://dev.meta.ai/docs/file-handling",
+          "quote": "| Inline (`file_data` base64 or `file_url` in the request body) | 50 MB (50,000,000 bytes) |",
+          "notes": "The vendor explicitly gives the decimal byte count for inline files."
+        },
+        {
+          "fact": "limit.document_bytes",
+          "rule": {"kind": "fixed", "value": 50000000},
+          "source_ref": "https://dev.meta.ai/docs/file-handling",
+          "quote": "| Inline (`file_data` base64 or `file_url` in the request body) | 50 MB (50,000,000 bytes) |",
+          "notes": "The inline file bound also covers PDF files."
+        }
+      ]
+    },
+    {
+      "provider_id": "deepseek",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000,
+      "notes": "No document bounds are established.",
+      "limits": [
+        {
+          "fact": "limit.images_per_request",
+          "rule": {"kind": "fixed", "value": 600},
+          "source_ref": "https://api-docs.deepseek.com/guides/vision.md",
+          "quote": "| Max images per request                        | 600                                                                                   |",
+          "notes": "Per-request image count."
+        },
+        {
+          "fact": "limit.image_bytes",
+          "rule": {"kind": "fixed", "value": 33554432},
+          "source_ref": "https://api-docs.deepseek.com/guides/vision.md",
+          "quote": "Max single image size (base64 / external URL) | 32 MiB",
+          "notes": "32 * 1048576 = 33554432 bytes."
+        },
+        {
+          "fact": "limit.image_long_edge_px",
+          "rule": {"kind": "fixed", "value": 4096},
+          "source_ref": "https://api-docs.deepseek.com/guides/vision.md",
+          "quote": "8192 px per side; drops to 4096 px per side when a request contains 15 or more images",
+          "notes": "8192 px applies below 15 images; 4096 applies from 15 onward. Serve 4096 so the bound holds at any allowed image count."
+        }
+      ]
+    }
+  ]
+}
