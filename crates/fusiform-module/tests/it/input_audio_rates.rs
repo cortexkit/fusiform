@@ -143,13 +143,31 @@ fn rates(
 }
 
 #[test]
+fn audio_tokens_per_second_uses_model_override_and_preserves_provider_default() {
+    let (store, _dir) = store();
+    for (model, expected) in [
+        ("gemini-3.8-flash", 25),
+        ("gemini-4-argon", 32),
+        ("antigravity-gemini-3.8-flash", 25),
+    ] {
+        let response = read(
+            &store,
+            serde_json::json!({"provider_id": "google", "model_id": model}),
+        );
+        let facts = &response["models"][format!("google/{model}")];
+        assert!(facts.get("rate.input_audio").is_some(), "{response}");
+        assert_eq!(facts["limit.audio_tokens_per_second"], expected, "{model}");
+    }
+}
+
+#[test]
 fn audio_tokens_per_second_is_current_only_and_never_stored() {
     let (store, _dir) = store();
     let args = serde_json::json!({"provider_id": "google", "model_id": "gemini-3.8-flash"});
     let current = read(&store, args.clone());
     let facts = &current["models"]["google/gemini-3.8-flash"];
     assert!(facts.get("rate.input_audio").is_some());
-    assert_eq!(facts["limit.audio_tokens_per_second"], 32);
+    assert_eq!(facts["limit.audio_tokens_per_second"], 25);
 
     let mut historical_args = args;
     historical_args["at_ms"] = POLLED_AT.into();
@@ -214,7 +232,7 @@ fn audio_tokens_per_second_survives_prefix_only_and_plane_reads_including_aliase
                 .as_object()
                 .unwrap();
             assert_eq!(facts.len(), 1, "{response}");
-            assert_eq!(facts["limit.audio_tokens_per_second"], 32, "{response}");
+            assert_eq!(facts["limit.audio_tokens_per_second"], 25, "{response}");
         }
     }
 }
@@ -229,7 +247,7 @@ fn audio_tokens_per_second_survives_paged_prefix_only_reads() {
     for model in ["gemini-3.8-flash", "antigravity-gemini-3.8-flash"] {
         assert_eq!(
             response["models"][format!("google/{model}")]["limit.audio_tokens_per_second"],
-            32,
+            25,
             "{response}"
         );
     }

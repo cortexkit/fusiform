@@ -636,7 +636,15 @@ Each row in `providers`:
 | `quote` | verbatim text from that page stating audio input is priced per million tokens; it must name the per-million-token unit |
 | `established_at_ms`, `review_by_ms` | when the page was read; exactly 60 days later |
 | `excluded_models` | models of this provider whose published `input_audio` the page does not support, each with `model_id` and `reason` |
-| `audio_tokens_per_second` | optional object with a positive integer `value`, an `https` `source_ref` and a verbatim `quote` from the provider's documentation stating the conversion; covered by the provider row's review date |
+| `audio_tokens_per_second` | optional object with a positive integer default `value`, an `https` `source_ref` and a verbatim `quote` from the provider's documentation stating the conversion; optional `model_overrides` are described below; covered by the provider row's review date |
+
+Each entry in `audio_tokens_per_second.model_overrides` has a unique `model_id`
+under that provider, a positive integer `value`, `basis: "measured"`, an `https`
+`source_ref` identifying the provider's billed usage counts, and a non-empty
+`quote` describing the measurement. Overrides replace only the named model's
+conversion; all other models retain the provider default. The embedded-seed
+fence requires each override's model to exist under that provider, not merely
+under another provider with the same model id.
 
 `declined` records providers whose page was read and did not establish the
 unit (`provider_id`, `source_ref`, `quote`, `reason`). It changes nothing that
@@ -661,8 +669,16 @@ as data, so the core crate does no file IO.
 The optional `audio_tokens_per_second` is applied only on current reads as
 `limit.audio_tokens_per_second`, a JSON integer. It is joined onto a provider's
 served rows only when their facts contain `rate.input_audio`, including aliases
-borrowing that rate. Today only Google's row supplies it: its audio documentation
-states "Tokens: 32 tokens per second of audio (1 minute = 1,920 tokens)".
+borrowing that rate. An alias uses its target provider and model to choose an
+override, so Google's `antigravity-gemini-3.8-flash` receives the same 25 as
+`gemini-3.8-flash`. Today only Google's row supplies the conversion: its audio
+documentation states "Tokens: 32 tokens per second of audio (1 minute = 1,920
+tokens)", which remains the default. The measured override for
+`gemini-3.8-flash` is 25: 62 billed requests on 2026-11-10 with 3.5–7 s audio
+clips each reported exactly `ceil(25 × duration in seconds)` audio input tokens
+in the Gemini API's `usageMetadata.promptTokensDetails`. The billed count is the
+authority for the charged conversion even though Google's audio page states
+32; its pricing page uses 25 per second for newer speech models.
 The conversion is never stored or replayed on `at_ms` reads. Selecting only
 `limit.audio_tokens_per_second` still evaluates the audio-rate gate internally;
 the response contains only the facts the caller selected. An absent conversion
@@ -674,11 +690,15 @@ exclusions and bad declined rows are rejected
 (`malformed_and_duplicate_rows_are_counted_as_rejects`,
 `malformed_fields_are_rejected`,
 `audio_tokens_per_second_is_optional_and_malformed_values_are_counted_rejects`,
+`audio_token_overrides_are_optional_and_malformed_values_are_rejected`,
 `malformed_exclusions_and_declined_rows_are_rejected`); every listed provider
-and every exclusion matches rows in the embedded seed
+and every exclusion matches rows in the embedded seed, as does each audio token
+override under its provider
 (`every_source_has_input_audio_rows_in_the_embedded_seed`,
 `planted_provider_without_audio_rows_is_named`,
-`planted_stale_exclusion_is_named`); and no row is past its review date
+`planted_stale_exclusion_is_named`,
+`audio_token_override_naming_unknown_model_fails_seed_fence`,
+`planted_audio_token_override_without_seed_model_is_named`); and no row is past its review date
 (`input_audio_sources_are_within_their_review_dates`,
 `planted_overdue_source_requires_rereading_or_removal`).
 

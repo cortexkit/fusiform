@@ -1417,7 +1417,7 @@
           ],
           "capability.tool_call": true,
           "existence": "present",
-          "limit.audio_tokens_per_second": 32,
+          "limit.audio_tokens_per_second": 25,
           "limit.context": 1048576,
           "limit.output": 65536,
           "model.canonical_id": "google/gemini-3.8-flash",

@@ -1864,21 +1864,30 @@ fn finish_plane_view(
                 // request, not of the model. An alias routes through another
                 // backend (Code Assist for the Antigravity rows), whose limits no
                 // source states, so it gets none rather than its target's.
-                let is_alias = response
+                let alias = response
                     .aliased
                     .iter()
-                    .any(|alias| alias.model == *identity);
-                if !is_alias {
+                    .find(|alias| alias.model == *identity);
+                if alias.is_none() {
                     crate::attachment_limits::apply(provider, facts);
                 }
                 if facts.contains_key("rate.input_audio") {
+                    // An alias borrows the target's conversion as well as its audio rate.
+                    let (audio_provider, audio_model) = alias
+                        .map(|alias| {
+                            (
+                                alias.target_provider_id.as_str(),
+                                alias.target_model_id.as_str(),
+                            )
+                        })
+                        .unwrap_or((provider, model));
                     if let Some(audio) = crate::input_audio::sources()
-                        .get(provider)
+                        .get(audio_provider)
                         .and_then(|row| row.audio_tokens_per_second.as_ref())
                     {
                         facts.insert(
                             "limit.audio_tokens_per_second".to_string(),
-                            serde_json::json!(audio.value),
+                            serde_json::json!(audio.value_for(audio_model)),
                         );
                     }
                 }

@@ -10,7 +10,16 @@
       "audio_tokens_per_second": {
         "value": 32,
         "source_ref": "https://ai.google.dev/gemini-api/docs/audio",
-        "quote": "Tokens: 32 tokens per second of audio (1 minute = 1,920 tokens)"
+        "quote": "Tokens: 32 tokens per second of audio (1 minute = 1,920 tokens)",
+        "model_overrides": [
+          {
+            "model_id": "gemini-3.8-flash",
+            "value": 25,
+            "basis": "measured",
+            "source_ref": "https://ai.google.dev/api/generate-content#UsageMetadata (Gemini API usageMetadata.promptTokensDetails billed audio input counts)",
+            "quote": "62 billed gemini-3.8-flash requests on 2026-11-10, clips of 3.5–7 s: each billed ceil(25 × duration in seconds) audio input tokens; Google's audio page states 32 tokens per second, and its pricing page uses 25 per second for newer speech models"
+          }
+        ]
       },
       "excluded_models": [
         {

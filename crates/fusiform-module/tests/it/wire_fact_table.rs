@@ -202,9 +202,16 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
         }
     }
     let audio = super::input_audio_rates::current_audio_response();
-    for facts in audio["models"].as_object().unwrap().values() {
+    for (identity, facts) in audio["models"].as_object().unwrap() {
         if facts.get("limit.audio_tokens_per_second").is_some() {
-            assert_eq!(facts["limit.audio_tokens_per_second"], 32);
+            let expected = match identity.as_str() {
+                "google/gemini-3.8-flash" | "google/antigravity-gemini-3.8-flash" => 25,
+                _ => 32,
+            };
+            assert_eq!(
+                facts["limit.audio_tokens_per_second"], expected,
+                "{identity}"
+            );
             assert!(facts.get("rate.input_audio").is_some());
             curated.push("limit.audio_tokens_per_second".to_string());
         }

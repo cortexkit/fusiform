@@ -45,7 +45,7 @@ pub struct InputAudioSource {
     /// support, each with the reason. Their audio key stays unattributed.
     #[serde(default)]
     pub excluded_models: Vec<ExcludedModel>,
-    /// A documented tokenizer conversion, joined only onto current audio rates.
+    /// A tokenizer conversion with model-specific evidence, joined only onto current audio rates.
     #[serde(default)]
     pub audio_tokens_per_second: Option<AudioTokensPerSecond>,
 }
@@ -56,6 +56,27 @@ pub struct AudioTokensPerSecond {
     pub value: u64,
     pub source_ref: String,
     pub quote: String,
+    #[serde(default)]
+    pub model_overrides: Vec<AudioTokensPerSecondOverride>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioTokensPerSecondOverride {
+    pub model_id: String,
+    pub value: u64,
+    pub basis: String,
+    pub source_ref: String,
+    pub quote: String,
+}
+
+impl AudioTokensPerSecond {
+    pub fn value_for(&self, model_id: &str) -> u64 {
+        self.model_overrides
+            .iter()
+            .find(|row| row.model_id == model_id)
+            .map_or(self.value, |row| row.value)
+    }
 }
 
 /// A model left out although its provider is listed.
@@ -142,6 +163,18 @@ pub(crate) fn load_for_schema(doc: &str, schema: &str) -> (InputAudioSources, Ve
                 || audio.quote.trim().is_empty()
         }) {
             Some("audio_tokens_per_second needs a positive integer, https source_ref and quote")
+        } else if row.audio_tokens_per_second.as_ref().is_some_and(|audio| {
+            let mut models = std::collections::BTreeSet::new();
+            audio.model_overrides.iter().any(|entry| {
+                entry.model_id.trim().is_empty()
+                    || !models.insert(&entry.model_id)
+                    || entry.value == 0
+                    || entry.basis != "measured"
+                    || !entry.source_ref.starts_with("https://")
+                    || entry.quote.trim().is_empty()
+            })
+        }) {
+            Some("an audio token override needs a unique model_id, positive integer, measured basis, https source_ref and quote")
         } else if row.established_at_ms <= 0
             || row.review_by_ms.checked_sub(row.established_at_ms) != Some(REVIEW_INTERVAL_MS)
         {
@@ -224,8 +257,8 @@ pub fn evidence() -> ChargeUnitEvidence {
 
 /// Listed providers the embedded seed does not carry, or carries with no
 /// `cost.input_audio` on any row, and excluded models the seed does not
-/// carry with `cost.input_audio`: a row like that establishes or excludes
-/// nothing and should be corrected or removed.
+/// carry with `cost.input_audio`, and audio token overrides naming models
+/// absent from that provider: those entries should be corrected or removed.
 pub fn unused_rows(rows: &InputAudioSources, seed: &serde_json::Value) -> Vec<String> {
     let publishes_audio = |model: &serde_json::Value| model["cost"].get("input_audio").is_some();
     let mut unused = Vec::new();
@@ -246,6 +279,17 @@ pub fn unused_rows(rows: &InputAudioSources, seed: &serde_json::Value) -> Vec<St
                      publishing cost.input_audio; correct or remove the exclusion",
                     excluded.model_id
                 ));
+            }
+        }
+        if let Some(audio) = &row.audio_tokens_per_second {
+            for entry in &audio.model_overrides {
+                if !models.is_some_and(|models| models.contains_key(&entry.model_id)) {
+                    unused.push(format!(
+                        "{provider}/{}: no such model in this provider's embedded seed; \
+                         correct or remove the audio token override",
+                        entry.model_id
+                    ));
+                }
             }
         }
     }
@@ -337,6 +381,81 @@ mod tests {
     }
 
     #[test]
+    fn audio_token_overrides_are_optional_and_malformed_values_are_rejected() {
+        let mut row = document()["providers"][0].clone();
+        let valid = json!({
+            "model_id": "gemini-3.8-flash",
+            "value": 25,
+            "basis": "measured",
+            "source_ref": "https://ai.google.dev/api/generate-content#UsageMetadata",
+            "quote": "Audio input counts billed at ceil(25 × duration in seconds)",
+        });
+        let load = |row: &serde_json::Value| {
+            load_reporting_rejects(&json!({"schema": SCHEMA, "providers": [row]}).to_string())
+        };
+        row["audio_tokens_per_second"]["model_overrides"] = json!([valid.clone()]);
+        let (rows, rejects) = load(&row);
+        assert!(rejects.is_empty(), "{rejects:?}");
+        let audio = rows["google"].audio_tokens_per_second.as_ref().unwrap();
+        assert_eq!(audio.value_for("gemini-3.8-flash"), 25);
+        assert_eq!(audio.value_for("gemini-4-argon"), 32);
+
+        for (field, value) in [
+            ("model_id", json!(" ")),
+            ("value", json!(0)),
+            ("value", json!(-1)),
+            ("value", json!(1.5)),
+            ("value", json!("25")),
+            ("value", json!(null)),
+            ("basis", json!("")),
+            ("basis", json!("documented")),
+            ("source_ref", json!("http://example.com/audio")),
+            ("source_ref", json!("")),
+            ("quote", json!(" ")),
+            ("unknown", json!(true)),
+        ] {
+            let mut entry = valid.clone();
+            entry[field] = value;
+            row["audio_tokens_per_second"]["model_overrides"] = json!([entry]);
+            let (rows, rejects) = load(&row);
+            assert!(rows.is_empty(), "{field}: {rows:?}");
+            assert_eq!(rejects.len(), 1, "{field}: {rejects:?}");
+        }
+        row["audio_tokens_per_second"]["model_overrides"] = json!([valid.clone(), valid]);
+        let (rows, rejects) = load(&row);
+        assert!(rows.is_empty());
+        assert_eq!(rejects.len(), 1, "{rejects:?}");
+
+        row["audio_tokens_per_second"]
+            .as_object_mut()
+            .unwrap()
+            .remove("model_overrides");
+        let (rows, rejects) = load(&row);
+        assert!(rejects.is_empty(), "{rejects:?}");
+        assert_eq!(
+            rows["google"]
+                .audio_tokens_per_second
+                .as_ref()
+                .unwrap()
+                .value_for("gemini-3.8-flash"),
+            32
+        );
+    }
+
+    #[test]
+    fn audio_token_override_naming_unknown_model_fails_seed_fence() {
+        let mut doc = document();
+        doc["providers"][0]["audio_tokens_per_second"]["model_overrides"][0]["model_id"] =
+            json!("not-in-the-embedded-seed");
+        let (rows, rejects) = load_reporting_rejects(&doc.to_string());
+        assert!(rejects.is_empty(), "{rejects:?}");
+        let unused = unused_rows(&rows, &seed());
+        assert_eq!(unused.len(), 1, "{unused:?}");
+        assert!(unused[0].starts_with("google/not-in-the-embedded-seed:"));
+        assert!(unused[0].contains("remove the audio token override"));
+    }
+
+    #[test]
     fn planted_stale_exclusion_is_named() {
         let mut seed = seed();
         let row = &sources()["google"];
@@ -349,6 +468,20 @@ mod tests {
         assert_eq!(unused.len(), 1, "{unused:?}");
         assert!(unused[0].starts_with(&format!("google/{excluded}:")));
         assert!(unused[0].contains("remove the exclusion"));
+    }
+
+    #[test]
+    fn planted_audio_token_override_without_seed_model_is_named() {
+        let mut seed = seed();
+        seed["google"]["models"]
+            .as_object_mut()
+            .unwrap()
+            .remove("gemini-3.8-flash")
+            .unwrap();
+        let unused = unused_rows(sources(), &seed);
+        assert_eq!(unused.len(), 1, "{unused:?}");
+        assert!(unused[0].starts_with("google/gemini-3.8-flash:"));
+        assert!(unused[0].contains("remove the audio token override"));
     }
 
     #[test]
