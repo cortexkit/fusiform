@@ -226,8 +226,8 @@ rate, including its denominator, belongs to the curated row's stored claim in
 
 `google/gemini-3.8-flash-tts` is curated as speech with text input and audio
 output: $0.50/M text input, $9/M audio output, and 25 output audio tokens per
-second. The source says both prices double on 2027-01-01; only the current
-prices are served. `elevenlabs/eleven_flash_v2_5` uses the explicitly admitted
+second. Google's [pricing page](https://ai.google.dev/gemini-api/docs/pricing)
+says both prices double on 2027-01-01; only the current prices are served. `elevenlabs/eleven_flash_v2_5` uses the explicitly admitted
 `rate.input.per_character`, $0.04 per 1,000 characters, with unknown increment
 and minimum. Its documented 40,000-character request cap is not a token limit.
 Neither row borrows a text-output price or an input-audio conversion.
@@ -812,7 +812,8 @@ records that key. Both flow through its Antigravity alias, with borrowed-rate
 markers retained in the disclosed served values. Vertex is not overridden.
 The [Google pricing page](https://ai.google.dev/gemini-api/docs/pricing)
 also quotes image output token counts (747 at 0.5K, 1120 at 1K,
-1680 at 2K, 2520 at 4K); these are evidence in the note, not new served facts.
+1680 at 2K, 2520 at 4K). They are quoted in the override's source text as
+supporting evidence only; fusiform serves no fact for them.
 
 One replacement row serves `limit.output` 65,536 for `google/gemini-4-argon`.
 models.dev changed it from 65,536 to 32,768 on 2026-10-13; 32,768 is Google's
