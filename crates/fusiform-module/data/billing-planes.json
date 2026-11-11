@@ -63,6 +63,18 @@
     },
     {
       "provider_id": "anthropic",
+      "auth_method": "gateway",
+      "kind": "upstream",
+      "wire_family": "anthropic.messages",
+      "source_ref": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "established_by": "fusiform",
+      "established_at_ms": 1794355200000,
+      "review_by_ms": 1799539200000,
+      "note": "Anthropic's pricing page lists 'Base input tokens', '5m cache writes', '1h cache writes', 'Cache hits and refreshes', and 'Output tokens' as prices per million tokens for Claude models. Basis: a company's gateway forwards Anthropic Messages requests using the company's own Anthropic API key, so these calls bill at Anthropic's published API card, not subscription quota weights. Negotiated discounts are not modelled. Rates, context tiers, fast mode and cache lifetimes are served unchanged from the ordinary Anthropic API card, without an inherited_from marker. A gateway's address belongs to the credential; the catalog serves no wire.api on gateway reads. wire.npm and wire.family remain available.",
+      "rules": []
+    },
+    {
+      "provider_id": "anthropic",
       "auth_method": "oauth",
       "kind": "quota_proxy",
       "source_ref": "https://support.anthropic.com/en/articles/9797557",

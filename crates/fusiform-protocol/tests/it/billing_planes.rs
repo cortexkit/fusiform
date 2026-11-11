@@ -9,7 +9,7 @@ use serde_json::json;
 fn catalog_get_accepts_auth_method_but_still_rejects_unknown_fields() {
     let empty: CatalogGetRequest = serde_json::from_str("{}").unwrap();
     assert_eq!(empty.auth_method, None);
-    for auth_method in ["apikey", "chatgpt", "oauth", "antigravity"] {
+    for auth_method in ["apikey", "chatgpt", "oauth", "antigravity", "gateway"] {
         let request: CatalogGetRequest = serde_json::from_value(json!({
             "provider_id": "openai", "auth_method": auth_method,
         }))

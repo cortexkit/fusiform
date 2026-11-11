@@ -1809,13 +1809,13 @@ fn select_billing_plane(request: &CatalogGetRequest) -> Result<Option<SelectedPl
     let Some(auth_method) = request.auth_method.as_deref() else {
         return Ok(None);
     };
-    // The accepted methods are apikey, chatgpt, oauth and antigravity: the login
-    // methods the credential vault records (docs/billing-planes.md).
+    // The accepted methods match the login methods the credential vault records
+    // (docs/billing-planes.md).
     // The set is closed so that a new login method is refused until someone
     // reviews how it bills, instead of quietly receiving the API price card.
     if !billing_planes::AUTH_METHODS.contains(&auth_method) {
         return Err(RouteError::bad_request(format!(
-            "unknown auth_method {auth_method:?}; expected apikey, chatgpt, oauth or antigravity"
+            "unknown auth_method {auth_method:?}; expected apikey, chatgpt, oauth, antigravity or gateway"
         )));
     }
     let Some(provider_id) = request.provider_id.as_deref() else {
@@ -1915,6 +1915,11 @@ fn finish_plane_view(
         retain_requested_wire_corrections(&mut response, requested_prefixes);
         return Ok(response);
     };
+    if plane.wire.auth_method == "gateway" {
+        // Endpoint corrections describe the upstream API address, which the
+        // gateway view omits in favor of the credential's own endpoint.
+        response.wire_corrections.clear();
+    }
     response.plane = Some(plane.wire);
     for (identity, facts) in &mut response.models {
         if let Some(declared) = plane.declared {
@@ -2123,6 +2128,11 @@ fn apply_billing_plane(
     facts: &mut BTreeMap<String, serde_json::Value>,
     plane: &Plane,
 ) -> Vec<BillingRuleWire> {
+    if plane.auth_method == "gateway" {
+        // A gateway's address belongs to the credential. Keeping the upstream
+        // endpoint here could send the gateway credential to the wrong host.
+        facts.remove("wire.api");
+    }
     if plane.provider_id == "openai" && plane.auth_method == "chatgpt" {
         // ChatGPT bills cache writes as input and accepts no cache lifetime.
         facts.retain(|key, _| {
@@ -4468,14 +4478,14 @@ mod billing_plane_tests {
     }
 
     #[test]
-    fn auth_method_accepts_exactly_the_four_pinned_strings() {
+    fn auth_method_accepts_exactly_the_five_pinned_strings() {
         assert_eq!(
             billing_planes::AUTH_METHODS,
-            &["apikey", "chatgpt", "oauth", "antigravity"]
+            &["apikey", "chatgpt", "oauth", "antigravity", "gateway"]
         );
         let (store, _dir) = store();
         seed(&store, "openai", "test-model", card());
-        for method in ["apikey", "chatgpt", "oauth", "antigravity"] {
+        for method in ["apikey", "chatgpt", "oauth", "antigravity", "gateway"] {
             let result = get(&store, request("openai", None, method, None));
             assert!(
                 result.is_ok() || result.unwrap_err().code == "no_coverage",
@@ -4485,7 +4495,7 @@ mod billing_plane_tests {
         for method in ["bogus", "", "APIKEY", "ChatGPT", "api_key"] {
             let error = get(&store, request("openai", None, method, None)).unwrap_err();
             assert_eq!(error.code, "bad_request");
-            assert_eq!(error.message, format!("unknown auth_method {method:?}; expected apikey, chatgpt, oauth or antigravity"));
+            assert_eq!(error.message, format!("unknown auth_method {method:?}; expected apikey, chatgpt, oauth, antigravity or gateway"));
         }
     }
 

@@ -15,9 +15,9 @@ integration tests are libtest paths in the module crate's `--test it` target.
 
 A `catalog.get` request selects a plane with `auth_method`:
 
-1. `auth_method` is one of `apikey`, `chatgpt`, `oauth`, `antigravity`. Any
+1. `auth_method` is one of `apikey`, `chatgpt`, `oauth`, `antigravity`, `gateway`. Any
    other value is `bad_request`
-   (`billing_plane_tests::auth_method_accepts_exactly_the_four_pinned_strings`).
+   (`billing_plane_tests::auth_method_accepts_exactly_the_five_pinned_strings`).
    The set is closed so a new login method is refused until someone reviews how
    it bills.
 2. `auth_method` requires `provider_id`; without it the read is `bad_request`
@@ -25,8 +25,8 @@ A `catalog.get` request selects a plane with `auth_method`:
 3. Plane views are current-only. `auth_method` with `at_ms` is `no_coverage`
    (`billing_plane_tests::plane_views_refuse_every_point_in_time_read`).
 4. A `(provider_id, auth_method)` pair with no declaration is `no_coverage`,
-   except `apikey`. A subscription login never falls back to the API card,
-   because API prices are a confident wrong answer for a subscription
+   except `apikey`. An undeclared login, including `gateway`, never falls back
+   to the API card: API rows alone cannot establish how that login bills
    (`billing_plane_tests::undeclared_subscription_planes_never_fall_back_to_api_rows`,
    `golden_payload::plane_refusal_cases_never_fall_back_to_api_rows`).
 5. An undeclared `apikey` plane serves the provider's published rows
@@ -63,6 +63,36 @@ and the row's own rates are marked as in item 1 above, exactly as on the
 Anthropic `oauth` plane (`billing_planes.rs`:
 `an_apikey_quota_proxy_may_name_its_own_provider_as_the_price_source`;
 `billing_plane_tests::an_own_provider_price_source_marks_its_own_rates_and_borrows_nothing`).
+
+### Anthropic gateways: published API prices
+
+The `(anthropic, gateway)` plane is `upstream`, with no billing rules. A
+company's gateway forwards Anthropic Messages requests using the company's own
+Anthropic API key, so calls bill at Anthropic's API card. Negotiated discounts
+are not modelled. [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing)
+lists “Base input tokens”, “5m cache writes”, “1h cache writes”, “Cache hits and
+refreshes”, and “Output tokens” per million tokens. Established 2026-11-11;
+review due 2027-01-10 (60 days).
+
+There is no declared `(anthropic, apikey)` plane: it uses the implicit upstream
+view in §1. Gateway reads use those same served rows, preserving all rates,
+`rate.*.above_context.*` tiers, fast-mode and cache-lifetime (`ttl`) keys, with
+no `inherited_from` marker. `wire.family` is `anthropic.messages`, and `wire.npm`
+is unchanged. The sole fact difference is the endpoint: a gateway's address
+belongs to the credential; the catalog serves no `wire.api` on gateway reads,
+even when the caller explicitly selects `fact_prefixes: ["wire.api"]`. Keeping
+Anthropic's upstream endpoint would risk sending the gateway credential to
+the wrong host.
+
+Named and provider-wide gateway reads match the API card byte for byte except
+for `wire.api`. The Anthropic slice of an ordinary paged read also matches that
+card; paging still refuses any `auth_method`, including `gateway`
+(`golden_payload::anthropic_gateway_preserves_every_api_card_except_the_credential_endpoint`,
+`golden_payload::anthropic_gateway_withholds_even_an_explicit_wire_api_filter`,
+`golden_payload::anthropic_gateway_keeps_plane_refusals_and_the_paging_contract`).
+No other provider has a gateway declaration: `(openai, gateway)` and
+`(xai, gateway)` refuse `no_coverage` rather than falling back to their API
+prices. Reads without `auth_method` are unchanged.
 
 ### Own-rate quota cards: OpenCode Go
 
@@ -158,7 +188,9 @@ A plane may carry rules, each stating how one token class bills on that plane.
    (`billing_plane_tests::missing_billed_as_targets_are_disclosed_as_not_established`).
 4. Targets are resolved against the row before any rule applies, so rule order
    cannot create chains (`billing_plane_tests::billed_as_targets_are_resolved_before_any_rule_outputs`).
-5. Non-rate facts are untouched (`billing_plane_tests::plane_views_preserve_non_rate_facts`).
+5. Non-rate facts are untouched except for a plane's sourced `wire.family`
+   and the gateway endpoint omission described in §2
+   (`billing_plane_tests::plane_views_preserve_non_rate_facts`).
 6. Nothing a plane does is stored, and a plane read does not move
    `catalog_version` (`billing_plane_tests::plane_views_never_change_stored_rows_or_catalog_version`).
 
@@ -187,7 +219,7 @@ plane:
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `provider_id` | yes | a models.dev provider slug |
-| `auth_method` | yes | one of the four methods |
+| `auth_method` | yes | one of the five methods in §1 |
 | `kind` | yes | `upstream` or `quota_proxy` |
 | `rates_from_provider` | no | non-empty provider slug; only valid on `quota_proxy`; replace rates with the exact canonical row's non-mode rate card, unless it names the plane's own provider, which keeps the row's own rates |
 | `source_ref` | yes | the source that states how this login method bills |

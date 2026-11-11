@@ -421,6 +421,18 @@ fn render_planes() -> String {
         };
         doc.insert(label, payload);
     }
+    // The older excerpt predates Opus 5.5. Keep its status counts and plain
+    // responses intact by rendering the gateway case from a separate seed store.
+    let (gateway_store, _gateway_dir) = anthropic_gateway_store();
+    let args = serde_json::json!({"provider_id":"anthropic", "model_id":"claude-opus-5-5", "auth_method":"gateway"});
+    let mut response = gateway_get(&gateway_store, args.clone());
+    response["resolved_at_ms"] = NOW_PLACEHOLDER.into();
+    doc.insert(
+        "apikey-vs-gateway anthropic".into(),
+        serde_json::json!({
+            "request":{"name":"catalog.get", "arguments":args}, "response":response
+        }),
+    );
     let mut text = serde_json::to_string_pretty(&doc).unwrap();
     text.push('\n');
     text
@@ -1346,7 +1358,14 @@ fn plane_refusal_cases_never_fall_back_to_api_rows() {
         (
             "refused — unknown auth",
             "bad_request",
-            vec!["bogus", "apikey", "chatgpt", "oauth", "antigravity"],
+            vec![
+                "bogus",
+                "apikey",
+                "chatgpt",
+                "oauth",
+                "antigravity",
+                "gateway",
+            ],
         ),
         (
             "refused — missing provider",
@@ -2405,6 +2424,221 @@ fn model_identity_and_open_status_are_served_with_unpublished_nulls() {
             assert_eq!(facts["model.type"], "transcription");
         } else {
             assert!(!facts.as_object().unwrap().contains_key("model.type"));
+        }
+    }
+}
+
+fn anthropic_gateway_store() -> (CatalogStore, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().to_string(),
+        },
+    })
+    .unwrap();
+    // Cover every upstream Anthropic row, not just the golden excerpt: gateway
+    // billing must preserve each published card, including its tier variants.
+    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    let upstream = serde_json::json!({"anthropic": seed["anthropic"]});
+    let catalog = normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
+        .unwrap()
+        .catalog;
+    let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
+    store.append_eras(&plan.eras).unwrap();
+    (store, dir)
+}
+
+fn gateway_get(store: &CatalogStore, args: serde_json::Value) -> serde_json::Value {
+    let request = serde_json::json!({"name":"catalog.get", "arguments":args});
+    serde_json::to_value(serve_tool_call(store, &serde_json::to_vec(&request).unwrap()).unwrap())
+        .unwrap()
+}
+
+#[test]
+fn anthropic_gateway_preserves_every_api_card_except_the_credential_endpoint() {
+    let (store, _dir) = anthropic_gateway_store();
+    let plain = gateway_get(&store, serde_json::json!({"provider_id":"anthropic"}));
+    let apikey = gateway_get(
+        &store,
+        serde_json::json!({"provider_id":"anthropic", "auth_method":"apikey"}),
+    );
+    assert_eq!(plain["models"], apikey["models"]);
+    let gateway = gateway_get(
+        &store,
+        serde_json::json!({"provider_id":"anthropic", "auth_method":"gateway"}),
+    );
+    assert_eq!(gateway["plane"]["provider_id"], "anthropic");
+    assert_eq!(gateway["plane"]["auth_method"], "gateway");
+    assert_eq!(gateway["plane"]["kind"], "upstream");
+    assert_eq!(
+        gateway["plane"]["source_ref"],
+        "https://platform.claude.com/docs/en/about-claude/pricing"
+    );
+    assert!(gateway.get("billing_rules").is_none());
+    assert!(gateway.get("wire_corrections").is_none());
+
+    let mut expected = apikey["models"].clone();
+    let rows = expected.as_object_mut().unwrap();
+    assert!(
+        rows.len() > 1,
+        "the control must cover more than a named row"
+    );
+    let mut tier = false;
+    let mut fast = false;
+    let mut ttl = false;
+    for (identity, row) in rows {
+        assert!(
+            row.as_object_mut().unwrap().remove("wire.api").is_some(),
+            "{identity}"
+        );
+        assert_eq!(row["wire.family"], "anthropic.messages", "{identity}");
+        assert!(row.get("wire.npm").is_some(), "{identity}");
+        for (key, rate) in row.as_object().unwrap() {
+            if key.starts_with("rate.") {
+                assert!(rate.get("inherited_from").is_none(), "{identity}/{key}");
+                tier |= key.contains(".above_context.");
+                fast |= key.contains(".mode.fast");
+                ttl |= key.contains(".ttl.");
+            }
+        }
+        let id = identity.strip_prefix("anthropic/").unwrap();
+        let mut named_api = gateway_get(
+            &store,
+            serde_json::json!({
+                "provider_id":"anthropic", "model_id":id, "auth_method":"apikey"
+            }),
+        );
+        assert!(named_api["models"][identity]
+            .as_object_mut()
+            .unwrap()
+            .remove("wire.api")
+            .is_some());
+        let named = gateway_get(
+            &store,
+            serde_json::json!({
+                "provider_id":"anthropic", "model_id":id, "auth_method":"gateway"
+            }),
+        );
+        assert_eq!(named["models"][identity], *row, "{identity}");
+        assert_eq!(
+            serde_json::to_vec(&named["models"]).unwrap(),
+            serde_json::to_vec(&named_api["models"]).unwrap(),
+            "{identity}"
+        );
+    }
+    assert!(
+        tier && fast && ttl,
+        "the control must include context, fast-mode and TTL rates"
+    );
+    assert_eq!(
+        serde_json::to_vec(&gateway["models"]).unwrap(),
+        serde_json::to_vec(&expected).unwrap()
+    );
+
+    // Paging remains an ordinary catalog read. Its Anthropic slice must carry
+    // the same API card, rather than a different rendering of the rates.
+    let mut paged = serde_json::Map::new();
+    let mut args = serde_json::json!({"paged":true});
+    loop {
+        let page = gateway_get(&store, args.clone());
+        for (identity, row) in page["models"].as_object().unwrap() {
+            if identity.starts_with("anthropic/") {
+                let mut row = row.clone();
+                assert!(row.as_object_mut().unwrap().remove("wire.api").is_some());
+                assert!(paged.insert(identity.clone(), row).is_none());
+            }
+        }
+        let Some(token) = page["next_page_token"].as_str() else {
+            break;
+        };
+        args["page_token"] = token.into();
+    }
+    assert_eq!(
+        serde_json::to_vec(&paged).unwrap(),
+        serde_json::to_vec(&expected).unwrap()
+    );
+    let after = gateway_get(&store, serde_json::json!({"provider_id":"anthropic"}));
+    assert_eq!(plain["models"], after["models"]);
+    assert_eq!(plain["catalog_version"], after["catalog_version"]);
+}
+
+#[test]
+fn anthropic_gateway_withholds_even_an_explicit_wire_api_filter() {
+    let (store, _dir) = anthropic_gateway_store();
+    for model in [None, Some("claude-opus-5-5")] {
+        let mut args = serde_json::json!({
+            "provider_id":"anthropic", "auth_method":"apikey", "fact_prefixes":["wire.api"]
+        });
+        if let Some(model) = model {
+            args["model_id"] = model.into();
+        }
+        let api = gateway_get(&store, args.clone());
+        assert!(!api["models"].as_object().unwrap().is_empty());
+        assert!(api["models"]
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|row| row.get("wire.api").is_some()));
+        args["auth_method"] = "gateway".into();
+        let gateway = gateway_get(&store, args);
+        assert!(gateway.get("wire_corrections").is_none());
+        assert!(gateway["models"]
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|row| row.as_object().unwrap().is_empty()));
+    }
+}
+
+#[test]
+fn anthropic_gateway_keeps_plane_refusals_and_the_paging_contract() {
+    let (store, _dir, _) = plane_store();
+    for provider in ["openai", "xai"] {
+        let api = gateway_get(
+            &store,
+            serde_json::json!({"provider_id":provider, "auth_method":"apikey"}),
+        );
+        assert!(!api["models"].as_object().unwrap().is_empty());
+    }
+    for (args, expected) in [
+        (
+            serde_json::json!({"provider_id":"openai", "auth_method":"gateway"}),
+            "no_coverage",
+        ),
+        (
+            serde_json::json!({"provider_id":"xai", "auth_method":"gateway"}),
+            "no_coverage",
+        ),
+        (
+            serde_json::json!({"provider_id":"anthropic", "auth_method":"unknown"}),
+            "bad_request",
+        ),
+        (
+            serde_json::json!({"provider_id":"anthropic", "auth_method":"gateway", "at_ms":1000}),
+            "no_coverage",
+        ),
+        (
+            serde_json::json!({"provider_id":"anthropic", "model_id":"claude-opus-5-5", "auth_method":"gateway", "at_ms":1000}),
+            "no_coverage",
+        ),
+        (
+            serde_json::json!({"auth_method":"gateway", "paged":true}),
+            "bad_request",
+        ),
+    ] {
+        let request = serde_json::json!({"name":"catalog.get", "arguments":args});
+        let error = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap_err();
+        assert_eq!(error.code, expected, "{request}: {}", error.message);
+        if request["arguments"]["auth_method"] == "gateway"
+            && matches!(
+                request["arguments"]["provider_id"].as_str(),
+                Some("openai" | "xai")
+            )
+        {
+            assert!(error.message.starts_with("no billing plane declared for"));
         }
     }
 }

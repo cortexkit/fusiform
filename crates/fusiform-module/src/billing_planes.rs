@@ -15,7 +15,7 @@ const BILLING_PLANES: &str = include_str!("../data/billing-planes.json");
 
 /// The login methods a caller may name to select a billing plane. The set is
 /// closed: an unlisted method is refused, never treated as an API key.
-pub const AUTH_METHODS: &[&str] = &["apikey", "chatgpt", "oauth", "antigravity"];
+pub const AUTH_METHODS: &[&str] = &["apikey", "chatgpt", "oauth", "antigravity", "gateway"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -191,7 +191,7 @@ pub fn load_reporting_rejects(doc: &str) -> (Planes, Vec<String>) {
         }
         if !AUTH_METHODS.contains(&row.auth_method.as_str()) {
             rejects.push(at(&format!(
-                "unknown auth_method {:?}; expected apikey, chatgpt, oauth or antigravity",
+                "unknown auth_method {:?}; expected apikey, chatgpt, oauth, antigravity or gateway",
                 row.auth_method
             )));
             continue;
@@ -444,7 +444,7 @@ mod tests {
             rejects.is_empty(),
             "the shipped file must parse: {rejects:?}"
         );
-        assert_eq!(table.len(), 7, "an empty or truncated table must not pass");
+        assert_eq!(table.len(), 8, "an empty or truncated table must not pass");
         assert_eq!(&table, planes());
         assert!(std::ptr::eq(planes(), planes()), "the table is parsed once");
     }
@@ -543,7 +543,7 @@ mod tests {
                 1,
             ),
         ];
-        assert_eq!(planes().len(), expected.len() + 3);
+        assert_eq!(planes().len(), expected.len() + 4);
         for (provider, auth, kind, source, count) in expected {
             let p = &planes()[&(provider.into(), auth.into())];
             assert_eq!(
@@ -584,6 +584,27 @@ mod tests {
     }
 
     #[test]
+    fn anthropic_gateway_is_a_sourced_ruleless_upstream_card() {
+        let p = &planes()[&("anthropic".into(), "gateway".into())];
+        assert_eq!(p.kind, PlaneKind::Upstream);
+        assert_eq!(p.wire_family.as_deref(), Some("anthropic.messages"));
+        assert_eq!(p.rates_from_provider, None);
+        assert_eq!(
+            p.source_ref,
+            "https://platform.claude.com/docs/en/about-claude/pricing"
+        );
+        assert_eq!(p.established_by, "fusiform");
+        assert_eq!(p.established_at_ms, 1_794_355_200_000);
+        assert_eq!(p.review_by_ms, 1_799_539_200_000);
+        assert_eq!(p.review_by_ms - p.established_at_ms, 60 * 86_400_000);
+        assert!(p.rules.is_empty());
+        assert!(!planes().contains_key(&("anthropic".into(), "apikey".into())));
+        for provider in ["openai", "xai"] {
+            assert!(!planes().contains_key(&(provider.into(), "gateway".into())));
+        }
+    }
+
+    #[test]
     fn unreadable_documents_and_malformed_rows_are_counted_not_fatal() {
         let (table, rejects) = load_reporting_rejects("{");
         assert!(table.is_empty());
@@ -615,7 +636,10 @@ mod tests {
         let (table, rejects) = load(vec![plane("good", vec![]), bad]);
         assert_eq!(table.len(), 1);
         assert_reject(&rejects, "plane 1", "unknown auth_method");
-        assert_eq!(AUTH_METHODS, &["apikey", "chatgpt", "oauth", "antigravity"]);
+        assert_eq!(
+            AUTH_METHODS,
+            &["apikey", "chatgpt", "oauth", "antigravity", "gateway"]
+        );
         for auth in AUTH_METHODS {
             let mut good = plane("good", vec![]);
             good["auth_method"] = json!(auth);

@@ -80,7 +80,7 @@ options:
   --provider <id>           narrow to one provider
   --model <id>              narrow to one model (requires --provider)
   --auth-method <method>    select a billing plane (get only; requires --provider)
-                            apikey, chatgpt, oauth, antigravity
+                            apikey, chatgpt, oauth, antigravity, gateway
   --fact <key>              which fact, for history
                             (rate.input, limit.context, existence, ...)
   --at <epoch-ms>           resolve the catalog at a past instant (get only:
@@ -2538,7 +2538,7 @@ mod tests {
             "without --at the field must be ABSENT, not zero: {now}"
         );
 
-        for method in ["apikey", "chatgpt", "oauth", "antigravity"] {
+        for method in ["apikey", "chatgpt", "oauth", "antigravity", "gateway"] {
             let plane = body(&["get", "--provider", "openai", "--auth-method", method]);
             assert_eq!(
                 plane["auth_method"],

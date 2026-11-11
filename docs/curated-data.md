@@ -208,7 +208,7 @@ All four rows after `meta` are currently held: see "Held rows" below.
 | Field | Meaning |
 | --- | --- |
 | `provider_id`, `model_id` | the served identity |
-| `auth_methods` | a non-empty allowlist of distinct login methods from `apikey`, `chatgpt`, `oauth`, `antigravity` |
+| `auth_methods` | a non-empty allowlist of distinct login methods from `apikey`, `chatgpt`, `oauth`, `antigravity`, `gateway` |
 | `facts` | fact key to value; keys must be in `SERVED_FACTS` or the curated loader's explicit unit-billed key allowlist |
 | `source_ref` | the evidence for the row: each page read, with the sentences it states quoted verbatim |
 | `established_by` | optional; who read the sources. Not served |

@@ -559,7 +559,7 @@ Every field is optional; `{}` reads the current catalog.
 | `include_retired` | boolean | `false` | include models whose `existence` is `absent` |
 | `provider_id` | string | none | only this provider |
 | `model_id` | string | none | only this model; requires `provider_id` |
-| `auth_method` | string | none | select a billing plane; see [`billing-planes.md`](billing-planes.md) |
+| `auth_method` | string | none | select a billing plane: `apikey`, `chatgpt`, `oauth`, `antigravity`, or `gateway` (Anthropic only); requires `provider_id`, current-only; see [`billing-planes.md`](billing-planes.md) |
 | `paged` | boolean | `false` | read whole providers in bounded pages; no provider/model/plane selector |
 | `page_token` | string | none | opaque continuation from `next_page_token`; requires `paged: true` |
 

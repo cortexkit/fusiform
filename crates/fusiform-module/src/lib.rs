@@ -270,7 +270,7 @@ pub fn manifest() -> ModuleManifest {
                         // Selects a provider's billing plane. Validated by the
                         // route against its closed list, so an unknown method is
                         // refused by name rather than by this schema.
-                        "auth_method": {"type": "string"},
+                        "auth_method": {"type": "string", "description": "Select a billing plane: apikey, chatgpt, oauth, antigravity, or gateway (Anthropic only). Requires provider_id; current-only."},
                         "paged": {"type": "boolean", "default": false},
                         "page_token": {"type": "string"}
                     },

@@ -427,8 +427,10 @@ pub struct CatalogGetRequest {
     #[serde(default)]
     pub page_token: Option<String>,
 
-    /// Select this provider's billing plane: `apikey`, `chatgpt`, `oauth`, or
-    /// `antigravity`. Requires `provider_id` and is current-only (no `at_ms`).
+    /// Select this provider's billing plane: `apikey`, `chatgpt`, `oauth`,
+    /// `antigravity`, or `gateway` (Anthropic only). Requires `provider_id` and
+    /// is current-only (no `at_ms`). Gateway reads omit `wire.api`: the gateway
+    /// address belongs to the credential, not the catalog.
     /// Absent means the ordinary catalog view, without plane rules or proxies.
     #[serde(default)]
     pub auth_method: Option<String>,
