@@ -1830,7 +1830,7 @@ fn select_billing_plane(request: &CatalogGetRequest) -> Result<Option<SelectedPl
         billing_planes::planes().get(&(provider_id.to_string(), auth_method.to_string()));
     if declared.is_none() && auth_method != "apikey" {
         return Err(RouteError::no_coverage(format!(
-            "no billing plane declared for ({provider_id}, {auth_method}); API rows cannot establish subscription billing"
+            "no billing plane declared for ({provider_id}, {auth_method}); only an apikey read is served the API price card without one"
         )));
     }
     Ok(Some(SelectedPlane {
@@ -4544,7 +4544,7 @@ mod billing_plane_tests {
             for model in [None, Some("test-model"), Some("unknown-model")] {
                 let error = get(&store, request(provider, model, method, None)).unwrap_err();
                 assert_eq!(error.code, "no_coverage");
-                assert_eq!(error.message, format!("no billing plane declared for ({provider}, {method}); API rows cannot establish subscription billing"));
+                assert_eq!(error.message, format!("no billing plane declared for ({provider}, {method}); only an apikey read is served the API price card without one"));
             }
         }
     }

@@ -8399,7 +8399,7 @@
   "refused — undeclared google antigravity": {
     "error": {
       "code": "no_coverage",
-      "message": "no billing plane declared for (google, antigravity); API rows cannot establish subscription billing"
+      "message": "no billing plane declared for (google, antigravity); only an apikey read is served the API price card without one"
     },
     "request": {
       "arguments": {
@@ -8412,7 +8412,7 @@
   "refused — undeclared openai oauth": {
     "error": {
       "code": "no_coverage",
-      "message": "no billing plane declared for (openai, oauth); API rows cannot establish subscription billing"
+      "message": "no billing plane declared for (openai, oauth); only an apikey read is served the API price card without one"
     },
     "request": {
       "arguments": {
