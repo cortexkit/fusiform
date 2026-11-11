@@ -1931,9 +1931,10 @@ pub struct StatusResponse {
     /// # What it cannot do, and why this warning is here twice
     ///
     /// It is `max(now_ms, current + 1)`, so it advances with WALL CLOCK time on
-    /// any poll that writes, including the boot poll after a restart, and on
-    /// each committed quality grade or withdrawal. Previews do not advance it.
-    /// It cannot
+    /// any poll that writes, on each committed quality grade or withdrawal, and
+    /// once at every start of the module process, so that data compiled into a
+    /// new build reaches readers that refetch on a version change. Previews do
+    /// not advance it. It cannot
     /// identify which snapshot a response describes: a point-in-time read of
     /// old values stamps TODAY's version on them. Use `resolved_at_ms`, which
     /// echoes the instant that was resolved and round-trips with `at_ms`.

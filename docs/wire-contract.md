@@ -80,9 +80,12 @@ different questions (`catalog.status` carries only the second).
 1. `resolved_at_ms` is always concrete. A read without `at_ms` records the
    instant "now" resolved to, and sending that instant back as `at_ms` returns
    the same values (`served_corrections::a_read_can_be_replayed_by_the_instant_it_resolved`).
-2. `catalog_version` is `max(now_ms, previous + 1)` at each poll that writes
-   and each committed quality grade or withdrawal. Previews and the one-time
-   grade import do not advance it. It never goes backwards, even across a restore of the
+2. `catalog_version` is `max(now_ms, previous + 1)` at each poll that writes,
+   each committed quality grade or withdrawal, and each start of the module
+   process. The start covers data compiled into the build (aliases, curated
+   rows, overrides, billing planes), which changes only with a deploy
+   (`history::a_process_start_advances_the_catalog_version_without_a_poll`).
+   Previews and the one-time grade import do not advance it. It never goes backwards, even across a restore of the
    database ([`data-model.md`](data-model.md) §4). It describes the store at
    read time: a point-in-time read of old values carries today's version. It
    is not a snapshot identifier.
