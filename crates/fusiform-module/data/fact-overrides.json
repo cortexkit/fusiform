@@ -16,6 +16,20 @@
       "review_by_ms": 1798156800000
     },
     {
+      "provider_id": "google",
+      "model_id": "gemini-4-carbon",
+      "fact_key": "limit.output",
+      "value": 65536,
+      "replaces": 32768,
+      "reason": "Google's model page states a default synchronous maximum of 65,536 output tokens. models.dev records 32,768, so a consumer that caps output at the catalog value stops a long answer at half its length, and a high-effort request can spend the whole 32,768 on thinking before it answers.",
+      "source_ref": "https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon (accessed 2026-11-11)",
+      "quote": "Model page: \"Context window (unified input and output token limit) 1,048,576 Max output 65,536 (default synchronous) / up to 1,048,576 (with long decode)\"",
+      "notes": "The same statement and the same models.dev value as gemini-4-argon. The Antigravity route google/antigravity-gemini-4-carbon, a curated alias of this row (model-aliases.json), serves the same value because alias entries are built from the target's served facts; the plugin declares that route's output as 262,144 in https://github.com/cortexkit/antigravity-auth/blob/cb40633d96e87ad2ad958e4940c71fa2a685df94/packages/core/src/model-registry.ts, which is not served because Google states no such limit. Up to 1,048,576 needs Google's long-decode mode, which is a different request.",
+      "established_by": "fusiform",
+      "established_at_ms": 1794355200000,
+      "review_by_ms": 1799539200000
+    },
+    {
       "provider_id": "anthropic",
       "model_id": "claude-fable-5",
       "fact_key": "capability.server_side_fallback",

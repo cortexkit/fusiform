@@ -863,3 +863,51 @@ fn a_status_models_dev_publishes_wins_over_the_deprecation_row() {
         assert_eq!(response.models[DAYBREAK_RED][STATUS], json!("deprecated"));
     }
 }
+
+/// Gemini 4 Carbon carries the same sourced output limit as Argon, on its own
+/// row and on its Antigravity alias, from Carbon's own model page.
+#[test]
+fn carbon_and_its_antigravity_alias_serve_the_sourced_output_limit() {
+    let seed: Value =
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+    let carbon = seed["google"]["models"]["gemini-4-carbon"].clone();
+    assert_eq!(
+        carbon["limit"]["output"],
+        json!(32_768),
+        "the embedded seed must publish the value the override replaces"
+    );
+    let mut google = seed["google"].clone();
+    google["models"] = json!({ "gemini-4-carbon": carbon });
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    ingest(
+        &store,
+        &serde_json::to_vec(&json!({ "google": google })).unwrap(),
+        1_000,
+    );
+
+    for model in ["gemini-4-carbon", "antigravity-gemini-4-carbon"] {
+        let response = get(&store, json!({"provider_id":"google","model_id":model}));
+        let identity = format!("google/{model}");
+        assert_eq!(
+            response.models[&identity]["limit.output"],
+            json!(65_536),
+            "{identity}"
+        );
+        let rows = disclosed(&response, &identity);
+        assert_eq!(rows.len(), 1, "{identity}: {:?}", response.fact_overrides);
+        assert_eq!(rows[0].model_id, "gemini-4-carbon");
+        assert_eq!(rows[0].replaces, json!(32_768));
+        assert!(rows[0]
+            .source_ref
+            .contains("https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon"));
+    }
+}
