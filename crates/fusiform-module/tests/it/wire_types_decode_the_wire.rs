@@ -41,6 +41,7 @@ fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
     let mut no_api_card = 0;
     let mut cross_provider = 0;
     let mut disclosed = 0;
+    let mut gateway = 0;
     for (label, case) in fixture.as_object().unwrap() {
         if case["request"]["arguments"].get("auth_method").is_none() {
             continue;
@@ -60,6 +61,16 @@ fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
             raw["plane"],
             "{label}"
         );
+        if plane.auth_method == "gateway" {
+            gateway += 1;
+            assert_eq!(plane.provider_id, "anthropic");
+            assert_eq!(plane.kind, "upstream");
+            assert!(decoded.wire_corrections.is_empty());
+            for row in decoded.models.values() {
+                assert!(!row.contains_key("wire.api"));
+                assert_eq!(row["wire.family"], "anthropic.messages");
+            }
+        }
         if let Some(rules) = raw.get("billing_rules") {
             disclosed += decoded.billing_rules.len();
             assert_eq!(
@@ -136,7 +147,11 @@ fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
             }
         }
     }
-    assert_eq!(responses, 22, "every successful plane case must decode");
+    assert_eq!(responses, 23, "every successful plane case must decode");
+    assert_eq!(
+        gateway, 1,
+        "the gateway plane must decode from served bytes"
+    );
     assert!(
         no_api_card > 0 && cross_provider > 0,
         "Kimi's missing API cards and canonical target markers must decode"
