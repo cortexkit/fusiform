@@ -123,6 +123,7 @@ published row:
 | `established_at_ms`, `review_by_ms` | when it was read; when it must be read again |
 | `reasoning_wire_ids`, `reasoning_default` | optional effort → backend model id map and default effort used when no tier is specified, read from the pinned plugin |
 | `wire_family` | optional verified route protocol, from the alias's pinned plugin source, never its target's package |
+| `limit_output` | optional route-specific output token limit: a positive integer `value`, nonempty `source_ref` and `quote` |
 
 How to add a row: read the routing code at a pinned revision. Include the
 alias only if every tier of the id resolves to the target's own backend model
@@ -167,6 +168,20 @@ The Sonnet 5.5 and Opus 5.5 aliases expose only `low`, `medium` and `high`,
 defaulting to `low`, rather than the Anthropic targets' additional `xhigh` and
 `max`. Both cite plugin revision `d17ca2e8`: each model's three native routes
 share one `vertexModelId`, and the resolver selects `-low` for a bare id.
+
+An alias can carry `limit_output` when its route has a sourced output limit
+different from the target's API. Current reads apply it after the target's
+facts and fact overrides. The existing `fact_overrides` list then discloses
+exactly one `limit.output` replacement for the alias identity, with the value
+the target would otherwise serve in `replaces`, the field's source and quote,
+and the alias row's review dates. The target's disclosure for that fact is not
+also copied to the alias. Target rows and point-in-time reads are unchanged;
+point-in-time reads do not serve aliases.
+
+Antigravity Carbon serves 262,144 output tokens, citing the captured
+Antigravity CLI (agy) 1.5.5 request's `"maxOutputTokens": 262144` for `gemini-4-carbon-low` and the plugin
+registry's `limit: { context: 1048576, output: 262144 }` at `cb40633d`.
+The public Carbon API target and the Argon alias still serve 65,536.
 
 Retiring an alias moves its identity to `retired`; never delete a served id.
 An optional `successor` is a full `provider/model` identity, accompanied by

@@ -177,21 +177,23 @@ fn merged_upstream() -> String {
     }
 
     let seed: serde_json::Value = serde_json::from_str(SEED).expect("the seed parses");
-    let target = seed[ALIAS_TARGET.0]["models"][ALIAS_TARGET.1].clone();
-    assert!(
-        target.is_object(),
-        "the alias target must be in the embedded seed, or the alias cases \
-         below pin a refusal instead of an aliased entry"
-    );
-    let models = obj
-        .get_mut(ALIAS_TARGET.0)
-        .and_then(|p| p.get_mut("models"))
-        .and_then(|m| m.as_object_mut())
-        .expect("the excerpt carries the target's provider");
-    assert!(
-        models.insert(ALIAS_TARGET.1.to_string(), target).is_none(),
-        "the excerpt already carries the alias target; drop the splice"
-    );
+    for (provider, model) in [ALIAS_TARGET, ("google", "gemini-4-carbon")] {
+        let target = seed[provider]["models"][model].clone();
+        assert!(
+            target.is_object(),
+            "the alias target must be in the embedded seed, or the alias cases \
+             below pin a refusal instead of an aliased entry"
+        );
+        let models = obj
+            .get_mut(provider)
+            .and_then(|p| p.get_mut("models"))
+            .and_then(|m| m.as_object_mut())
+            .expect("the excerpt carries the target's provider");
+        assert!(
+            models.insert(model.to_string(), target).is_none(),
+            "the excerpt already carries the alias target; drop the splice"
+        );
+    }
     serde_json::to_string(&doc).unwrap()
 }
 
@@ -1918,6 +1920,12 @@ fn cases() -> Vec<(&'static str, String)> {
             // is the target's API list price and not the route's own.
             "catalog.get — a curated alias",
             r#"{"name":"catalog.get","arguments":{"provider_id":"google","model_id":"antigravity-gemini-3.8-flash"}}"#.to_string(),
+        ),
+        (
+            // Pin the route-specific limit and its alias-owned disclosure,
+            // rather than inheriting the public API target's lower limit.
+            "catalog.get — an alias with its own output limit",
+            r#"{"name":"catalog.get","arguments":{"provider_id":"google","model_id":"antigravity-gemini-4-carbon","fact_prefixes":["limit."]}}"#.to_string(),
         ),
         (
             // History of an alias id: no eras, because fusiform never observed

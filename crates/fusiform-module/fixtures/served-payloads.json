@@ -2658,6 +2658,54 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — an alias with its own output limit": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "limit."
+        ],
+        "model_id": "antigravity-gemini-4-carbon",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "aliased": [
+        {
+          "model": "google/antigravity-gemini-4-carbon",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/cb40633d96e87ad2ad958e4940c71fa2a685df94/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS antigravity-gemini-4-carbon, RESOLVER_ALIASES, isGeminiCarbonModel, getGeminiCarbonAntigravityModel), pinned by packages/core/src/carbon-model.test.ts at the same commit; protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
+          "target_model_id": "gemini-4-carbon",
+          "target_provider_id": "google"
+        }
+      ],
+      "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794355200000,
+          "established_by": "curated",
+          "fact_key": "limit.output",
+          "model": "google/antigravity-gemini-4-carbon",
+          "model_id": "antigravity-gemini-4-carbon",
+          "provider_id": "google",
+          "quote": "The captured agy 1.5.5 request for \"model\": \"gemini-4-carbon-low\" sends \"maxOutputTokens\": 262144; the registry declares limit: { context: 1048576, output: 262144 }.",
+          "reason": "The alias route has its own sourced output limit, independent of the target's API limit.",
+          "replaces": 65536,
+          "review_by_ms": 1799539200000,
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/cb40633d96e87ad2ad958e4940c71fa2a685df94/test-fixtures/agy-cli-1.5.5/native-carbon-low.json (requests[].native_generation_config); https://github.com/cortexkit/antigravity-auth/blob/cb40633d96e87ad2ad958e4940c71fa2a685df94/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS antigravity-gemini-4-carbon)",
+          "value": 262144
+        }
+      ],
+      "models": {
+        "google/antigravity-gemini-4-carbon": {
+          "limit.audio_tokens_per_second": 32,
+          "limit.context": 1048576,
+          "limit.output": 262144
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — an instant inside an unobserved window": {
     "request": {
       "arguments": {
@@ -5070,7 +5118,7 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 401,
+      "era_count": 422,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
@@ -5078,8 +5126,8 @@
         "polls_back": 1
       },
       "history_begins_at_ms": 1000,
-      "model_count": 19,
-      "models_priced": 13,
+      "model_count": 20,
+      "models_priced": 14,
       "recent_polls": [
         {
           "detail": "upstream returned 503",

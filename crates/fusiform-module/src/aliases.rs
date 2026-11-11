@@ -42,6 +42,16 @@ struct AliasRow {
     #[serde(default)]
     reasoning_wire_ids: BTreeMap<String, String>,
     reasoning_default: Option<String>,
+    limit_output: Option<LimitOutput>,
+}
+
+/// A route-specific output limit and the evidence for replacing the target's limit.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LimitOutput {
+    pub value: u64,
+    pub source_ref: String,
+    pub quote: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -68,6 +78,7 @@ pub struct Alias {
     pub review_by_ms: i64,
     pub reasoning_wire_ids: BTreeMap<String, String>,
     pub reasoning_default: Option<String>,
+    pub limit_output: Option<LimitOutput>,
 }
 
 /// `(alias provider_id, alias model_id)` -> what it resolves to.
@@ -123,6 +134,15 @@ pub fn load_reporting_rejects(doc: &str) -> (Aliases, Vec<String>) {
             continue;
         }
         let key = (row.provider_id.clone(), row.model_id.clone());
+        if row.limit_output.as_ref().is_some_and(|limit| {
+            limit.value == 0 || limit.source_ref.trim().is_empty() || limit.quote.trim().is_empty()
+        }) {
+            rejects.push(format!(
+                "alias {}/{} has invalid limit_output",
+                key.0, key.1
+            ));
+            continue;
+        }
         if row
             .wire_family
             .as_deref()
@@ -158,6 +178,7 @@ pub fn load_reporting_rejects(doc: &str) -> (Aliases, Vec<String>) {
             review_by_ms: row.review_by_ms,
             reasoning_wire_ids: row.reasoning_wire_ids,
             reasoning_default: row.reasoning_default,
+            limit_output: row.limit_output,
         };
         if let Some(existing) = out.get(&key) {
             // Two rows for one alias id is a curation mistake, not a
@@ -519,6 +540,32 @@ mod tests {
         assert_eq!(drift.len(), 1);
         assert!(drift[0].contains("minimal"));
         assert!(drift[0].contains("antigravity-gemini-3.8-flash"));
+    }
+
+    #[test]
+    fn malformed_output_limits_are_rejected_and_counted() {
+        let valid = serde_json::json!({"value":262144,"source_ref":"pinned capture","quote":"maxOutputTokens: 262144"});
+        let mut doc: serde_json::Value = serde_json::from_str(ALIASES).unwrap();
+        let count = doc["aliases"].as_array().unwrap().len();
+        doc["aliases"][0]["limit_output"] = valid.clone();
+        let (rows, rejects) = load_reporting_rejects(&doc.to_string());
+        assert!(rejects.is_empty(), "{rejects:?}");
+        assert_eq!(rows.len(), count);
+        for malformed in [
+            serde_json::json!({"value":0,"source_ref":"source","quote":"quote"}),
+            serde_json::json!({"value":-1,"source_ref":"source","quote":"quote"}),
+            serde_json::json!({"value":1.5,"source_ref":"source","quote":"quote"}),
+            serde_json::json!({"value":1,"source_ref":" ","quote":"quote"}),
+            serde_json::json!({"value":1,"source_ref":"source","quote":""}),
+            serde_json::json!({"value":1,"source_ref":"source"}),
+            serde_json::json!({"value":1,"source_ref":"source","quote":"quote","unknown":true}),
+        ] {
+            doc["aliases"][0]["limit_output"] = malformed.clone();
+            let (rows, rejects) = load_reporting_rejects(&doc.to_string());
+            assert_eq!(rows.len(), count - 1, "{malformed}");
+            assert_eq!(rejects.len(), 1, "{malformed}: {rejects:?}");
+            assert!(!rows.contains_key(&("google".into(), "antigravity-claude-sonnet-5-5".into())));
+        }
     }
 
     #[test]

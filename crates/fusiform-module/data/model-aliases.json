@@ -78,6 +78,11 @@
       "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/cb40633d96e87ad2ad958e4940c71fa2a685df94/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS antigravity-gemini-4-carbon, RESOLVER_ALIASES, isGeminiCarbonModel, getGeminiCarbonAntigravityModel), pinned by packages/core/src/carbon-model.test.ts at the same commit; protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
       "established_at_ms": 1794355200000,
       "review_by_ms": 1799539200000,
+      "limit_output": {
+        "value": 262144,
+        "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/cb40633d96e87ad2ad958e4940c71fa2a685df94/test-fixtures/agy-cli-1.5.5/native-carbon-low.json (requests[].native_generation_config); https://github.com/cortexkit/antigravity-auth/blob/cb40633d96e87ad2ad958e4940c71fa2a685df94/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS antigravity-gemini-4-carbon)",
+        "quote": "The captured agy 1.5.5 request for \"model\": \"gemini-4-carbon-low\" sends \"maxOutputTokens\": 262144; the registry declares limit: { context: 1048576, output: 262144 }."
+      },
       "reasoning_wire_ids": {
         "low": "gemini-4-carbon-low",
         "medium": "gemini-4-carbon-medium",
