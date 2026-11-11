@@ -451,15 +451,17 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
     assert_eq!(plan.new_models, 0);
     assert_eq!(plan.disappeared_models, 0);
     // The count a deploy should expect, pinned so a reviewer sees it move:
-    // Google's 13 eligible input rows, plus two Google output rows and one
+    // Google's 14 eligible input rows, plus two Google output rows and one
     // OpenAI output row. Live Preview carries both independent audio facts.
-    assert_eq!(plan.eras.len(), 16, "{:?}", written.keys());
+    // Gemini 4 Carbon joined in the November seed: Google bills it one input
+    // price for every modality, which equals its models.dev audio price.
+    assert_eq!(plan.eras.len(), 17, "{:?}", written.keys());
     assert_eq!(
         written
             .keys()
             .filter(|(_, _, key)| key == "rate.input_audio")
             .count(),
-        13
+        14
     );
     assert_eq!(
         written

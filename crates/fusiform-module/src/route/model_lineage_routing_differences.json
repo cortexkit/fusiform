@@ -1473,7 +1473,17 @@
       "siliconflow-cn/zai-org/GLM-5.3": ["other", "glm"],
       "siliconflow-cn/zai-org/GLM-5.3-Flash": ["other", "glm"],
       "togetherai/moonshotai/Kimi-K3.1-Pro": ["other", "kimi"],
-      "vercel/meta/muse-ember": ["other", "llama"]
+      "vercel/meta/muse-ember": ["other", "llama"],
+      "amazon-bedrock/anthropic.claude-fable-5-2": ["other", "claude"],
+      "amazon-bedrock/global.anthropic.claude-fable-5-2": ["other", "claude"],
+      "amazon-bedrock/global.moonshotai.kimi-k3.1": ["other", "kimi"],
+      "amazon-bedrock/us.anthropic.claude-fable-5-2": ["other", "claude"],
+      "amazon-bedrock/us.moonshotai.kimi-k3.1": ["other", "kimi"],
+      "chutes/Qwen/Qwen3.5-27B-TEE": ["other", "qwen"],
+      "cloudflare-ai-gateway/meta/muse-ember-1.0": ["other", "llama"],
+      "llmgateway-providers/meta/muse-ember-1.0": ["other", "llama"],
+      "llmgateway/muse-ember-1.0": ["other", "llama"],
+      "nano-gpt/meta/muse-ember": ["other", "llama"]
     }
   },
   {
@@ -1632,20 +1642,20 @@
   ],
   "counts": {
     "coverage": {
-      "claude": 853,
-      "deepseek": 659,
-      "gemini": 802,
-      "glm": 762,
+      "claude": 870,
+      "deepseek": 666,
+      "gemini": 819,
+      "glm": 761,
       "gpt": 1544,
       "grok": 273,
-      "kimi": 420,
-      "llama": 312,
+      "kimi": 424,
+      "llama": 317,
       "minimax": 289,
       "mistral": 344,
       "other": 1614,
-      "qwen": 1073
+      "qwen": 1070
     },
-    "newly_classified": 1475,
+    "newly_classified": 1485,
     "disagreements": 129
   }
 }
