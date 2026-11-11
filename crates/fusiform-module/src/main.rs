@@ -252,6 +252,20 @@ impl ModuleHandler for Fusiform {
             ),
         }
 
+        // Move the catalog version once per start, after the compiled data
+        // above is in place. A deploy that changes only compiled data (an alias,
+        // a curated row, an override) does not write a poll era, and readers
+        // refetch only when the version moves; without this they would keep
+        // serving the previous build's view until the next upstream change.
+        // Not fatal: reads are correct either way, only reader refresh waits.
+        if let Err(e) = store.advance_catalog_version_at_start(fusiform_core::Timestamp(now_ms())) {
+            eprintln!(
+                "fusiform: could not advance the catalog version at start, so \
+                 readers that refetch on a version change keep their previous \
+                 copy until the next upstream change: {e}"
+            );
+        }
+
         // Adopt the catalog's real age before the loop starts. The staleness
         // signal lives in an atomic, so a restart empties it — and a module
         // whose upstream has been unreachable for hours would report healthy

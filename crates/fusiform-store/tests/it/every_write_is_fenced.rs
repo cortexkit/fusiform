@@ -246,6 +246,7 @@ fn version_helper_callers_are_all_named_and_fenced() {
         callers,
         BTreeSet::from([
             "lib.rs:advance_catalog_version".into(),
+            "lib.rs:advance_catalog_version_at_start".into(),
             "quality.rs:append_quality_grade".into()
         ])
     );

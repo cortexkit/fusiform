@@ -1557,6 +1557,20 @@ impl CatalogStore {
             .with_conn_fenced(|tx| advance_catalog_version_in(tx, Some(observation_id), now))?;
         Ok(issued)
     }
+
+    /// Advance the version once when a process starts serving.
+    ///
+    /// Compiled-in data (aliases, curated rows, overrides, planes) changes with
+    /// the binary, not with a poll, and readers refetch only when the version
+    /// moves. Advancing at every start means a deploy that changes only
+    /// compiled data still reaches them, at the cost of one refetch per
+    /// restart. Records no observation: nothing was polled.
+    pub fn advance_catalog_version_at_start(&self, now: Timestamp) -> Result<i64, CatalogError> {
+        let issued = self
+            .inner
+            .with_conn_fenced(|tx| advance_catalog_version_in(tx, None, now))?;
+        Ok(issued)
+    }
 }
 
 /// Shared transaction-level advancement keeps grade and poll versions identical.

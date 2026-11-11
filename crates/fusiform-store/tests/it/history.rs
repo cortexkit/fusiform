@@ -835,3 +835,39 @@ fn the_catalog_version_survives_a_backwards_clock() {
     );
     assert_eq!(second, first + 1, "the fallback is current + 1");
 }
+
+/// A process start moves the version even though nothing was polled. Compiled
+/// data such as an alias changes with the binary, and readers refetch only when
+/// the version moves, so a deploy that changes only compiled data must still
+/// reach them.
+#[test]
+fn a_process_start_advances_the_catalog_version_without_a_poll() {
+    let f = fixture();
+    let obs = f
+        .store
+        .record_observation(&observation(
+            1_786_000_000_000,
+            ObservationOutcome::Unchanged,
+        ))
+        .unwrap();
+    let polled = f
+        .store
+        .advance_catalog_version(obs, Timestamp(1_786_000_000_000))
+        .unwrap();
+
+    let started = f
+        .store
+        .advance_catalog_version_at_start(Timestamp(1_786_000_000_000))
+        .unwrap();
+    assert_eq!(
+        started,
+        polled + 1,
+        "a start at the same instant still advances"
+    );
+
+    let later = f
+        .store
+        .advance_catalog_version_at_start(Timestamp(1_786_000_060_000))
+        .unwrap();
+    assert_eq!(later, 1_786_000_060_000, "a later start takes the clock");
+}
