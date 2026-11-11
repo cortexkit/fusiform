@@ -5912,7 +5912,7 @@ fn aliased_response(
             source_ref: limit.source_ref.clone(),
             quote: limit.quote.clone(),
             notes: None,
-            established_by: "curated".into(),
+            established_by: "fusiform".into(),
             established_at_ms: alias.established_at_ms,
             review_by_ms: alias.review_by_ms,
         }

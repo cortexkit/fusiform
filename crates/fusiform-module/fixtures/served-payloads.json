@@ -2682,7 +2682,7 @@
       "fact_overrides": [
         {
           "established_at_ms": 1794355200000,
-          "established_by": "curated",
+          "established_by": "fusiform",
           "fact_key": "limit.output",
           "model": "google/antigravity-gemini-4-carbon",
           "model_id": "antigravity-gemini-4-carbon",
