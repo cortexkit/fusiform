@@ -182,9 +182,10 @@
           "per": 60,
           "increment": {"kind": "unknown"},
           "minimum_quantity": {"kind": "unknown"}
-        }
+        },
+        "wire.api": {"value": "https://api.openai.com/v1", "from": "curated"}
       },
-      "source_ref": "Read 2026-11-07 at https://developers.openai.com/api/docs/models/gpt-transcribe: \"GPT Transcribe\"; \"Input modalities: audio, text\"; \"Output modalities: text\"; the \"Transcription audio duration\" table states \"Price | $0.0045 | minute\". https://developers.openai.com/api/docs/pricing, transcription table: \"gpt-transcribe | Transcription | - | - | $0.0045 / minute\". Served as $0.0045 per 60 seconds, not a per-token price. The token-rate columns are '-' so no token rate is served. Neither page states a rounding rule, a minimum, or a prompt/keyword text billing rule; those omissions do not establish that no rounding, minimum or text charge applies.",
+      "source_ref": "Read 2026-11-07 at https://developers.openai.com/api/docs/models/gpt-transcribe: \"GPT Transcribe\"; \"Input modalities: audio, text\"; \"Output modalities: text\"; the \"Transcription audio duration\" table states \"Price | $0.0045 | minute\". https://developers.openai.com/api/docs/pricing, transcription table: \"gpt-transcribe | Transcription | - | - | $0.0045 / minute\". Served as $0.0045 per 60 seconds, not a per-token price. The token-rate columns are '-' so no token rate is served. Neither page states a rounding rule, a minimum, or a prompt/keyword text billing rule; those omissions do not establish that no rounding, minimum or text charge applies. Read 2026-11-11 at https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create: \"https://api.openai.com/v1/audio/transcriptions\"; the base is served as https://api.openai.com/v1 and the caller appends audio/transcriptions. No wire.family is served: no request-format token is verified for the transcription endpoint.",
       "established_at_ms": 1794009600000,
       "review_by_ms": 1799193600000
     },

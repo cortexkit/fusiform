@@ -6,6 +6,14 @@ use serde_json::{json, Value};
 /// Curated endpoints are their own documented claims, never provider defaults.
 /// Rows without a declaration must keep every wire fact absent.
 pub(crate) fn expected_curated_wire(model: &str) -> std::collections::BTreeMap<String, Value> {
+    // OpenAI documents the transcription endpoint's address but no request-format
+    // token is verified for it, so this row declares an endpoint and no family.
+    if model == "openai/gpt-transcribe" {
+        return std::collections::BTreeMap::from([(
+            "wire.api".into(),
+            json!({"value":"https://api.openai.com/v1","from":"curated"}),
+        )]);
+    }
     let (api, family) = match model {
         "google/gemini-3.8-flash-tts" => (
             "https://generativelanguage.googleapis.com/v1beta",
