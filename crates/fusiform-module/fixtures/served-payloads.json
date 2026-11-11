@@ -4940,7 +4940,7 @@
       "name": "catalog.get"
     },
     "response": {
-      "catalog_version": 0,
+      "catalog_version": 123,
       "models": {
         "synthetic-quality-reseller/synthetic-model": {
           "quality.elo": 1284,
@@ -8368,6 +8368,109 @@
       "resolved_at_ms": -1,
       "tier_vocabulary": "The tier is the VENDOR'S OWN TIER NAME, never an API plan string. OpenAI's Pro 100, Pro 200 and Pro 500 are pro_100, pro_200 and pro_500 here. A consumer holding an API string must map it to a tier itself, with knowledge of the account.",
       "unit_policy": "US list price, monthly-billed, web subscription. An operator on an annual term, in another country, or subscribed through an app store pays something else, and this plane cannot see which."
+    }
+  },
+  "quality.grade — preview": {
+    "request": {
+      "arguments": {
+        "elo": 1500,
+        "eq": 1600.5,
+        "model": "synthetic/model",
+        "reason": "new evaluation"
+      },
+      "name": "quality.grade"
+    },
+    "response": {
+      "affected_count": 1,
+      "affected_ids": [
+        "synthetic/model"
+      ],
+      "current": {
+        "elo": 1284,
+        "eq": 1599.800,
+        "graded_by": "operator",
+        "model": "synthetic/model",
+        "reason": "initial evaluation",
+        "recorded_at_ms": 123,
+        "withdrawn": false
+      },
+      "dry_run": true,
+      "model": "synthetic/model",
+      "new": {
+        "elo": 1500,
+        "eq": 1600.5,
+        "graded_by": "operator",
+        "model": "synthetic/model",
+        "reason": "new evaluation",
+        "recorded_at_ms": -1,
+        "withdrawn": false
+      }
+    }
+  },
+  "quality.grades — history": {
+    "request": {
+      "arguments": {
+        "model": "synthetic/model"
+      },
+      "name": "quality.grades"
+    },
+    "response": {
+      "grades": [
+        {
+          "elo": null,
+          "eq": null,
+          "graded_by": "operator",
+          "model": "synthetic/model",
+          "reason": "evaluation withdrawn",
+          "recorded_at_ms": -1,
+          "withdrawn": true
+        },
+        {
+          "elo": 1284,
+          "eq": 1599.800,
+          "graded_by": "operator",
+          "model": "synthetic/model",
+          "reason": "initial evaluation",
+          "recorded_at_ms": 123,
+          "withdrawn": false
+        }
+      ]
+    }
+  },
+  "quality.withdraw — commit": {
+    "request": {
+      "arguments": {
+        "dry_run": false,
+        "model": "synthetic/model",
+        "reason": "evaluation withdrawn"
+      },
+      "name": "quality.withdraw"
+    },
+    "response": {
+      "affected_count": 1,
+      "affected_ids": [
+        "synthetic/model"
+      ],
+      "current": {
+        "elo": 1284,
+        "eq": 1599.800,
+        "graded_by": "operator",
+        "model": "synthetic/model",
+        "reason": "initial evaluation",
+        "recorded_at_ms": 123,
+        "withdrawn": false
+      },
+      "dry_run": false,
+      "model": "synthetic/model",
+      "new": {
+        "elo": null,
+        "eq": null,
+        "graded_by": "operator",
+        "model": "synthetic/model",
+        "reason": "evaluation withdrawn",
+        "recorded_at_ms": -1,
+        "withdrawn": true
+      }
     }
   },
   "refused — historical plane": {

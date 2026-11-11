@@ -75,10 +75,15 @@ commands:
   retract-artifact          take back an artifact mark
   correct                   record that fusiform's own record was wrong over a
                             past window (previews by default; --commit writes)
+  grade <model> --elo N --eq N --reason TEXT [--commit]
+                            set live quality grades (previews by default)
+  withdraw-grade <model> --reason TEXT [--commit]
+                            withdraw a grade, retaining its history
+  grades [--model <key>]     current grades, or one key's full history
 
 options:
   --provider <id>           narrow to one provider
-  --model <id>              narrow to one model (requires --provider)
+  --model <id>              narrow to one model (get/history require --provider)
   --auth-method <method>    select a billing plane (get only; requires --provider)
                             apikey, chatgpt, oauth, antigravity, gateway
   --fact <key>              which fact, for history
@@ -214,6 +219,8 @@ struct Args {
     provider: Option<String>,
     auth_method: Option<String>,
     model: Option<String>,
+    elo: Option<serde_json::Number>,
+    eq: Option<serde_json::Number>,
     fact: Option<String>,
     at_ms: Option<i64>,
     prefixes: Option<Vec<String>>,
@@ -251,6 +258,9 @@ struct Args {
 /// which this repo has now produced three times in a day — the artifact under
 /// test has to be the thing that ships.
 fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String> {
+    if args.command != "grade" && (args.elo.is_some() || args.eq.is_some()) {
+        return Err("--elo and --eq apply to grade only".into());
+    }
     // A flag that does nothing must SAY so rather than be dropped.
     //
     // `--at` is a global option but only `get` resolves an instant: `history`
@@ -288,6 +298,40 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
     }
 
     match args.command.as_str() {
+        "grade" | "withdraw-grade" => {
+            let model = args
+                .model
+                .as_ref()
+                .ok_or("grade and withdraw-grade need a model key")?;
+            let reason = args
+                .reason
+                .as_ref()
+                .filter(|r| !r.trim().is_empty())
+                .ok_or("a nonempty --reason is required")?;
+            let mut body =
+                serde_json::json!({"model":model,"reason":reason,"dry_run":!args.commit});
+            if args.command == "grade" {
+                for (name, value) in [("elo", &args.elo), ("eq", &args.eq)] {
+                    let value = value
+                        .as_ref()
+                        .ok_or_else(|| format!("grade needs --{name}"))?;
+                    if !value.as_f64().is_some_and(|n| n.is_finite() && n > 0.0) {
+                        return Err(format!("--{name} must be a finite positive number"));
+                    }
+                    body[name] = serde_json::Value::Number(value.clone());
+                }
+                Ok((fusiform_protocol::TOOL_QUALITY_GRADE, body))
+            } else {
+                Ok((fusiform_protocol::TOOL_QUALITY_WITHDRAW, body))
+            }
+        }
+        "grades" => Ok((
+            fusiform_protocol::TOOL_QUALITY_GRADES,
+            args.model.as_ref().map_or_else(
+                || serde_json::json!({}),
+                |model| serde_json::json!({"model":model}),
+            ),
+        )),
         "status" => {
             let mut a = serde_json::Map::new();
             if let Some(n) = args.polls {
@@ -457,6 +501,7 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
         "plan-prices" => print!("{}", render_plan_prices(&response)),
         "mark-artifact" => print_mark(&response),
         "retract-artifact" => print_retraction(&response),
+        "grade" | "withdraw-grade" | "grades" => print!("{}", render_grades(&response)),
         _ => unreachable!("the command was validated above"),
     }
     Ok(())
@@ -1573,6 +1618,8 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         provider: None,
         auth_method: None,
         model: None,
+        elo: None,
+        eq: None,
         fact: None,
         at_ms: None,
         prefixes: None,
@@ -1599,6 +1646,15 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
             "--provider" => args.provider = Some(value()?),
             "--auth-method" => args.auth_method = Some(value()?),
             "--model" => args.model = Some(value()?),
+            "--elo" | "--eq" => {
+                let number = serde_json::from_str::<serde_json::Number>(&value()?)
+                    .map_err(|e| format!("{flag} needs a number: {e}"))?;
+                if flag == "--elo" {
+                    args.elo = Some(number);
+                } else {
+                    args.eq = Some(number);
+                }
+            }
             "--fact" => args.fact = Some(value()?),
             "--at" => {
                 let raw = value()?;
@@ -1654,6 +1710,13 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
             }
             "--include-retired" => args.include_retired = true,
             "--json" => args.json = true,
+            model
+                if !model.starts_with('-')
+                    && matches!(args.command.as_str(), "grade" | "withdraw-grade")
+                    && args.model.is_none() =>
+            {
+                args.model = Some(model.to_string())
+            }
             other => return Err(format!("unknown option {other:?}\n\n{USAGE}")),
         }
     }
@@ -2032,8 +2095,121 @@ fn print_correction(response: &serde_json::Value) {
     }
 }
 
+fn render_grades(response: &serde_json::Value) -> String {
+    let mut out = String::new();
+    if let Some(dry_run) = response.get("dry_run").and_then(serde_json::Value::as_bool) {
+        out.push_str(if dry_run {
+            "Preview (nothing written)\n"
+        } else {
+            "Committed\n"
+        });
+        out.push_str(&format!(
+            "Reaches {} served rows: {}\n",
+            response["affected_count"], response["affected_ids"]
+        ));
+        out.push_str(&format!(
+            "Current: {}\nNew: {}\n",
+            response["current"], response["new"]
+        ));
+    } else if let Some(rows) = response["grades"].as_array() {
+        for row in rows {
+            out.push_str(&format!(
+                "{}  elo={} eq={}{}  {}  {}: {}\n",
+                row["model"].as_str().unwrap_or("?"),
+                row["elo"],
+                row["eq"],
+                if row["withdrawn"] == true {
+                    " (withdrawn)"
+                } else {
+                    ""
+                },
+                format_instant(row["recorded_at_ms"].as_i64().unwrap_or(0)),
+                row["graded_by"].as_str().unwrap_or("?"),
+                row["reason"].as_str().unwrap_or("?")
+            ));
+        }
+        if rows.is_empty() {
+            out.push_str("No current quality grades.\n");
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn quality_grade_commands_preview_commit_and_exact_numbers() {
+        let parse =
+            |words: &[&str]| super::parse_args(words.iter().map(std::ffi::OsString::from)).unwrap();
+        for command in ["grade", "withdraw-grade"] {
+            for commit in [false, true] {
+                let mut words = vec![
+                    "ck-fusiform",
+                    command,
+                    "lab/model",
+                    "--reason",
+                    "evaluation",
+                ];
+                if command == "grade" {
+                    words.extend(["--elo", "1234.500", "--eq", "1599.800"]);
+                }
+                if commit {
+                    words.push("--commit");
+                }
+                let (tool, body) = super::request_for(&parse(&words)).unwrap();
+                assert_eq!(
+                    tool,
+                    if command == "grade" {
+                        "quality.grade"
+                    } else {
+                        "quality.withdraw"
+                    }
+                );
+                assert_eq!(body["dry_run"], !commit);
+                assert_eq!(body["model"], "lab/model");
+                if command == "grade" {
+                    assert_eq!(body["elo"].to_string(), "1234.500");
+                    assert_eq!(body["eq"].to_string(), "1599.800");
+                }
+            }
+        }
+        for words in [
+            vec!["ck-fusiform", "grades"],
+            vec!["ck-fusiform", "grades", "--model", "lab/model"],
+        ] {
+            let (tool, body) = super::request_for(&parse(&words)).unwrap();
+            assert_eq!(tool, "quality.grades");
+            assert_eq!(body.get("model").is_some(), words.len() == 4);
+        }
+        for token in ["0", "-1", "1e9999"] {
+            assert!(super::request_for(&parse(&[
+                "ck-fusiform",
+                "grade",
+                "lab/model",
+                "--elo",
+                token,
+                "--eq",
+                "1",
+                "--reason",
+                "evaluation"
+            ]))
+            .is_err());
+        }
+        assert!(super::request_for(&parse(&[
+            "ck-fusiform",
+            "grade",
+            "lab/model",
+            "--reason",
+            "evaluation"
+        ]))
+        .is_err());
+        let rendered = super::render_grades(
+            &serde_json::json!({"grades":[{"model":"lab/model","elo":null,"eq":null,"withdrawn":true,"graded_by":"operator","reason":"retracted","recorded_at_ms":123}]}),
+        );
+        for expected in ["lab/model", "withdrawn", "operator", "retracted", "1970"] {
+            assert!(rendered.contains(expected), "{rendered}");
+        }
+    }
     use super::*;
 
     /// A mode rate key translates to the `mode_rate` field id, carrying the

@@ -24,7 +24,6 @@ pub mod loop_;
 pub mod model_lineage;
 pub mod output_audio;
 pub mod plan_prices;
-pub mod quality_scores;
 pub mod route;
 pub mod seed;
 pub mod signals;
@@ -322,7 +321,7 @@ pub fn manifest() -> ModuleManifest {
                          catalog currently says. Previews unless dry_run is false."
                         .to_string(),
                 ),
-                // The only tool here that writes. Declared honestly so the
+                // Declared honestly so the
                 // daemon can fence it: calling it Pure would tell the
                 // supervisor a write is safe to replay.
                 execution_mode: ExecutionMode::Mutating,
@@ -420,6 +419,42 @@ pub fn manifest() -> ModuleManifest {
                         "provider_id": {"type": "string"}
                     },
                     "additionalProperties": false
+                }),
+            },
+            Tool {
+                name: route::TOOL_QUALITY_GRADE.to_string(),
+                description: Some("Set live operator quality grades for a served canonical key, or a row without one. Previews unless dry_run is false.".into()),
+                execution_mode: ExecutionMode::Mutating,
+                schema: serde_json::json!({
+                    "type":"object",
+                    "properties": {
+                        "model":{"type":"string"}, "elo":{"type":"number", "exclusiveMinimum":0},
+                        "eq":{"type":"number", "exclusiveMinimum":0}, "reason":{"type":"string"},
+                        "dry_run":{"type":"boolean", "default":true}
+                    },
+                    "required":["model","elo","eq","reason"], "additionalProperties":false
+                }),
+            },
+            Tool {
+                name: route::TOOL_QUALITY_WITHDRAW.to_string(),
+                description: Some("Withdraw a current operator quality grade. History is retained. Previews unless dry_run is false.".into()),
+                execution_mode: ExecutionMode::Mutating,
+                schema: serde_json::json!({
+                    "type":"object",
+                    "properties": {
+                        "model":{"type":"string"}, "reason":{"type":"string"},
+                        "dry_run":{"type":"boolean", "default":true}
+                    },
+                    "required":["model","reason"], "additionalProperties":false
+                }),
+            },
+            Tool {
+                name: route::TOOL_QUALITY_GRADES.to_string(),
+                description: Some("List current quality grades, or one key's full history newest first, including withdrawals.".into()),
+                execution_mode: ExecutionMode::Pure,
+                schema: serde_json::json!({
+                    "type":"object", "properties":{"model":{"type":"string"}},
+                    "additionalProperties":false
                 }),
             },
         ],

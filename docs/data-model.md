@@ -13,11 +13,11 @@ in `crates/fusiform-store/tests/it/history.rs`.
 ## 1. Tables
 
 Tables, as shipped: `observation`, `era`, `catalog_version`,
-`observation_artifact_event`, `plan_price_era`, `curated_model_era`,
+`observation_artifact_event`, `plan_price_era`, `curated_model_era`, `quality_grade_era`,
 `cortexkit_schema_version`, `cortexkit_fence`.
 
 - `observation`, `era`, `catalog_version`, `observation_artifact_event`,
-  `plan_price_era` and `curated_model_era` are fusiform's own, created by the
+  `plan_price_era`, `curated_model_era` and `quality_grade_era` are fusiform's own, created by the
   migration chain in `crates/fusiform-store/src/schema.rs` under the namespace
   `catalog`.
 - `cortexkit_schema_version` belongs to the store crate and records which
@@ -42,14 +42,16 @@ does not create.
 | 5 | `observation_artifact_event`, an event log of artifact marks and retractions |
 | 6 | `plan_price_era` |
 | 7 | `curated_model_era` |
+| 8 | `quality_grade_era`, with a one-time import of the frozen grade snapshot |
 
 A store whose recorded schema version is newer than the running binary's chain
 is refused at open, and the error names the store's version
-(`schema_doc::a_store_written_by_a_newer_binary_is_refused`). Migrations 4, 6
-and 7 are tested against stores that already hold rows
+(`schema_doc::a_store_written_by_a_newer_binary_is_refused`). Migrations 4, 6,
+7 and 8 are tested against stores that already hold rows
 (`schema_doc::the_artifact_table_arrives_on_a_populated_store`,
 `schema_doc::the_plan_price_table_arrives_on_a_populated_store`,
-`schema_doc::the_curated_model_table_arrives_on_a_populated_store`).
+`schema_doc::the_curated_model_table_arrives_on_a_populated_store`,
+`schema_doc::quality_grade_v8_import_preserves_exact_rows_on_populated_v7`).
 
 ## 2. Observations
 
@@ -177,7 +179,11 @@ and the current value is never uncertain
 ## 4. The catalog version
 
 `catalog_version` is a single row. Each poll that writes eras advances it to
-`max(now_ms, current + 1)` after the eras are durable. Because the next value
+`max(now_ms, current + 1)` after the eras are durable. Each committed quality
+grade or withdrawal uses the same store advancement function in the transaction
+that appends its grade row. Previews and the v8 import do not advance it.
+The version row's `observation_id` is null for a grade write, which has no poll.
+Because the next value
 is at least the wall clock, restoring an older copy of the database cannot make
 the version go backwards (`history::a_restore_cannot_rewind_the_catalog_version`,
 `store_durability::a_restore_rewinds_the_row_counts_but_not_the_catalog_version`),
@@ -317,6 +323,35 @@ serve the compiled file. The rules:
 6. The shipped file (five rows, none held) writes five rows on a store's
    first start, and an unchanged file writes nothing after that. These rules
    are tested in `crates/fusiform-module/src/route/curated_history_tests.rs`.
+
+## 7b. Operator quality grades
+
+`quality_grade_era` is an append-only table separate from upstream fact eras.
+The newest insertion id for a model key is its current judgment, regardless
+of clock order. Columns:
+
+| Column | Meaning |
+| --- | --- |
+| `id` | integer primary key, insertion order |
+| `model` | served canonical id, or a provider/model row id with no canonical id |
+| `elo`, `eq` | exact JSON number tokens stored as TEXT, both present or both null |
+| `withdrawn` | 1 for a withdrawal with both numbers null, 0 for a complete grade |
+| `graded_by` | operator attribution |
+| `reason` | why the grade was assigned or withdrawn |
+| `recorded_at_ms` | when the judgment was recorded, in epoch milliseconds |
+
+CHECK constraints prohibit partial grades, withdrawals with numbers and unknown
+withdrawal states. Migration v8 imports the frozen former grade file exactly
+once, retaining its original grading time; it never imports again on reopen.
+Live writes append through the writer fence and advance the catalog version
+in that same transaction. No grade row is updated or deleted. The store write
+fence names the one grade/withdrawal INSERT and verifies every caller of the
+shared version-advance helper holds the fence.
+
+Current reads and full grade histories use the read pool. Withdrawals hide
+grades from current catalog reads but remain in `quality.grades` history.
+Catalog `at_ms` reads omit grades, as before; grade history is not upstream
+`catalog.history`. See [`curated-data.md`](curated-data.md) §11.
 
 ## 8. What is not stored
 

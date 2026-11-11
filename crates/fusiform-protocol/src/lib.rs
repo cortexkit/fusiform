@@ -79,8 +79,11 @@ use serde::{Deserialize, Serialize};
 pub const TOOL_GET: &str = "catalog.get";
 pub const TOOL_HISTORY: &str = "catalog.history";
 pub const TOOL_STATUS: &str = "catalog.status";
-/// The only tool that writes.
+/// Record a correction to upstream observation history.
 pub const TOOL_CORRECT: &str = "catalog.correct";
+pub const TOOL_QUALITY_GRADE: &str = "quality.grade";
+pub const TOOL_QUALITY_WITHDRAW: &str = "quality.withdraw";
+pub const TOOL_QUALITY_GRADES: &str = "quality.grades";
 
 /// Every tool name, so a dispatch and a manifest cannot disagree about which
 /// tools exist.
@@ -119,6 +122,9 @@ pub const TOOLS: &[&str] = &[
     TOOL_MARK_ARTIFACT,
     TOOL_RETRACT_ARTIFACT,
     TOOL_PLAN_PRICES,
+    TOOL_QUALITY_GRADE,
+    TOOL_QUALITY_WITHDRAW,
+    TOOL_QUALITY_GRADES,
 ];
 
 /// Ask what curated subscription prices fusiform holds.
@@ -478,6 +484,8 @@ pub struct CatalogGetResponse {
     /// is told to check is a property of the source, not of the system.
     pub resolved_at_ms: i64,
     /// The monotonic catalog version at the time of the read.
+    /// Advances on a poll that writes and on each committed quality grade or
+    /// withdrawal, never on previews or the one-time grade import.
     ///
     /// Carried on a pull as well as a push, so a consumer can tell whether a
     /// read it just made is newer than the last push it applied without
@@ -1641,6 +1649,8 @@ pub enum ToolResponse {
     MarkArtifact(MarkArtifactResponse),
     RetractArtifact(RetractArtifactResponse),
     PlanPrices(PlanPricesResponse),
+    QualityWrite(QualityWriteResponse),
+    QualityGrades(QualityGradesResponse),
 }
 
 /// A `catalog.history` request: every era for one fact.
@@ -1710,7 +1720,65 @@ pub struct CuratedModelWire {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct QualityScoresWire {
     pub graded_by: String,
+    /// Newest recorded_at_ms among the current grades served in this response.
     pub graded_at_ms: i64,
+}
+
+/// Assign both exact positive numeric grades. Previews unless dry_run is false.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QualityGradeRequest {
+    pub model: String,
+    pub elo: serde_json::Number,
+    pub eq: serde_json::Number,
+    pub reason: String,
+    #[serde(default = "default_true")]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QualityWithdrawRequest {
+    pub model: String,
+    pub reason: String,
+    #[serde(default = "default_true")]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QualityGradesRequest {
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// An operator judgment, or a withdrawal with both numbers null.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QualityGradeWire {
+    pub model: String,
+    pub elo: Option<serde_json::Number>,
+    pub eq: Option<serde_json::Number>,
+    pub withdrawn: bool,
+    pub graded_by: String,
+    pub reason: String,
+    pub recorded_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QualityWriteResponse {
+    pub dry_run: bool,
+    pub model: String,
+    pub current: Option<QualityGradeWire>,
+    pub new: QualityGradeWire,
+    pub affected_count: usize,
+    /// At most ten reached served row ids, in lexical order.
+    pub affected_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QualityGradesResponse {
+    /// Current grades ordered by key, or one key's history newest first.
+    pub grades: Vec<QualityGradeWire>,
 }
 
 /// Provenance for a curated `model.canonical_id`, not an upstream observation.
@@ -1863,7 +1931,9 @@ pub struct StatusResponse {
     /// # What it cannot do, and why this warning is here twice
     ///
     /// It is `max(now_ms, current + 1)`, so it advances with WALL CLOCK time on
-    /// any poll that writes, including the boot poll after a restart. It cannot
+    /// any poll that writes, including the boot poll after a restart, and on
+    /// each committed quality grade or withdrawal. Previews do not advance it.
+    /// It cannot
     /// identify which snapshot a response describes: a point-in-time read of
     /// old values stamps TODAY's version on them. Use `resolved_at_ms`, which
     /// echoes the instant that was resolved and round-trips with `at_ms`.

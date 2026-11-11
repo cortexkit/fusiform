@@ -17,7 +17,7 @@ Integration test names below are libtest paths in the module crate's
 
 Tools, as served: `catalog.get`, `catalog.history`, `catalog.status`,
 `catalog.correct`, `catalog.mark_artifact`, `catalog.retract_artifact`,
-`plan.prices`.
+`plan.prices`, `quality.grade`, `quality.withdraw`, `quality.grades`.
 
 | Tool | Execution mode | What it does |
 | --- | --- | --- |
@@ -28,6 +28,9 @@ Tools, as served: `catalog.get`, `catalog.history`, `catalog.status`,
 | `catalog.mark_artifact` | mutating | mark one poll as a representation change of fusiform's own |
 | `catalog.retract_artifact` | mutating | take a mark back |
 | `plan.prices` | pure | curated subscription list prices |
+| `quality.grade` | mutating | preview or commit live operator ELO and EQ grades |
+| `quality.withdraw` | mutating | preview or commit a grade withdrawal, retaining history |
+| `quality.grades` | pure | current grades, or one key's full history newest first |
 
 Tests check that the list above names exactly the tools in the protocol
 crate's `TOOLS` constant

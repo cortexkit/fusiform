@@ -62,6 +62,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 7,
         statements: SCHEMA_V7,
     },
+    Migration {
+        version: 8,
+        statements: SCHEMA_V8,
+    },
 ];
 
 const SCHEMA_V1: &str = r#"
@@ -541,3 +545,30 @@ CREATE TABLE curated_model_era (
 CREATE INDEX curated_model_era_key
     ON curated_model_era (provider_id, model_id, boundary_at_ms);
 "#;
+
+// The frozen document belongs only to this migration. Reopening an upgraded
+// store never reapplies it, so a binary upgrade cannot replace operator writes.
+const SCHEMA_V8: &str = concat!(
+    r#"
+CREATE TABLE quality_grade_era (
+    id             INTEGER PRIMARY KEY,
+    model          TEXT NOT NULL,
+    elo            TEXT,
+    eq             TEXT,
+    withdrawn      INTEGER NOT NULL CHECK (withdrawn IN (0, 1)),
+    graded_by      TEXT NOT NULL,
+    reason         TEXT NOT NULL,
+    recorded_at_ms INTEGER NOT NULL,
+    CHECK ((withdrawn = 1 AND elo IS NULL AND eq IS NULL)
+        OR (withdrawn = 0 AND elo IS NOT NULL AND eq IS NOT NULL))
+) STRICT;
+CREATE INDEX quality_grade_era_key ON quality_grade_era(model, id);
+WITH doc(body) AS (VALUES ('"#,
+    include_str!("quality-v8.json"),
+    r#"'))
+INSERT INTO quality_grade_era (model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms)
+SELECT value ->> 'model', value -> 'elo', value -> 'eq', 0, 'operator',
+       'One-time import of quality-scores.json', body ->> 'graded_at_ms'
+FROM doc, json_each(body, '$.rows');
+"#
+);

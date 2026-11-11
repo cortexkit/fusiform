@@ -96,7 +96,6 @@ step path-deps scripts/no-outside-path-deps.sh
 step shell-guard-self-test python3 scripts/check-shell-exit-guard.py --self-test
 step shell-guard python3 scripts/check-shell-exit-guard.py
 step wire-crate-version wire_version
-step importer-tests python3 scripts/test_import_quality_scores.py
 
 if [ "$fast_only" -eq 0 ]; then
     # Prints each exit code and fails if either failed.

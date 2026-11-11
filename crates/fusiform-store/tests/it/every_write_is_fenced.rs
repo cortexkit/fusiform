@@ -32,6 +32,16 @@ use std::collections::BTreeSet;
 
 /// Statements that modify the database, as they appear in SQL.
 const WRITE_KEYWORDS: [&str; 3] = ["INSERT INTO", "UPDATE ", "DELETE FROM"];
+const STORE_SOURCES: &[&str] = &[
+    "lib.rs",
+    "ingest.rs",
+    "serve.rs",
+    "correct.rs",
+    "readers.rs",
+    "curated.rs",
+    "quality.rs",
+];
+const VERSION_HELPER: &str = "advance_catalog_version_in";
 
 /// Read a store source file, with SQL string continuations joined.
 ///
@@ -148,7 +158,12 @@ fn fenced_ranges(text: &str) -> Vec<(usize, usize)> {
 
 fn unfenced_writes(text: &str) -> Vec<usize> {
     let text = join_continuations(text);
-    let ranges = fenced_ranges(&text);
+    let mut ranges = fenced_ranges(&text);
+    // This one shared UPDATE lives in a transaction helper. A separate control
+    // enumerates every caller and requires each to hold the writer fence.
+    if let Some((start, end)) = version_helper_range(&text) {
+        ranges.push((start, end));
+    }
     write_lines(&text)
         .into_iter()
         .filter(|line| {
@@ -157,6 +172,83 @@ fn unfenced_writes(text: &str) -> Vec<usize> {
                 .any(|(start, end)| line >= start && line <= end)
         })
         .collect()
+}
+
+fn version_helper_range(text: &str) -> Option<(usize, usize)> {
+    let definition = format!("pub(crate) fn {VERSION_HELPER}(");
+    let lines: Vec<_> = text.lines().collect();
+    let start = lines
+        .iter()
+        .position(|line| line.starts_with(&definition))?;
+    let mut depth = 0i32;
+    let mut started = false;
+    for (index, line) in lines.iter().enumerate().skip(start) {
+        for ch in line.chars() {
+            if ch == '{' {
+                depth += 1;
+                started = true;
+            }
+            if ch == '}' {
+                depth -= 1;
+            }
+        }
+        if started && depth == 0 {
+            return Some((start + 1, index + 1));
+        }
+    }
+    panic!("{VERSION_HELPER} has no closing brace");
+}
+
+#[test]
+fn version_helper_callers_are_all_named_and_fenced() {
+    let mut callers = BTreeSet::new();
+    let mut definitions = Vec::new();
+    for file in STORE_SOURCES {
+        let text = source(file);
+        if version_helper_range(&text).is_some() {
+            definitions.push(*file);
+        }
+        let ranges = fenced_ranges(&text);
+        let mut function = "<module>";
+        for (index, line) in text.lines().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("//") {
+                continue;
+            }
+            if let Some((_, rest)) = trimmed.split_once("fn ") {
+                function = rest.split('(').next().unwrap();
+            }
+            if !line.contains(&format!("{VERSION_HELPER}("))
+                || line.contains(&format!("fn {VERSION_HELPER}("))
+            {
+                continue;
+            }
+            let caller = format!("{file}:{function}");
+            assert!(
+                ranges
+                    .iter()
+                    .any(|(start, end)| index + 1 >= *start && index < *end),
+                "unfenced version helper caller {caller} at line {}",
+                index + 1
+            );
+            assert!(
+                callers.insert(caller),
+                "a version helper caller was duplicated"
+            );
+        }
+    }
+    assert_eq!(
+        definitions,
+        ["lib.rs"],
+        "only the named shared helper may contain the version UPDATE"
+    );
+    assert_eq!(
+        callers,
+        BTreeSet::from([
+            "lib.rs:advance_catalog_version".into(),
+            "quality.rs:append_quality_grade".into()
+        ])
+    );
 }
 
 fn missing_fence_calls(text: &str) -> Vec<&str> {
@@ -216,16 +308,11 @@ fn planted_reopened_migration_handle_is_reported() {
 fn no_write_escapes_the_fence() {
     // Every file that can issue SQL against the store. `schema.rs` is excluded
     // deliberately and checked separately below.
+    // Its v8 quality_grade_era import INSERT runs through the retained migration
+    // handle, not a live write API; the migration-handle control covers it.
     let mut writes_seen = 0usize;
 
-    for file in [
-        "lib.rs",
-        "ingest.rs",
-        "serve.rs",
-        "correct.rs",
-        "readers.rs",
-        "curated.rs",
-    ] {
+    for file in STORE_SOURCES {
         let text = source(file);
         let unfenced = unfenced_writes(&text);
 
@@ -273,6 +360,7 @@ fn no_write_escapes_the_fence() {
     //   INSERT INTO curated_model_era          (curated.rs: one statement
     //                                           writes both a curated model
     //                                           row's claim and its tombstone)
+    //   INSERT INTO quality_grade_era          (quality.rs: grade or withdrawal)
     //
     // ingest.rs, serve.rs and correct.rs issue none: they build plans and read,
     // and every write they cause goes through `append_eras` in lib.rs.
@@ -295,8 +383,8 @@ fn no_write_escapes_the_fence() {
     // list that quietly became wrong, which is worse than no list — a reader
     // checking the guard against three sites concludes it is complete.
     assert_eq!(
-        writes_seen, 8,
-        "the write detector found {writes_seen} write sites; eight are enumerated \
+        writes_seen, 9,
+        "the write detector found {writes_seen} write sites; nine are enumerated \
          above. If you ADDED a write, add it to that list and update this number \
          — the list is how the next reader checks this guard, and a stale list \
          is worse than none. If you added nothing, either WRITE_KEYWORDS has \

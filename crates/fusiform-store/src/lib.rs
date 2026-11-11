@@ -16,6 +16,7 @@
 pub mod correct;
 mod curated;
 pub mod ingest;
+mod quality;
 mod readers;
 pub mod schema;
 pub mod serve;
@@ -36,6 +37,7 @@ use rusqlite::{params, OptionalExtension};
 pub use curated::{
     CuratedModelEra, NewCuratedModel, CURATED_MODELS_FILE, CURATED_MODEL_NOT_SERVED,
 };
+pub use quality::{QualityGrade, QualityGradeEra};
 
 /// A lease-guarded, migrated catalog store.
 pub struct CatalogStore {
@@ -1550,33 +1552,43 @@ impl CatalogStore {
         observation_id: i64,
         now: Timestamp,
     ) -> Result<i64, CatalogError> {
-        let issued = self.inner.with_conn_fenced(|tx| {
-            let current: i64 = tx.query_row(
-                "SELECT version FROM catalog_version WHERE id = 1",
-                [],
-                |r| r.get(0),
-            )?;
-            let next = now.0.max(current + 1);
-            if next <= current {
-                // Signalled through the driver's error channel so the whole
-                // transaction rolls back; mapped to a domain error below.
-                return Err(rusqlite::Error::SqliteFailure(
-                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
-                    Some(format!(
-                        "catalog version must advance: {current} -> {next} does not"
-                    )),
-                ));
-            }
-            tx.execute(
-                "UPDATE catalog_version \
-                 SET version = ?1, observation_id = ?2, updated_at_ms = ?3 \
-                 WHERE id = 1",
-                params![next, observation_id, now.0],
-            )?;
-            Ok(next)
-        })?;
+        let issued = self
+            .inner
+            .with_conn_fenced(|tx| advance_catalog_version_in(tx, Some(observation_id), now))?;
         Ok(issued)
     }
+}
+
+/// Shared transaction-level advancement keeps grade and poll versions identical.
+/// Callers must hold the writer fence and commit the content in this transaction.
+pub(crate) fn advance_catalog_version_in(
+    tx: &rusqlite::Transaction<'_>,
+    observation_id: Option<i64>,
+    now: Timestamp,
+) -> rusqlite::Result<i64> {
+    let current: i64 = tx.query_row(
+        "SELECT version FROM catalog_version WHERE id = 1",
+        [],
+        |r| r.get(0),
+    )?;
+    let next = now.0.max(current + 1);
+    if next <= current {
+        // Signalled through the driver's error channel so the whole
+        // transaction rolls back; mapped to a domain error below.
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+            Some(format!(
+                "catalog version must advance: {current} -> {next} does not"
+            )),
+        ));
+    }
+    tx.execute(
+        "UPDATE catalog_version \
+                 SET version = ?1, observation_id = ?2, updated_at_ms = ?3 \
+                 WHERE id = 1",
+        params![next, observation_id, now.0],
+    )?;
+    Ok(next)
 }
 
 /// Corrections indexed by the fact they cover.

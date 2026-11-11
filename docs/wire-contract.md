@@ -26,7 +26,8 @@ A call is a JSON object `{"name": "<tool>", "arguments": {...}}`
    serves one surface and no presets
    (`scope_and_preset::a_named_preset_is_refused_and_an_absent_one_is_served`).
 4. The requests for `catalog.get`, `catalog.history`, `catalog.status` and
-   `catalog.correct` are declared to reject unknown fields, so a misspelled
+   `catalog.correct`, `quality.grade`, `quality.withdraw` and `quality.grades`
+   are declared to reject unknown fields, so a misspelled
    field is an error rather than a silently different answer. The test covers
    `catalog.get` (`route::a_malformed_request_is_refused_rather_than_defaulted`).
    The requests for `catalog.mark_artifact`, `catalog.retract_artifact` and
@@ -36,7 +37,7 @@ A call is a JSON object `{"name": "<tool>", "arguments": {...}}`
    value. Any other value, including `seed`, is `bad_request`
    (`route::every_accepted_source_can_match_a_row`).
 
-The seven tools are listed in [`module-surface.md`](module-surface.md).
+The tools are listed in [`module-surface.md`](module-surface.md).
 
 ## 2. Refusals
 
@@ -79,8 +80,9 @@ different questions (`catalog.status` carries only the second).
 1. `resolved_at_ms` is always concrete. A read without `at_ms` records the
    instant "now" resolved to, and sending that instant back as `at_ms` returns
    the same values (`served_corrections::a_read_can_be_replayed_by_the_instant_it_resolved`).
-2. `catalog_version` is `max(now_ms, previous + 1)` at each poll that changed
-   something, so it never goes backwards, even across a restore of the
+2. `catalog_version` is `max(now_ms, previous + 1)` at each poll that writes
+   and each committed quality grade or withdrawal. Previews and the one-time
+   grade import do not advance it. It never goes backwards, even across a restore of the
    database ([`data-model.md`](data-model.md) §4). It describes the store at
    read time: a point-in-time read of old values carries today's version. It
    is not a snapshot identifier.
@@ -824,7 +826,7 @@ Rules for the data are in [`curated-data.md`](curated-data.md) §10.
 
 ### 5.9 Operator quality scores
 
-Current `catalog.get` reads join the operator's compiled-in grade table to each
+Current `catalog.get` reads join the operator's current store grades to each
 row's served `model.canonical_id`. A row without a canonical id uses its own
 `provider/model` key. Several providers serving the same canonical model share
 one grade. Alias rows receive grades only through a matching served canonical
@@ -833,7 +835,7 @@ plain read's grades for the same row.
 
 `quality.elo` (general quality) and `quality.eq` (writing and judgment) are
 advisory judgments for routing selection, not upstream measurements or
-instructions changing request bytes. Null grades are absent facts. Numbers
+instructions changing request bytes. Withdrawn grades are absent facts. Numbers
 retain their decimal representation without a binary-float conversion.
 `fact_prefixes` applies normally (`["quality."]` selects both).
 
@@ -852,13 +854,44 @@ appears once at response level:
 }
 ```
 
-The example uses synthetic grades. `graded_at_ms` is epoch milliseconds (`0`
-means unspecified). There is no per-model attribution duplication. The object
+The example uses synthetic grades. `graded_at_ms` is the newest `recorded_at_ms`
+among grades actually served in this response, in epoch milliseconds. An
+unrelated grade write does not redate another model's grade. There is no
+per-model attribution duplication. The object
 is omitted for an empty grade table, unmatched rows, filters excluding quality,
-and pages with no quality facts. The shipped table is empty. These derivations
-are computed per read, never stored: point-in-time (`at_ms`) reads carry no
-quality facts or attribution, and history has no grade eras. See
-[`curated-data.md`](curated-data.md) §11 for the table and CSV importer.
+and pages with no quality facts. Grades have their own append-only history;
+point-in-time (`at_ms`) catalog reads still carry no quality facts or attribution,
+and `catalog.history` remains upstream fact history. See
+[`curated-data.md`](curated-data.md) §11 for storage and operator commands.
+
+#### Operator grade tools
+
+`quality.grade {model, elo, eq, reason, dry_run?: true}` and
+`quality.withdraw {model, reason, dry_run?: true}` are Mutating tools that preview
+by default. Only explicit `dry_run: false` appends a row. Each committed row
+advances `catalog_version` in the same transaction, using the poll-write rule
+`max(now_ms, current + 1)`; previews and the migration import do not advance it.
+This version is also returned by `catalog.status`, so polling consumers and
+cached catalog page plans notice live grade changes.
+
+`model` names a canonical id carried by a current served row, or the row's own
+`provider/model` id when it has no canonical id. An unknown grade key refuses
+`bad_request`, naming the key and this rule. Both numbers must be finite and
+positive; invalid numbers and empty reasons refuse `bad_request`. Withdrawals
+without a current grade refuse `no_coverage`. Withdrawing a previously graded
+key remains possible after its last served row disappears.
+
+Both write responses have `dry_run`, `model`, `current` (the current grade, or
+null), `new` (the proposed or committed record), `affected_count`, and
+`affected_ids` (up to ten served row ids in lexical order). A grade record has
+`model`, exact numeric `elo` and `eq`, `withdrawn`, `graded_by`, `reason`, and
+`recorded_at_ms`. Withdrawal records set `withdrawn: true` and both numbers null.
+
+`quality.grades {model?: key}` is Pure. With no key it returns
+`{grades: [...]}` containing every current, non-withdrawn grade ordered by key.
+With a key it returns that key's full history newest first, withdrawals
+included; no history refuses `no_coverage`. Request and response types live in
+`fusiform-protocol`.
 
 ### 5.10 Model lineage
 

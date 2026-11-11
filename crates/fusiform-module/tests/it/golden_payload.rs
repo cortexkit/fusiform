@@ -479,6 +479,10 @@ fn render_all() -> String {
     ordinary
         .as_object_mut()
         .unwrap()
+        .extend(render_quality_tools());
+    ordinary
+        .as_object_mut()
+        .unwrap()
         .extend(render_curated_wire());
     ordinary.as_object_mut().unwrap().insert(
         "catalog.get — a curated row at an instant".into(),
@@ -707,14 +711,8 @@ fn render_synthetic_canonical_link() -> serde_json::Value {
     render_canonical_identity(&doc, "synthetic-provider", "synthetic-model")
 }
 
-/// Pin grade decimals and their shared disclosure while the shipped table is empty.
+/// Pin exact grade decimals and their disclosure through the store-backed join.
 pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
-    let _grades = fusiform_module::quality_scores::plant(
-        r#"{
-        "graded_by":"operator","graded_at_ms":123,"purpose":"synthetic routing grades",
-        "rows":[{"model":"synthetic-lab/synthetic-model","elo":1284,"eq":1599.8}]
-    }"#,
-    );
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -740,6 +738,18 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
         "provider_id":"synthetic-quality-reseller", "model_id":"synthetic-model",
         "fact_prefixes":["quality."]
     }});
+    store
+        .append_quality_grade(
+            "synthetic-lab/synthetic-model",
+            Some(&fusiform_store::QualityGrade {
+                elo: serde_json::from_str("1284").unwrap(),
+                eq: serde_json::from_str("1599.8").unwrap(),
+            }),
+            "operator",
+            "synthetic routing grades",
+            123,
+        )
+        .unwrap();
     let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
     let mut response = serde_json::to_value(response).unwrap();
     response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
@@ -749,6 +759,77 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
     );
     assert_eq!(response["quality_scores"]["graded_by"], "operator");
     serde_json::json!({"request":request, "response":response})
+}
+
+fn render_quality_tools() -> serde_json::Map<String, serde_json::Value> {
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("grades.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    let grade = fusiform_store::QualityGrade {
+        elo: serde_json::from_str("1284").unwrap(),
+        eq: serde_json::from_str("1599.800").unwrap(),
+    };
+    let key = "synthetic/model";
+    store
+        .append_quality_grade(key, Some(&grade), "operator", "initial evaluation", 123)
+        .unwrap();
+    store
+        .append_eras(&[fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "synthetic".into(),
+            model_id: "model".into(),
+            fact_key: fusiform_store::FactKey::existence(),
+            value_json: "\"present\"".into(),
+            boundary_at: Timestamp(1000),
+            boundary_kind: BoundaryKind::Seed,
+            observation_id: None,
+        }])
+        .unwrap();
+    let mut cases = serde_json::Map::new();
+    for (label, name, arguments) in [
+        (
+            "quality.grade — preview",
+            "quality.grade",
+            serde_json::json!({"model":key,"elo":1500,"eq":1600.5,"reason":"new evaluation"}),
+        ),
+        (
+            "quality.withdraw — commit",
+            "quality.withdraw",
+            serde_json::json!({"model":key,"reason":"evaluation withdrawn","dry_run":false}),
+        ),
+        (
+            "quality.grades — history",
+            "quality.grades",
+            serde_json::json!({"model":key}),
+        ),
+    ] {
+        let request = serde_json::json!({"name":name,"arguments":arguments});
+        let mut response = serde_json::to_value(
+            serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap(),
+        )
+        .unwrap();
+        if response.get("new").is_some() {
+            response["new"]["recorded_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+        }
+        if let Some(rows) = response
+            .get_mut("grades")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            rows[0]["recorded_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+        }
+        cases.insert(
+            label.into(),
+            serde_json::json!({"request":request,"response":response}),
+        );
+    }
+    cases
 }
 
 fn render_canonical_identity(
@@ -875,6 +956,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         .count();
     assert_eq!(plain_plane_cases, 2);
     let curated_wire = render_curated_wire();
+    let quality_tools = render_quality_tools();
     // The five single cases rendered outside `cases()`: the first provider page,
     // the seed and synthetic identities, synthetic grades, and curated history.
     for (text, expected) in [
@@ -884,12 +966,17 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
                 + plain_plane_cases
                 + 5
                 + curated_wire.len()
+                + quality_tools.len()
                 + render_cache_lifetimes().len()
                 + render_attachment_limits().len(),
         ),
         (
             serde_json::to_string(&curated_wire).unwrap(),
             curated_wire.len(),
+        ),
+        (
+            serde_json::to_string(&quality_tools).unwrap(),
+            quality_tools.len(),
         ),
         (render(), cases().len()),
         (serde_json::to_string(&render_cache_lifetimes()).unwrap(), 2),
@@ -2160,6 +2247,9 @@ fn every_read_response_field_reaches_the_fixture() {
             "CatalogGetResponse",
             "CuratedModelWire",
             "QualityScoresWire",
+            "QualityGradeWire",
+            "QualityWriteResponse",
+            "QualityGradesResponse",
             "CanonicalLinkWire",
             "WireCorrectionWire",
             "FactOverrideWire",

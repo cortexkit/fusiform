@@ -140,8 +140,14 @@ pub(super) fn serve_planned_page(
         }
     };
     let range = plan.range_after(cursor.map(|c| c.provider.as_str()))?;
-    let mut response =
-        serve_catalog_get_request(store, request, budget, frame_limit, oversized, Some(&range))?;
+    let mut response = serve_catalog_get_request(
+        store,
+        request.clone(),
+        budget,
+        frame_limit,
+        oversized,
+        Some(&range),
+    )?;
     let rendered = PageCursor {
         catalog_version: response.catalog_version,
         resolved_at_ms: response.resolved_at_ms,
@@ -190,10 +196,22 @@ pub(super) fn serve_planned_page(
         // discard only the last whole provider and resume before it next time.
         providers.pop_last();
         let last = providers.last_key_value().map(|(p, _)| p.clone()).unwrap();
-        for rows in providers.into_values() {
-            rows.append_to(&mut response);
+        // Re-render the reduced range so grade attribution uses only the rows
+        // actually served, including when the removed provider had the newest grade.
+        response = serve_catalog_get_request(
+            store,
+            request.clone(),
+            budget,
+            frame_limit,
+            oversized,
+            Some(&ProviderRange {
+                after: range.after.clone(),
+                through: Some(last.clone()),
+            }),
+        )?;
+        if let Some(cursor) = cursor {
+            response.resolved_at_ms = cursor.resolved_at_ms;
         }
-        retain_quality_disclosure(&mut response);
         response.next_page_token = Some(format!(
             "v1:{}:{}:{last}",
             response.catalog_version, response.resolved_at_ms
@@ -257,8 +275,15 @@ fn build_plan(
             Some(&range),
         )?;
         retain_range(&mut response, &range);
-        if response.quality_scores.is_some() {
-            quality = response.quality_scores.clone();
+        if let Some(disclosure) = &response.quality_scores {
+            if quality
+                .as_ref()
+                .is_none_or(|q: &fusiform_protocol::QualityScoresWire| {
+                    q.graded_at_ms.to_string().len() < disclosure.graded_at_ms.to_string().len()
+                })
+            {
+                quality = Some(disclosure.clone());
+            }
         }
         for (provider, rows) in partition_providers(&mut response) {
             providers.push((provider, rows.contribution()?));

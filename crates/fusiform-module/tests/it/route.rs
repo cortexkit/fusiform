@@ -641,6 +641,9 @@ fn every_tool_schema_names_exactly_its_request_fields() {
         ("catalog.mark_artifact", "MarkArtifactRequest"),
         ("catalog.retract_artifact", "RetractArtifactRequest"),
         ("plan.prices", "PlanPricesRequest"),
+        ("quality.grade", "QualityGradeRequest"),
+        ("quality.withdraw", "QualityWithdrawRequest"),
+        ("quality.grades", "QualityGradesRequest"),
     ];
     let manifest = fusiform_module::manifest();
     let tools: Vec<_> = manifest
@@ -758,6 +761,22 @@ fn the_manifest_and_the_dispatch_agree_on_which_tools_exist() {
     let f = fixture();
     for tool in &declared {
         let args = match tool.as_str() {
+            "quality.grade" => {
+                let response = fusiform_module::route::serve_catalog_get(&f.store, b"{}").unwrap();
+                let (id, facts) = response
+                    .models
+                    .iter()
+                    .find(|(id, _)| !response.aliased.iter().any(|a| &a.model == *id))
+                    .unwrap();
+                let model = facts
+                    .get("model.canonical_id")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(id);
+                serde_json::json!({"model":model,"elo":1200,"eq":1300,"reason":"reachability check"})
+            }
+            "quality.withdraw" => {
+                serde_json::json!({"model":"openai/gpt-4","reason":"reachability check"})
+            }
             "catalog.history" => serde_json::json!({
                 "provider_id": "anthropic",
                 "model_id": "claude-sonnet-4-5",

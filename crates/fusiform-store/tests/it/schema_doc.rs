@@ -24,6 +24,183 @@
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_store::CatalogStore;
 
+#[test]
+fn quality_grade_v8_import_preserves_exact_rows_on_populated_v7() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    for migration in &fusiform_store::schema::MIGRATIONS[..7] {
+        conn.execute_batch(migration.statements).unwrap();
+    }
+    conn.execute("INSERT INTO observation (source, observed_at_ms, outcome) VALUES ('models.dev', 1000, 'changed')", []).unwrap();
+    let migration = fusiform_store::schema::MIGRATIONS
+        .get(7)
+        .expect("quality grades require v8");
+    conn.execute_batch(migration.statements).unwrap();
+    let snapshot: serde_json::Value =
+        serde_json::from_str(include_str!("../../src/quality-v8.json")).unwrap();
+    let mut stmt = conn.prepare("SELECT model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms FROM quality_grade_era ORDER BY model").unwrap();
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, bool>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, i64>(6)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(rows.len(), snapshot["rows"].as_array().unwrap().len());
+    for (row, expected) in rows.iter().zip(snapshot["rows"].as_array().unwrap()) {
+        assert_eq!(row.0, expected["model"].as_str().unwrap());
+        assert_eq!(row.1, expected["elo"].to_string());
+        assert_eq!(row.2, expected["eq"].to_string());
+        assert!(!row.3);
+        assert_eq!(row.4, "operator");
+        assert!(row.5.contains("import"));
+        assert_eq!(row.6, snapshot["graded_at_ms"].as_i64().unwrap());
+    }
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM observation", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    // The JSON operators must retain decimal tokens, not convert through REAL.
+    assert_eq!(
+        conn.query_row("SELECT '{\"elo\":1599.800}' -> 'elo'", [], |r| r
+            .get::<_, String>(0))
+            .unwrap(),
+        "1599.800"
+    );
+    for (elo, eq, withdrawn) in [
+        (Some("1"), None, 0),
+        (None, None, 0),
+        (Some("1"), Some("2"), 1),
+        (None, None, 2),
+    ] {
+        assert!(conn.execute("INSERT INTO quality_grade_era (model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms) VALUES ('x/y', ?1, ?2, ?3, 'operator', 'invalid', 1)", rusqlite::params![elo, eq, withdrawn]).is_err());
+    }
+}
+
+#[test]
+fn quality_grade_v8_reopen_never_reimports_and_v7_reports_store_ahead() {
+    let dir = tempfile::tempdir().unwrap();
+    let descriptor = StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("grades.db").to_string_lossy().into(),
+        },
+    };
+    {
+        let old = cortexkit_store::open_sqlite(&descriptor).unwrap();
+        old.migrate(
+            fusiform_store::schema::NAMESPACE,
+            &fusiform_store::schema::MIGRATIONS[..7],
+        )
+        .unwrap();
+        old.with_conn_fenced(|tx| tx.execute("INSERT INTO observation (source, observed_at_ms, outcome) VALUES ('models.dev', 1000, 'changed')", [])).unwrap();
+    }
+    let snapshot: serde_json::Value =
+        serde_json::from_str(include_str!("../../src/quality-v8.json")).unwrap();
+    let count = snapshot["rows"].as_array().unwrap().len();
+    let watermark;
+    {
+        let store = CatalogStore::open(&descriptor).unwrap();
+        assert_eq!(store.quality_grades().unwrap().len(), count);
+        assert_eq!(
+            store.catalog_version().unwrap(),
+            0,
+            "migration import is not a live grade write"
+        );
+        let grade = fusiform_store::QualityGrade {
+            elo: serde_json::from_str("1599.800").unwrap(),
+            eq: serde_json::from_str("1200.00").unwrap(),
+        };
+        store
+            .append_quality_grade(
+                "openai/gpt-4",
+                Some(&grade),
+                "operator",
+                "new evaluation",
+                5000,
+            )
+            .unwrap();
+        assert_eq!(store.catalog_version().unwrap(), 5000);
+        store
+            .append_quality_grade("openai/gpt-4", None, "operator", "withdrawn", 1)
+            .unwrap();
+        assert_eq!(
+            store.catalog_version().unwrap(),
+            5001,
+            "a backwards clock must not rewind the version"
+        );
+        watermark = store.latest_quality_grade_id().unwrap();
+    }
+    for _ in 0..2 {
+        let store = CatalogStore::open(&descriptor).unwrap();
+        assert_eq!(store.latest_quality_grade_id().unwrap(), watermark);
+        assert_eq!(store.quality_grades().unwrap().len(), count - 1);
+        let history = store.quality_grade_history("openai/gpt-4").unwrap();
+        assert_eq!(history.len(), 3);
+        assert_eq!(
+            history[1].grade.as_ref().unwrap().elo.to_string(),
+            "1599.800"
+        );
+        assert!(
+            history[2].grade.is_none(),
+            "reopening must not restore a withdrawn grade"
+        );
+    }
+    let old = cortexkit_store::open_sqlite(&descriptor).unwrap();
+    let outcome = old
+        .migrate(
+            fusiform_store::schema::NAMESPACE,
+            &fusiform_store::schema::MIGRATIONS[..7],
+        )
+        .unwrap();
+    assert!(
+        outcome.store_ahead(),
+        "the v7 binary's existing refusal guard must reject a v8 store"
+    );
+    assert_eq!(outcome.recorded, 8);
+    assert_eq!(outcome.chain_max, 7);
+}
+
+#[test]
+fn quality_grade_and_version_commit_atomically() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grades.db");
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: path.to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    let conn = rusqlite::Connection::open(path).unwrap();
+    conn.execute_batch("CREATE TRIGGER refuse_version BEFORE UPDATE ON catalog_version BEGIN SELECT RAISE(ABORT, 'version refused'); END;").unwrap();
+    let grade = fusiform_store::QualityGrade {
+        elo: serde_json::from_str("1").unwrap(),
+        eq: serde_json::from_str("2").unwrap(),
+    };
+    assert!(store
+        .append_quality_grade("test/model", Some(&grade), "operator", "evaluation", 5000)
+        .is_err());
+    assert!(store
+        .quality_grade_history("test/model")
+        .unwrap()
+        .is_empty());
+    assert_eq!(store.catalog_version().unwrap(), 0);
+}
+
 fn table_list(note: &str) -> String {
     note.split("\n\n")
         .find(|p| p.trim_start().starts_with("Tables, as shipped:"))

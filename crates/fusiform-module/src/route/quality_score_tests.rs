@@ -4,9 +4,221 @@ use fusiform_core::BoundaryKind;
 use fusiform_store::NewEra;
 use serde_json::{json, Value};
 
+#[test]
+fn quality_grade_commit_refreshes_named_provider_and_cached_pages() {
+    let (store, _dir) = fixture(true);
+    let status_version = || serve_status(&store, b"{}").unwrap().catalog_version;
+    let version_before = status_version();
+    let args: Value = serde_json::from_str(
+        r#"{"model":"lab/shared","elo":1234.500,"eq":1789,"reason":"new evaluation"}"#,
+    )
+    .unwrap();
+    let call = |name: &str, arguments: Value| {
+        serve_tool_call(
+            &store,
+            &serde_json::to_vec(&json!({"name":name,"arguments":arguments})).unwrap(),
+        )
+    };
+    let preview =
+        serde_json::to_value(call("quality.grade", args.clone()).expect("quality.grade previews"))
+            .unwrap();
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(preview["affected_count"], 3);
+    assert_eq!(
+        preview["affected_ids"],
+        json!([
+            "google/antigravity-gemini-4-argon",
+            "google/gemini-4-argon",
+            "reseller/shared"
+        ])
+    );
+    assert!(preview["current"].is_null());
+    assert!(store
+        .quality_grade_history("lab/shared")
+        .unwrap()
+        .is_empty());
+    assert_eq!(status_version(), version_before);
+    assert!(
+        !get(&store, json!({"paged":true})).models["reseller/shared"].contains_key("quality.elo")
+    );
+    let key_before = WholeCatalogKey::new(
+        &store,
+        &CatalogGetRequest::default(),
+        SourceId::ModelsDev,
+        REPLY_FRAME_LIMIT_BYTES,
+    )
+    .unwrap();
+    let mut commit = args;
+    commit["dry_run"] = json!(false);
+    assert_eq!(
+        serde_json::to_value(call("quality.grade", commit).unwrap()).unwrap()["dry_run"],
+        false
+    );
+    assert_eq!(store.quality_grade_history("lab/shared").unwrap().len(), 1);
+    let version_after_grade = status_version();
+    assert!(version_after_grade > version_before);
+    let key_after = WholeCatalogKey::new(
+        &store,
+        &CatalogGetRequest::default(),
+        SourceId::ModelsDev,
+        REPLY_FRAME_LIMIT_BYTES,
+    )
+    .unwrap();
+    assert!(
+        key_before != key_after,
+        "grade writes must invalidate page-plan and oversized-response caches"
+    );
+    for query in [
+        json!({"provider_id":"reseller","model_id":"shared"}),
+        json!({"provider_id":"reseller"}),
+        json!({"paged":true}),
+    ] {
+        let response = get(&store, query);
+        assert_eq!(
+            response.models["reseller/shared"]["quality.elo"].to_string(),
+            "1234.500"
+        );
+        assert!(response.quality_scores.is_some());
+    }
+    let withdrawal = json!({"model":"lab/shared","reason":"retracted"});
+    assert_eq!(
+        serde_json::to_value(call("quality.withdraw", withdrawal).unwrap()).unwrap()["dry_run"],
+        true
+    );
+    assert_eq!(store.quality_grade_history("lab/shared").unwrap().len(), 1);
+    assert_eq!(status_version(), version_after_grade);
+    call(
+        "quality.withdraw",
+        json!({"model":"lab/shared","reason":"retracted","dry_run":false}),
+    )
+    .unwrap();
+    assert_eq!(store.quality_grade_history("lab/shared").unwrap().len(), 2);
+    assert!(status_version() > version_after_grade);
+    assert!(
+        !get(&store, json!({"paged":true})).models["reseller/shared"].contains_key("quality.elo")
+    );
+}
+
+#[test]
+fn quality_grade_refuses_unknown_invalid_and_missing_coverage() {
+    let (store, _dir) = fixture(true);
+    let call = |name: &str, arguments: Value| {
+        serve_tool_call(
+            &store,
+            &serde_json::to_vec(&json!({"name":name,"arguments":arguments})).unwrap(),
+        )
+    };
+    let unknown = call(
+        "quality.grade",
+        json!({"model":"missing/model","elo":1,"eq":2,"reason":"evaluation","dry_run":false}),
+    )
+    .unwrap_err();
+    assert_eq!(unknown.code, "bad_request");
+    assert!(unknown.message.contains("missing/model") && unknown.message.contains("canonical"));
+    for token in ["-1", "0", "1e9999", "null", "\"NaN\"", "\"Infinity\""] {
+        for field in ["elo", "eq"] {
+            let mut arguments =
+                json!({"model":"lab/shared","elo":1,"eq":2,"reason":"evaluation","dry_run":false});
+            arguments[field] = serde_json::from_str(token).unwrap();
+            assert_eq!(
+                call("quality.grade", arguments).unwrap_err().code,
+                "bad_request",
+                "{field}={token}"
+            );
+        }
+    }
+    let malformed = br#"{"name":"quality.grade","arguments":{"model":"lab/shared","elo":NaN,"eq":2,"reason":"invalid"}}"#;
+    assert_eq!(
+        serve_tool_call(&store, malformed).unwrap_err().code,
+        "bad_request"
+    );
+    assert_eq!(
+        call(
+            "quality.withdraw",
+            json!({"model":"lab/shared","reason":"withdraw"})
+        )
+        .unwrap_err()
+        .code,
+        "no_coverage"
+    );
+    assert_eq!(
+        call("quality.grades", json!({"model":"lab/shared"}))
+            .unwrap_err()
+            .code,
+        "no_coverage"
+    );
+    assert!(store
+        .quality_grade_history("lab/shared")
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .quality_grade_history("missing/model")
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn quality_grades_lists_current_or_newest_first_history_and_response_dates() {
+    let (store, _dir) = fixture(true);
+    seed_grades(&store);
+    let grade = fusiform_store::QualityGrade {
+        elo: serde_json::from_str("1400.000").unwrap(),
+        eq: serde_json::from_str("1600").unwrap(),
+    };
+    store
+        .append_quality_grade(
+            "reseller/own",
+            Some(&grade),
+            "operator",
+            "re-evaluation",
+            456,
+        )
+        .unwrap();
+    assert_eq!(
+        get(&store, json!({"provider_id":"reseller"}))
+            .quality_scores
+            .unwrap()
+            .graded_at_ms,
+        456
+    );
+    assert_eq!(
+        get(
+            &store,
+            json!({"provider_id":"reseller","model_id":"shared"})
+        )
+        .quality_scores
+        .unwrap()
+        .graded_at_ms,
+        123
+    );
+    let response = quality::grades(&store, b"{}").unwrap();
+    assert_eq!(response.grades.len(), 4);
+    let history = quality::grades(&store, br#"{"model":"reseller/own"}"#).unwrap();
+    assert_eq!(history.grades.len(), 2);
+    assert_eq!(history.grades[0].reason, "re-evaluation");
+    assert_eq!(
+        history.grades[0].elo.as_ref().unwrap().to_string(),
+        "1400.000"
+    );
+    store
+        .append_quality_grade("reseller/own", None, "operator", "withdrawn", 789)
+        .unwrap();
+    let history = quality::grades(&store, br#"{"model":"reseller/own"}"#).unwrap();
+    assert!(history.grades[0].withdrawn);
+    assert!(history.grades[0].elo.is_none() && history.grades[0].eq.is_none());
+    assert_eq!(quality::grades(&store, b"{}").unwrap().grades.len(), 3);
+    assert_eq!(
+        get(&store, json!({"provider_id":"reseller"}))
+            .quality_scores
+            .unwrap()
+            .graded_at_ms,
+        123
+    );
+}
+
 const GRADES: &str = r#"{"graded_by":"operator","graded_at_ms":123,"purpose":"routing","rows":[
     {"model":"lab/shared","elo":1284,"eq":1599.8},
-    {"model":"reseller/own","elo":1000.00,"eq":null},
+    {"model":"reseller/own","elo":1000.00,"eq":900.00},
     {"model":"reseller/shared","elo":99,"eq":99},
     {"model":"google/antigravity-gemini-4-argon","elo":99,"eq":99}
 ]}"#;
@@ -22,6 +234,11 @@ fn fixture(canonical: bool) -> (CatalogStore, tempfile::TempDir) {
         },
     })
     .unwrap();
+    for row in store.quality_grades().unwrap() {
+        store
+            .append_quality_grade(&row.model, None, "operator", "fixture isolation", 0)
+            .unwrap();
+    }
     for (provider, model, has_canonical) in [
         ("reseller", "shared", canonical),
         ("reseller", "own", false),
@@ -56,10 +273,29 @@ fn get(store: &CatalogStore, args: Value) -> CatalogGetResponse {
     serve_catalog_get(store, &serde_json::to_vec(&args).unwrap()).unwrap()
 }
 
+fn seed_grades(store: &CatalogStore) {
+    let doc: Value = serde_json::from_str(GRADES).unwrap();
+    for row in doc["rows"].as_array().unwrap() {
+        let grade = fusiform_store::QualityGrade {
+            elo: row["elo"].as_number().unwrap().clone(),
+            eq: row["eq"].as_number().unwrap().clone(),
+        };
+        store
+            .append_quality_grade(
+                row["model"].as_str().unwrap(),
+                Some(&grade),
+                "operator",
+                "fixture",
+                123,
+            )
+            .unwrap();
+    }
+}
+
 #[test]
-fn quality_scores_join_served_canonical_identity_and_own_key_without_storage() {
-    let _grades = crate::quality_scores::plant(GRADES);
+fn quality_scores_join_served_identity_without_upstream_eras() {
     let (store, _dir) = fixture(true);
+    seed_grades(&store);
     let eras = store.era_count(SourceId::ModelsDev).unwrap();
     let version = store.catalog_version().unwrap();
     for args in [
@@ -81,7 +317,10 @@ fn quality_scores_join_served_canonical_identity_and_own_key_without_storage() {
         response.models["reseller/own"]["quality.elo"].to_string(),
         "1000.00"
     );
-    assert!(!response.models["reseller/own"].contains_key("quality.eq"));
+    assert_eq!(
+        response.models["reseller/own"]["quality.eq"].to_string(),
+        "900.00"
+    );
     assert_eq!(store.era_count(SourceId::ModelsDev).unwrap(), eras);
     assert_eq!(store.catalog_version().unwrap(), version);
     let (stored, _) = store
@@ -96,8 +335,8 @@ fn quality_scores_join_served_canonical_identity_and_own_key_without_storage() {
 
 #[test]
 fn quality_scores_obey_fact_filters_and_point_in_time_exclusion() {
-    let _grades = crate::quality_scores::plant(GRADES);
     let (store, _dir) = fixture(true);
+    seed_grades(&store);
     for args in [
         json!({"at_ms":1000}),
         json!({"fact_prefixes":["rate."]}),
@@ -131,9 +370,6 @@ fn quality_scores_obey_fact_filters_and_point_in_time_exclusion() {
 
 #[test]
 fn quality_scores_empty_table_serves_no_facts_or_disclosure() {
-    let _grades = crate::quality_scores::plant(
-        r#"{"graded_by":"operator","graded_at_ms":0,"purpose":"routing","rows":[]}"#,
-    );
     let (store, _dir) = fixture(true);
     let response = get(&store, json!({}));
     assert!(response.quality_scores.is_none());
@@ -154,9 +390,9 @@ fn quality_scores_empty_table_serves_no_facts_or_disclosure() {
 
 #[test]
 fn quality_scores_aliases_require_canonical_identity_and_planes_match_plain_reads() {
-    let _grades = crate::quality_scores::plant(GRADES);
     for canonical in [true, false] {
         let (store, _dir) = fixture(canonical);
+        seed_grades(&store);
         for auth in [Value::Null, json!("apikey")] {
             let response = get(
                 &store,
@@ -176,8 +412,8 @@ fn quality_scores_aliases_require_canonical_identity_and_planes_match_plain_read
 
 #[test]
 fn quality_scores_pages_without_graded_rows_omit_disclosure() {
-    let _grades = crate::quality_scores::plant(GRADES);
     let (store, _dir) = fixture(false);
+    seed_grades(&store);
     let mut response = get(&store, json!({}));
     scope_page(
         &mut response,

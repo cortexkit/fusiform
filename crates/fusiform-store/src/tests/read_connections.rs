@@ -80,6 +80,57 @@ fn catalog_read_completes_during_writer_transaction_and_sees_commit() {
 }
 
 #[test]
+fn quality_grade_reads_use_pool_and_see_the_next_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(&dir);
+    let watermark = store.latest_quality_grade_id().unwrap();
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (commit_tx, commit_rx) = mpsc::channel();
+    let (read_tx, read_rx) = mpsc::channel();
+    let during_write = thread::scope(|scope| {
+        let store = &store;
+        let writer = scope.spawn(move || {
+            store.inner.with_conn_fenced(|tx| {
+                tx.execute("INSERT INTO quality_grade_era (model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms) VALUES ('test/model', '1000.00', '1500', 0, 'operator', 'evaluation', 1)", [])?;
+                ready_tx.send(()).unwrap();
+                commit_rx.recv_timeout(HOLD_DEADLINE).unwrap();
+                Ok(())
+            }).unwrap();
+        });
+        ready_rx.recv_timeout(HOLD_DEADLINE).unwrap();
+        let reader = scope.spawn(move || {
+            read_tx
+                .send((
+                    store.quality_grades(),
+                    store.quality_grade_history("test/model"),
+                    store.latest_quality_grade_id(),
+                ))
+                .unwrap();
+        });
+        let result = read_rx.recv_timeout(READ_DEADLINE);
+        commit_tx.send(()).unwrap();
+        writer.join().unwrap();
+        reader.join().unwrap();
+        result
+    });
+    let (current, history, latest) =
+        during_write.expect("quality reads must not wait for the writer");
+    assert!(!current.unwrap().iter().any(|r| r.model == "test/model"));
+    assert!(history.unwrap().is_empty());
+    assert_eq!(latest.unwrap(), watermark);
+    assert_eq!(
+        store.quality_grade_history("test/model").unwrap()[0]
+            .grade
+            .as_ref()
+            .unwrap()
+            .elo
+            .to_string(),
+        "1000.00"
+    );
+    assert_eq!(store.latest_quality_grade_id().unwrap(), watermark + 1);
+}
+
+#[test]
 fn every_read_connection_rejects_writes() {
     fn check(store: &CatalogStore, remaining: usize) {
         store

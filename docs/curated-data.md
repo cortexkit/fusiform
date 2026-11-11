@@ -13,7 +13,7 @@ that keep them honest.
 | `model-aliases.json` | route-specific ids and the published row each one is | at read time, current reads only |
 | `curated-models.json` | provider rows models.dev does not carry | at read time on current reads; written to `curated_model_era` at start, which point-in-time reads serve (§4) |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
-| `quality-scores.json` | operator-assigned ELO and EQ judgments for routing selection | at read time, current reads only (§11) |
+| store quality grades | operator-assigned ELO and EQ judgments for routing selection | at read time, current reads only (§11) |
 | `model-lineage.json` | curated routing diversity and cost-fallback groups | computed per row at read time, current reads only (§12) |
 | `wire-corrections.json` | sourced per-model endpoint corrections or withholding, and providers whose routed list is complete | at read time, current reads only (§9) |
 | `wire-families.json` | verified package-and-shape request protocols | at read time, current reads only (§13) |
@@ -964,72 +964,70 @@ model names the row to re-source or remove
 `tests/it/fact_overrides.rs` cover named, bulk, paged, filtered, plane, alias,
 historical, upstream-moved and upstream-published reads.
 
-## 11. Operator quality scores (`quality-scores.json`)
+## 11. Operator quality grades (store)
 
 These grades are the operator's judgments, not upstream facts or benchmark
 measurements. ELO describes general quality; EQ describes writing and judgment.
-They guide routing selection, not request bytes. The shipped table is empty;
-loading completed grades later changes data only.
+They guide routing selection, not request bytes. Grades live in the store's
+append-only `quality_grade_era` table and take effect immediately, without a
+build or restart. A binary upgrade never overwrites an operator judgment.
 
-The compiled-in document is parsed once. File-level fields are `graded_by`
-(always `"operator"`), `graded_at_ms` (epoch milliseconds when the operator
-finished grading; `0` only in the shipped empty table, which serves no
-attribution), `purpose`, and `rows`. Each row has `model`, `elo`, and `eq`:
-
-```json
-{
-  "graded_by": "operator",
-  "graded_at_ms": 123,
-  "purpose": "Operator-assigned model quality scores for routing selection, not upstream facts.",
-  "rows": [
-    {"model": "synthetic-lab/synthetic-model", "elo": 1284, "eq": 1599.8}
-  ]
-}
-```
-
-The example is synthetic. Each score is a JSON number or `null`; only non-null
-scores are served. JSON numbers travel as `serde_json::Number` with the
-workspace's `arbitrary_precision` feature, never through a binary float, so the
-decimal text survives parsing and serialization. Malformed rows, duplicate
-keys, and rows with both scores null are rejected and counted. The shipped-data
-test requires zero rejects.
+Migration v8 imports the former grade file once. Its frozen snapshot is
+`crates/fusiform-store/src/quality-v8.json`, reachable only from the migration:
+all original decimal tokens and the file's grading time are retained, with
+`graded_by: "operator"` and an import reason. Reopening a v8 store imports
+nothing, including when a model has subsequently been withdrawn.
 
 One grade belongs to the served `model.canonical_id`, shared across providers.
 Only a row with no canonical id falls back to its own `provider/model` key
 (which can contain slashes inside the model id). An alias gets a grade only
 when its served canonical id matches; it does not borrow a target's own-key
 grade. Canonical links are applied before the join. Billing-plane reads use
-the same grades as plain reads. All grades are computed per read and never
-stored; `at_ms` reads omit them. `fact_prefixes` filters `quality.elo` and
-`quality.eq` normally, including `quality.`. A response containing either
-fact carries one `quality_scores` attribution object; filtered or paged
-responses with no quality facts omit it.
+the same grades as plain reads. Read-pool queries select the newest row by
+insertion id; a withdrawal hides the grade. Point-in-time `at_ms` catalog
+reads still omit grades. Grade history is available separately.
 
-Import a finished sheet with:
+Both scores must be finite positive JSON numbers. They travel as exact
+`serde_json::Number` values with `arbitrary_precision` and are stored as decimal
+TEXT, never SQLite REAL. The positivity/finite check does not rewrite the
+number: fractional trailing zeros survive storage and serving. A withdrawal
+stores null in both columns; a CHECK forbids partial grades or a withdrawal
+carrying numbers.
+
+Operator commands (preview by default; `--commit` appends one row):
 
 ```sh
-python3 scripts/import-quality-scores.py grades.csv --graded-at 123
+ck models grade <model> --elo N --eq N --reason TEXT [--commit]
+ck models withdraw-grade <model> --reason TEXT [--commit]
+ck models grades [--model <key>]
 ```
 
-The CSV must have `model,ELO,EQ` columns; `AA` and other reference columns are
-ignored. Rows with neither score are omitted. Scores must be plain JSON
-decimals, without exponents, plus signs, or surrounding whitespace. Their text
-is written verbatim, including fractional trailing zeros. Duplicate model keys
-are refused with the CSV line number, even if an unscored row repeats a key.
-Rows are sorted by key with stable formatting. `--graded-at` is required: it is
-served as the grading date, so a placeholder would read as a real date, and the
-current time would make two runs on the same sheet differ. With the same sheet
-and the same `--graded-at`, rerunning the import is byte-identical.
-Review and commit only the resulting data change when the grades are ready.
+`quality.grade` validates that the key reaches a current served row. A preview
+shows the current and proposed grade and the affected row count plus up to ten
+row ids. `quality.withdraw` refuses `no_coverage` without a current grade.
+`quality.grades` lists all current grades; with `model`, it returns that key's
+full history newest first, including times, reasons and withdrawals. A key with
+no history refuses `no_coverage`. The CLI calls those tools, never the database.
 
-Gates: `quality_scores.rs` checks shipped rejects, malformed and duplicate rows,
-fixture restoration, and exact decimal round trips. `route/quality_score_tests.rs`
-covers canonical and own-key joins, null omission, aliases, billing planes,
-filters, pages, and exclusion from point-in-time reads and storage. The golden
-case `catalog.get — synthetic operator quality scores` plants fixture grades
-so the response-field coverage fence remains effective with an empty shipped
-table. `python3 -m unittest discover -s scripts -p 'test_import_quality_scores.py'`
-checks the importer.
+Committed grades and withdrawals advance `catalog_version` atomically with the
+append, using the same `max(now_ms, current + 1)` rule as poll writes. Previews
+write nothing and do not advance it. This also invalidates cached page plans
+and oversized-response refusals. Consumers polling `catalog.status` therefore
+observe a live grade change without needing an upstream poll.
+
+`fact_prefixes` filters `quality.elo` and `quality.eq` normally, including
+`quality.`. A response containing either fact carries one `quality_scores`
+attribution object. Its `graded_at_ms` is the newest `recorded_at_ms` among the
+grades actually served in that response, not the date of an unrelated grade.
+Filtered or paged responses with no quality facts omit it.
+
+Gates cover populated-v7 migration exactness and constraints, reopen/import
+idempotence, atomic grade/version writes, read-pool isolation, preview/commit,
+validation and withdrawal. `route/quality_score_tests.rs` covers canonical and
+own-key joins, aliases, billing planes, filters, page cache invalidation and
+current-only catalog reads. Golden cases pin both the served facts and the
+three operator tools. The former CSV importer and its CI test are removed;
+there is no compiled-in serving loader.
 
 ## 12. Model lineage (`model-lineage.json`)
 

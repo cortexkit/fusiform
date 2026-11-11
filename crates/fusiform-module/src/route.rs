@@ -31,6 +31,7 @@ use serde::Deserialize;
 mod paging_tests;
 
 mod page_plan;
+mod quality;
 use page_plan::{serve_planned_page, ProviderRange};
 
 #[cfg(test)]
@@ -67,7 +68,8 @@ pub use fusiform_protocol::{
     PlanPricesResponse, PlaneWire, PollChanges, RetractArtifactRequest, RetractArtifactResponse,
     StatusPoll, StatusRequest, StatusResponse, ToolResponse, UncertainFactWire, WithheldFactWire,
     TOOLS, TOOL_CORRECT, TOOL_GET, TOOL_HISTORY, TOOL_MARK_ARTIFACT, TOOL_PLAN_PRICES,
-    TOOL_RETRACT_ARTIFACT, TOOL_STATUS,
+    TOOL_QUALITY_GRADE, TOOL_QUALITY_GRADES, TOOL_QUALITY_WITHDRAW, TOOL_RETRACT_ARTIFACT,
+    TOOL_STATUS,
 };
 
 /// Why a request could not be served.
@@ -204,6 +206,9 @@ pub fn serve_tool_call(store: &CatalogStore, body: &[u8]) -> Result<ToolResponse
             serve_retract_artifact(store, &args).map(ToolResponse::RetractArtifact)
         }
         TOOL_PLAN_PRICES => serve_plan_prices(store, &args).map(ToolResponse::PlanPrices),
+        TOOL_QUALITY_GRADE => quality::grade(store, &args).map(ToolResponse::QualityWrite),
+        TOOL_QUALITY_WITHDRAW => quality::withdraw(store, &args).map(ToolResponse::QualityWrite),
+        TOOL_QUALITY_GRADES => quality::grades(store, &args).map(ToolResponse::QualityGrades),
         // Named explicitly rather than served anyway. A module that answers to
         // any tool name keeps answering after a consumer's typo, and the
         // consumer believes it called something else.
@@ -1896,7 +1901,7 @@ fn finish_plane_view(
                 }
             }
         }
-        apply_quality_scores(&mut response);
+        apply_quality_scores(store, &mut response)?;
         apply_model_lineage(&mut response);
     }
     let Some(plane) = plane else {
@@ -1993,8 +1998,17 @@ fn apply_model_lineage(response: &mut CatalogGetResponse) {
     }
 }
 
-fn apply_quality_scores(response: &mut CatalogGetResponse) {
-    let scores = crate::quality_scores::scores();
+fn apply_quality_scores(
+    store: &CatalogStore,
+    response: &mut CatalogGetResponse,
+) -> Result<(), RouteError> {
+    let scores: BTreeMap<_, _> = store
+        .quality_grades()
+        .map_err(|e| store_error(&e))?
+        .into_iter()
+        .map(|row| (row.model.clone(), row))
+        .collect();
+    let mut newest = None;
     for (identity, facts) in &mut response.models {
         let canonical = facts
             .get("model.canonical_id")
@@ -2008,20 +2022,24 @@ fn apply_quality_scores(response: &mut CatalogGetResponse) {
         {
             continue;
         }
-        let Some(row) = scores.rows.get(canonical.unwrap_or(identity)) else {
+        let Some(row) = scores.get(canonical.unwrap_or(identity)) else {
             continue;
         };
-        for (key, value) in [("quality.elo", &row.elo), ("quality.eq", &row.eq)] {
-            if let Some(value) = value {
-                facts.insert(key.to_string(), serde_json::Value::Number(value.clone()));
-            }
+        let grade = row
+            .grade
+            .as_ref()
+            .expect("current grades exclude withdrawals");
+        for (key, value) in [("quality.elo", &grade.elo), ("quality.eq", &grade.eq)] {
+            facts.insert(key.to_string(), serde_json::Value::Number(value.clone()));
         }
+        newest = Some(newest.map_or(row.recorded_at_ms, |n: i64| n.max(row.recorded_at_ms)));
     }
-    response.quality_scores = Some(fusiform_protocol::QualityScoresWire {
+    response.quality_scores = newest.map(|graded_at_ms| fusiform_protocol::QualityScoresWire {
         graded_by: "operator".to_string(),
-        graded_at_ms: scores.graded_at_ms,
+        graded_at_ms,
     });
     retain_quality_disclosure(response);
+    Ok(())
 }
 
 fn retain_quality_disclosure(response: &mut CatalogGetResponse) {
