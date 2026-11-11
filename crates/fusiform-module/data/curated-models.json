@@ -171,6 +171,7 @@
       "facts": {
         "existence": "present",
         "model.name": "GPT Transcribe",
+        "model.type": "transcription",
         "capability.input_modalities": ["audio", "text"],
         "capability.output_modalities": ["text"],
         "rate.input_audio.per_second": {

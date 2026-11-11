@@ -3248,6 +3248,7 @@
           "existence": "present",
           "model.lineage": "gpt",
           "model.name": "GPT Transcribe",
+          "model.type": "transcription",
           "provider.name": "OpenAI",
           "rate.input_audio.per_second": {
             "currency": "USD",
