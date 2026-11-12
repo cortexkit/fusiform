@@ -1,0 +1,56 @@
+{
+  "schema": "temperature-ranges/v1",
+  "notes": "Provider-level request temperature bounds, not model capabilities. Serve on current reads of that provider's own rows only, after capability.temperature replacements, never on aliases or a row whose served acceptance flag is false. An absent acceptance flag is unknown, not false. Bounds remain JSON numbers in the vendor's notation. Each source was accessed 2026-11-12 and must be re-read within 60 days.",
+  "ranges": [
+    {
+      "provider_id": "openai",
+      "minimum": 0,
+      "maximum": 2,
+      "source_ref": "https://platform.openai.com/docs/api-reference/chat/create (accessed 2026-11-12)",
+      "quote": "What sampling temperature to use, between 0 and 2.",
+      "notes": "The Chat Completions reference states minimum: 0, maximum: 2. Model-specific lack of support is expressed by capability.temperature, not by changing the provider range.",
+      "established_at_ms": 1794441600000,
+      "review_by_ms": 1799625600000
+    },
+    {
+      "provider_id": "google",
+      "minimum": 0.0,
+      "maximum": 2.0,
+      "source_ref": "https://ai.google.dev/api/rest/v1beta/models/generateContent (accessed 2026-11-12)",
+      "quote": "Values can range from [0.0, 2.0]. This field is no longer supported and is silently ignored on Gemini 3.6 Flash and newer models.",
+      "notes": "The range applies only where the served capability.temperature is not false. Gemini 3.6 Flash and newer corrections are sourced separately in fact-overrides.json.",
+      "established_at_ms": 1794441600000,
+      "review_by_ms": 1799625600000
+    },
+    {
+      "provider_id": "deepseek",
+      "minimum": 0,
+      "maximum": 2,
+      "source_ref": "https://api-docs.deepseek.com/api/create-chat-completion (accessed 2026-11-12)",
+      "quote": "Possible values: >= 0 and <= 2",
+      "notes": "These are the accepted Chat Completions request bounds, not a recommended sampling setting.",
+      "established_at_ms": 1794441600000,
+      "review_by_ms": 1799625600000
+    },
+    {
+      "provider_id": "xai",
+      "minimum": 0,
+      "maximum": 2,
+      "source_ref": "https://docs.x.ai/developers/rest-api-reference/inference/chat-completions (accessed 2026-11-12)",
+      "quote": "What sampling temperature to use, between 0 and 2. Values above 1 are sampled at 1.",
+      "notes": "The documented accepted range is 0..2. Values above 1 are sampled at 1; that sampling cap does not narrow the accepted request range.",
+      "established_at_ms": 1794441600000,
+      "review_by_ms": 1799625600000
+    },
+    {
+      "provider_id": "anthropic",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "source_ref": "https://platform.claude.com/docs/en/api/messages/create (accessed 2026-11-12)",
+      "quote": "Ranges from 0.0 to 1.0.",
+      "notes": "The Messages API range is useful for older models. Current models that reject non-default sampling parameters carry capability.temperature false and receive no range.",
+      "established_at_ms": 1794441600000,
+      "review_by_ms": 1799625600000
+    }
+  ]
+}

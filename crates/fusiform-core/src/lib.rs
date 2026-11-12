@@ -331,6 +331,8 @@ pub enum CapabilityId {
     /// Whether models.dev says structured output is supported; the claim may be
     /// corrected independently of other model capabilities.
     StructuredOutput,
+    /// Whether the serving API accepts temperature, independently correctable.
+    Temperature,
     ToolCall,
     Attachment,
     InputModalities,

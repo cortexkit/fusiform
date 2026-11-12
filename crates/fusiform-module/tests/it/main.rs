@@ -35,6 +35,7 @@ mod scope_and_preset;
 mod served_corrections;
 mod shrink_guard;
 mod structured_output;
+mod temperature;
 mod tick;
 mod wire_claims;
 mod wire_fact_table;

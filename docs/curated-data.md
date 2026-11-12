@@ -20,6 +20,7 @@ that keep them honest.
 | `fact-overrides.json` | guarded sourced replacements or additions to upstream facts | compiled file on current reads; stored `fact_override_era` claims on point-in-time reads (§10) |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
 | `cache-lifetimes.json` | first-party OpenAI and Anthropic prompt-cache lifetimes and exact write-price multipliers | at read time, current reads only |
+| `temperature-ranges.json` | documented provider-level sampling temperature bounds | current reads of the provider's own rows only, never aliases or rows with `capability.temperature: false` |
 | `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models, and optional documented audio tokens per second | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio`; at read time: joins `limit.audio_tokens_per_second` onto current rows serving that rate (§8) |
 | `output-audio-per-token.json` | providers with separately sourced output-audio token units and optional excluded models | at ingest: lets eligible unconditional `cost.output_audio` become `rate.output_audio`; conditional audio remains unpriced |
 | `plan-prices.json` | subscription list prices, quota values and service-tier entitlements | prices written to `plan_price_era` at start; quota values and service tiers joined only on current reads |
@@ -786,6 +787,37 @@ and are deliberately omitted. OpenAI's 50,000,000-byte per-file PDF limit also
 has a 50 MB combined-request limit; the per-file fact alone does not promise
 that several maximum-sized files fit in one request.
 
+## Temperature ranges (`temperature-ranges.json`)
+
+models.dev's optional `temperature` boolean is stored and served as
+`capability.temperature`. Absence means unknown, never false. A consumer omits
+temperature for false without refusing the send; for true it clamps the caller's
+value to the served `limit.temperature_min`..`limit.temperature_max`, or 0..1
+when no bounds are served. An unknown acceptance flag uses the 0..1 clamp.
+
+The `temperature-ranges/v1` file has provider-level `ranges` rows: `provider_id`,
+`minimum` and `maximum` JSON numbers, `source_ref` with accessed date, a verbatim
+`quote`, explanatory `notes`, `established_at_ms` and `review_by_ms` exactly 60
+days later. Zero is a real minimum. OpenAI, Google, DeepSeek and xAI document
+0..2; Anthropic documents 0.0..1.0. xAI's sampling cap above 1 is noted but does
+not narrow the accepted request range. Malformed and duplicate rows are counted
+as rejects; the review gate requires re-reading overdue sources.
+
+Ranges are applied after fact replacements, before prefix filtering, only on
+current reads of that provider's own rows. No range is served on an alias or
+when the served capability is false. Aliases inherit a target's false acceptance
+flag because omitting temperature is safe on any route; true and absent target
+flags establish no acceptance on the alias API and produce no alias fact.
+
+Google's GenerateContent reference and text-generation guide state that Gemini
+3.6 Flash and newer ignore custom temperature. Five guarded replacements in
+`fact-overrides.json` correct the seed's true claims: `gemini-3.6-flash`,
+`gemini-3.7-flash`, `gemini-3.8-flash`, `gemini-4-argon`, `gemini-4-carbon`, all
+under `google`. The three Flash versions are at least 3.6; the other two are
+Gemini 4, explicitly covered by the guide. No other Google Gemini 3.6+ row is
+in the embedded seed. The correction has dated history and stops when the
+stored upstream boolean moves away from true.
+
 ## 9. Wire corrections (`wire-corrections.json`)
 
 Each `corrections` row names `provider`, `model`, `field` (currently only
@@ -870,6 +902,7 @@ an addition is always written as one. Each fact key has its own rule:
 | `limit.context`, `limit.output` | replacement only | positive integer | a different positive integer |
 | `capability.server_side_fallback` | addition only | `true` or `false` | `null` |
 | `capability.mid_conversation_system` | addition only | `true` or `false` | `null` |
+| `capability.temperature` | replacement only | boolean | a different published boolean |
 | `model.status` | replacement of the stored `null` only | `"deprecated"` | `null` |
 | `rate.output` | replacement only | sourced per-million-token rate | exact stored upstream token-rate object, without serve-time currency provenance |
 | `rate.output_image` | addition only | sourced per-million-image-token rate | `null` |

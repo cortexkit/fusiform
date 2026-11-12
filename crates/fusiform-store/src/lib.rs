@@ -195,6 +195,7 @@ impl FactKey {
                 CapabilityId::Reasoning => "reasoning",
                 CapabilityId::ReasoningOptions => "reasoning_options",
                 CapabilityId::StructuredOutput => "structured_output",
+                CapabilityId::Temperature => "temperature",
                 CapabilityId::ToolCall => "tool_call",
                 CapabilityId::Attachment => "attachment",
                 CapabilityId::InputModalities => "input_modalities",

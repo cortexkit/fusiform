@@ -451,6 +451,10 @@ fn render_all() -> String {
         .as_object_mut()
         .unwrap()
         .extend(render_attachment_limits());
+    ordinary
+        .as_object_mut()
+        .unwrap()
+        .extend(render_temperature());
     let planes: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
     for (label, case) in planes.as_object().unwrap() {
         assert!(
@@ -545,6 +549,90 @@ pub(super) fn render_attachment_limits() -> serde_json::Map<String, serde_json::
         );
     }
     cases
+}
+
+fn render_temperature() -> serde_json::Map<String, serde_json::Value> {
+    let mut seed: serde_json::Value =
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+    seed.as_object_mut().unwrap().retain(|provider, row| {
+        let models: &[&str] = match provider.as_str() {
+            "openai" => &["gpt-4.1"],
+            "google" => &["gemini-4-carbon", "gemini-3.1-flash-image"],
+            "anthropic" => &["claude-sonnet-5-5"],
+            _ => return false,
+        };
+        row["models"]
+            .as_object_mut()
+            .unwrap()
+            .retain(|id, _| models.contains(&id.as_str()));
+        true
+    });
+    let (store, _dir) = super::temperature::store(seed);
+    let mut cases = serde_json::Map::new();
+    for (label, provider, model) in [
+        ("temperature accepted with range", "openai", "gpt-4.1"),
+        ("temperature Google correction", "google", "gemini-4-carbon"),
+        (
+            "temperature unsupported without range",
+            "anthropic",
+            "claude-sonnet-5-5",
+        ),
+        (
+            "temperature false Claude alias",
+            "google",
+            "antigravity-claude-sonnet-5-5",
+        ),
+        (
+            "temperature corrected Carbon alias",
+            "google",
+            "antigravity-gemini-4-carbon",
+        ),
+        (
+            "temperature true target omitted on alias",
+            "google",
+            "antigravity-gemini-3.1-flash-image",
+        ),
+    ] {
+        let request = serde_json::json!({"name":"catalog.get","arguments":{
+            "provider_id":provider,"model_id":model,
+            "fact_prefixes":["capability.temperature", "limit.temperature_"]
+        }});
+        let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+        let mut response = serde_json::to_value(response).unwrap();
+        response["resolved_at_ms"] = NOW_PLACEHOLDER.into();
+        cases.insert(
+            format!("catalog.get — {label}"),
+            serde_json::json!({"request":request,"response":response}),
+        );
+    }
+    cases
+}
+
+#[test]
+fn temperature_golden_cases_pin_acceptance_correction_and_safe_alias_projection() {
+    let cases = render_temperature();
+    let accepted = &cases["catalog.get — temperature accepted with range"]["response"]["models"]
+        ["openai/gpt-4.1"];
+    assert_eq!(accepted["capability.temperature"], true);
+    assert_eq!(accepted["limit.temperature_min"], 0);
+    assert_eq!(accepted["limit.temperature_max"], 2);
+    for (label, id) in [
+        ("Google correction", "google/gemini-4-carbon"),
+        ("unsupported without range", "anthropic/claude-sonnet-5-5"),
+        ("false Claude alias", "google/antigravity-claude-sonnet-5-5"),
+        (
+            "corrected Carbon alias",
+            "google/antigravity-gemini-4-carbon",
+        ),
+    ] {
+        let facts = &cases[&format!("catalog.get — temperature {label}")]["response"]["models"][id];
+        assert_eq!(facts["capability.temperature"], false);
+        assert!(facts.get("limit.temperature_max").is_none());
+    }
+    let alias = &cases["catalog.get — temperature true target omitted on alias"]["response"]
+        ["models"]["google/antigravity-gemini-3.1-flash-image"];
+    assert!(alias.get("capability.temperature").is_none());
+    assert!(alias.get("limit.temperature_max").is_none());
 }
 
 fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
@@ -1004,7 +1092,8 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
                 + curated_wire.len()
                 + quality_tools.len()
                 + render_cache_lifetimes().len()
-                + render_attachment_limits().len(),
+                + render_attachment_limits().len()
+                + render_temperature().len(),
         ),
         (
             serde_json::to_string(&curated_wire).unwrap(),
@@ -1020,6 +1109,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
             serde_json::to_string(&render_attachment_limits()).unwrap(),
             2,
         ),
+        (serde_json::to_string(&render_temperature()).unwrap(), 6),
         (serde_json::json!({"paged":render_paged()}).to_string(), 1),
         (
             serde_json::json!({"canonical":render_canonical_link()}).to_string(),

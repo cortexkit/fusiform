@@ -32,6 +32,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -41,6 +42,8 @@
           "limit.image_long_edge_px.above_images.20": 3000,
           "limit.images_per_request": 600,
           "limit.output": 64000,
+          "limit.temperature_max": 1.0,
+          "limit.temperature_min": 0.0,
           "model.canonical_id": null,
           "model.family": "claude-sonnet",
           "model.lineage": "claude",
@@ -192,6 +195,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
@@ -200,6 +204,8 @@
           "limit.image_long_edge_px.above_images.14": 4096,
           "limit.images_per_request": 600,
           "limit.output": 393216,
+          "limit.temperature_max": 2,
+          "limit.temperature_min": 0,
           "model.canonical_id": "deepseek/deepseek-v4.1-flash-1017",
           "model.family": "deepseek-flash",
           "model.lineage": "deepseek",
@@ -320,6 +326,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1050000,
@@ -582,11 +589,14 @@
           "capability.reasoning": false,
           "capability.reasoning_options": null,
           "capability.structured_output": true,
+          "capability.temperature": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
           "limit.image_bytes": 20971520,
           "limit.output": 30000,
+          "limit.temperature_max": 2,
+          "limit.temperature_min": 0,
           "model.canonical_id": null,
           "model.family": "grok",
           "model.lineage": "grok",
@@ -780,6 +790,7 @@
           ],
           "capability.server_side_fallback": true,
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -960,6 +971,7 @@
               ]
             }
           ],
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -1144,6 +1156,8 @@
           ],
           "existence": "present",
           "limit.images_per_request": 1500,
+          "limit.temperature_max": 2,
+          "limit.temperature_min": 0,
           "model.lineage": "gpt",
           "model.name": "GPT Image 2.6 Flare",
           "model.type": "image",
@@ -1477,6 +1491,8 @@
           "limit.context": 8192,
           "limit.output": 16384,
           "limit.output_audio_tokens_per_second": 25,
+          "limit.temperature_max": 2.0,
+          "limit.temperature_min": 0.0,
           "model.lineage": "gemini",
           "model.name": "Gemini 3.8 Flash TTS",
           "model.type": "speech",
@@ -1547,6 +1563,8 @@
           "limit.output_video_tokens_per_second.resolution.360p": 1931,
           "limit.output_video_tokens_per_second.resolution.4k": 17376,
           "limit.output_video_tokens_per_second.resolution.720p": 5792,
+          "limit.temperature_max": 2.0,
+          "limit.temperature_min": 0.0,
           "model.lineage": "gemini",
           "model.name": "Gemini Omni 1.2 Flash",
           "model.type": "video",
@@ -1607,6 +1625,23 @@
         }
       ],
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794441600000,
+          "established_by": "fusiform",
+          "fact_key": "capability.temperature",
+          "model": "google/antigravity-gemini-3.8-flash",
+          "model_id": "gemini-3.8-flash",
+          "notes": "This Flash version is newer than 3.6 and covered by both quoted statements. The replacement applies only while models.dev publishes true.",
+          "provider_id": "google",
+          "quote": "GenerateContent reference: \"Values can range from [0.0, 2.0]. This field is no longer supported and is silently ignored on Gemini 3.6 Flash and newer models.\" Text-generation guide: \"Gemini 4 and Gemini 3.6+ models ignore custom values for `temperature`, `top_p`, and `top_k` and return deprecation warning headers. Remove these sampling parameters from your requests.\"",
+          "reason": "Google documents that Gemini 3.6 Flash and newer models ignore custom temperature. Omit the parameter rather than implying a caller can control sampling.",
+          "replaces": true,
+          "review_by_ms": 1799625600000,
+          "source_ref": "https://ai.google.dev/api/rest/v1beta/models/generateContent (accessed 2026-11-12); https://ai.google.dev/gemini-api/docs/text-generation (accessed 2026-11-12)",
+          "value": false
+        }
+      ],
       "models": {
         "google/antigravity-gemini-3.8-flash": {
           "capability.attachment": true,
@@ -1631,6 +1666,7 @@
               ]
             }
           ],
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.audio_tokens_per_second": 25,
@@ -2001,6 +2037,7 @@
               "type": "budget_tokens"
             }
           ],
+          "capability.temperature": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -2107,6 +2144,7 @@
               "type": "budget_tokens"
             }
           ],
+          "capability.temperature": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -2198,6 +2236,7 @@
           "capability.reasoning": true,
           "capability.reasoning_options": [],
           "capability.structured_output": true,
+          "capability.temperature": true,
           "capability.tool_call": true
         }
       },
@@ -2556,6 +2595,23 @@
         }
       ],
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794441600000,
+          "established_by": "fusiform",
+          "fact_key": "capability.temperature",
+          "model": "google/antigravity-gemini-3.8-flash",
+          "model_id": "gemini-3.8-flash",
+          "notes": "This Flash version is newer than 3.6 and covered by both quoted statements. The replacement applies only while models.dev publishes true.",
+          "provider_id": "google",
+          "quote": "GenerateContent reference: \"Values can range from [0.0, 2.0]. This field is no longer supported and is silently ignored on Gemini 3.6 Flash and newer models.\" Text-generation guide: \"Gemini 4 and Gemini 3.6+ models ignore custom values for `temperature`, `top_p`, and `top_k` and return deprecation warning headers. Remove these sampling parameters from your requests.\"",
+          "reason": "Google documents that Gemini 3.6 Flash and newer models ignore custom temperature. Omit the parameter rather than implying a caller can control sampling.",
+          "replaces": true,
+          "review_by_ms": 1799625600000,
+          "source_ref": "https://ai.google.dev/api/rest/v1beta/models/generateContent (accessed 2026-11-12); https://ai.google.dev/gemini-api/docs/text-generation (accessed 2026-11-12)",
+          "value": false
+        }
+      ],
       "models": {
         "google/antigravity-gemini-3.8-flash": {
           "capability.attachment": true,
@@ -2580,6 +2636,7 @@
               ]
             }
           ],
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
@@ -2822,6 +2879,7 @@
           ],
           "capability.server_side_fallback": true,
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -3014,6 +3072,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1050000,
@@ -3294,6 +3353,8 @@
             "text"
           ],
           "existence": "present",
+          "limit.temperature_max": 2,
+          "limit.temperature_min": 0,
           "model.lineage": "gpt",
           "model.name": "GPT Transcribe",
           "model.type": "transcription",
@@ -3525,6 +3586,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -3914,6 +3976,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -3923,6 +3986,8 @@
           "limit.image_long_edge_px.above_images.20": 3000,
           "limit.images_per_request": 600,
           "limit.output": 64000,
+          "limit.temperature_max": 1.0,
+          "limit.temperature_min": 0.0,
           "model.canonical_id": null,
           "model.family": "claude-sonnet",
           "model.lineage": "claude",
@@ -4048,6 +4113,7 @@
               "type": "toggle"
             }
           ],
+          "capability.temperature": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -4194,6 +4260,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -4356,6 +4423,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
@@ -4465,6 +4533,7 @@
           ],
           "capability.reasoning": true,
           "capability.reasoning_options": [],
+          "capability.temperature": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 204800,
@@ -4592,6 +4661,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1050000,
@@ -5043,6 +5113,7 @@
           ],
           "capability.server_side_fallback": true,
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true
         }
       },
@@ -5105,6 +5176,202 @@
       "quality_scores": {
         "graded_at_ms": 123,
         "graded_by": "operator"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — temperature Google correction": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "capability.temperature",
+          "limit.temperature_"
+        ],
+        "model_id": "gemini-4-carbon",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794441600000,
+          "established_by": "fusiform",
+          "fact_key": "capability.temperature",
+          "model": "google/gemini-4-carbon",
+          "model_id": "gemini-4-carbon",
+          "notes": "This is a Gemini 4 row named by the text-generation guide. The replacement applies only while models.dev publishes true.",
+          "provider_id": "google",
+          "quote": "GenerateContent reference: \"Values can range from [0.0, 2.0]. This field is no longer supported and is silently ignored on Gemini 3.6 Flash and newer models.\" Text-generation guide: \"Gemini 4 and Gemini 3.6+ models ignore custom values for `temperature`, `top_p`, and `top_k` and return deprecation warning headers. Remove these sampling parameters from your requests.\"",
+          "reason": "Google documents that Gemini 4 models ignore custom temperature. Omit the parameter rather than implying a caller can control sampling.",
+          "replaces": true,
+          "review_by_ms": 1799625600000,
+          "source_ref": "https://ai.google.dev/api/rest/v1beta/models/generateContent (accessed 2026-11-12); https://ai.google.dev/gemini-api/docs/text-generation (accessed 2026-11-12)",
+          "value": false
+        }
+      ],
+      "models": {
+        "google/gemini-4-carbon": {
+          "capability.temperature": false
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — temperature accepted with range": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "capability.temperature",
+          "limit.temperature_"
+        ],
+        "model_id": "gpt-4.1",
+        "provider_id": "openai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "openai/gpt-4.1": {
+          "capability.temperature": true,
+          "limit.temperature_max": 2,
+          "limit.temperature_min": 0
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — temperature corrected Carbon alias": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "capability.temperature",
+          "limit.temperature_"
+        ],
+        "model_id": "antigravity-gemini-4-carbon",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "aliased": [
+        {
+          "model": "google/antigravity-gemini-4-carbon",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/cb40633d96e87ad2ad958e4940c71fa2a685df94/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS antigravity-gemini-4-carbon, RESOLVER_ALIASES, isGeminiCarbonModel, getGeminiCarbonAntigravityModel), pinned by packages/core/src/carbon-model.test.ts at the same commit; protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
+          "target_model_id": "gemini-4-carbon",
+          "target_provider_id": "google"
+        }
+      ],
+      "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794441600000,
+          "established_by": "fusiform",
+          "fact_key": "capability.temperature",
+          "model": "google/antigravity-gemini-4-carbon",
+          "model_id": "gemini-4-carbon",
+          "notes": "This is a Gemini 4 row named by the text-generation guide. The replacement applies only while models.dev publishes true.",
+          "provider_id": "google",
+          "quote": "GenerateContent reference: \"Values can range from [0.0, 2.0]. This field is no longer supported and is silently ignored on Gemini 3.6 Flash and newer models.\" Text-generation guide: \"Gemini 4 and Gemini 3.6+ models ignore custom values for `temperature`, `top_p`, and `top_k` and return deprecation warning headers. Remove these sampling parameters from your requests.\"",
+          "reason": "Google documents that Gemini 4 models ignore custom temperature. Omit the parameter rather than implying a caller can control sampling.",
+          "replaces": true,
+          "review_by_ms": 1799625600000,
+          "source_ref": "https://ai.google.dev/api/rest/v1beta/models/generateContent (accessed 2026-11-12); https://ai.google.dev/gemini-api/docs/text-generation (accessed 2026-11-12)",
+          "value": false
+        }
+      ],
+      "models": {
+        "google/antigravity-gemini-4-carbon": {
+          "capability.temperature": false
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — temperature false Claude alias": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "capability.temperature",
+          "limit.temperature_"
+        ],
+        "model_id": "antigravity-claude-sonnet-5-5",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "aliased": [
+        {
+          "model": "google/antigravity-claude-sonnet-5-5",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/d17ca2e88fe033f54f745faf31f6b815a75c32e1/packages/core/src/model-registry.ts#L188-L216 (vertexModelId: 'claude-sonnet-5-5@default' on all three tiers), #L327-L340 (variants and limits), #L472 (public id); packages/core/src/transform/model-resolver.ts#L205-L211 (actualModel: `${modelWithoutQuota}-low`, tier: 'low') at the same revision; protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
+          "target_model_id": "claude-sonnet-5-5",
+          "target_provider_id": "anthropic"
+        }
+      ],
+      "catalog_version": 0,
+      "models": {
+        "google/antigravity-claude-sonnet-5-5": {
+          "capability.temperature": false
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — temperature true target omitted on alias": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "capability.temperature",
+          "limit.temperature_"
+        ],
+        "model_id": "antigravity-gemini-3.1-flash-image",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "aliased": [
+        {
+          "model": "google/antigravity-gemini-3.1-flash-image",
+          "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, skipAlias and isImageModel); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
+          "target_model_id": "gemini-3.1-flash-image",
+          "target_provider_id": "google"
+        }
+      ],
+      "catalog_version": 0,
+      "models": {
+        "google/antigravity-gemini-3.1-flash-image": {}
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — temperature unsupported without range": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "capability.temperature",
+          "limit.temperature_"
+        ],
+        "model_id": "claude-sonnet-5-5",
+        "provider_id": "anthropic"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "anthropic/claude-sonnet-5-5": {
+          "capability.temperature": false
+        }
       },
       "resolved_at_ms": -1,
       "source": "models.dev"
@@ -5225,7 +5492,7 @@
     },
     "response": {
       "catalog_version": 0,
-      "era_count": 422,
+      "era_count": 438,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
@@ -5287,11 +5554,14 @@
         "limit.output_video_tokens_per_second.resolution.1080p",
         "limit.output_video_tokens_per_second.resolution.4k",
         "limit.context",
+        "limit.temperature_min",
+        "limit.temperature_max",
         "limit.output",
         "capability.reasoning",
         "capability.reasoning_options",
         "capability.cache_lifetimes",
         "capability.structured_output",
+        "capability.temperature",
         "capability.tool_call",
         "capability.server_side_fallback",
         "capability.mid_conversation_system",
@@ -5353,6 +5623,7 @@
           ],
           "capability.reasoning": false,
           "capability.reasoning_options": null,
+          "capability.temperature": false,
           "capability.tool_call": false,
           "existence": "present",
           "limit.context": null,
@@ -5520,6 +5791,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true
         },
         "openai/gpt-image-1": {
@@ -5533,6 +5805,7 @@
           ],
           "capability.reasoning": false,
           "capability.reasoning_options": null,
+          "capability.temperature": false,
           "capability.tool_call": false
         }
       },
@@ -5779,6 +6052,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1050000,
@@ -5913,6 +6187,7 @@
           ],
           "capability.reasoning": false,
           "capability.reasoning_options": null,
+          "capability.temperature": false,
           "capability.tool_call": false,
           "existence": "present",
           "limit.context": null,
@@ -6084,6 +6359,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true
         }
       },
@@ -6306,6 +6582,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1050000,
@@ -6560,6 +6837,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -6569,6 +6847,8 @@
           "limit.image_long_edge_px.above_images.20": 3000,
           "limit.images_per_request": 600,
           "limit.output": 64000,
+          "limit.temperature_max": 1.0,
+          "limit.temperature_min": 0.0,
           "model.canonical_id": null,
           "model.family": "claude-sonnet",
           "model.lineage": "claude",
@@ -6802,6 +7082,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
@@ -6911,6 +7192,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 262144,
@@ -7020,6 +7302,7 @@
               ]
             }
           ],
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
@@ -7074,6 +7357,7 @@
           "capability.reasoning": true,
           "capability.reasoning_options": [],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 262144,
@@ -7504,6 +7788,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
@@ -7561,6 +7846,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 262144,
@@ -7618,6 +7904,7 @@
               ]
             }
           ],
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
@@ -7664,6 +7951,7 @@
           "capability.reasoning": true,
           "capability.reasoning_options": [],
           "capability.structured_output": true,
+          "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 262144,
@@ -7739,6 +8027,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -7748,6 +8037,8 @@
           "limit.image_long_edge_px.above_images.20": 3000,
           "limit.images_per_request": 600,
           "limit.output": 64000,
+          "limit.temperature_max": 1.0,
+          "limit.temperature_min": 0.0,
           "model.canonical_id": null,
           "model.family": "claude-sonnet",
           "model.lineage": "claude",
@@ -7914,6 +8205,7 @@
             }
           ],
           "capability.structured_output": true,
+          "capability.temperature": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,
@@ -7995,6 +8287,7 @@
               "type": "budget_tokens"
             }
           ],
+          "capability.temperature": true,
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1000000,

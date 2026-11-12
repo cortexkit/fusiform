@@ -48,11 +48,14 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 /// until models.dev catches up.
 /// The image model's mixed output price is split with a guarded text-rate
 /// replacement and an image-rate addition, before alias and plane projection.
-pub const OVERRIDABLE_FACTS: [&str; 7] = [
+/// `capability.temperature` replaces only a published boolean when the vendor
+/// documents different acceptance; it never fills an unknown upstream claim.
+pub const OVERRIDABLE_FACTS: [&str; 8] = [
     "limit.context",
     "limit.output",
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
+    "capability.temperature",
     "model.status",
     "rate.output",
     "rate.output_image",
@@ -112,6 +115,15 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
+        "capability.temperature" => {
+            if !row.value.is_boolean() || !row.replaces.is_boolean() {
+                Some("temperature value and replaces must be booleans")
+            } else if row.value == row.replaces {
+                Some("value must differ from the upstream value it replaces")
+            } else {
+                None
+            }
+        }
         "capability.server_side_fallback" | "capability.mid_conversation_system" => {
             if !row.value.is_boolean() {
                 Some("capability addition value must be a boolean")
@@ -134,7 +146,7 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
-        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system, model.status, rate.output and rate.output_image may be overridden"),
+        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system, capability.temperature, model.status, rate.output and rate.output_image may be overridden"),
     }
 }
 
@@ -572,7 +584,7 @@ mod tests {
     fn shipped_overrides_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 22);
+        assert_eq!(rows.len(), 27);
         let row = argon();
         assert_eq!(row.value, json!(65_536));
         assert_eq!(row.replaces, json!(32_768));
@@ -581,6 +593,29 @@ mod tests {
         assert!(row.notes.as_ref().unwrap().contains(
             "cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts"
         ));
+    }
+
+    #[test]
+    fn temperature_overrides_require_different_published_booleans() {
+        let original = document()["overrides"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["fact_key"] == "capability.temperature")
+            .unwrap()
+            .clone();
+        for (field, value) in [
+            ("replaces", json!(null)),
+            ("value", json!(null)),
+            ("value", json!(true)),
+            ("replaces", json!(1)),
+        ] {
+            let mut row = original.clone();
+            row[field] = value;
+            let (rows, rejects) = load_reporting_rejects(&json!({"overrides":[row]}).to_string());
+            assert!(rows.is_empty(), "{field}");
+            assert_eq!(rejects.len(), 1, "{field}");
+        }
     }
 
     #[test]
@@ -832,7 +867,13 @@ mod tests {
             // could only ever fill a withheld fact.
             ("replaces", json!(null), "positive integers"),
         ] {
-            let mut row = document()["overrides"][0].clone();
+            let mut row = document()["overrides"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["fact_key"] == "limit.output")
+                .unwrap()
+                .clone();
             row[field] = value;
             let (rows, rejects) = load_reporting_rejects(&json!({"overrides": [row]}).to_string());
             assert!(rows.is_empty(), "{field}");

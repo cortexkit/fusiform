@@ -365,7 +365,16 @@ fn assert_overridden(response: &CatalogGetResponse, model: &str, label: &str) {
         json!(65_536),
         "{label}: {model}"
     );
-    let rows = disclosed(response, model);
+    let rows = disclosed_fact(response, model, "limit.output");
+    // An unfiltered Argon read also carries its independent temperature
+    // replacement. Every disclosed row must still correspond to a served fact.
+    for row in disclosed(response, model) {
+        assert_eq!(response.models[model].get(&row.fact_key), Some(&row.value));
+        assert!(matches!(
+            row.fact_key.as_str(),
+            "limit.output" | "capability.temperature"
+        ));
+    }
     assert_eq!(
         rows.len(),
         1,
@@ -418,8 +427,12 @@ fn a_current_read_serves_the_override_and_discloses_it() {
         ),
     ] {
         assert_overridden(&response, TARGET, label);
-        // Nothing else is touched: the control model gets no disclosure.
-        assert!(disclosed(&response, CONTROL).is_empty(), "{label}");
+        // The control model has no output-limit replacement; its separately
+        // sourced temperature replacement may still be disclosed.
+        assert!(
+            disclosed_fact(&response, CONTROL, "limit.output").is_empty(),
+            "{label}"
+        );
         // Each disclosure describes a value the response actually serves.
         for row in &response.fact_overrides {
             assert_eq!(
@@ -465,13 +478,14 @@ fn the_antigravity_alias_serves_the_overridden_value() {
             "{label}: the entry is served as an alias"
         );
     }
-    // The named alias read carries only the alias entry, so its one
-    // disclosure is re-keyed to it rather than left naming the target.
+    // The named alias read carries only the alias entry, so both the output
+    // and temperature disclosures are re-keyed rather than naming the target.
     let named = get(
         &store,
         json!({"provider_id":"google","model_id":"antigravity-gemini-4-argon"}),
     );
-    assert_eq!(named.fact_overrides.len(), 1);
+    assert_eq!(named.fact_overrides.len(), 2);
+    assert!(named.fact_overrides.iter().all(|row| row.model == ALIAS));
 }
 
 #[test]
@@ -526,13 +540,14 @@ fn an_at_ms_read_serves_the_stored_value_without_disclosure() {
 #[test]
 fn an_upstream_value_other_than_replaces_is_served_as_published() {
     // Upstream already publishes something else, including the override's own
-    // value: the row does not apply and nothing is disclosed.
+    // value: the output row does not apply and no output override is disclosed.
+    // Select that fact so the independent temperature correction is out of scope.
     for published in [json!(49_152), json!(65_536), json!(1_048_576)] {
         let (store, _dir) = store_publishing(published.clone());
         for args in [
-            json!({"provider_id":"google","model_id":"gemini-4-argon"}),
-            json!({"provider_id":"google","model_id":"antigravity-gemini-4-argon"}),
-            json!({}),
+            json!({"provider_id":"google","model_id":"gemini-4-argon","fact_prefixes":["limit.output"]}),
+            json!({"provider_id":"google","model_id":"antigravity-gemini-4-argon","fact_prefixes":["limit.output"]}),
+            json!({"fact_prefixes":["limit.output"]}),
         ] {
             let response = get(&store, args.clone());
             assert!(response.fact_overrides.is_empty(), "{published} {args}");
@@ -551,7 +566,7 @@ fn an_upstream_value_other_than_replaces_is_served_as_published() {
     ingest(&store, &upstream(json!(49_152)), 2_000);
     let now = get(
         &store,
-        json!({"provider_id":"google","model_id":"gemini-4-argon"}),
+        json!({"provider_id":"google","model_id":"gemini-4-argon","fact_prefixes":["limit.output"]}),
     );
     assert_eq!(now.models[TARGET]["limit.output"], json!(49_152));
     assert!(now.fact_overrides.is_empty());

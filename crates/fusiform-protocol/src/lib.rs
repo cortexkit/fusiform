@@ -1205,6 +1205,20 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                compaction pressure to a model whose capacity it does not know.",
     },
     ServedFact {
+        key: "limit.temperature_min",
+        class: FactClass::ByteAffecting,
+        note: "vendor-documented minimum sampling temperature, kept as a JSON number. \
+               Current reads of that provider's own rows only, never aliases or \
+               rows whose served capability.temperature is false. Consumers clamp \
+               the caller's temperature to the served range; absent bounds mean 0..1.",
+    },
+    ServedFact {
+        key: "limit.temperature_max",
+        class: FactClass::ByteAffecting,
+        note: "vendor-documented maximum sampling temperature; same scope and \
+               clamping contract as limit.temperature_min. Absence means unknown.",
+    },
+    ServedFact {
         key: "limit.output",
         class: FactClass::ByteAffecting,
         note: "the model's maximum output. Since 2026-09-25 a consumer renders \
@@ -1264,6 +1278,16 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                on every route to the model. It becomes ByteAffecting if a \
                consumer uses it to shape request bytes; no consumer does so yet. \
                Rows without the upstream key have no fact, not false.",
+    },
+    ServedFact {
+        key: "capability.temperature",
+        class: FactClass::ByteAffecting,
+        note: "models.dev temperature boolean with sourced guarded replacements. \
+               False tells a consumer to omit temperature, never refuse a send. \
+               True tells it to clamp to limit.temperature_min..limit.temperature_max \
+               when served, else 0..1. Absent means unknown (0..1 clamp), never false. \
+               Alias rows inherit only false: omission is safe on any route, but \
+               target acceptance does not establish the alias API accepts it.",
     },
     ServedFact {
         key: "capability.tool_call",

@@ -65,6 +65,8 @@ pub struct Capabilities {
     /// Whether models.dev claims the model supports structured output. `None`
     /// means the upstream did not state a value; it is never defaulted to false.
     pub structured_output: Option<bool>,
+    /// Whether the serving API accepts temperature; absence remains unknown.
+    pub temperature: Option<bool>,
     /// The reasoning settings the model accepts, exactly as models.dev
     /// publishes them under `reasoning_options`.
     ///
@@ -542,6 +544,7 @@ fn normalize_model(
         reasoning,
         reasoning_options,
         structured_output,
+        temperature,
         tool_call,
         attachment,
         limit,
@@ -588,6 +591,7 @@ fn normalize_model(
         reasoning: *reasoning,
         reasoning_options: (*reasoning_options).clone(),
         structured_output: *structured_output,
+        temperature: *temperature,
         tool_call: *tool_call,
         attachment: *attachment,
     };

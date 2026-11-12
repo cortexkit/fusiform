@@ -978,6 +978,23 @@ fn structured_output_preserves_absence_and_published_booleans() {
     assert_eq!(read(r#","structured_output":true"#), Some(true));
     assert_eq!(read(r#","structured_output":false"#), Some(false));
 }
+
+#[test]
+fn temperature_preserves_absence_and_published_booleans() {
+    for (field, expected) in [
+        ("", None),
+        (r#""temperature":null"#, None),
+        (r#""temperature":true"#, Some(true)),
+        (r#""temperature":false"#, Some(false)),
+    ] {
+        let text = format!(r#"{{"p":{{"models":{{"m":{{{field}}}}}}}}}"#);
+        let catalog = normalize_models_dev(text.as_bytes()).unwrap().catalog;
+        assert_eq!(
+            catalog.models().next().unwrap().capabilities.temperature,
+            expected
+        );
+    }
+}
 #[test]
 fn wire_claims_preserve_values_precedence_provenance_and_absence() {
     use fusiform_core::normalize::{WireClaim, WireFacts, WireOrigin};

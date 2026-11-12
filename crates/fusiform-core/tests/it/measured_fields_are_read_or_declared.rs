@@ -18,10 +18,6 @@ const DECLARED_UNREAD: &[(&str, &str)] = &[
         "human-facing prose, not a served capacity, price or capability",
     ),
     (
-        "model.temperature",
-        "request knob acceptance, not a model capacity; no served consumer contract",
-    ),
-    (
         "model.interleaved",
         "bool or field-selector object whose request-shaping meaning is unestablished",
     ),

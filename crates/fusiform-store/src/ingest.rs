@@ -342,6 +342,7 @@ pub const SERVED_FACT_NAMESPACE: &[&str] = &[
     "capability.reasoning",
     "capability.reasoning_options",
     "capability.structured_output",
+    "capability.temperature",
     "capability.tool_call",
     "capability.attachment",
     "capability.input_modalities",
@@ -461,6 +462,14 @@ fn facts_of(model: &NormalizedModel) -> Vec<(FactKey, String)> {
     if let Some(supported) = model.capabilities.structured_output {
         facts.push((
             FactKey::capability("structured_output"),
+            json_opt_bool(Some(supported)),
+        ));
+    }
+
+    // An unpublished acceptance flag is unknown, not a negative claim.
+    if let Some(supported) = model.capabilities.temperature {
+        facts.push((
+            FactKey::capability("temperature"),
             json_opt_bool(Some(supported)),
         ));
     }

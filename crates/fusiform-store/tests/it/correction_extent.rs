@@ -188,6 +188,9 @@ fn every_served_fact_has_a_field_id() {
             capability: CapabilityId::StructuredOutput,
         },
         FieldId::Capability {
+            capability: CapabilityId::Temperature,
+        },
+        FieldId::Capability {
             capability: CapabilityId::ToolCall,
         },
         FieldId::Capability {

@@ -37,6 +37,7 @@ const SERVED_FACT_KEYS: &[&str] = &[
     // to request bytes stays the consumer's; fusiform serves only the list.
     "capability.reasoning_options",
     "capability.structured_output",
+    "capability.temperature",
     "capability.tool_call",
     "capability.attachment",
     "capability.input_modalities",
@@ -671,6 +672,7 @@ fn every_capability_field_reaches_a_fact() {
         reasoning,
         reasoning_options,
         structured_output,
+        temperature,
         tool_call,
         attachment,
     } = &model.capabilities;
@@ -686,6 +688,7 @@ fn every_capability_field_reaches_a_fact() {
         (reasoning.is_some(), "capability.reasoning"),
         (reasoning_options.is_some(), "capability.reasoning_options"),
         (structured_output.is_some(), "capability.structured_output"),
+        (temperature.is_some(), "capability.temperature"),
         (tool_call.is_some(), "capability.tool_call"),
         (attachment.is_some(), "capability.attachment"),
     ] {
@@ -701,6 +704,11 @@ fn every_capability_field_reaches_a_fact() {
         *structured_output,
         Some(true),
         "the fixture must exercise a published structured_output claim"
+    );
+    assert_eq!(
+        *temperature,
+        Some(true),
+        "fixture exercises temperature acceptance"
     );
     assert!(
         keys.iter().filter(|k| k.starts_with("capability.")).count() >= 3,

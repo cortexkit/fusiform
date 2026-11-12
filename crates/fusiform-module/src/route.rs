@@ -925,6 +925,14 @@ fn serve_catalog_get_request(
     if request.at_ms.is_none() {
         request.fact_prefixes = request.fact_prefixes.as_ref().map(|prefixes| {
             let mut wide = prefixes.clone();
+            if crate::temperature_ranges::KEYS
+                .iter()
+                .any(|key| prefixes.iter().any(|prefix| key.starts_with(prefix)))
+            {
+                // The served acceptance flag, including replacements, gates ranges.
+                wide.push("capability.temperature".to_string());
+                wide.push("existence".to_string());
+            }
             if prefixes.iter().any(|prefix| {
                 "capability.cache_lifetimes".starts_with(prefix)
                     || "rate.cache_write".starts_with(prefix)
@@ -1883,6 +1891,7 @@ fn finish_plane_view(
                     .find(|alias| alias.model == *identity);
                 if alias.is_none() {
                     crate::attachment_limits::apply(provider, facts);
+                    crate::temperature_ranges::apply(provider, facts);
                 }
                 if facts.contains_key("rate.input_audio") {
                     // An alias borrows the target's conversion as well as its audio rate.
@@ -5990,6 +5999,13 @@ fn omit_route_dependent_alias_facts(facts: &mut BTreeMap<String, serde_json::Val
     facts.remove("provider.name");
     facts.retain(|key, _| !key.starts_with("route."));
     facts.remove("capability.structured_output");
+    // A false target claim safely tells a runner to omit temperature on any
+    // route. A true claim cannot establish acceptance on a different API.
+    if facts.get("capability.temperature") != Some(&serde_json::Value::Bool(false)) {
+        facts.remove("capability.temperature");
+    }
+    facts.remove("limit.temperature_min");
+    facts.remove("limit.temperature_max");
     // Anthropic documents server-side fallback only on the Claude API and on
     // Claude Models on Google Cloud (Anthropic managed). A route reaching the
     // model through another serving path, such as Antigravity's Google-managed
