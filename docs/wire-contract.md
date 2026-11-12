@@ -844,11 +844,15 @@ one grade. Alias rows receive grades only through a matching served canonical
 id, never through a target's provider/model key. Billing-plane reads keep the
 plain read's grades for the same row.
 
-`quality.elo` (general quality) and `quality.eq` (writing and judgment) are
+Chat rows (absent `model.type` or `chat`) receive `quality.elo` (general quality)
+and `quality.eq` (writing and judgment). Rows with a set non-chat `model.type`
+(image, speech, transcription, video, embedding, reranking, realtime) receive
+only `quality.grade`. Higher grades are better, and `quality.grade` is comparable
+only among rows with the same `model.type`. All three dimensions are
 advisory judgments for routing selection, not upstream measurements or
 instructions changing request bytes. Withdrawn grades are absent facts. Numbers
 retain their decimal representation without a binary-float conversion.
-`fact_prefixes` applies normally (`["quality."]` selects both).
+`fact_prefixes` applies normally (`["quality."]` selects all quality dimensions).
 
 When at least one quality fact survives in the response, `quality_scores`
 appears once at response level:
@@ -877,7 +881,8 @@ and `catalog.history` remains upstream fact history. See
 
 #### Operator grade tools
 
-`quality.grade {model, elo, eq, reason, dry_run?: true}` and
+`quality.grade {model, elo, eq, reason, dry_run?: true}` (chat) or
+`quality.grade {model, grade, reason, dry_run?: true}` (non-chat), and
 `quality.withdraw {model, reason, dry_run?: true}` are Mutating tools that preview
 by default. Only explicit `dry_run: false` appends a row. Each committed row
 advances `catalog_version` in the same transaction, using the poll-write rule
@@ -887,7 +892,10 @@ cached catalog page plans notice live grade changes.
 
 `model` names a canonical id carried by a current served row, or the row's own
 `provider/model` id when it has no canonical id. An unknown grade key refuses
-`bad_request`, naming the key and this rule. Both numbers must be finite and
+`bad_request`, naming the key and the unavailable `model.type`. The dimensions
+must match every affected row's served type: `grade` on chat, `elo` or `eq` on
+non-chat, mixed dimensions, and incomplete grades refuse `bad_request`, naming
+the row's `model.type` and required dimensions. All numbers must be finite and
 positive; invalid numbers and empty reasons refuse `bad_request`. Withdrawals
 without a current grade refuse `no_coverage`. Withdrawing a previously graded
 key remains possible after its last served row disappears.
@@ -895,8 +903,16 @@ key remains possible after its last served row disappears.
 Both write responses have `dry_run`, `model`, `current` (the current grade, or
 null), `new` (the proposed or committed record), `affected_count`, and
 `affected_ids` (up to ten served row ids in lexical order). A grade record has
-`model`, exact numeric `elo` and `eq`, `withdrawn`, `graded_by`, `reason`, and
-`recorded_at_ms`. Withdrawal records set `withdrawn: true` and both numbers null.
+`model`, `elo`, `eq`, `withdrawn`, `graded_by`, `reason`, and `recorded_at_ms`.
+Chat records carry numeric `elo` and `eq` and omit `grade`, retaining their
+existing wire shape. Non-chat records add numeric `grade` and set `elo` and `eq`
+null. Withdrawal records set `withdrawn: true`, both chat numbers null, and omit
+`grade`.
+
+CLI equivalents are `ck models grade <model> --elo N --eq N --reason TEXT`
+and `ck models grade <model> --grade N --reason TEXT`; both preview unless
+`--commit` is supplied. `ck models grades` and `withdraw-grade` handle either
+kind of judgment.
 
 `quality.grades {model?: key}` is Pure. With no key it returns
 `{grades: [...]}` containing every current, non-withdrawn grade ordered by key.

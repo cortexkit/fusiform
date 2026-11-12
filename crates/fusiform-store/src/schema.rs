@@ -70,6 +70,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 9,
         statements: SCHEMA_V9,
     },
+    Migration {
+        version: 10,
+        statements: SCHEMA_V10,
+    },
 ];
 
 const SCHEMA_V1: &str = r#"
@@ -610,4 +614,28 @@ CREATE TABLE fact_override_era (
 -- Equal boundaries are possible with a clock behind the record; newest id wins.
 CREATE INDEX fact_override_era_key
     ON fact_override_era (provider_id, model_id, fact_key, boundary_at_ms);
+"#;
+
+// Rebuild only the grade table to strengthen its CHECK without touching the
+// imported decimal tokens, row ids, or the append-only history ordering.
+const SCHEMA_V10: &str = r#"
+CREATE TABLE quality_grade_era_v10 (
+    id             INTEGER PRIMARY KEY,
+    model          TEXT NOT NULL,
+    elo            TEXT,
+    eq             TEXT,
+    withdrawn      INTEGER NOT NULL CHECK (withdrawn IN (0, 1)),
+    graded_by      TEXT NOT NULL,
+    reason         TEXT NOT NULL,
+    recorded_at_ms INTEGER NOT NULL,
+    grade          TEXT,
+    CHECK ((withdrawn = 1 AND elo IS NULL AND eq IS NULL AND grade IS NULL)
+        OR (withdrawn = 0 AND elo IS NOT NULL AND eq IS NOT NULL AND grade IS NULL)
+        OR (withdrawn = 0 AND elo IS NULL AND eq IS NULL AND grade IS NOT NULL))
+) STRICT;
+INSERT INTO quality_grade_era_v10 (id, model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms)
+SELECT id, model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms FROM quality_grade_era;
+DROP TABLE quality_grade_era;
+ALTER TABLE quality_grade_era_v10 RENAME TO quality_grade_era;
+CREATE INDEX quality_grade_era_key ON quality_grade_era(model, id);
 "#;

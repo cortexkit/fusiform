@@ -123,7 +123,8 @@ fn quality_grade_reads_use_pool_and_see_the_next_commit() {
             .grade
             .as_ref()
             .unwrap()
-            .elo
+            .elo()
+            .unwrap()
             .to_string(),
         "1000.00"
     );

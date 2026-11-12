@@ -76,7 +76,9 @@ commands:
   correct                   record that fusiform's own record was wrong over a
                             past window (previews by default; --commit writes)
   grade <model> --elo N --eq N --reason TEXT [--commit]
-                            set live quality grades (previews by default)
+                            set chat quality grades (previews by default)
+  grade <model> --grade N --reason TEXT [--commit]
+                            set a non-chat grade, comparable within model.type
   withdraw-grade <model> --reason TEXT [--commit]
                             withdraw a grade, retaining its history
   grades [--model <key>]     current grades, or one key's full history
@@ -221,6 +223,7 @@ struct Args {
     model: Option<String>,
     elo: Option<serde_json::Number>,
     eq: Option<serde_json::Number>,
+    grade: Option<serde_json::Number>,
     fact: Option<String>,
     at_ms: Option<i64>,
     prefixes: Option<Vec<String>>,
@@ -258,8 +261,9 @@ struct Args {
 /// which this repo has now produced three times in a day — the artifact under
 /// test has to be the thing that ships.
 fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String> {
-    if args.command != "grade" && (args.elo.is_some() || args.eq.is_some()) {
-        return Err("--elo and --eq apply to grade only".into());
+    if args.command != "grade" && (args.elo.is_some() || args.eq.is_some() || args.grade.is_some())
+    {
+        return Err("--elo, --eq and --grade apply to grade only".into());
     }
     // A flag that does nothing must SAY so rather than be dropped.
     //
@@ -311,10 +315,12 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
             let mut body =
                 serde_json::json!({"model":model,"reason":reason,"dry_run":!args.commit});
             if args.command == "grade" {
-                for (name, value) in [("elo", &args.elo), ("eq", &args.eq)] {
-                    let value = value
-                        .as_ref()
-                        .ok_or_else(|| format!("grade needs --{name}"))?;
+                let dimensions = match (&args.elo, &args.eq, &args.grade) {
+                    (Some(elo), Some(eq), None) => vec![("elo", elo), ("eq", eq)],
+                    (None, None, Some(grade)) => vec![("grade", grade)],
+                    _ => return Err("grade needs either --elo and --eq (chat), or --grade (non-chat), never both".into()),
+                };
+                for (name, value) in dimensions {
                     if !value.as_f64().is_some_and(|n| n.is_finite() && n > 0.0) {
                         return Err(format!("--{name} must be a finite positive number"));
                     }
@@ -1620,6 +1626,7 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         model: None,
         elo: None,
         eq: None,
+        grade: None,
         fact: None,
         at_ms: None,
         prefixes: None,
@@ -1646,13 +1653,15 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
             "--provider" => args.provider = Some(value()?),
             "--auth-method" => args.auth_method = Some(value()?),
             "--model" => args.model = Some(value()?),
-            "--elo" | "--eq" => {
+            "--elo" | "--eq" | "--grade" => {
                 let number = serde_json::from_str::<serde_json::Number>(&value()?)
                     .map_err(|e| format!("{flag} needs a number: {e}"))?;
                 if flag == "--elo" {
                     args.elo = Some(number);
-                } else {
+                } else if flag == "--eq" {
                     args.eq = Some(number);
+                } else {
+                    args.grade = Some(number);
                 }
             }
             "--fact" => args.fact = Some(value()?),
@@ -2113,11 +2122,17 @@ fn render_grades(response: &serde_json::Value) -> String {
         ));
     } else if let Some(rows) = response["grades"].as_array() {
         for row in rows {
+            let dimensions = row
+                .get("grade")
+                .filter(|grade| !grade.is_null())
+                .map_or_else(
+                    || format!("elo={} eq={}", row["elo"], row["eq"]),
+                    |grade| format!("grade={grade}"),
+                );
             out.push_str(&format!(
-                "{}  elo={} eq={}{}  {}  {}: {}\n",
+                "{}  {}{}  {}  {}: {}\n",
                 row["model"].as_str().unwrap_or("?"),
-                row["elo"],
-                row["eq"],
+                dimensions,
                 if row["withdrawn"] == true {
                     " (withdrawn)"
                 } else {
@@ -2209,6 +2224,60 @@ mod tests {
         for expected in ["lab/model", "withdrawn", "operator", "retracted", "1970"] {
             assert!(rendered.contains(expected), "{rendered}");
         }
+    }
+
+    #[test]
+    fn quality_grade_media_cli_exact_numbers_and_exclusive_dimensions() {
+        let request = |extra: &[&str]| {
+            let mut words = vec![
+                "ck-fusiform",
+                "grade",
+                "lab/transcribe",
+                "--reason",
+                "evaluation",
+            ];
+            words.extend_from_slice(extra);
+            let args = super::parse_args(words.iter().map(std::ffi::OsString::from))?;
+            super::request_for(&args)
+        };
+        for commit in [false, true] {
+            let mut extra = vec!["--grade", "87.500"];
+            if commit {
+                extra.push("--commit");
+            }
+            let (tool, body) = request(&extra).unwrap();
+            assert_eq!(tool, "quality.grade");
+            assert_eq!(body["grade"].to_string(), "87.500");
+            assert_eq!(body["dry_run"], !commit);
+            assert!(body.get("elo").is_none() && body.get("eq").is_none());
+        }
+        for extra in [
+            vec!["--grade", "1", "--elo", "2", "--eq", "3"],
+            vec!["--grade", "1", "--eq", "2"],
+            vec!["--grade", "1", "--elo", "2"],
+            vec!["--elo", "1"],
+            vec!["--grade", "0"],
+            vec!["--grade", "-1"],
+            vec!["--grade", "1e9999"],
+            vec!["--grade", "null"],
+        ] {
+            assert!(request(&extra).is_err(), "{extra:?}");
+        }
+        for command in ["grades", "withdraw-grade", "get"] {
+            let args = super::parse_args(
+                ["ck-fusiform", command, "--grade", "1"]
+                    .iter()
+                    .map(std::ffi::OsString::from),
+            )
+            .unwrap();
+            assert!(super::request_for(&args).is_err());
+        }
+        let rendered = super::render_grades(
+            &serde_json::json!({"grades":[{"model":"lab/transcribe","grade":87.5,"elo":null,"eq":null,"withdrawn":false,"graded_by":"operator","reason":"evaluation","recorded_at_ms":123}]}),
+        );
+        assert!(rendered.contains("grade=87.5"), "{rendered}");
+        assert!(!rendered.contains("elo="), "{rendered}");
+        assert!(super::USAGE.contains("--grade N"));
     }
     use super::*;
 

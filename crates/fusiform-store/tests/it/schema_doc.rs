@@ -118,7 +118,7 @@ fn quality_grade_v8_reopen_never_reimports_and_v7_reports_store_ahead() {
             0,
             "migration import is not a live grade write"
         );
-        let grade = fusiform_store::QualityGrade {
+        let grade = fusiform_store::QualityGrade::Chat {
             elo: serde_json::from_str("1599.800").unwrap(),
             eq: serde_json::from_str("1200.00").unwrap(),
         };
@@ -149,7 +149,13 @@ fn quality_grade_v8_reopen_never_reimports_and_v7_reports_store_ahead() {
         let history = store.quality_grade_history("openai/gpt-4").unwrap();
         assert_eq!(history.len(), 3);
         assert_eq!(
-            history[1].grade.as_ref().unwrap().elo.to_string(),
+            history[1]
+                .grade
+                .as_ref()
+                .unwrap()
+                .elo()
+                .unwrap()
+                .to_string(),
             "1599.800"
         );
         assert!(
@@ -168,7 +174,7 @@ fn quality_grade_v8_reopen_never_reimports_and_v7_reports_store_ahead() {
         outcome.store_ahead(),
         "the v7 binary's existing refusal guard must reject a newer store"
     );
-    assert_eq!(outcome.recorded, 9);
+    assert_eq!(outcome.recorded, 10);
     assert_eq!(outcome.chain_max, 7);
 }
 
@@ -211,9 +217,14 @@ fn fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it() {
         "curated_model_era",
         "quality_grade_era",
     ];
-    let snapshot = |table| {
+    let snapshot = |table: &&str| {
+        let columns = if *table == "quality_grade_era" {
+            "id, model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms"
+        } else {
+            "*"
+        };
         let mut stmt = conn
-            .prepare(&format!("SELECT * FROM {table} ORDER BY id"))
+            .prepare(&format!("SELECT {columns} FROM {table} ORDER BY id"))
             .unwrap();
         let columns = stmt.column_count();
         stmt.query_map([], |r| {
@@ -248,9 +259,69 @@ fn fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it() {
         .unwrap();
     assert!(
         outcome.store_ahead(),
-        "the existing v8 refusal guard must reject v9"
+        "the existing v8 refusal guard must reject a newer store"
     );
-    assert_eq!((outcome.recorded, outcome.chain_max), (9, 8));
+    assert_eq!((outcome.recorded, outcome.chain_max), (10, 8));
+    let outcome = old
+        .migrate(
+            fusiform_store::schema::NAMESPACE,
+            &fusiform_store::schema::MIGRATIONS[..9],
+        )
+        .unwrap();
+    assert!(outcome.store_ahead(), "v9 must also refuse a v10 store");
+    assert_eq!((outcome.recorded, outcome.chain_max), (10, 9));
+}
+
+#[test]
+fn quality_grade_v10_preserves_populated_v8_and_checks_exclusive_dimensions() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    for migration in &fusiform_store::schema::MIGRATIONS[..8] {
+        conn.execute_batch(migration.statements).unwrap();
+    }
+    conn.execute("INSERT INTO quality_grade_era (model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms) VALUES ('test/exact', '1599.800', '1200.00', 0, 'operator', 'exact tokens', 1)", []).unwrap();
+    conn.execute("INSERT INTO quality_grade_era (model, withdrawn, graded_by, reason, recorded_at_ms) VALUES ('test/exact', 1, 'operator', 'withdrawn', 2)", []).unwrap();
+    let snapshot = || {
+        conn.prepare("SELECT id, model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms FROM quality_grade_era ORDER BY id").unwrap()
+            .query_map([], |row| (0..8).map(|i| row.get::<_, rusqlite::types::Value>(i)).collect::<Result<Vec<_>, _>>()).unwrap()
+            .collect::<Result<Vec<_>, _>>().unwrap()
+    };
+    let before = snapshot();
+    for migration in &fusiform_store::schema::MIGRATIONS[8..] {
+        conn.execute_batch(migration.statements).unwrap();
+    }
+    assert_eq!(snapshot(), before);
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM quality_grade_era WHERE grade IS NOT NULL",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    for (elo, eq, grade, withdrawn) in [
+        (None, None, None, 0),
+        (Some("1"), Some("2"), Some("3"), 0),
+        (Some("1"), None, Some("3"), 0),
+        (None, Some("2"), Some("3"), 0),
+        (Some("1"), None, None, 0),
+        (None, Some("2"), None, 0),
+        (None, None, Some("3"), 1),
+        (Some("1"), Some("2"), None, 1),
+        (None, None, None, 2),
+    ] {
+        assert!(conn.execute("INSERT INTO quality_grade_era (model, elo, eq, grade, withdrawn, graded_by, reason, recorded_at_ms) VALUES ('test/invalid', ?1, ?2, ?3, ?4, 'operator', 'invalid', 3)", rusqlite::params![elo, eq, grade, withdrawn]).is_err());
+    }
+    conn.execute("INSERT INTO quality_grade_era (model, grade, withdrawn, graded_by, reason, recorded_at_ms) VALUES ('test/media', '87.500', 0, 'operator', 'media', 3)", []).unwrap();
+    assert_eq!(
+        conn.query_row(
+            "SELECT grade FROM quality_grade_era WHERE model='test/media'",
+            [],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        "87.500"
+    );
 }
 
 #[test]
@@ -328,7 +399,7 @@ fn quality_grade_and_version_commit_atomically() {
     .unwrap();
     let conn = rusqlite::Connection::open(path).unwrap();
     conn.execute_batch("CREATE TRIGGER refuse_version BEFORE UPDATE ON catalog_version BEGIN SELECT RAISE(ABORT, 'version refused'); END;").unwrap();
-    let grade = fusiform_store::QualityGrade {
+    let grade = fusiform_store::QualityGrade::Chat {
         elo: serde_json::from_str("1").unwrap(),
         eq: serde_json::from_str("2").unwrap(),
     };

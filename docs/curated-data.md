@@ -1022,7 +1022,9 @@ historical, upstream-moved and upstream-published reads.
 ## 11. Operator quality grades (store)
 
 These grades are the operator's judgments, not upstream facts or benchmark
-measurements. ELO describes general quality; EQ describes writing and judgment.
+measurements. On chat rows, ELO describes general quality; EQ describes writing
+and judgment. A set, non-chat `model.type` instead uses one `quality.grade`,
+comparable only within that type, with higher values better.
 They guide routing selection, not request bytes. Grades live in the store's
 append-only `quality_grade_era` table and take effect immediately, without a
 build or restart. A binary upgrade never overwrites an operator judgment.
@@ -1042,22 +1044,25 @@ the same grades as plain reads. Read-pool queries select the newest row by
 insertion id; a withdrawal hides the grade. Point-in-time `at_ms` catalog
 reads still omit grades. Grade history is available separately.
 
-Both scores must be finite positive JSON numbers. They travel as exact
+All scores must be finite positive JSON numbers. They travel as exact
 `serde_json::Number` values with `arbitrary_precision` and are stored as decimal
 TEXT, never SQLite REAL. The positivity/finite check does not rewrite the
 number: fractional trailing zeros survive storage and serving. A withdrawal
-stores null in both columns; a CHECK forbids partial grades or a withdrawal
-carrying numbers.
+stores null in every numeric column. Migration v10 preserves every v8 row while
+adding `grade`; a CHECK requires either the chat pair or the non-chat grade on
+an active era, and no numbers on a withdrawal. No non-chat values are seeded.
 
 Operator commands (preview by default; `--commit` appends one row):
 
 ```sh
 ck models grade <model> --elo N --eq N --reason TEXT [--commit]
+ck models grade <model> --grade N --reason TEXT [--commit]
 ck models withdraw-grade <model> --reason TEXT [--commit]
 ck models grades [--model <key>]
 ```
 
-`quality.grade` validates that the key reaches a current served row. A preview
+`quality.grade` validates that the key reaches a current served row and that
+the dimensions match its `model.type` (absent means chat). A preview
 shows the current and proposed grade and the affected row count plus up to ten
 row ids. `quality.withdraw` refuses `no_coverage` without a current grade.
 `quality.grades` lists all current grades; with `model`, it returns that key's
@@ -1070,8 +1075,8 @@ write nothing and do not advance it. This also invalidates cached page plans
 and oversized-response refusals. Consumers polling `catalog.status` therefore
 observe a live grade change without needing an upstream poll.
 
-`fact_prefixes` filters `quality.elo` and `quality.eq` normally, including
-`quality.`. A response containing either fact carries one `quality_scores`
+`fact_prefixes` filters `quality.elo`, `quality.eq` and `quality.grade` normally,
+including `quality.`. A response containing any quality fact carries one `quality_scores`
 attribution object. Its `graded_at_ms` is the newest `recorded_at_ms` among the
 grades actually served in that response, not the date of an unrelated grade.
 Filtered or paged responses with no quality facts omit it.

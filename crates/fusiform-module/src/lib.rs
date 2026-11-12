@@ -424,16 +424,21 @@ pub fn manifest() -> ModuleManifest {
             },
             Tool {
                 name: route::TOOL_QUALITY_GRADE.to_string(),
-                description: Some("Set live operator quality grades for a served canonical key, or a row without one. Previews unless dry_run is false.".into()),
+                description: Some("Set live operator quality: elo and eq for chat, or grade for other model.type values. Uses a served canonical key, or a row without one. Previews unless dry_run is false.".into()),
                 execution_mode: ExecutionMode::Mutating,
                 schema: serde_json::json!({
                     "type":"object",
                     "properties": {
                         "model":{"type":"string"}, "elo":{"type":"number", "exclusiveMinimum":0},
                         "eq":{"type":"number", "exclusiveMinimum":0}, "reason":{"type":"string"},
+                        "grade":{"type":"number", "exclusiveMinimum":0},
                         "dry_run":{"type":"boolean", "default":true}
                     },
-                    "required":["model","elo","eq","reason"], "additionalProperties":false
+                    "required":["model","reason"], "additionalProperties":false,
+                    "oneOf":[
+                        {"required":["elo","eq"], "not":{"required":["grade"]}},
+                        {"required":["grade"], "not":{"anyOf":[{"required":["elo"]},{"required":["eq"]}]}}
+                    ]
                 }),
             },
             Tool {

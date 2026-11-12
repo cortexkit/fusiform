@@ -5,9 +5,38 @@ use rusqlite::params;
 use crate::{CatalogError, CatalogStore};
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct QualityGrade {
-    pub elo: serde_json::Number,
-    pub eq: serde_json::Number,
+#[serde(untagged)]
+pub enum QualityGrade {
+    Chat {
+        elo: serde_json::Number,
+        eq: serde_json::Number,
+    },
+    NonChat {
+        grade: serde_json::Number,
+    },
+}
+
+impl QualityGrade {
+    pub fn elo(&self) -> Option<&serde_json::Number> {
+        match self {
+            Self::Chat { elo, .. } => Some(elo),
+            Self::NonChat { .. } => None,
+        }
+    }
+
+    pub fn eq(&self) -> Option<&serde_json::Number> {
+        match self {
+            Self::Chat { eq, .. } => Some(eq),
+            Self::NonChat { .. } => None,
+        }
+    }
+
+    pub fn grade(&self) -> Option<&serde_json::Number> {
+        match self {
+            Self::NonChat { grade } => Some(grade),
+            Self::Chat { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +52,7 @@ pub struct QualityGradeEra {
 fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<QualityGradeEra> {
     let elo: Option<String> = row.get(2)?;
     let eq: Option<String> = row.get(3)?;
+    let grade: Option<String> = row.get(7)?;
     let number = |text: String| {
         serde_json::from_str(&text).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(e))
@@ -31,10 +61,13 @@ fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<QualityGradeEra> {
     Ok(QualityGradeEra {
         id: row.get(0)?,
         model: row.get(1)?,
-        grade: match (elo, eq) {
-            (Some(elo), Some(eq)) => Some(QualityGrade {
+        grade: match (elo, eq, grade) {
+            (Some(elo), Some(eq), None) => Some(QualityGrade::Chat {
                 elo: number(elo)?,
                 eq: number(eq)?,
+            }),
+            (None, None, Some(grade)) => Some(QualityGrade::NonChat {
+                grade: number(grade)?,
             }),
             _ => None,
         },
@@ -57,16 +90,17 @@ impl CatalogStore {
         Ok(self.inner.with_conn_fenced(|tx| {
             tx.execute(
                 "INSERT INTO quality_grade_era \
-                 (model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                 (model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms, grade) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     model,
-                    grade.map(|g| g.elo.to_string()),
-                    grade.map(|g| g.eq.to_string()),
+                    grade.and_then(QualityGrade::elo).map(ToString::to_string),
+                    grade.and_then(QualityGrade::eq).map(ToString::to_string),
                     grade.is_none(),
                     graded_by,
                     reason,
-                    recorded_at_ms
+                    recorded_at_ms,
+                    grade.and_then(QualityGrade::grade).map(ToString::to_string)
                 ],
             )?;
             crate::advance_catalog_version_in(tx, None, fusiform_core::Timestamp(recorded_at_ms))?;
@@ -78,7 +112,7 @@ impl CatalogStore {
     pub fn quality_grades(&self) -> Result<Vec<QualityGradeEra>, CatalogError> {
         self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms \
+                "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms, grade \
                  FROM quality_grade_era q WHERE withdrawn = 0 \
                  AND id = (SELECT MAX(id) FROM quality_grade_era WHERE model = q.model) \
                  ORDER BY model",
@@ -92,7 +126,7 @@ impl CatalogStore {
     pub fn quality_grade_history(&self, model: &str) -> Result<Vec<QualityGradeEra>, CatalogError> {
         self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms \
+                "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms, grade \
                  FROM quality_grade_era WHERE model = ?1 ORDER BY id",
             )?;
             let rows = stmt.query_map([model], decode)?.collect();

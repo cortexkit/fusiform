@@ -1068,6 +1068,11 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "operator-assigned writing and judgment score for routing selection, not request bytes; current reads only, disclosed in quality_scores.",
     },
     ServedFact {
+        key: "quality.grade",
+        class: FactClass::Advisory,
+        note: "operator-assigned quality score for non-chat models, comparable only among rows with the same model.type; higher is better. Current reads only, disclosed in quality_scores.",
+    },
+    ServedFact {
         key: "model.name",
         class: FactClass::Advisory,
         note: "human display label, verbatim upstream or sourced curation. Absent when missing or empty; aliases use only their own sourced route label, never the target's name. Consumer display only.",
@@ -1749,16 +1754,39 @@ pub struct QualityScoresWire {
     pub graded_at_ms: i64,
 }
 
-/// Assign both exact positive numeric grades. Previews unless dry_run is false.
+/// Assign the chat pair or a non-chat grade. Previews unless dry_run is false.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QualityGradeRequest {
     pub model: String,
-    pub elo: serde_json::Number,
-    pub eq: serde_json::Number,
+    #[serde(
+        default,
+        deserialize_with = "quality_number",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub elo: Option<serde_json::Number>,
+    #[serde(
+        default,
+        deserialize_with = "quality_number",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub eq: Option<serde_json::Number>,
+    #[serde(
+        default,
+        deserialize_with = "quality_number",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub grade: Option<serde_json::Number>,
     pub reason: String,
     #[serde(default = "default_true")]
     pub dry_run: bool,
+}
+
+// Omitted dimensions are allowed, but explicit null is not a numeric grade.
+fn quality_number<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<serde_json::Number>, D::Error> {
+    serde_json::Number::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1777,12 +1805,14 @@ pub struct QualityGradesRequest {
     pub model: Option<String>,
 }
 
-/// An operator judgment, or a withdrawal with both numbers null.
+/// An operator judgment, or a withdrawal with no numbers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QualityGradeWire {
     pub model: String,
     pub elo: Option<serde_json::Number>,
     pub eq: Option<serde_json::Number>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grade: Option<serde_json::Number>,
     pub withdrawn: bool,
     pub graded_by: String,
     pub reason: String,

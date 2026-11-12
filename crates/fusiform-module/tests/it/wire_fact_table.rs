@@ -167,6 +167,19 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
                     .cloned()
             }),
     );
+    let media = super::golden_payload::render_media_quality();
+    for case in media.values() {
+        if let Some(models) = case["response"]["models"].as_object() {
+            curated.extend(models.values().flat_map(|facts| {
+                facts
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .filter(|key| QUALITY_ONLY.contains(&key.as_str()))
+                    .cloned()
+            }));
+        }
+    }
     // Use real served vectors, not an exemption for a current-only fact.
     for case in super::golden_payload::render_cache_lifetimes().values() {
         for facts in case["response"]["models"].as_object().unwrap().values() {
@@ -350,7 +363,7 @@ pub(crate) const ADDITION_ONLY: &[&str] = &[
 ];
 
 /// Operator judgments are joined at read time, never inferred from upstream.
-const QUALITY_ONLY: &[&str] = &["quality.elo", "quality.eq"];
+const QUALITY_ONLY: &[&str] = &["quality.elo", "quality.eq", "quality.grade"];
 
 /// `catalog.get` computes `model.lineage` on current reads, never the normalizer.
 const LINEAGE_ONLY: &[&str] = &["model.lineage"];

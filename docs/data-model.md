@@ -45,16 +45,18 @@ does not create.
 | 7 | `curated_model_era` |
 | 8 | `quality_grade_era`, with a one-time import of the frozen grade snapshot |
 | 9 | `fact_override_era`, dated history of guarded fact overrides |
+| 10 | `quality_grade_era.grade`, with an exclusive chat-pair or non-chat-number CHECK |
 
 A store whose recorded schema version is newer than the running binary's chain
 is refused at open, and the error names the store's version
 (`schema_doc::a_store_written_by_a_newer_binary_is_refused`). Migrations 4, 6,
-7, 8 and 9 are tested against stores that already hold rows
+7, 8, 9 and 10 are tested against stores that already hold rows
 (`schema_doc::the_artifact_table_arrives_on_a_populated_store`,
 `schema_doc::the_plan_price_table_arrives_on_a_populated_store`,
 `schema_doc::the_curated_model_table_arrives_on_a_populated_store`,
 `schema_doc::quality_grade_v8_import_preserves_exact_rows_on_populated_v7`,
-`schema_doc::fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it`).
+`schema_doc::fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it`,
+`schema_doc::quality_grade_v10_preserves_populated_v8_and_checks_exclusive_dimensions`).
 
 ## 2. Observations
 
@@ -338,14 +340,20 @@ of clock order. Columns:
 | --- | --- |
 | `id` | integer primary key, insertion order |
 | `model` | served canonical id, or a provider/model row id with no canonical id |
-| `elo`, `eq` | exact JSON number tokens stored as TEXT, both present or both null |
-| `withdrawn` | 1 for a withdrawal with both numbers null, 0 for a complete grade |
+| `elo`, `eq` | exact JSON number tokens stored as TEXT, both present for a chat judgment, otherwise both null |
+| `grade` | exact JSON number token stored as TEXT for a non-chat judgment, otherwise null |
+| `withdrawn` | 1 for a withdrawal with all numbers null, 0 for a complete judgment |
 | `graded_by` | operator attribution |
 | `reason` | why the grade was assigned or withdrawn |
 | `recorded_at_ms` | when the judgment was recorded, in epoch milliseconds |
 
-CHECK constraints prohibit partial grades, withdrawals with numbers and unknown
-withdrawal states. Migration v8 imports the frozen former grade file exactly
+CHECK constraints require an active era to carry either `elo` and `eq` or
+`grade`, never both and never neither. Withdrawals carry no numbers; unknown
+withdrawal states are prohibited. Migration v10 rebuilds this same table to
+replace the CHECK, copying every legacy column (including ids and exact TEXT
+tokens) unchanged and leaving `grade` null. One table retains a single insertion
+order for grades and withdrawals without merging histories across tables.
+Migration v8 imports the frozen former grade file exactly
 once, retaining its original grading time; it never imports again on reopen.
 Live writes append through the writer fence and advance the catalog version
 in that same transaction. No grade row is updated or deleted. The store write
@@ -356,6 +364,11 @@ Current reads and full grade histories use the read pool. Withdrawals hide
 grades from current catalog reads but remain in `quality.grades` history.
 Catalog `at_ms` reads omit grades, as before; grade history is not upstream
 `catalog.history`. See [`curated-data.md`](curated-data.md) §11.
+
+Writes and serving select the dimensions by the row's served `model.type`:
+absent or `chat` uses the chat pair; a set non-chat type uses `grade`. All three
+numbers must be finite and positive. A non-chat grade is comparable only within
+the same `model.type`, with higher values better. No non-chat grades are seeded.
 
 ## 7c. Fact override history
 

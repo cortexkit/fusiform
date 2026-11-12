@@ -4086,6 +4086,34 @@
       ]
     }
   },
+  "catalog.get — operator transcription grade": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "model.type",
+          "quality."
+        ],
+        "model_id": "gpt-transcribe",
+        "provider_id": "openai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": -1,
+      "models": {
+        "openai/gpt-transcribe": {
+          "model.type": "transcription",
+          "quality.grade": 87.500
+        }
+      },
+      "quality_scores": {
+        "graded_at_ms": -1,
+        "graded_by": "operator"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — pi Anthropic effective endpoint": {
     "request": {
       "arguments": {
@@ -5530,6 +5558,7 @@
       "served_facts": [
         "quality.elo",
         "quality.eq",
+        "quality.grade",
         "model.name",
         "model.lineage",
         "provider.name",
@@ -8818,6 +8847,20 @@
       "unit_policy": "US list price, monthly-billed, web subscription. An operator on an annual term, in another country, or subscribed through an app store pays something else, and this plane cannot see which."
     }
   },
+  "quality.grade — chat refuses single grade": {
+    "error": {
+      "code": "bad_request",
+      "message": "row \"openai/synthetic-chat\" has model.type=\"chat\"; quality.grade requires elo and eq only (no grade)"
+    },
+    "request": {
+      "arguments": {
+        "grade": 87,
+        "model": "openai/synthetic-chat",
+        "reason": "wrong dimensions"
+      },
+      "name": "quality.grade"
+    }
+  },
   "quality.grade — preview": {
     "request": {
       "arguments": {
@@ -8853,6 +8896,51 @@
         "recorded_at_ms": -1,
         "withdrawn": false
       }
+    }
+  },
+  "quality.grade — transcription commit": {
+    "request": {
+      "arguments": {
+        "dry_run": false,
+        "grade": 87.500,
+        "model": "openai/gpt-transcribe",
+        "reason": "synthetic media evaluation"
+      },
+      "name": "quality.grade"
+    },
+    "response": {
+      "affected_count": 1,
+      "affected_ids": [
+        "openai/gpt-transcribe"
+      ],
+      "current": null,
+      "dry_run": false,
+      "model": "openai/gpt-transcribe",
+      "new": {
+        "elo": null,
+        "eq": null,
+        "grade": 87.500,
+        "graded_by": "operator",
+        "model": "openai/gpt-transcribe",
+        "reason": "synthetic media evaluation",
+        "recorded_at_ms": -1,
+        "withdrawn": false
+      }
+    }
+  },
+  "quality.grade — transcription refuses chat pair": {
+    "error": {
+      "code": "bad_request",
+      "message": "row \"openai/gpt-transcribe\" has model.type=\"transcription\"; quality.grade requires grade only (no elo or eq)"
+    },
+    "request": {
+      "arguments": {
+        "elo": 87,
+        "eq": 88,
+        "model": "openai/gpt-transcribe",
+        "reason": "wrong dimensions"
+      },
+      "name": "quality.grade"
     }
   },
   "quality.grades — history": {

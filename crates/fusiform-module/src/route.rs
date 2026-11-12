@@ -2043,7 +2043,20 @@ fn apply_quality_scores(
             .grade
             .as_ref()
             .expect("current grades exclude withdrawals");
-        for (key, value) in [("quality.elo", &grade.elo), ("quality.eq", &grade.eq)] {
+        let non_chat = facts
+            .get("model.type")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|kind| kind != "chat");
+        let values = match grade {
+            fusiform_store::QualityGrade::Chat { elo, eq } if !non_chat => {
+                vec![("quality.elo", elo), ("quality.eq", eq)]
+            }
+            fusiform_store::QualityGrade::NonChat { grade } if non_chat => {
+                vec![("quality.grade", grade)]
+            }
+            _ => continue,
+        };
+        for (key, value) in values {
             facts.insert(key.to_string(), serde_json::Value::Number(value.clone()));
         }
         newest = Some(newest.map_or(row.recorded_at_ms, |n: i64| n.max(row.recorded_at_ms)));
@@ -2057,11 +2070,11 @@ fn apply_quality_scores(
 }
 
 fn retain_quality_disclosure(response: &mut CatalogGetResponse) {
-    if !response
-        .models
-        .values()
-        .any(|facts| facts.contains_key("quality.elo") || facts.contains_key("quality.eq"))
-    {
+    if !response.models.values().any(|facts| {
+        facts.contains_key("quality.elo")
+            || facts.contains_key("quality.eq")
+            || facts.contains_key("quality.grade")
+    }) {
         response.quality_scores = None;
     }
 }

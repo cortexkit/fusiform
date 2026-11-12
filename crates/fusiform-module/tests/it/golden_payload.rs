@@ -489,6 +489,10 @@ fn render_all() -> String {
     ordinary
         .as_object_mut()
         .unwrap()
+        .extend(render_media_quality());
+    ordinary
+        .as_object_mut()
+        .unwrap()
         .extend(render_curated_wire());
     ordinary.as_object_mut().unwrap().insert(
         "catalog.get — a curated row at an instant".into(),
@@ -864,7 +868,7 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
     store
         .append_quality_grade(
             "synthetic-lab/synthetic-model",
-            Some(&fusiform_store::QualityGrade {
+            Some(&fusiform_store::QualityGrade::Chat {
                 elo: serde_json::from_str("1284").unwrap(),
                 eq: serde_json::from_str("1599.8").unwrap(),
             }),
@@ -895,7 +899,7 @@ fn render_quality_tools() -> serde_json::Map<String, serde_json::Value> {
         },
     })
     .unwrap();
-    let grade = fusiform_store::QualityGrade {
+    let grade = fusiform_store::QualityGrade::Chat {
         elo: serde_json::from_str("1284").unwrap(),
         eq: serde_json::from_str("1599.800").unwrap(),
     };
@@ -952,6 +956,71 @@ fn render_quality_tools() -> serde_json::Map<String, serde_json::Value> {
             serde_json::json!({"request":request,"response":response}),
         );
     }
+    cases
+}
+
+/// Isolate live media writes so existing chat and catalog vectors stay stable.
+pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Value> {
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("media-grades.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    let doc = serde_json::json!({"openai": {
+        "id":"openai", "models": {
+            "gpt-transcribe":{"id":"gpt-transcribe", "type":"transcription"},
+            "synthetic-chat":{"id":"synthetic-chat"}
+        }
+    }});
+    let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+        .unwrap()
+        .catalog;
+    let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
+    store.append_eras(&plan.eras).unwrap();
+    let mut cases = serde_json::Map::new();
+    for (label, name, arguments) in [
+        ("quality.grade — transcription commit", "quality.grade", serde_json::from_str::<serde_json::Value>(r#"{"model":"openai/gpt-transcribe","grade":87.500,"reason":"synthetic media evaluation","dry_run":false}"#).unwrap()),
+        ("catalog.get — operator transcription grade", "catalog.get", serde_json::json!({"provider_id":"openai","model_id":"gpt-transcribe","fact_prefixes":["model.type","quality."]})),
+        ("quality.grade — chat refuses single grade", "quality.grade", serde_json::json!({"model":"openai/synthetic-chat","grade":87,"reason":"wrong dimensions"})),
+        ("quality.grade — transcription refuses chat pair", "quality.grade", serde_json::json!({"model":"openai/gpt-transcribe","elo":87,"eq":88,"reason":"wrong dimensions"})),
+    ] {
+        let request = serde_json::json!({"name":name,"arguments":arguments});
+        let case = match serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()) {
+            Ok(response) => {
+                let mut response = serde_json::to_value(response).unwrap();
+                if response.get("new").is_some() {
+                    response["new"]["recorded_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+                }
+                if response.get("resolved_at_ms").is_some() {
+                    response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+                    response["catalog_version"] = serde_json::json!(NOW_PLACEHOLDER);
+                    response["quality_scores"]["graded_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+                }
+                serde_json::json!({"request":request,"response":response})
+            }
+            Err(error) => serde_json::json!({"request":request,"error":{"code":error.code,"message":error.message}}),
+        };
+        cases.insert(label.into(), case);
+    }
+    assert_eq!(
+        cases["catalog.get — operator transcription grade"]["response"]["models"]
+            ["openai/gpt-transcribe"]["quality.grade"]
+            .to_string(),
+        "87.500"
+    );
+    assert_eq!(
+        cases["quality.grade — chat refuses single grade"]["error"]["code"],
+        "bad_request"
+    );
+    assert_eq!(
+        cases["quality.grade — transcription refuses chat pair"]["error"]["code"],
+        "bad_request"
+    );
     cases
 }
 
@@ -1080,6 +1149,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
     assert_eq!(plain_plane_cases, 2);
     let curated_wire = render_curated_wire();
     let quality_tools = render_quality_tools();
+    let media_quality = render_media_quality();
     // The six single cases rendered outside `cases()`: the first provider page,
     // the seed and synthetic identities, synthetic grades, curated history,
     // and dated fact overrides.
@@ -1091,6 +1161,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
                 + 6
                 + curated_wire.len()
                 + quality_tools.len()
+                + media_quality.len()
                 + render_cache_lifetimes().len()
                 + render_attachment_limits().len()
                 + render_temperature().len(),
@@ -1102,6 +1173,10 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         (
             serde_json::to_string(&quality_tools).unwrap(),
             quality_tools.len(),
+        ),
+        (
+            serde_json::to_string(&media_quality).unwrap(),
+            media_quality.len(),
         ),
         (render(), cases().len()),
         (serde_json::to_string(&render_cache_lifetimes()).unwrap(), 2),
