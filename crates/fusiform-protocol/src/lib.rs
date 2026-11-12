@@ -1210,7 +1210,8 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "vendor-documented minimum sampling temperature, kept as a JSON number. \
                Current reads of that provider's own rows only, never aliases or \
                rows whose served capability.temperature is false. Consumers clamp \
-               the caller's temperature to the served range; absent bounds mean 0..1.",
+               the caller's temperature to the served range. Absence means unknown, \
+               not that any value is accepted.",
     },
     ServedFact {
         key: "limit.temperature_max",

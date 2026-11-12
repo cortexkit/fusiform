@@ -5294,12 +5294,13 @@ mod billing_plane_tests {
             let mut response = get(&store, args).unwrap();
             // The response clock and store version differ on every run, so pin
             // them. The exact bytes include current provider temperature bounds,
-            // but must still omit plane, billing_rules and plane-specific rate
-            // annotations when no login method was requested.
+            // but a read that names no login method (`auth_method`) must still
+            // carry no billing-plane fields: no `plane`, no `billing_rules`, and
+            // no rate annotations a plane read would add.
             response.resolved_at_ms = 1_000;
             response.catalog_version = 1;
             // Check the endpoint default and its disclosure separately from
-            // the pinned fact bytes; neither may introduce plane or billing_rules.
+            // the pinned fact bytes; neither may add `plane` or `billing_rules`.
             assert_eq!(
                 response
                     .models
