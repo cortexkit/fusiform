@@ -551,7 +551,7 @@ pub(super) fn render_attachment_limits() -> serde_json::Map<String, serde_json::
     cases
 }
 
-fn render_temperature() -> serde_json::Map<String, serde_json::Value> {
+pub(super) fn render_temperature() -> serde_json::Map<String, serde_json::Value> {
     let mut seed: serde_json::Value =
         serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
     seed.as_object_mut().unwrap().retain(|provider, row| {

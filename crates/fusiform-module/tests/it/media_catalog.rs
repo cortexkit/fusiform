@@ -88,6 +88,7 @@ fn gemini_flash_tts_serves_only_documented_speech_facts() {
         "model.lineage":"gemini",
             "capability.input_modalities":["text"], "capability.output_modalities":["audio"],
             "limit.context":8192, "limit.output":16384, "limit.output_audio_tokens_per_second":25,
+            "limit.temperature_min":0.0, "limit.temperature_max":2.0,
             "rate.input":price(50,2), "rate.output_audio":price(9,0),
             "wire.api":{"value":"https://generativelanguage.googleapis.com/v1beta","from":"curated"},
             "wire.family":"google.generate_content"
@@ -175,6 +176,7 @@ fn flare_serves_only_documented_image_facts() {
             "model.lineage":"gpt",
             "capability.input_modalities":["image","text"], "capability.output_modalities":["image"],
             "limit.images_per_request":1500,
+            "limit.temperature_min":0, "limit.temperature_max":2,
             "rate.input":price(5,0), "rate.cache_read":price(125,2),
             "rate.input_image":price(8,0), "rate.output_image":price(30,0),
             "wire.api":{"value":"https://api.openai.com/v1","from":"curated"},
@@ -194,6 +196,7 @@ fn omni_serves_only_documented_video_facts() {
             "model.lineage":"gemini",
             "capability.input_modalities":["image","text","video"], "capability.output_modalities":["text","video"],
             "limit.images_per_request":3600,
+            "limit.temperature_min":0.0, "limit.temperature_max":2.0,
             "rate.input":price(150,2), "rate.output":price(9,0), "rate.output_video":price(12,0),
             "limit.output_video_tokens_per_second.resolution.360p":1931,
             "limit.output_video_tokens_per_second.resolution.720p":5792,

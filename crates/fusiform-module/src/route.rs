@@ -5293,12 +5293,13 @@ mod billing_plane_tests {
             }
             let mut response = get(&store, args).unwrap();
             // The response clock and store version differ on every run, so pin
-            // them. Everything else must equal the bytes a read without a login
-            // method served before billing planes existed.
+            // them. The exact bytes include current provider temperature bounds,
+            // but must still omit plane, billing_rules and plane-specific rate
+            // annotations when no login method was requested.
             response.resolved_at_ms = 1_000;
             response.catalog_version = 1;
-            // Provider endpoint defaults are the only additions to the old
-            // plain-read bytes; the billing plane must still change nothing.
+            // Check the endpoint default and its disclosure separately from
+            // the pinned fact bytes; neither may introduce plane or billing_rules.
             assert_eq!(
                 response
                     .models
@@ -5313,7 +5314,7 @@ mod billing_plane_tests {
             response.wire_corrections.clear();
             assert_eq!(
                 serde_json::to_string(&response).unwrap(),
-                r#"{"source":"models.dev","resolved_at_ms":1000,"catalog_version":1,"models":{"openai/test-model":{"capability.reasoning":true,"existence":"present","model.family":"real-family","model.open_weights":false,"rate.input":{"currency":"USD","exponent":9,"state":"priced","unit_provenance":"source","units":100}}}}"#
+                r#"{"source":"models.dev","resolved_at_ms":1000,"catalog_version":1,"models":{"openai/test-model":{"capability.reasoning":true,"existence":"present","limit.temperature_max":2,"limit.temperature_min":0,"model.family":"real-family","model.open_weights":false,"rate.input":{"currency":"USD","exponent":9,"state":"priced","unit_provenance":"source","units":100}}}}"#
             );
         }
     }

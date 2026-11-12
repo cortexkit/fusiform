@@ -228,6 +228,15 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             }
         }
     }
+    let temperature = super::golden_payload::render_temperature();
+    let accepted = &temperature["catalog.get — temperature accepted with range"]["response"]
+        ["models"]["openai/gpt-4.1"];
+    assert_eq!(accepted["limit.temperature_min"], serde_json::json!(0));
+    assert_eq!(accepted["limit.temperature_max"], serde_json::json!(2));
+    for key in TEMPERATURE_ONLY {
+        assert!(accepted.get(key).is_some());
+        curated.push(key.to_string());
+    }
     let unproduced = unproduced_tabled_facts(&produced, &curated, &tabled);
     assert!(unproduced.is_empty(), "{}", unproduced.join("\n"));
 
@@ -241,7 +250,14 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
     // comes from the caller's max_tokens. That correction is the reason this
     // list is short: it is what a consumer read out of their source, not what
     // the field names suggest.
-    for key in ["limit.context", "capability.reasoning", "wire.family"] {
+    for key in [
+        "limit.context",
+        "capability.reasoning",
+        "wire.family",
+        "capability.temperature",
+        "limit.temperature_min",
+        "limit.temperature_max",
+    ] {
         let fact = SERVED_FACTS
             .iter()
             .find(|f| f.key == key)
@@ -353,6 +369,9 @@ const AUDIO_ONLY: &[&str] = &["limit.audio_tokens_per_second"];
 /// Provider attachment bounds are joined on current reads, never normalized.
 const ATTACHMENT_ONLY: &[&str] = fusiform_module::attachment_limits::KEYS;
 
+/// Provider sampling bounds are sourced on current reads, never normalized.
+const TEMPERATURE_ONLY: &[&str] = &["limit.temperature_min", "limit.temperature_max"];
+
 fn attachment_fact_is_registered(key: &str, tabled: &[&str]) -> bool {
     (ATTACHMENT_ONLY.contains(&key)
         || fusiform_protocol::served_fact_key_matches(
@@ -383,7 +402,8 @@ fn image_count_selector_family_is_checked_in_both_vocabulary_directions() {
 /// Tabled facts nothing emits, and curated-only facts the normalizer emits.
 ///
 /// A tabled fact must come from the normalizer, or be declared curated-only,
-/// addition-only, quality-only, lineage-only, wire-only, cache-only, audio-only or attachment-only and be carried by at least one
+/// addition-only, quality-only, lineage-only, wire-only, cache-only, audio-only,
+/// attachment-only or temperature-only and be carried by at least one
 /// curated row, shipped addition row or actual served response (all passed in `curated`).
 fn unproduced_tabled_facts(
     normalized: &[String],
@@ -401,6 +421,7 @@ fn unproduced_tabled_facts(
             .chain(CACHE_ONLY)
             .chain(AUDIO_ONLY)
             .chain(ATTACHMENT_ONLY)
+            .chain(TEMPERATURE_ONLY)
             .chain(std::iter::once(
                 &fusiform_module::attachment_limits::IMAGE_COUNT_FAMILY,
             ))
@@ -435,6 +456,17 @@ fn unproduced_tabled_facts(
 #[test]
 fn planted_unproduced_or_inferred_curated_only_fact_is_reported() {
     let strings = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
+    assert!(unproduced_tabled_facts(&[], &strings(TEMPERATURE_ONLY), TEMPERATURE_ONLY).is_empty());
+    assert_eq!(unproduced_tabled_facts(&[], &[], TEMPERATURE_ONLY).len(), 2);
+    assert_eq!(
+        unproduced_tabled_facts(
+            &strings(TEMPERATURE_ONLY),
+            &strings(TEMPERATURE_ONLY),
+            TEMPERATURE_ONLY
+        )
+        .len(),
+        2
+    );
     assert!(unproduced_tabled_facts(&[], &strings(ATTACHMENT_ONLY), ATTACHMENT_ONLY).is_empty());
     assert_eq!(
         unproduced_tabled_facts(&[], &[], ATTACHMENT_ONLY).len(),
