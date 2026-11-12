@@ -66,13 +66,14 @@ the compiled file.
 5. **History is append-only.** Nothing is updated or deleted. Withdrawals are
    tombstone eras, corrections are eras that mark a window, and artifact marks
    and retractions are events ([`data-model.md`](data-model.md) §3, §5, §6).
-6. **Serve-time layers are never stored.** Inheritance, aliases, curated rows,
-   overrides, cache lifetimes, lineage, quality scores and billing planes are
-   applied when a read is served, and only on current
-   reads, so a point-in-time read replays what the upstream published. The one
-   exception is curated model rows: their history is recorded in its own
-   table, and a point-in-time read serves the curated claim in force at its
-   instant ([`data-model.md`](data-model.md) §7a).
+6. **Historical curation is recorded separately from upstream.** Inheritance,
+    aliases, cache lifetimes, lineage and billing planes remain current-only.
+    Curated model rows and guarded fact overrides are diffed into their own
+    append-only tables on every boot. A point-in-time read serves their claims
+    in force at its instant; an override's upstream guard uses the upstream
+    value stored at that same instant. Current reads keep using the compiled
+    files ([`data-model.md`](data-model.md) §7a, §7c). Operator quality grades
+    have their own store history but are omitted from catalog `at_ms` reads.
 7. **Refuse rather than answer wrongly.** An unknown provider, an instant
    before the record begins, an undeclared billing plane, and a store that
    cannot be read are refusals with distinct codes, never an empty catalog

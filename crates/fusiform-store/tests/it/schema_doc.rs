@@ -166,10 +166,151 @@ fn quality_grade_v8_reopen_never_reimports_and_v7_reports_store_ahead() {
         .unwrap();
     assert!(
         outcome.store_ahead(),
-        "the v7 binary's existing refusal guard must reject a v8 store"
+        "the v7 binary's existing refusal guard must reject a newer store"
     );
-    assert_eq!(outcome.recorded, 8);
+    assert_eq!(outcome.recorded, 9);
     assert_eq!(outcome.chain_max, 7);
+}
+
+#[test]
+fn fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let descriptor = StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into(),
+        },
+    };
+    {
+        let old = cortexkit_store::open_sqlite(&descriptor).unwrap();
+        old.migrate(
+            fusiform_store::schema::NAMESPACE,
+            &fusiform_store::schema::MIGRATIONS[..8],
+        )
+        .unwrap();
+        old.with_conn_fenced(|tx| tx.execute_batch(r#"
+            INSERT INTO observation (source, observed_at_ms, outcome) VALUES ('models.dev',1000,'seeded');
+            INSERT INTO era (source, provider_id, model_id, fact_key, value_json, boundary_at_ms, boundary_kind)
+                VALUES ('models.dev','p','m','existence','"present"',1000,'seed');
+            INSERT INTO plan_price_era (provider_id,tier,minor_units,exponent,currency,period,boundary_kind,
+                boundary_at_ms,established_by,established_at_ms,review_by_ms,source_ref)
+                VALUES ('p','tier',100,2,'USD','month','asserted',1000,'fusiform',1000,2000,'source');
+            INSERT INTO curated_model_era (provider_id,model_id,boundary_at_ms,facts_json,auth_methods_json,
+                source_ref,established_by,established_at_ms,review_by_ms)
+                VALUES ('p','curated',1000,'{"existence":"present"}','["apikey"]','source','fusiform',1000,2000);
+        "#)).unwrap();
+    }
+    let path = dir.path().join("store.db");
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let tables = [
+        "observation",
+        "era",
+        "plan_price_era",
+        "curated_model_era",
+        "quality_grade_era",
+    ];
+    let snapshot = |table| {
+        let mut stmt = conn
+            .prepare(&format!("SELECT * FROM {table} ORDER BY id"))
+            .unwrap();
+        let columns = stmt.column_count();
+        stmt.query_map([], |r| {
+            (0..columns)
+                .map(|i| r.get::<_, rusqlite::types::Value>(i))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    };
+    let before: Vec<_> = tables.iter().map(&snapshot).collect();
+    {
+        let store = CatalogStore::open(&descriptor).unwrap();
+        assert!(store.fact_overrides_at(i64::MAX, None).unwrap().is_empty());
+        assert_eq!(store.catalog_version().unwrap(), 0);
+    }
+    for (table, expected) in tables.iter().zip(before) {
+        assert_eq!(snapshot(table), expected, "v9 must preserve {table}");
+    }
+    let value: String = conn
+        .query_row("SELECT value_json FROM era", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(value, "\"present\"");
+    drop(conn);
+    let old = cortexkit_store::open_sqlite(&descriptor).unwrap();
+    let outcome = old
+        .migrate(
+            fusiform_store::schema::NAMESPACE,
+            &fusiform_store::schema::MIGRATIONS[..8],
+        )
+        .unwrap();
+    assert!(
+        outcome.store_ahead(),
+        "the existing v8 refusal guard must reject v9"
+    );
+    assert_eq!((outcome.recorded, outcome.chain_max), (9, 8));
+}
+
+#[test]
+fn fact_override_v9_constraints_reject_partial_claims_and_tombstones() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    for m in fusiform_store::schema::MIGRATIONS {
+        conn.execute_batch(m.statements).unwrap();
+    }
+    let insert = |value: Option<&str>,
+                  replaces: Option<&str>,
+                  reason: Option<&str>,
+                  quote: Option<&str>,
+                  review: Option<i64>,
+                  tombstone: Option<&str>,
+                  notes: Option<&str>| {
+        conn.execute("INSERT INTO fact_override_era (provider_id,model_id,fact_key,boundary_at_ms,value_json,
+            replaces_json,reason,source_ref,quote,notes,established_by,established_at_ms,review_by_ms,tombstone_reason)
+            VALUES ('p','m','limit.output',1000,?1,?2,?3,'source',?4,?7,'fusiform',1000,?5,?6)",
+            rusqlite::params![value,replaces,reason,quote,review,tombstone,notes])
+    };
+    assert!(insert(
+        Some("2"),
+        Some("1"),
+        Some("reason"),
+        Some("quote"),
+        Some(2000),
+        None,
+        None
+    )
+    .is_ok());
+    assert!(insert(
+        Some("2"),
+        None,
+        Some("reason"),
+        Some("quote"),
+        Some(2000),
+        None,
+        None
+    )
+    .is_ok());
+    assert!(insert(None, None, None, None, None, Some("removed"), None).is_ok());
+    for (value, replaces, reason, quote, review, tombstone, notes) in [
+        (
+            Some("2"),
+            None,
+            Some("r"),
+            Some("q"),
+            Some(2000),
+            Some("removed"),
+            None,
+        ),
+        (None, None, None, None, None, None, None),
+        (Some("2"), None, None, Some("q"), Some(2000), None, None),
+        (Some("2"), None, Some("r"), None, Some(2000), None, None),
+        (Some("2"), None, Some("r"), Some("q"), None, None, None),
+        (None, Some("1"), None, None, None, Some("removed"), None),
+        (None, None, None, None, None, Some("removed"), Some("notes")),
+    ] {
+        assert!(insert(value, replaces, reason, quote, review, tombstone, notes).is_err());
+    }
 }
 
 #[test]

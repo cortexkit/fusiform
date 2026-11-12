@@ -714,10 +714,10 @@ pub struct CatalogGetResponse {
 
     /// Facts whose served value is a sourced curated value, not the upstream's.
     ///
-    /// Current reads only: a point-in-time read serves what was recorded and
-    /// never carries one. An override applies only while the stored upstream
-    /// value equals its `replaces`, so once models.dev publishes anything else
-    /// the upstream value is served again and no entry appears. One entry per
+    /// Current reads use the compiled claims; point-in-time reads use the
+    /// recorded override era in force. A replacement applies only while upstream
+    /// at that instant equals `replaces`; an addition only while upstream lacks
+    /// the fact. Otherwise upstream wins and no entry appears. One entry per
     /// served `models` entry carrying an overridden value, including an alias
     /// entry serving the overridden row. Omitted when empty, and when the fact
     /// is filtered out.

@@ -1,10 +1,10 @@
-//! Sourced values served for one current upstream fact.
+//! Sourced values served for one upstream fact, with dated claim history.
 //!
 //! Two kinds of row live here.
 //!
 //! A REPLACEMENT corrects a value models.dev publishes that is true for one way
 //! of calling a model and wrong for the way consumers call it. It replaces that
-//! one value on current catalog reads, and only while the stored upstream value
+//! one value on catalog reads, and only while the stored upstream value
 //! is exactly the value the row was sourced against (`replaces`). Once
 //! models.dev publishes anything else, the row stops applying and the upstream
 //! value is served again, so an override can never hide a later upstream
@@ -19,8 +19,10 @@
 //! records the key, upstream wins and the row stops applying, for the same
 //! reason as a replacement.
 //!
-//! Nothing is written to the store, and point-in-time reads serve the recorded
-//! history unchanged.
+//! Current reads use the compiled file. Every boot records claim changes in
+//! `fact_override_era`; point-in-time reads apply the claim in force, with its
+//! guard evaluated against upstream at the requested instant. Provenance-only
+//! edits do not open an era or rewrite its original provenance.
 
 use std::collections::BTreeMap;
 
@@ -294,6 +296,69 @@ pub fn overrides() -> &'static FactOverrides {
     ROWS.get_or_init(|| load_reporting_rejects(DOCUMENT).0)
 }
 
+/// Record the compiled claims on every boot, independently of upstream polls.
+pub fn apply_to_store(
+    store: &fusiform_store::CatalogStore,
+    rows: &FactOverrides,
+    boot_at_ms: i64,
+) -> Result<usize, fusiform_store::CatalogError> {
+    let rows: Vec<_> = rows
+        .values()
+        .map(|r| fusiform_store::NewFactOverride {
+            provider_id: r.provider_id.clone(),
+            model_id: r.model_id.clone(),
+            fact_key: r.fact_key.clone(),
+            value: r.value.clone(),
+            replaces: r.replaces.clone(),
+            reason: r.reason.clone(),
+            source_ref: r.source_ref.clone(),
+            quote: r.quote.clone(),
+            notes: r.notes.clone(),
+            established_by: r.established_by.clone(),
+            established_at_ms: r.established_at_ms,
+            review_by_ms: r.review_by_ms,
+        })
+        .collect();
+    store.append_fact_overrides(&rows, boot_at_ms)
+}
+
+/// Load the claims in force, dropping tombstones rather than falling back to
+/// the compiled file: a removed override must stay removed on historical reads.
+pub fn at(
+    store: &fusiform_store::CatalogStore,
+    at_ms: i64,
+    provider_id: Option<&str>,
+) -> Result<FactOverrides, fusiform_store::CatalogError> {
+    Ok(store
+        .fact_overrides_at(at_ms, provider_id)?
+        .into_iter()
+        .filter_map(|era| {
+            let r = era.claim?;
+            Some((
+                (
+                    r.provider_id.clone(),
+                    r.model_id.clone(),
+                    r.fact_key.clone(),
+                ),
+                FactOverride {
+                    provider_id: r.provider_id,
+                    model_id: r.model_id,
+                    fact_key: r.fact_key,
+                    value: r.value,
+                    replaces: r.replaces,
+                    reason: r.reason,
+                    source_ref: r.source_ref,
+                    quote: r.quote,
+                    notes: r.notes,
+                    established_by: r.established_by,
+                    established_at_ms: r.established_at_ms,
+                    review_by_ms: r.review_by_ms,
+                },
+            ))
+        })
+        .collect())
+}
+
 pub fn overdue_at(rows: &FactOverrides, now_ms: i64) -> Vec<String> {
     rows.values()
         .filter(|row| row.review_by_ms < now_ms)
@@ -403,7 +468,7 @@ pub fn apply(
     )
 }
 
-fn apply_rows(
+pub(crate) fn apply_rows(
     rows: &FactOverrides,
     provider_id: &str,
     model_id: &str,

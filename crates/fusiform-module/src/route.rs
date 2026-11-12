@@ -1243,12 +1243,17 @@ fn serve_catalog_get_request(
     // Count the route's main render, not nested renders used to derive aliases.
     #[cfg(test)]
     CATALOG_RENDER_COUNT.with(|count| count.set(count.get() + 1));
+    let historical_overrides = at
+        .map(|at| crate::fact_overrides::at(store, at.0, request.provider_id.as_deref()))
+        .transpose()
+        .map_err(|e| store_error(&e))?;
     let mut response = render(
         source,
         snapshot,
         at,
         Some((store, crate::creators::creators())),
         request.fact_prefixes.as_ref(),
+        historical_overrides.as_ref(),
     );
     if !named {
         // Widening for an absent identity can fetch only existence. Preserve the
@@ -2506,6 +2511,7 @@ fn render(
     at: Option<Timestamp>,
     inherit: Option<(&CatalogStore, &crate::creators::Creators)>,
     requested_prefixes: Option<&Vec<String>>,
+    historical_overrides: Option<&crate::fact_overrides::FactOverrides>,
 ) -> CatalogGetResponse {
     let mut models = BTreeMap::new();
     let mut canonical_links = Vec::new();
@@ -2534,16 +2540,26 @@ fn render(
             name_the_provenance_of_a_pre_0_11_row(&mut value);
             facts.insert(key.as_str().to_string(), value);
         }
+        let withheld: Vec<&str> = snapshot
+            .withheld
+            .iter()
+            .filter(|w| w.provider_id == model.provider_id && w.model_id == model.model_id)
+            .map(|w| w.fact_key.as_str())
+            .collect();
+        if let Some(rows) = historical_overrides {
+            // The same upstream guard runs against the snapshot at the
+            // requested instant, never against today's upstream value.
+            fact_overrides.extend(crate::fact_overrides::apply_rows(
+                rows,
+                &model.provider_id,
+                &model.model_id,
+                &mut facts,
+                requested_prefixes,
+                &withheld,
+            ));
+        }
         if at.is_none() {
             let mut endpoint_withheld = false;
-            // A sourced value replaces the stored upstream value only on a
-            // current read; `at` reads serve the recorded history as it was.
-            let withheld: Vec<&str> = snapshot
-                .withheld
-                .iter()
-                .filter(|w| w.provider_id == model.provider_id && w.model_id == model.model_id)
-                .map(|w| w.fact_key.as_str())
-                .collect();
             fact_overrides.extend(crate::fact_overrides::apply(
                 &model.provider_id,
                 &model.model_id,
@@ -5879,6 +5895,7 @@ fn aliased_response(
         None,
         Some((store, crate::creators::creators())),
         wide.as_ref(),
+        None,
     );
     let target_key = format!("{}/{}", alias.target_provider_id, alias.target_model_id);
     let Some(mut facts) = response.models.remove(&target_key) else {

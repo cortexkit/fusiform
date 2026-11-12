@@ -788,13 +788,19 @@ addition quoting Anthropic's refusals-and-fallback page
 messages inside `messages`, without a beta header, not the beta turn-scoped
 `clear_at` variant. Supported `anthropic` rows serve `true`, Sonnet 5 and
 Opus 4.7 serve `false`, and absence on any other row means not stated. Its
-additions use the same current-only, never-stored, upstream-wins rules.
+additions use the same dated-history and upstream-wins rules.
 
-1. **Current reads only.** `at_ms` reads serve the recorded value with no
-   disclosure, and serve no added fact at all; `catalog.history` lists only
-   stored eras; nothing is written to the store
-   (`fact_overrides::an_at_ms_read_serves_the_stored_value_without_disclosure`,
-   `fact_overrides::an_at_ms_read_serves_no_server_side_fallback`).
+1. **Compiled current reads, stored historical reads.** Current reads use the
+    compiled file unchanged. Every boot diffs its claims into
+    `fact_override_era`: the first era starts at `established_at_ms`; changes
+    and removals start at boot, clamped to the latest boundary if the clock is
+    behind. Provenance-only edits open no era and retain stored provenance.
+    `at_ms` reads apply and disclose the claim in force, or leave upstream
+    untouched before the first era and after a tombstone. `catalog.history`
+    still lists upstream eras only. For example, the golden case
+    `catalog.get — dated Flash Image split rates` serves $3/M text output and
+    $60/M image output at 2026-11-11 23:36:33Z from the dated override history
+    (`fact_overrides::dated_flash_image_overrides_split_text_and_image_after_establishment`).
 2. **Only while upstream publishes `replaces`.** When the stored upstream
    value is anything else, including the override's own value, or the fact is
    absent or withheld by a correction, the upstream value is served and
@@ -802,14 +808,16 @@ additions use the same current-only, never-stored, upstream-wins rules.
    (`fact_overrides::an_upstream_value_other_than_replaces_is_served_as_published`).
    An addition applies only while the stored upstream row has no such fact:
    once upstream records the key, with any value including `null`, or a
-   correction withholds it, the addition stops applying
-   (`fact_overrides::an_upstream_value_for_the_key_suppresses_the_addition`).
+    correction withholds it, the addition stops applying
+    (`fact_overrides::an_upstream_value_for_the_key_suppresses_the_addition`).
+    On an `at_ms` read both guards use the stored upstream at that instant,
+    never today's upstream (`fact_overrides::dated_override_guards_use_upstream_at_the_requested_instant`).
 3. **Named, bulk and paged reads alike**, and billing-plane (`auth_method`)
    reads, which are current-only and change only rates
    (`fact_overrides::a_current_read_serves_the_override_and_discloses_it`,
    `fact_overrides::a_current_read_serves_the_documented_server_side_fallback`).
    Paging keeps each entry with the provider of its `model`.
-4. **Aliases carry it.** An alias entry is built from its target's served
+4. **Current aliases carry it.** Aliases remain current-only. An alias entry is built from its target's served
    facts, so it serves the overridden value too, and its disclosure has the
    alias id in `model` and the target in `provider_id`/`model_id`
    (`fact_overrides::the_antigravity_alias_serves_the_overridden_value`).

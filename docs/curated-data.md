@@ -17,7 +17,7 @@ that keep them honest.
 | `model-lineage.json` | curated routing diversity and cost-fallback groups | computed per row at read time, current reads only (§12) |
 | `wire-corrections.json` | sourced per-model endpoint corrections or withholding, and providers whose routed list is complete | at read time, current reads only (§9) |
 | `wire-families.json` | verified package-and-shape request protocols | at read time, current reads only (§13) |
-| `fact-overrides.json` | sourced values replacing one current upstream fact while upstream still publishes the value they replace, or adding one fact upstream publishes nothing for | at read time, current reads only (§10) |
+| `fact-overrides.json` | guarded sourced replacements or additions to upstream facts | compiled file on current reads; stored `fact_override_era` claims on point-in-time reads (§10) |
 | `billing-planes.json` | how a provider bills a login method | at read time, current reads only |
 | `cache-lifetimes.json` | first-party OpenAI and Anthropic prompt-cache lifetimes and exact write-price multipliers | at read time, current reads only |
 | `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models, and optional documented audio tokens per second | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio`; at read time: joins `limit.audio_tokens_per_second` onto current rows serving that rate (§8) |
@@ -67,10 +67,11 @@ the source file of the same name under `crates/fusiform-module/src/`.
 1. **Curated facts are never stored as observations.** Creators, aliases,
    curated rows, canonical links, quality scores, model lineage, fact overrides and billing planes are applied when a read is served, so a
    point-in-time read replays what the upstream published and never today's
-   curation (see [`data-model.md`](data-model.md) §8). Curated model rows
-   differ on point-in-time reads: their history is recorded in a separate
-   table, `curated_model_era`, never as eras, and a point-in-time read serves
-   the curated claim in force at its instant (§4, "Point-in-time reads").
+    curation (see [`data-model.md`](data-model.md) §8). Curated model rows and
+    fact overrides differ on point-in-time reads: their histories are recorded
+    in `curated_model_era` and `fact_override_era`, never as upstream eras, and
+    a point-in-time read serves the curated claims in force at its instant
+    (§4, "Point-in-time reads", and §10).
    Among stored model facts the exception is `input-audio-per-token.json`
    (§8), whose pricing evidence adds no value of its own: it supplies evidence
    for interpreting an upstream `cost.input_audio` during normalization, and an
@@ -891,14 +892,20 @@ never replaced. Whether a row is an addition follows its fact key, not a null
 duplicate `(provider_id, model_id, fact_key)` identities are counted as
 rejects.
 
-A replacement applies on current reads only, and only while the stored
+A replacement applies only while the stored
 upstream value equals `replaces`. Once models.dev publishes anything else, the
 row stops applying and the upstream value is served, so an override can never
-hide a later upstream change. An addition applies on current reads only, and
+hide a later upstream change. An addition applies
 only while the stored upstream row has no such fact, neither served nor
 withheld: once models.dev publishes the key with any value, `null` included,
-upstream wins. Nothing is stored, `at_ms` reads and
-`catalog.history` serve the recorded values, and every applied row is
+upstream wins. Current reads use the compiled file. Every boot records claim
+changes in `fact_override_era`; `at_ms` reads apply the claim in force and
+evaluate its guard against upstream at that instant. A first claim starts at
+`established_at_ms`; later changes and tombstones start at boot, clamped to
+the latest boundary if the clock is behind. Provenance-only edits write
+nothing and retain original stored provenance. Before the first era or after
+a tombstone, upstream is served without an override. `catalog.history` still
+serves upstream eras only, and every applied override is
 disclosed in the response's `fact_overrides` list
 ([wire contract](wire-contract.md) §5.8). Alias entries are built from their
 target's served facts, so an alias of an overridden row serves the overridden
@@ -964,8 +971,8 @@ have no curated value; absence means not stated, never `false`.
 The source also covers `claude-mythos-5-1` and `claude-mythos-5`, but the seed
 does not carry them. They have no addition rows until the catalog carries
 those ids, preserving the seed-presence gate. If models.dev ever publishes
-the fact key, its value wins; the addition is current-read-only and never
-stored, just like the fallback addition.
+the fact key, its value wins at the instant being read. The
+`capability.mid_conversation_system` addition has dated claim history.
 
 Gates in `fact_overrides.rs` check rejects, review dates
 (`fact_overrides_are_within_their_review_dates`, with a planted overdue row in

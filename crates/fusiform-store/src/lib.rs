@@ -15,6 +15,7 @@
 
 pub mod correct;
 mod curated;
+mod fact_overrides;
 pub mod ingest;
 mod quality;
 mod readers;
@@ -37,6 +38,7 @@ use rusqlite::{params, OptionalExtension};
 pub use curated::{
     CuratedModelEra, NewCuratedModel, CURATED_MODELS_FILE, CURATED_MODEL_NOT_SERVED,
 };
+pub use fact_overrides::{FactOverrideEra, NewFactOverride};
 pub use quality::{QualityGrade, QualityGradeEra};
 
 /// A lease-guarded, migrated catalog store.

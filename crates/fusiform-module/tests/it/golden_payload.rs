@@ -490,6 +490,10 @@ fn render_all() -> String {
         "catalog.get — a curated row at an instant".into(),
         render_curated_history(),
     );
+    ordinary.as_object_mut().unwrap().insert(
+        "catalog.get — dated Flash Image split rates".into(),
+        render_fact_override_history(),
+    );
     let mut text = serde_json::to_string_pretty(&ordinary).unwrap();
     text.push('\n');
     text
@@ -670,6 +674,35 @@ fn render_curated_history() -> serde_json::Value {
     let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
     let response = serde_json::to_value(response).unwrap();
     assert_eq!(response["resolved_at_ms"], at);
+    serde_json::json!({"request":request, "response":response})
+}
+
+/// Pin the text/image split at 2026-11-11 23:36:33Z. An isolated
+/// store keeps existing current-read payloads and status counts unchanged.
+fn render_fact_override_history() -> serde_json::Value {
+    let (store, _dir) = super::curated_wire::store();
+    let at = 1_794_440_193_000i64;
+    fusiform_module::fact_overrides::apply_to_store(
+        &store,
+        fusiform_module::fact_overrides::overrides(),
+        at,
+    )
+    .unwrap();
+    let request = serde_json::json!({"name":"catalog.get", "arguments":{
+        "provider_id":"google", "model_id":"gemini-3.1-flash-image",
+        "fact_prefixes":["rate."], "at_ms":at,
+    }});
+    let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+    let response = serde_json::to_value(response).unwrap();
+    assert_eq!(
+        response["models"]["google/gemini-3.1-flash-image"]["rate.output"]["units"],
+        3_000_000_000i64
+    );
+    assert_eq!(
+        response["models"]["google/gemini-3.1-flash-image"]["rate.output_image"]["units"],
+        60_000_000_000i64
+    );
+    assert_eq!(response["fact_overrides"].as_array().unwrap().len(), 2);
     serde_json::json!({"request":request, "response":response})
 }
 
@@ -959,14 +992,15 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
     assert_eq!(plain_plane_cases, 2);
     let curated_wire = render_curated_wire();
     let quality_tools = render_quality_tools();
-    // The five single cases rendered outside `cases()`: the first provider page,
-    // the seed and synthetic identities, synthetic grades, and curated history.
+    // The six single cases rendered outside `cases()`: the first provider page,
+    // the seed and synthetic identities, synthetic grades, curated history,
+    // and dated fact overrides.
     for (text, expected) in [
         (
             GOLDEN.to_string(),
             cases().len()
                 + plain_plane_cases
-                + 5
+                + 6
                 + curated_wire.len()
                 + quality_tools.len()
                 + render_cache_lifetimes().len()
@@ -998,6 +1032,10 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         ),
         (
             serde_json::json!({"curated_history":render_curated_history()}).to_string(),
+            1,
+        ),
+        (
+            serde_json::json!({"fact_override_history":render_fact_override_history()}).to_string(),
             1,
         ),
         (

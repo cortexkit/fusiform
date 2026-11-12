@@ -79,6 +79,250 @@ fn get(store: &CatalogStore, args: Value) -> CatalogGetResponse {
     serve_catalog_get(store, &serde_json::to_vec(&args).unwrap()).unwrap()
 }
 
+const FLASH: &str = "google/gemini-3.1-flash-image";
+const FLASH_MODEL: &str = "gemini-3.1-flash-image";
+
+fn flash_document(output: i64) -> Vec<u8> {
+    let model = json!({"id":FLASH_MODEL, "name":"Flash Image",
+        "cost":{"input":2, "output":output}, "limit":{"context":1000, "output":500}});
+    serde_json::to_vec(&json!({"google":{"id":"google", "name":"Google",
+        "models":{FLASH_MODEL:model}}}))
+    .unwrap()
+}
+
+fn flash_store() -> (CatalogStore, tempfile::TempDir) {
+    let (store, dir) = store_publishing(json!(32_768));
+    ingest(&store, &flash_document(60), 2_000);
+    (store, dir)
+}
+
+fn flash_overrides() -> fusiform_module::fact_overrides::FactOverrides {
+    fusiform_module::fact_overrides::overrides()
+        .iter()
+        .filter(|((provider, model, _), _)| provider == "google" && model == FLASH_MODEL)
+        .map(|(key, row)| (key.clone(), row.clone()))
+        .collect()
+}
+
+#[test]
+fn dated_flash_image_overrides_split_text_and_image_after_establishment() {
+    let (store, _dir) = flash_store();
+    let rows = flash_overrides();
+    assert_eq!(rows.len(), 2);
+    let boundary = rows.values().map(|r| r.established_at_ms).max().unwrap();
+    assert_eq!(
+        fusiform_module::fact_overrides::apply_to_store(&store, &rows, boundary + 1).unwrap(),
+        2
+    );
+    let before = get(
+        &store,
+        json!({"provider_id":"google", "model_id":FLASH_MODEL, "at_ms":boundary - 1}),
+    );
+    assert_eq!(
+        before.models[FLASH]["rate.output"]["units"],
+        60_000_000_000i64
+    );
+    assert!(!before.models[FLASH].contains_key("rate.output_image"));
+    assert!(before.fact_overrides.is_empty());
+    for response in [
+        get(
+            &store,
+            json!({"provider_id":"google", "model_id":FLASH_MODEL, "at_ms":boundary}),
+        ),
+        get(
+            &store,
+            json!({"provider_id":"google", "model_id":FLASH_MODEL, "at_ms":1_794_440_193_000i64}),
+        ),
+        get(&store, json!({"provider_id":"google", "at_ms":boundary})),
+        paged(&store, json!({"at_ms":boundary, "fact_prefixes":["rate."]})),
+    ] {
+        assert_eq!(
+            response.models[FLASH]["rate.output"]["units"],
+            3_000_000_000i64
+        );
+        assert_eq!(
+            response.models[FLASH]["rate.output_image"]["units"],
+            60_000_000_000i64
+        );
+        assert_eq!(disclosed(&response, FLASH).len(), 2);
+        assert!(response.aliased.is_empty());
+        assert!(response.billing_rules.is_empty());
+    }
+}
+
+fn override_era_count(store: &CatalogStore) -> i64 {
+    rusqlite::Connection::open(store.path())
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM fact_override_era", [], |r| r.get(0))
+        .unwrap()
+}
+
+#[test]
+fn dated_overrides_diff_claims_not_provenance_and_tombstone_removals() {
+    let (store, _dir) = flash_store();
+    let mut rows = flash_overrides();
+    let boundary = rows.values().map(|r| r.established_at_ms).max().unwrap();
+    let apply =
+        |rows: &_| fusiform_module::fact_overrides::apply_to_store(&store, rows, boundary + 100);
+    assert_eq!(apply(&rows).unwrap(), 2);
+    assert_eq!(apply(&rows).unwrap(), 0);
+    let original_quote = rows.values().next().unwrap().quote.clone();
+    for row in rows.values_mut() {
+        row.quote = "new source wording".into();
+        row.reason = "new explanation".into();
+        row.source_ref = "https://example.com/rechecked".into();
+        row.notes = None;
+        row.established_at_ms += 10;
+        row.review_by_ms += 10;
+    }
+    assert_eq!(apply(&rows).unwrap(), 0);
+    assert_eq!(override_era_count(&store), 2);
+    let recorded = store.fact_overrides_at(boundary, None).unwrap();
+    assert_eq!(recorded[0].claim.as_ref().unwrap().quote, original_quote);
+
+    let output_key = (
+        "google".to_string(),
+        FLASH_MODEL.to_string(),
+        "rate.output".to_string(),
+    );
+    rows.get_mut(&output_key).unwrap().value["units"] = json!(4_000_000_000i64);
+    assert_eq!(apply(&rows).unwrap(), 1);
+    assert_eq!(apply(&rows).unwrap(), 0);
+    assert_eq!(override_era_count(&store), 3);
+    for (at, units) in [
+        (boundary + 99, 3_000_000_000i64),
+        (boundary + 100, 4_000_000_000),
+    ] {
+        let response = get(
+            &store,
+            json!({"provider_id":"google", "model_id":FLASH_MODEL,"at_ms":at}),
+        );
+        assert_eq!(response.models[FLASH]["rate.output"]["units"], units);
+    }
+    rows.remove(&output_key);
+    assert_eq!(
+        fusiform_module::fact_overrides::apply_to_store(&store, &rows, boundary + 200).unwrap(),
+        1
+    );
+    assert_eq!(
+        fusiform_module::fact_overrides::apply_to_store(&store, &rows, boundary + 300).unwrap(),
+        0
+    );
+    assert_eq!(override_era_count(&store), 4);
+    let at_removal = store.fact_overrides_at(boundary + 200, None).unwrap();
+    assert!(at_removal[0].claim.is_none());
+    let response = get(
+        &store,
+        json!({"provider_id":"google", "model_id":FLASH_MODEL,"at_ms":boundary + 200}),
+    );
+    assert_eq!(
+        response.models[FLASH]["rate.output"]["units"],
+        60_000_000_000i64
+    );
+    assert_eq!(disclosed(&response, FLASH).len(), 1);
+    // Current reads never switch to a stored claim, even after its removal.
+    let current = get(
+        &store,
+        json!({"provider_id":"google", "model_id":FLASH_MODEL}),
+    );
+    assert_eq!(
+        current.models[FLASH]["rate.output"]["units"],
+        3_000_000_000i64
+    );
+    assert_eq!(disclosed(&current, FLASH).len(), 2);
+}
+
+#[test]
+fn dated_override_guards_use_upstream_at_the_requested_instant() {
+    let (store, _dir) = flash_store();
+    let rows = flash_overrides();
+    let boundary = rows.values().map(|r| r.established_at_ms).max().unwrap();
+    fusiform_module::fact_overrides::apply_to_store(&store, &rows, boundary).unwrap();
+    ingest(&store, &flash_document(70), boundary + 100);
+    let conn = rusqlite::Connection::open(store.path()).unwrap();
+    // Upstream's explicit null is a published fact too; it blocks an addition.
+    conn.execute("INSERT INTO era (source, provider_id, model_id, fact_key, value_json,
+        boundary_at_ms, boundary_kind) VALUES ('models.dev','google',?1,'rate.output_image','null',?2,'seed')",
+        rusqlite::params![FLASH_MODEL, boundary + 100]).unwrap();
+    for args in [
+        json!({"provider_id":"google", "model_id":FLASH_MODEL,"at_ms":boundary + 100}),
+        json!({"at_ms":boundary + 100,"fact_prefixes":["rate.output_image"]}),
+    ] {
+        let response = get(&store, args);
+        assert!(response.fact_overrides.is_empty());
+        assert_eq!(response.models[FLASH]["rate.output_image"], Value::Null);
+    }
+    let moved = get(
+        &store,
+        json!({"provider_id":"google", "model_id":FLASH_MODEL,"at_ms":boundary + 100}),
+    );
+    assert_eq!(
+        moved.models[FLASH]["rate.output"]["units"],
+        70_000_000_000i64
+    );
+    let earlier = get(
+        &store,
+        json!({"provider_id":"google", "model_id":FLASH_MODEL,"at_ms":boundary}),
+    );
+    assert_eq!(
+        earlier.models[FLASH]["rate.output"]["units"],
+        3_000_000_000i64
+    );
+    assert_eq!(disclosed(&earlier, FLASH).len(), 2);
+    let excluded = get(
+        &store,
+        json!({"provider_id":"google", "at_ms":boundary,"fact_prefixes":["limit."]}),
+    );
+    assert!(excluded.fact_overrides.is_empty());
+    let only_addition = paged(
+        &store,
+        json!({"at_ms":boundary,"fact_prefixes":["rate.output_image"]}),
+    );
+    assert_eq!(disclosed(&only_addition, FLASH).len(), 1);
+}
+
+#[test]
+fn dated_override_reappearance_and_clock_rollback_use_latest_boundary() {
+    let (store, _dir) = flash_store();
+    let mut rows = flash_overrides();
+    let boundary = rows.values().map(|r| r.established_at_ms).max().unwrap();
+    fusiform_module::fact_overrides::apply_to_store(&store, &rows, boundary).unwrap();
+    fusiform_module::fact_overrides::apply_to_store(&store, &Default::default(), boundary + 100)
+        .unwrap();
+    assert_eq!(
+        fusiform_module::fact_overrides::apply_to_store(&store, &rows, boundary - 100).unwrap(),
+        2
+    );
+    let eras = store.fact_overrides_at(boundary + 100, None).unwrap();
+    assert!(eras
+        .iter()
+        .all(|e| e.boundary_at_ms == boundary + 100 && e.claim.is_some()));
+    assert_eq!(override_era_count(&store), 6);
+    assert_eq!(
+        fusiform_module::fact_overrides::apply_to_store(&store, &rows, boundary + 200).unwrap(),
+        0
+    );
+    // Changing only the upstream guard is a new claim too.
+    rows.values_mut()
+        .find(|r| r.fact_key == "rate.output")
+        .unwrap()
+        .replaces["units"] = json!(70_000_000_000i64);
+    assert_eq!(
+        fusiform_module::fact_overrides::apply_to_store(&store, &rows, boundary + 200).unwrap(),
+        1
+    );
+    assert_eq!(override_era_count(&store), 7);
+    let response = get(
+        &store,
+        json!({"provider_id":"google", "model_id":FLASH_MODEL, "at_ms":boundary + 200}),
+    );
+    assert_eq!(
+        response.models[FLASH]["rate.output"]["units"],
+        60_000_000_000i64
+    );
+    assert_eq!(disclosed(&response, FLASH).len(), 1);
+}
+
 /// Every page of a paged read, merged.
 fn paged(store: &CatalogStore, mut args: Value) -> CatalogGetResponse {
     args["paged"] = json!(true);
@@ -680,7 +924,7 @@ fn mid_conversation_system_is_not_projected_onto_other_routes() {
 }
 
 #[test]
-fn mid_conversation_system_is_current_only_and_upstream_wins() {
+fn mid_conversation_system_before_first_era_and_upstream_wins() {
     for published in [
         None,
         Some(json!(false)),

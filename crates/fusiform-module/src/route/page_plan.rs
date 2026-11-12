@@ -298,7 +298,14 @@ fn build_plan(
         withheld: Vec::new(),
         uncertain: Vec::new(),
     };
-    let mut envelope = render(source, snapshot, request.at_ms.map(Timestamp), None, None);
+    let mut envelope = render(
+        source,
+        snapshot,
+        request.at_ms.map(Timestamp),
+        None,
+        None,
+        None,
+    );
     envelope.quality_scores = quality.clone();
     let quality_bytes = quality_disclosure_size(quality.as_ref())?;
     // Width rather than a cached timestamp keeps page one's resolved_at a read

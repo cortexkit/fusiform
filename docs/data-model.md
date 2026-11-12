@@ -13,13 +13,14 @@ in `crates/fusiform-store/tests/it/history.rs`.
 ## 1. Tables
 
 Tables, as shipped: `observation`, `era`, `catalog_version`,
-`observation_artifact_event`, `plan_price_era`, `curated_model_era`, `quality_grade_era`,
-`cortexkit_schema_version`, `cortexkit_fence`.
+`observation_artifact_event`, `plan_price_era`, `curated_model_era`,
+`quality_grade_era`, `fact_override_era`, `cortexkit_schema_version`,
+`cortexkit_fence`.
 
 - `observation`, `era`, `catalog_version`, `observation_artifact_event`,
-  `plan_price_era`, `curated_model_era` and `quality_grade_era` are fusiform's own, created by the
-  migration chain in `crates/fusiform-store/src/schema.rs` under the namespace
-  `catalog`.
+  `plan_price_era`, `curated_model_era`, `quality_grade_era` and
+  `fact_override_era` are fusiform's own, created by the migration chain in
+  `crates/fusiform-store/src/schema.rs` under the namespace `catalog`.
 - `cortexkit_schema_version` belongs to the store crate and records which
   migrations have been applied.
 - `cortexkit_fence` belongs to the store crate and is created on the first
@@ -43,15 +44,17 @@ does not create.
 | 6 | `plan_price_era` |
 | 7 | `curated_model_era` |
 | 8 | `quality_grade_era`, with a one-time import of the frozen grade snapshot |
+| 9 | `fact_override_era`, dated history of guarded fact overrides |
 
 A store whose recorded schema version is newer than the running binary's chain
 is refused at open, and the error names the store's version
 (`schema_doc::a_store_written_by_a_newer_binary_is_refused`). Migrations 4, 6,
-7 and 8 are tested against stores that already hold rows
+7, 8 and 9 are tested against stores that already hold rows
 (`schema_doc::the_artifact_table_arrives_on_a_populated_store`,
 `schema_doc::the_plan_price_table_arrives_on_a_populated_store`,
 `schema_doc::the_curated_model_table_arrives_on_a_populated_store`,
-`schema_doc::quality_grade_v8_import_preserves_exact_rows_on_populated_v7`).
+`schema_doc::quality_grade_v8_import_preserves_exact_rows_on_populated_v7`,
+`schema_doc::fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it`).
 
 ## 2. Observations
 
@@ -97,7 +100,8 @@ fact is identified by `(source, provider_id, model_id, fact_key)`; the value is
 ### 3.1 Append-only
 
 The store never updates or deletes a row in `era`, `observation`,
-`observation_artifact_event`, `plan_price_era` or `curated_model_era`.
+`observation_artifact_event`, `plan_price_era`, `curated_model_era`,
+`quality_grade_era` or `fact_override_era`.
 
 - There is no `valid_to` column. An era ends where the next era for the same
   fact begins.
@@ -353,6 +357,34 @@ grades from current catalog reads but remain in `quality.grades` history.
 Catalog `at_ms` reads omit grades, as before; grade history is not upstream
 `catalog.history`. See [`curated-data.md`](curated-data.md) §11.
 
+## 7c. Fact override history
+
+`fact_override_era` records the compiled `fact-overrides.json` on every boot
+through `CatalogStore::append_fact_overrides`. It is separate from upstream
+`era` rows, so `catalog.history` still reports only upstream observations.
+Current reads still use the compiled file; `at_ms` reads use the stored claim
+in force, guarded against the upstream value at that same instant.
+
+- Identity is `(provider_id, model_id, fact_key)`. `value_json` holds the
+  served claim as JSON text; `replaces_json` holds the exact upstream JSON
+  value expected by a replacement, or SQL NULL for `replaces: null` (an
+  addition for added fact keys, a null replacement for `model.status`).
+- Provenance is `reason`, `source_ref`, `quote`, optional `notes`,
+  `established_by`, `established_at_ms` and `review_by_ms`. The boot diff
+  compares only value and replaces for each identity. Provenance-only changes
+  write nothing and retain the original stored provenance, as curated models do.
+- Dating follows §7a: the first era starts at `established_at_ms`; a changed
+  claim, reappearance or removal starts at boot, clamped to the newest stored
+  boundary when the clock is behind. The greatest boundary not exceeding the
+  requested instant wins, with newest `id` breaking ties. Before the first
+  era there is no override, and the upstream row remains readable.
+- A removed key gets one tombstone with a `tombstone_reason`, no claim,
+  replacement, quote, notes or review date. CHECK constraints reject partial
+  claims and malformed tombstones. Claims and tombstones share one fenced
+  INSERT; no existing row is edited or deleted.
+- A failed boot write is logged and non-fatal. Historical reads retain the
+  last stored claims; current reads are unaffected.
+
 ## 8. What is not stored
 
 On upstream rows, `model.name` and `provider.name` are stored per model as ordinary
@@ -371,8 +403,8 @@ force at that instant), or sourced in curation for a provider absent upstream.
   `route::billing_plane_tests::plane_views_never_change_stored_rows_or_catalog_version`
   in `crates/fusiform-module/src/route.rs`). A point-in-time read therefore
   replays what the upstream published, not a rule fusiform holds today. The
-  one curated addition to a point-in-time read is a curated model row, served
-  from `curated_model_era` as it stood at that instant (§7a).
+  curated additions to a point-in-time read are curated model rows (§7a) and
+  guarded fact overrides (§7c), each served from its stored history.
 - The currency provenance of a rate is attached when it is served, not stored
   (`served_vocabulary::a_stored_rate_carries_no_annotation_fusiform_invented`).
 - Request header/body overrides and experimental mode selectors are never

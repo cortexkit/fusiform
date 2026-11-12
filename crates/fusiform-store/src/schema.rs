@@ -66,6 +66,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 8,
         statements: SCHEMA_V8,
     },
+    Migration {
+        version: 9,
+        statements: SCHEMA_V9,
+    },
 ];
 
 const SCHEMA_V1: &str = r#"
@@ -572,3 +576,38 @@ SELECT value ->> 'model', value -> 'elo', value -> 'eq', 0, 'operator',
 FROM doc, json_each(body, '$.rows');
 "#
 );
+
+// Overrides are fusiform's claims, not observations of models.dev. Keep their
+// history separate so catalog.history still describes upstream observations.
+const SCHEMA_V9: &str = r#"
+CREATE TABLE fact_override_era (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_id       TEXT NOT NULL,
+    model_id          TEXT NOT NULL,
+    fact_key          TEXT NOT NULL,
+    -- First claim: curation date. Later claims and withdrawals: boot date,
+    -- clamped to the newest boundary, exactly as for curated_model_era.
+    boundary_at_ms    INTEGER NOT NULL,
+    value_json        TEXT,
+    -- SQL NULL represents replaces:null; the fact key determines whether that
+    -- requires an absent fact or a stored null (model.status).
+    replaces_json     TEXT,
+    reason            TEXT,
+    source_ref        TEXT NOT NULL,
+    quote             TEXT,
+    notes             TEXT,
+    established_by    TEXT NOT NULL,
+    established_at_ms INTEGER NOT NULL,
+    review_by_ms      INTEGER,
+    tombstone_reason  TEXT,
+    CHECK ((value_json IS NULL) = (tombstone_reason IS NOT NULL)),
+    CHECK ((value_json IS NULL) = (reason IS NULL)),
+    CHECK ((value_json IS NULL) = (quote IS NULL)),
+    CHECK ((value_json IS NULL) = (review_by_ms IS NULL)),
+    CHECK (value_json IS NOT NULL OR (replaces_json IS NULL AND notes IS NULL))
+) STRICT;
+
+-- Equal boundaries are possible with a clock behind the record; newest id wins.
+CREATE INDEX fact_override_era_key
+    ON fact_override_era (provider_id, model_id, fact_key, boundary_at_ms);
+"#;

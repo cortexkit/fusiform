@@ -39,6 +39,7 @@ const STORE_SOURCES: &[&str] = &[
     "correct.rs",
     "readers.rs",
     "curated.rs",
+    "fact_overrides.rs",
     "quality.rs",
 ];
 const VERSION_HELPER: &str = "advance_catalog_version_in";
@@ -290,6 +291,14 @@ fn planted_unfenced_write_is_reported() {
 }
 
 #[test]
+fn planted_unfenced_fact_override_insert_is_reported() {
+    let text = source("fact_overrides.rs");
+    assert!(unfenced_writes(&text).is_empty());
+    let planted = text.replace("with_conn_fenced(", "with_conn(");
+    assert_eq!(unfenced_writes(&planted).len(), 1);
+}
+
+#[test]
 fn planted_missing_fence_calls_are_reported() {
     assert_eq!(missing_fence_calls("fn idle() {}"), ["with_conn_fenced"]);
 }
@@ -362,6 +371,7 @@ fn no_write_escapes_the_fence() {
     //                                           writes both a curated model
     //                                           row's claim and its tombstone)
     //   INSERT INTO quality_grade_era          (quality.rs: grade or withdrawal)
+    //   INSERT INTO fact_override_era          (fact_overrides.rs: claim or tombstone)
     //
     // ingest.rs, serve.rs and correct.rs issue none: they build plans and read,
     // and every write they cause goes through `append_eras` in lib.rs.
@@ -384,8 +394,8 @@ fn no_write_escapes_the_fence() {
     // list that quietly became wrong, which is worse than no list — a reader
     // checking the guard against three sites concludes it is complete.
     assert_eq!(
-        writes_seen, 9,
-        "the write detector found {writes_seen} write sites; nine are enumerated \
+        writes_seen, 10,
+        "the write detector found {writes_seen} write sites; ten are enumerated \
          above. If you ADDED a write, add it to that list and update this number \
          — the list is how the next reader checks this guard, and a stale list \
          is worse than none. If you added nothing, either WRITE_KEYWORDS has \

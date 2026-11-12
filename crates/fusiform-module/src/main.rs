@@ -252,6 +252,8 @@ impl ModuleHandler for Fusiform {
             ),
         }
 
+        record_fact_overrides_at_start(&store, now_ms());
+
         // Move the catalog version once per start, after the compiled data
         // above is in place. A deploy that changes only compiled data (an alias,
         // a curated row, an override) does not write a poll era, and readers
@@ -295,6 +297,23 @@ impl ModuleHandler for Fusiform {
         // a health reply that queues behind a degraded resource is useless
         // exactly when it is needed.
         health::report(&self.signals, now_ms())
+    }
+}
+
+/// Keep serving if history cannot be written: current reads still use the
+/// compiled file, while historical reads retain the last recorded claims.
+fn record_fact_overrides_at_start(store: &CatalogStore, boot_at_ms: i64) {
+    match fusiform_module::fact_overrides::apply_to_store(
+        store,
+        fusiform_module::fact_overrides::overrides(),
+        boot_at_ms,
+    ) {
+        Ok(0) => {}
+        Ok(n) => eprintln!("fusiform: recorded {n} fact override change(s)"),
+        Err(e) => eprintln!(
+            "fusiform: could not record fact overrides, so point-in-time reads \
+             serve what the store already held; current reads are unaffected: {e}"
+        ),
     }
 }
 
@@ -385,4 +404,45 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod fact_override_boot_tests {
+    use super::*;
+    use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+
+    #[test]
+    fn fact_override_boot_write_failure_is_nonfatal() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.db");
+        let store = CatalogStore::open(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: path.to_string_lossy().into(),
+            },
+        })
+        .unwrap();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER refuse_override BEFORE INSERT ON fact_override_era \
+            BEGIN SELECT RAISE(ABORT, 'override refused'); END;",
+        )
+        .unwrap();
+        // Prove the trigger reached the actual write, rather than testing an
+        // empty diff that could not fail in the first place.
+        assert!(fusiform_module::fact_overrides::apply_to_store(
+            &store,
+            fusiform_module::fact_overrides::overrides(),
+            1_800_000_000_000,
+        )
+        .is_err());
+        record_fact_overrides_at_start(&store, 1_800_000_000_000);
+        assert!(store.fact_overrides_at(i64::MAX, None).unwrap().is_empty());
+        store
+            .advance_catalog_version_at_start(fusiform_core::Timestamp(1_800_000_000_000))
+            .unwrap();
+        assert_eq!(store.catalog_version().unwrap(), 1_800_000_000_000);
+    }
 }
