@@ -644,7 +644,9 @@ ALTER TABLE quality_grade_era_v10 RENAME TO quality_grade_era;
 CREATE INDEX quality_grade_era_key ON quality_grade_era(model, id);
 "#;
 
-// Import once at migration time so reopening cannot overwrite operator changes.
+// Import the operator's decommissioned model ids (decommissioned-v11.json) once,
+// at migration time, so reopening the store never overwrites a later mark or
+// restore the operator set with the live tools.
 const SCHEMA_V11: &str = concat!(
     r#"
 CREATE TABLE model_mark_era (
