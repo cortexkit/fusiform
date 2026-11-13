@@ -147,7 +147,7 @@ fn plane_variants_and_both_disclosures_decode_from_real_served_bytes() {
             }
         }
     }
-    assert_eq!(responses, 23, "every successful plane case must decode");
+    assert_eq!(responses, 25, "every successful plane case must decode");
     assert_eq!(
         gateway, 1,
         "the gateway plane must decode from served bytes"
