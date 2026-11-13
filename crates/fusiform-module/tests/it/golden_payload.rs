@@ -482,6 +482,10 @@ fn render_all() -> String {
         "catalog.get — synthetic operator quality scores".into(),
         render_synthetic_quality_scores(),
     );
+    ordinary.as_object_mut().unwrap().insert(
+        "plan.prices — synthetic concurrency scopes".into(),
+        render_plan_concurrency(),
+    );
     ordinary
         .as_object_mut()
         .unwrap()
@@ -1054,6 +1058,41 @@ fn render_canonical_identity(
     serde_json::json!({"request":request, "response":response})
 }
 
+/// Pin both concurrency scopes without making a claim about any vendor's plan.
+/// The ordinary plan-prices case continues to use only the shipped curation.
+fn render_plan_concurrency() -> serde_json::Value {
+    let (store, _dir) = store();
+    let mut cells = Vec::new();
+    for (tier, scope) in [("shared", "account"), ("per-model", "account_model")] {
+        let mut cap = serde_json::json!({
+            "limit":3, "scope":scope,
+            "source_ref":"https://example.invalid/concurrency",
+            "quote":"Synthetic fixture: three simultaneous requests per account or per model.",
+            "established_at_ms":1000, "review_by_ms":5_184_001_000i64
+        });
+        if scope == "account_model" {
+            cap["per_model"] = serde_json::json!({"synthetic-plans/model-a":2});
+        }
+        cells.push(serde_json::json!({
+            "provider_id":"synthetic-plans", "tier":tier,
+            "price":{"minor_units":2000,"exponent":2,"currency":"USD","period":"month"},
+            "concurrency":cap,
+            "boundary_at_ms":1000, "established_by":"fixture", "established_at_ms":1000,
+            "review_by_ms":5_184_001_000i64, "source_ref":"https://example.invalid/pricing"
+        }));
+    }
+    let _planted =
+        fusiform_module::plan_prices::plant(&serde_json::json!({"cells":cells}).to_string());
+    let rows = fusiform_module::plan_prices::store_rows(fusiform_module::plan_prices::rows());
+    store.append_plan_prices(&rows).unwrap();
+    let request =
+        serde_json::json!({"name":"plan.prices","arguments":{"provider_id":"synthetic-plans"}});
+    let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+    let mut response = serde_json::to_value(response).unwrap();
+    response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+    serde_json::json!({"request":request,"response":response})
+}
+
 fn render_paged() -> serde_json::Value {
     let (store, _dir) = store();
     // The second provider cannot fit with the first. Its large family value
@@ -1150,15 +1189,15 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
     let curated_wire = render_curated_wire();
     let quality_tools = render_quality_tools();
     let media_quality = render_media_quality();
-    // The six single cases rendered outside `cases()`: the first provider page,
+    // The seven single cases rendered outside `cases()`: the first provider page,
     // the seed and synthetic identities, synthetic grades, curated history,
-    // and dated fact overrides.
+    // dated fact overrides, and synthetic plan concurrency.
     for (text, expected) in [
         (
             GOLDEN.to_string(),
             cases().len()
                 + plain_plane_cases
-                + 6
+                + 7
                 + curated_wire.len()
                 + quality_tools.len()
                 + media_quality.len()
@@ -2472,6 +2511,7 @@ fn every_read_response_field_reaches_the_fixture() {
             "StatusResponse",
             "PlanPricesResponse",
             "PlanPriceWire",
+            "ConcurrencyWire",
         ],
     );
 

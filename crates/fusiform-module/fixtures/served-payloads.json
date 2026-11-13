@@ -8847,6 +8847,70 @@
       "unit_policy": "US list price, monthly-billed, web subscription. An operator on an annual term, in another country, or subscribed through an app store pays something else, and this plane cannot see which."
     }
   },
+  "plan.prices — synthetic concurrency scopes": {
+    "request": {
+      "arguments": {
+        "provider_id": "synthetic-plans"
+      },
+      "name": "plan.prices"
+    },
+    "response": {
+      "prices": [
+        {
+          "boundary_at_ms": 1000,
+          "concurrency": {
+            "established_at_ms": 1000,
+            "limit": 3,
+            "per_model": {
+              "synthetic-plans/model-a": 2
+            },
+            "quote": "Synthetic fixture: three simultaneous requests per account or per model.",
+            "review_by_ms": 5184001000,
+            "scope": "account_model",
+            "source_ref": "https://example.invalid/concurrency"
+          },
+          "established_at_ms": 1000,
+          "established_by": "fixture",
+          "price": {
+            "currency": "USD",
+            "exponent": 2,
+            "minor_units": 2000,
+            "period": "month"
+          },
+          "provider_id": "synthetic-plans",
+          "review_by_ms": 5184001000,
+          "source_ref": "https://example.invalid/pricing",
+          "tier": "per-model"
+        },
+        {
+          "boundary_at_ms": 1000,
+          "concurrency": {
+            "established_at_ms": 1000,
+            "limit": 3,
+            "quote": "Synthetic fixture: three simultaneous requests per account or per model.",
+            "review_by_ms": 5184001000,
+            "scope": "account",
+            "source_ref": "https://example.invalid/concurrency"
+          },
+          "established_at_ms": 1000,
+          "established_by": "fixture",
+          "price": {
+            "currency": "USD",
+            "exponent": 2,
+            "minor_units": 2000,
+            "period": "month"
+          },
+          "provider_id": "synthetic-plans",
+          "review_by_ms": 5184001000,
+          "source_ref": "https://example.invalid/pricing",
+          "tier": "shared"
+        }
+      ],
+      "resolved_at_ms": -1,
+      "tier_vocabulary": "The tier is the VENDOR'S OWN TIER NAME, never an API plan string. OpenAI's Pro 100, Pro 200 and Pro 500 are pro_100, pro_200 and pro_500 here. A consumer holding an API string must map it to a tier itself, with knowledge of the account.",
+      "unit_policy": "US list price, monthly-billed, web subscription. An operator on an annual term, in another country, or subscribed through an app store pays something else, and this plane cannot see which."
+    }
+  },
   "quality.grade — chat refuses single grade": {
     "error": {
       "code": "bad_request",
