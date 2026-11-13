@@ -1804,7 +1804,8 @@ pub struct CuratedModelWire {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LoginMethodsWire {
     pub model: String,
-    /// An allowlist, not a preference: a plane read refuses an unlisted method.
+    /// An allowlist, not a preference: a `catalog.get` naming an `auth_method`
+    /// this list omits is refused for this model.
     pub auth_methods: Vec<String>,
     pub source_ref: String,
     pub review_by_ms: i64,
