@@ -20,6 +20,7 @@ pub mod fact_overrides;
 pub mod fetch;
 pub mod health;
 pub mod input_audio;
+pub mod login_methods;
 pub mod loop_;
 pub mod model_lineage;
 pub mod output_audio;

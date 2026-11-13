@@ -45,7 +45,7 @@ impl PagePlan {
             .collect();
         let mut estimate = PageEstimate {
             bytes: self.envelope_bytes,
-            present: [false; 10],
+            present: [false; 11],
             pending_quality_bytes: self.quality_bytes,
         };
         let mut through = None;

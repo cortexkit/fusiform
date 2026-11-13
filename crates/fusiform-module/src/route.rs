@@ -1344,6 +1344,9 @@ fn serve_catalog_get_request(
         response.models.insert(disclosure.model.clone(), facts);
         response.curated.push(disclosure);
     }
+    if at.is_none() {
+        apply_login_methods(&mut response, request.auth_method.as_deref());
+    }
     let mut response = finish_plane_view(
         store,
         source,
@@ -1366,6 +1369,9 @@ fn serve_catalog_get_request(
             .retain(|row| response.models.contains_key(&row.model));
         response
             .aliased
+            .retain(|row| response.models.contains_key(&row.model));
+        response
+            .login_methods
             .retain(|row| response.models.contains_key(&row.model));
     }
     for (provider, model, retired_at_ms, successor) in retired_ids {
@@ -1484,6 +1490,9 @@ fn scope_page(response: &mut CatalogGetResponse, providers: &BTreeSet<String>) {
         .curated
         .retain(|row| providers.contains(model_provider(&row.model)));
     response
+        .login_methods
+        .retain(|row| providers.contains(model_provider(&row.model)));
+    response
         .retired
         .retain(|row| providers.contains(model_provider(&row.model)));
     response
@@ -1533,7 +1542,7 @@ fn page_catalog(
     let pending_quality_bytes = quality_disclosure_size(response.quality_scores.as_ref())?;
     let mut estimate = PageEstimate {
         bytes: compact_size(&response)? - pending_quality_bytes + token_reserve,
-        present: [false; 10],
+        present: [false; 11],
         pending_quality_bytes,
     };
     let mut count = 0;
@@ -1616,11 +1625,13 @@ struct ProviderRows {
     wire_corrections: Vec<fusiform_protocol::WireCorrectionWire>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     fact_overrides: Vec<fusiform_protocol::FactOverrideWire>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    login_methods: Vec<fusiform_protocol::LoginMethodsWire>,
 }
 
 // The empty models object is already in the envelope. Optional array headers
 // appear only once per page; provider payloads supply their interior JSON bytes.
-const DISCLOSURE_HEADERS: [&str; 9] = [
+const DISCLOSURE_HEADERS: [&str; 10] = [
     r#","curated":[]"#,
     r#","withheld":[]"#,
     r#","retired":[]"#,
@@ -1630,19 +1641,20 @@ const DISCLOSURE_HEADERS: [&str; 9] = [
     r#","canonical_links":[]"#,
     r#","wire_corrections":[]"#,
     r#","fact_overrides":[]"#,
+    r#","login_methods":[]"#,
 ];
 
 #[derive(Clone, Copy)]
 struct ProviderContribution {
     bytes: usize,
-    present: [bool; 10],
+    present: [bool; 11],
     has_quality: bool,
 }
 
 #[derive(Clone, Copy)]
 struct PageEstimate {
     bytes: usize,
-    present: [bool; 10],
+    present: [bool; 11],
     pending_quality_bytes: usize,
 }
 
@@ -1687,6 +1699,7 @@ impl ProviderRows {
             !self.canonical_links.is_empty(),
             !self.wire_corrections.is_empty(),
             !self.fact_overrides.is_empty(),
+            !self.login_methods.is_empty(),
         ];
         let headers = DISCLOSURE_HEADERS
             .iter()
@@ -1718,6 +1731,7 @@ impl ProviderRows {
         page.canonical_links.extend(self.canonical_links);
         page.wire_corrections.extend(self.wire_corrections);
         page.fact_overrides.extend(self.fact_overrides);
+        page.login_methods.extend(self.login_methods);
     }
 }
 
@@ -1753,6 +1767,13 @@ fn quality_disclosure_size(
 
 fn partition_providers(response: &mut CatalogGetResponse) -> BTreeMap<String, ProviderRows> {
     let mut providers: BTreeMap<String, ProviderRows> = BTreeMap::new();
+    for row in std::mem::take(&mut response.login_methods) {
+        providers
+            .entry(model_provider(&row.model).to_owned())
+            .or_default()
+            .login_methods
+            .push(row);
+    }
     for (model, facts) in std::mem::take(&mut response.models) {
         providers
             .entry(model_provider(&model).to_owned())
@@ -2728,6 +2749,7 @@ fn render(
         // callers that serve one row's facts under another id.
         aliased: Vec::new(),
         curated: Vec::new(),
+        login_methods: Vec::new(),
         quality_scores: None,
         canonical_links,
         wire_corrections,
@@ -2745,6 +2767,40 @@ fn curated_disclosure(
         auth_methods: row.auth_methods.clone(),
         source_ref: row.source_ref.clone(),
         review_by_ms: row.review_by_ms,
+    }
+}
+
+/// Login evidence follows the upstream identity, never an alias of that row.
+fn apply_login_methods(response: &mut CatalogGetResponse, method: Option<&str>) {
+    for row in crate::login_methods::rows().values() {
+        let id = format!("{}/{}", row.provider_id, row.model_id);
+        if !response.models.contains_key(&id)
+            || response.aliased.iter().any(|alias| alias.model == id)
+            || response.curated.iter().any(|curated| curated.model == id)
+        {
+            continue;
+        }
+        if method.is_some_and(|method| !row.auth_methods.iter().any(|m| m == method)) {
+            response.models.remove(&id);
+            response.canonical_links.retain(|link| link.model != id);
+            response.fact_overrides.retain(|claim| claim.model != id);
+            response
+                .wire_corrections
+                .retain(|claim| claim.provider != row.provider_id || claim.model != row.model_id);
+            response.withheld.retain(|claim| claim.model != id);
+            response.uncertain.retain(|claim| {
+                claim.provider_id != row.provider_id || claim.model_id != row.model_id
+            });
+            continue;
+        }
+        response
+            .login_methods
+            .push(fusiform_protocol::LoginMethodsWire {
+                model: id,
+                auth_methods: row.auth_methods.clone(),
+                source_ref: row.source_ref.clone(),
+                review_by_ms: row.review_by_ms,
+            });
     }
 }
 

@@ -21,6 +21,7 @@ mod health_detail;
 mod http_stub;
 mod input_audio_rates;
 mod live;
+mod login_methods;
 mod manifest_probe;
 mod media_catalog;
 mod mode_rates;

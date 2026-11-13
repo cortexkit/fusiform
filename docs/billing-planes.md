@@ -207,6 +207,14 @@ A plane may carry rules, each stating how one token class bills on that plane.
   (`golden_payload::chatgpt_named_and_bulk_cases_apply_the_plane_before_each_filter`).
 - Curated model rows whose `auth_methods` do not include the selected method
   are not served (see [`curated-data.md`](curated-data.md) §4).
+- Upstream rows with a sourced `login_methods` allowlist also omit the row
+  when the selected method is not listed. The disclosure is current-only,
+  independent of `fact_prefixes`, and has the same member shape as `curated`.
+  Unlisted upstream rows and aliases are unchanged. This serving rule does not
+  assert that unlisted rows accept every subscription login: routing consumers
+  restrict a non-`apikey` method to explicit rows once any row for that provider
+  lists it. Without such a listing, absence still means any; for `apikey`,
+  absence always means any.
 
 The plane fields decode with the protocol crate
 (`wire_types_decode_the_wire::plane_variants_and_both_disclosures_decode_from_real_served_bytes`).

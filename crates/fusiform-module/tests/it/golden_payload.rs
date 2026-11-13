@@ -498,6 +498,10 @@ fn render_all() -> String {
         .as_object_mut()
         .unwrap()
         .extend(render_curated_wire());
+    ordinary
+        .as_object_mut()
+        .unwrap()
+        .extend(render_login_methods());
     ordinary.as_object_mut().unwrap().insert(
         "catalog.get — Realtime audio input from upstream".into(),
         render_realtime_audio(),
@@ -645,6 +649,52 @@ fn temperature_golden_cases_pin_acceptance_correction_and_safe_alias_projection(
         ["models"]["google/antigravity-gemini-3.1-flash-image"];
     assert!(alias.get("capability.temperature").is_none());
     assert!(alias.get("limit.temperature_max").is_none());
+}
+
+fn render_login_methods() -> serde_json::Map<String, serde_json::Value> {
+    let (store, _dir) = super::login_methods::store();
+    let mut cases = serde_json::Map::new();
+    for (label, model, method) in [
+        (
+            "catalog.get — upstream ChatGPT login allowlist",
+            "gpt-6.1-sol",
+            None,
+        ),
+        (
+            "catalog.get — upstream API-key-only login allowlist",
+            "gpt-5.5",
+            None,
+        ),
+        (
+            "catalog.get — upstream login availability not established",
+            "gpt-4o",
+            None,
+        ),
+        (
+            "catalog.get — allowed ChatGPT plane row",
+            "gpt-6.1-sol",
+            Some("chatgpt"),
+        ),
+        (
+            "catalog.get — refused ChatGPT plane row",
+            "gpt-5.5",
+            Some("chatgpt"),
+        ),
+    ] {
+        let mut args = serde_json::json!({"provider_id":"openai", "model_id":model, "fact_prefixes":["rate."]});
+        if let Some(method) = method {
+            args["auth_method"] = serde_json::json!(method);
+        }
+        let request = serde_json::json!({"name":"catalog.get", "arguments":args});
+        let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+        let mut response = serde_json::to_value(response).unwrap();
+        response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+        cases.insert(
+            label.into(),
+            serde_json::json!({"request":request, "response":response}),
+        );
+    }
+    cases
 }
 
 fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
@@ -1260,6 +1310,11 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
     let curated_wire = render_curated_wire();
     let quality_tools = render_quality_tools();
     let media_quality = render_media_quality();
+    let login_methods = render_login_methods();
+    let plain_login_cases = login_methods
+        .values()
+        .filter(|case| case["request"]["arguments"].get("auth_method").is_none())
+        .count();
     // The eight single cases rendered outside `cases()`: the first provider page,
     // the seed and synthetic identities, synthetic grades, curated history,
     // dated fact overrides, Realtime audio input, and synthetic plan concurrency.
@@ -1272,6 +1327,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
                 + curated_wire.len()
                 + quality_tools.len()
                 + media_quality.len()
+                + plain_login_cases
                 + render_cache_lifetimes().len()
                 + render_attachment_limits().len()
                 + render_temperature().len(),
@@ -1279,6 +1335,10 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         (
             serde_json::to_string(&curated_wire).unwrap(),
             curated_wire.len(),
+        ),
+        (
+            serde_json::to_string(&login_methods).unwrap(),
+            plain_login_cases,
         ),
         (
             serde_json::to_string(&quality_tools).unwrap(),

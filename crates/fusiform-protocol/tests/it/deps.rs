@@ -276,6 +276,12 @@ fn every_response_type_round_trips() {
             review_by_ms: 1_797_552_000_000,
         }],
         next_page_token: None,
+        login_methods: vec![LoginMethodsWire {
+            model: "openai/gpt-6.1-sol".into(),
+            auth_methods: vec!["apikey".into(), "chatgpt".into()],
+            source_ref: "https://developers.openai.com/codex/models".into(),
+            review_by_ms: 1_799_712_000_000,
+        }],
         curated: vec![CuratedModelWire {
             model: "meta/muse-wonder-full-1.0".into(),
             auth_methods: vec!["oauth".into()],

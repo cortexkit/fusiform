@@ -615,11 +615,21 @@ pub struct CatalogGetResponse {
     /// curated claim in force at that instant from fusiform's stored curated
     /// history. `auth_methods` is an allowlist: only these login methods may
     /// serve the row. The routing consumer must refuse a credential whose login
-    /// method is not listed. Absence of a row from `curated` means fusiform
-    /// places no login restriction on it. Omitted when empty; an upstream row
+    /// method is not listed. Upstream rows can instead carry a `login_methods`
+    /// disclosure. Omitted when empty; an upstream row
     /// present at the same instant always wins.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub curated: Vec<CuratedModelWire>,
+
+    /// Sourced login allowlists on upstream rows, not curated model facts.
+    /// Current reads only; never stored history or aliases. Members have the
+    /// same shape and allowlist meaning as `curated`. Unlisted rows carry no
+    /// established login claim, rather than an implied denial or permission.
+    /// Routing consumers restrict a non-apikey method to explicitly listing
+    /// rows once any row of that provider lists the method; otherwise absence
+    /// still means any. For apikey, absence always means any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub login_methods: Vec<LoginMethodsWire>,
 
     /// Operator judgments for routing selection, not upstream observations or
     /// request bytes. Present once only when this response serves quality facts;
@@ -1785,6 +1795,16 @@ pub struct CuratedModelWire {
     pub model: String,
     /// An allowlist, not a preference: unlisted credential login methods must
     /// be refused by the routing consumer.
+    pub auth_methods: Vec<String>,
+    pub source_ref: String,
+    pub review_by_ms: i64,
+}
+
+/// Provenance and login restrictions for one upstream provider row.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LoginMethodsWire {
+    pub model: String,
+    /// An allowlist, not a preference: a plane read refuses an unlisted method.
     pub auth_methods: Vec<String>,
     pub source_ref: String,
     pub review_by_ms: i64,

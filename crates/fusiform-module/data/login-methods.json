@@ -1,0 +1,106 @@
+{
+  "schema": "login-methods/v1",
+  "accessed": "2026-11-13",
+  "notes": "OpenAI publishes no exhaustive login allowlist: Codex's models endpoint returns the live list per account. These rows establish only the documented availability or retirement of the named models; unlisted OpenAI rows are not established either way. ChatGPT availability depends on plan, client, workspace controls and rollout, not merely a login. API-key availability follows the upstream API catalog; a ChatGPT retirement does not retire the API row. These current-read allowlists are never stored as observations.",
+  "models": [
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-6.1-sol",
+      "auth_methods": ["apikey", "chatgpt"],
+      "source_ref": "https://developers.openai.com/codex/models",
+      "quote": "On Plus, Pro, Business, Enterprise, and Edu plans, choose GPT-6.1 Sol (`gpt-6.1-sol`) when available.",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-6-luna",
+      "auth_methods": ["apikey", "chatgpt"],
+      "source_ref": "https://developers.openai.com/codex/models",
+      "quote": "On Free and Go plans, choose GPT-6 Luna (`gpt-6-luna`) in the desktop app when available.",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-6-astra",
+      "auth_methods": ["apikey", "chatgpt"],
+      "source_ref": "https://developers.openai.com/codex/models",
+      "quote": "codex -m gpt-6-astra",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-6.1-terra",
+      "auth_methods": ["apikey", "chatgpt"],
+      "source_ref": "https://developers.openai.com/codex/pricing",
+      "quote": "GPT-6.1 Terra is available in Work and Codex on Plus, Pro, Business, Enterprise, and Edu plans. It does not support UAE inference residency. It isn’t available in Chat. Access requires the corresponding surface; Enterprise access also depends on workspace availability and administrator controls. Overall Work and Codex plan limits are unchanged.",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-6-sol",
+      "auth_methods": ["apikey", "chatgpt"],
+      "source_ref": "https://help.openai.com/en/articles/20001275-chatgpt-work-and-codex",
+      "quote": "GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Sol and GPT-6 Luna are models for ChatGPT Work and Codex. They are not available in regular ChatGPT conversations. GPT-6.1 Sol is rolling out for eligible paid plans. Availability depends on your plan, workspace settings and rollout access.",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-5.5",
+      "auth_methods": ["apikey"],
+      "source_ref": "https://developers.openai.com/codex/models",
+      "quote": "Effective October 14, 2026, at noon PDT (19:00 UTC), GPT-5.5 retires from Codex for users signed in with ChatGPT. The OpenAI API and Codex sessions authenticated with an API key aren’t affected.",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-5.4",
+      "auth_methods": ["apikey"],
+      "source_ref": "https://developers.openai.com/codex/models",
+      "quote": "The `gpt-5.4` and `gpt-5.4-mini` models retired from Codex with ChatGPT sign-in on August 31, 2026. Replace `gpt-5.4` with `gpt-6-sol` and `gpt-5.4-mini` with `gpt-6-luna` when available to your plan and client.",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-5.4-mini",
+      "auth_methods": ["apikey"],
+      "source_ref": "https://developers.openai.com/codex/models",
+      "quote": "The `gpt-5.4` and `gpt-5.4-mini` models retired from Codex with ChatGPT sign-in on August 31, 2026. Replace `gpt-5.4` with `gpt-6-sol` and `gpt-5.4-mini` with `gpt-6-luna` when available to your plan and client.",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-5.2",
+      "auth_methods": ["apikey"],
+      "source_ref": "https://developers.openai.com/codex/models",
+      "quote": "The `gpt-5.2` and `gpt-5.3-codex` models are already deprecated in Codex when you sign in with ChatGPT. Update scripts, configuration files, and `codex exec --model` commands that still reference those models.",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-5.3-codex",
+      "auth_methods": ["apikey"],
+      "source_ref": "https://developers.openai.com/codex/models",
+      "quote": "The `gpt-5.2` and `gpt-5.3-codex` models are already deprecated in Codex when you sign in with ChatGPT. Update scripts, configuration files, and `codex exec --model` commands that still reference those models.",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-5.3-codex-spark",
+      "auth_methods": ["apikey"],
+      "source_ref": "https://developers.openai.com/codex/models",
+      "quote": "GPT-5.3-Codex-Spark retired on September 14, 2026, and is no longer available in the ChatGPT desktop app, Codex CLI, or IDE extension.",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
+    }
+  ]
+}

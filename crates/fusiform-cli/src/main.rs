@@ -614,6 +614,7 @@ where
                     catalog_version: _,
                     models,
                     curated,
+                    login_methods,
                     quality_scores,
                     withheld,
                     retired,
@@ -627,6 +628,7 @@ where
                 } = page;
                 merged.models.extend(models);
                 merged.curated.extend(curated);
+                merged.login_methods.extend(login_methods);
                 if quality_scores.is_some() {
                     merged.quality_scores = quality_scores;
                 }
@@ -4044,6 +4046,9 @@ mod paging_tests {
         // corrected or linked row without saying why.
         let mut second = page(2, "b", None);
         second["quality_scores"] = json!({"graded_by":"operator","graded_at_ms":123});
+        second["login_methods"] = json!([{
+            "model":"b/m", "auth_methods":["apikey"], "source_ref":"s", "review_by_ms":2000
+        }]);
         second["models"]["b/m"]["quality.elo"] = json!(1284);
         second["canonical_links"] = json!([{
             "model":"b/m", "canonical_id":"lab/m", "source_ref":"s", "quote":"q",
@@ -4073,6 +4078,11 @@ mod paging_tests {
         assert_eq!(result["models"]["b/m"]["quality.elo"], 1284);
         assert_eq!(result["wire_corrections"][0]["provider"], "b");
         assert_eq!(result["fact_overrides"][0]["model"], "b/m");
+        assert_eq!(result["login_methods"][0]["model"], "b/m");
+        assert_eq!(
+            result["login_methods"][0]["auth_methods"],
+            json!(["apikey"])
+        );
         assert_eq!(result["curated"].as_array().unwrap().len(), 2);
     }
 
