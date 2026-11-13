@@ -218,7 +218,9 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
     for (identity, facts) in audio["models"].as_object().unwrap() {
         if facts.get("limit.audio_tokens_per_second").is_some() {
             let expected = match identity.as_str() {
-                "google/gemini-3.8-flash" | "google/antigravity-gemini-3.8-flash" => 25,
+                "google/gemini-3.8-flash"
+                | "google/antigravity-gemini-3.8-flash"
+                | "google/gemini-3.5-transcribe-live" => 25,
                 _ => 32,
             };
             assert_eq!(
