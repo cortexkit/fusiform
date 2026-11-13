@@ -14,11 +14,11 @@ in `crates/fusiform-store/tests/it/history.rs`.
 
 Tables, as shipped: `observation`, `era`, `catalog_version`,
 `observation_artifact_event`, `plan_price_era`, `curated_model_era`,
-`quality_grade_era`, `fact_override_era`, `cortexkit_schema_version`,
+`quality_grade_era`, `model_mark_era`, `fact_override_era`, `cortexkit_schema_version`,
 `cortexkit_fence`.
 
 - `observation`, `era`, `catalog_version`, `observation_artifact_event`,
-  `plan_price_era`, `curated_model_era`, `quality_grade_era` and
+  `plan_price_era`, `curated_model_era`, `quality_grade_era`, `model_mark_era` and
   `fact_override_era` are fusiform's own, created by the migration chain in
   `crates/fusiform-store/src/schema.rs` under the namespace `catalog`.
 - `cortexkit_schema_version` belongs to the store crate and records which
@@ -46,11 +46,12 @@ does not create.
 | 8 | `quality_grade_era`, with a one-time import of the frozen grade snapshot |
 | 9 | `fact_override_era`, dated history of guarded fact overrides |
 | 10 | `quality_grade_era.grade`, with an exclusive chat-pair or non-chat-number CHECK |
+| 11 | `model_mark_era`, with a one-time import of 107 operator decommissioned keys |
 
 A store whose recorded schema version is newer than the running binary's chain
 is refused at open, and the error names the store's version
 (`schema_doc::a_store_written_by_a_newer_binary_is_refused`). Migrations 4, 6,
-7, 8, 9 and 10 are tested against stores that already hold rows
+7, 8, 9, 10 and 11 are tested against stores that already hold rows
 (`schema_doc::the_artifact_table_arrives_on_a_populated_store`,
 `schema_doc::the_plan_price_table_arrives_on_a_populated_store`,
 `schema_doc::the_curated_model_table_arrives_on_a_populated_store`,
@@ -369,6 +370,30 @@ Writes and serving select the dimensions by the row's served `model.type`:
 absent or `chat` uses the chat pair; a set non-chat type uses `grade`. All three
 numbers must be finite and positive. A non-chat grade is comparable only within
 the same `model.type`, with higher values better. No non-chat grades are seeded.
+
+### Operator decommission marks
+
+`model_mark_era` is a STRICT, append-only table with `id` (integer primary key),
+`model`, `decommissioned` (INTEGER constrained to 0 or 1), `marked_by`, `reason`,
+and `recorded_at_ms`. The `(model, id)` index supports newest-insertion-wins
+current reads and full per-key history, independently of clock order.
+Migration v11 imports the 107 keys in the frozen `decommissioned-v11.json` once,
+at 1794564000000 (2026-11-13 19:20 UTC), the operator's read time for the grades
+sheet's DECOMISSIONED column. The snapshot records the source sheet's filename.
+Reopening never reapplies the import.
+`schema_doc::decommission_v11_import_on_populated_v10_and_reopen` verifies the
+populated-store migration, retained history, constraints, and older-binary refusal.
+
+Live decommission and restore operations append through the writer fence and
+advance `catalog_version` in the same transaction using `advance_catalog_version_in`,
+the shared helper also used by grades.
+Previews do neither. The newest row with `decommissioned = 1` serves
+`quality.decommissioned: true` on all rows sharing the key; a newest 0 removes
+the fact without deleting history. The key is the served canonical id, falling
+back to the row id exactly as grades do. Point-in-time catalog reads omit marks.
+Current facts share the `quality_scores` attribution, whose time includes marks.
+The latest mark id also participates in the page-plan cache key.
+`quality.marks` lists current decommissioned keys, or one key's full history.
 
 ## 7c. Fact override history
 

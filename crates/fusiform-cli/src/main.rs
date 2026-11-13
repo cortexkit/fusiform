@@ -82,6 +82,11 @@ commands:
   withdraw-grade <model> --reason TEXT [--commit]
                             withdraw a grade, retaining its history
   grades [--model <key>]     current grades, or one key's full history
+  decommission <model> --reason TEXT [--commit]
+                            veto routing (previews by default)
+  restore <model> --reason TEXT [--commit]
+                            remove the routing veto, retaining history
+  marks [--model <key>]      decommissioned keys, or one key's mark history
 
 options:
   --provider <id>           narrow to one provider
@@ -302,11 +307,11 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
     }
 
     match args.command.as_str() {
-        "grade" | "withdraw-grade" => {
+        "grade" | "withdraw-grade" | "decommission" | "restore" => {
             let model = args
                 .model
                 .as_ref()
-                .ok_or("grade and withdraw-grade need a model key")?;
+                .ok_or("grade, withdraw-grade, decommission and restore need a model key")?;
             let reason = args
                 .reason
                 .as_ref()
@@ -328,11 +333,23 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
                 }
                 Ok((fusiform_protocol::TOOL_QUALITY_GRADE, body))
             } else {
-                Ok((fusiform_protocol::TOOL_QUALITY_WITHDRAW, body))
+                let tool = match args.command.as_str() {
+                    "decommission" => fusiform_protocol::TOOL_QUALITY_DECOMMISSION,
+                    "restore" => fusiform_protocol::TOOL_QUALITY_RESTORE,
+                    _ => fusiform_protocol::TOOL_QUALITY_WITHDRAW,
+                };
+                Ok((tool, body))
             }
         }
         "grades" => Ok((
             fusiform_protocol::TOOL_QUALITY_GRADES,
+            args.model.as_ref().map_or_else(
+                || serde_json::json!({}),
+                |model| serde_json::json!({"model":model}),
+            ),
+        )),
+        "marks" => Ok((
+            fusiform_protocol::TOOL_QUALITY_MARKS,
             args.model.as_ref().map_or_else(
                 || serde_json::json!({}),
                 |model| serde_json::json!({"model":model}),
@@ -507,7 +524,9 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
         "plan-prices" => print!("{}", render_plan_prices(&response)),
         "mark-artifact" => print_mark(&response),
         "retract-artifact" => print_retraction(&response),
-        "grade" | "withdraw-grade" | "grades" => print!("{}", render_grades(&response)),
+        "grade" | "withdraw-grade" | "grades" | "decommission" | "restore" | "marks" => {
+            print!("{}", render_grades(&response))
+        }
         _ => unreachable!("the command was validated above"),
     }
     Ok(())
@@ -1721,7 +1740,10 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
             "--json" => args.json = true,
             model
                 if !model.starts_with('-')
-                    && matches!(args.command.as_str(), "grade" | "withdraw-grade")
+                    && matches!(
+                        args.command.as_str(),
+                        "grade" | "withdraw-grade" | "decommission" | "restore"
+                    )
                     && args.model.is_none() =>
             {
                 args.model = Some(model.to_string())
@@ -2153,6 +2175,20 @@ fn render_grades(response: &serde_json::Value) -> String {
             "Current: {}\nNew: {}\n",
             response["current"], response["new"]
         ));
+    } else if let Some(rows) = response["marks"].as_array() {
+        for row in rows {
+            out.push_str(&format!(
+                "{}  decommissioned={}  {}  {}: {}\n",
+                row["model"].as_str().unwrap_or("?"),
+                row["decommissioned"],
+                format_instant(row["recorded_at_ms"].as_i64().unwrap_or(0)),
+                row["marked_by"].as_str().unwrap_or("?"),
+                row["reason"].as_str().unwrap_or("?")
+            ));
+        }
+        if rows.is_empty() {
+            out.push_str("No current decommissioned keys.\n");
+        }
     } else if let Some(rows) = response["grades"].as_array() {
         for row in rows {
             let dimensions = row
@@ -2185,6 +2221,50 @@ fn render_grades(response: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn decommission_cli_preview_commit_and_listing() {
+        use super::*;
+        for command in ["decommission", "restore"] {
+            for commit in [false, true] {
+                let mut argv = vec![
+                    "ck-fusiform",
+                    command,
+                    "openai/gpt-4.1",
+                    "--reason",
+                    "evaluation",
+                ];
+                if commit {
+                    argv.push("--commit");
+                }
+                let args = parse_args(argv.into_iter().map(OsString::from)).unwrap();
+                let (tool, body) = request_for(&args).unwrap();
+                assert_eq!(tool, format!("quality.{command}"));
+                assert_eq!(
+                    body,
+                    serde_json::json!({"model":"openai/gpt-4.1","reason":"evaluation","dry_run":!commit})
+                );
+                assert!(USAGE.contains(&format!("{command} <model> --reason TEXT [--commit]")));
+            }
+        }
+        let args = parse_args(
+            ["ck-fusiform", "marks", "--model", "openai/gpt-4.1"]
+                .into_iter()
+                .map(OsString::from),
+        )
+        .unwrap();
+        assert_eq!(
+            request_for(&args).unwrap(),
+            (
+                "quality.marks",
+                serde_json::json!({"model":"openai/gpt-4.1"})
+            )
+        );
+        let text = render_grades(
+            &serde_json::json!({"marks":[{"model":"openai/gpt-4.1","decommissioned":true,"marked_by":"operator","recorded_at_ms":123,"reason":"retired"}]}),
+        );
+        assert!(text.contains("openai/gpt-4.1  decommissioned=true") && text.contains("retired"));
+    }
+
     #[test]
     fn quality_grade_commands_preview_commit_and_exact_numbers() {
         let parse =

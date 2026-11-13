@@ -5,6 +5,238 @@ use fusiform_store::NewEra;
 use serde_json::{json, Value};
 
 #[test]
+fn decommission_embedded_seed_served_row_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("seed.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    crate::seed::seed_if_empty(&store).unwrap();
+    let response = serve_catalog_get_with_limits(&store, b"{}", usize::MAX, usize::MAX).unwrap();
+    let marked: Vec<_> = response
+        .models
+        .iter()
+        .filter(|(_, facts)| facts.get("quality.decommissioned") == Some(&json!(true)))
+        .collect();
+    assert!(marked.len() >= 107);
+    assert_eq!(
+        response.models["openai/gpt-4.1"]["quality.decommissioned"],
+        true
+    );
+    assert!(marked
+        .iter()
+        .any(|(id, facts)| id.as_str() != "openai/gpt-4.1"
+            && facts.get("model.canonical_id") == Some(&json!("openai/gpt-4.1"))));
+    println!(
+        "embedded seed: {} served rows carry quality.decommissioned out of {} rows",
+        marked.len(),
+        response.models.len()
+    );
+}
+
+#[test]
+fn decommission_import_serves_canonical_and_reseller_but_not_unmarked() {
+    let (store, _dir) = fixture(true);
+    assert_eq!(store.model_marks().unwrap().len(), 107);
+    for provider in ["openai", "reseller"] {
+        store
+            .append_eras(&[
+                NewEra {
+                    source: SourceId::ModelsDev,
+                    provider_id: provider.into(),
+                    model_id: "gpt-4.1".into(),
+                    fact_key: FactKey::existence(),
+                    value_json: json!("present").to_string(),
+                    boundary_at: Timestamp(1000),
+                    boundary_kind: BoundaryKind::Seed,
+                    observation_id: None,
+                },
+                NewEra {
+                    source: SourceId::ModelsDev,
+                    provider_id: provider.into(),
+                    model_id: "gpt-4.1".into(),
+                    fact_key: FactKey::from_stored("model.canonical_id".into()),
+                    value_json: json!("openai/gpt-4.1").to_string(),
+                    boundary_at: Timestamp(1000),
+                    boundary_kind: BoundaryKind::Seed,
+                    observation_id: None,
+                },
+            ])
+            .unwrap();
+    }
+    for query in [
+        json!({}),
+        json!({"provider_id":"reseller"}),
+        json!({"paged":true}),
+    ] {
+        let response = get(&store, query);
+        assert_eq!(
+            response.models["reseller/gpt-4.1"]["quality.decommissioned"],
+            true
+        );
+        assert!(!response.models["reseller/shared"].contains_key("quality.decommissioned"));
+        assert_eq!(response.quality_scores.unwrap().graded_at_ms, 1794564000000);
+    }
+    assert_eq!(
+        get(&store, json!({})).models["openai/gpt-4.1"]["quality.decommissioned"],
+        true
+    );
+    let past = get(&store, json!({"at_ms":1000}));
+    assert!(!past.models["reseller/gpt-4.1"].contains_key("quality.decommissioned"));
+    assert!(past.quality_scores.is_none());
+    store
+        .append_quality_grade(
+            "openai/gpt-4.1",
+            Some(&fusiform_store::QualityGrade::Chat {
+                elo: serde_json::from_str("1200").unwrap(),
+                eq: serde_json::from_str("1300").unwrap(),
+            }),
+            "operator",
+            "evaluation",
+            123,
+        )
+        .unwrap();
+    let filtered = get(
+        &store,
+        json!({"provider_id":"reseller", "model_id":"gpt-4.1", "fact_prefixes":["quality.elo"]}),
+    );
+    assert!(!filtered.models["reseller/gpt-4.1"].contains_key("quality.decommissioned"));
+    assert_eq!(filtered.quality_scores.unwrap().graded_at_ms, 123);
+}
+
+#[test]
+fn decommission_preview_commit_restore_and_cached_pages() {
+    let (store, _dir) = fixture(true);
+    let call = |name: &str, arguments: Value| {
+        serde_json::to_value(
+            serve_tool_call(
+                &store,
+                &serde_json::to_vec(&json!({"name":name,"arguments":arguments})).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let version = store.catalog_version().unwrap();
+    assert_eq!(
+        call("quality.marks", json!({}))["marks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        107
+    );
+    let before = WholeCatalogKey::new(
+        &store,
+        &CatalogGetRequest::default(),
+        SourceId::ModelsDev,
+        REPLY_FRAME_LIMIT_BYTES,
+    )
+    .unwrap();
+    assert!(
+        !get(&store, json!({"paged":true})).models["reseller/shared"]
+            .contains_key("quality.decommissioned")
+    );
+    let preview = call(
+        "quality.decommission",
+        json!({"model":"lab/shared","reason":"retired"}),
+    );
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(preview["affected_count"], 3);
+    assert_eq!(store.catalog_version().unwrap(), version);
+    assert!(store.model_mark_history("lab/shared").unwrap().is_empty());
+    assert!(
+        !get(&store, json!({})).models["reseller/shared"].contains_key("quality.decommissioned")
+    );
+    call(
+        "quality.decommission",
+        json!({"model":"lab/shared","reason":"retired","dry_run":false}),
+    );
+    assert!(store.catalog_version().unwrap() > version);
+    let after = WholeCatalogKey::new(
+        &store,
+        &CatalogGetRequest::default(),
+        SourceId::ModelsDev,
+        REPLY_FRAME_LIMIT_BYTES,
+    )
+    .unwrap();
+    assert!(before != after);
+    for query in [
+        json!({}),
+        json!({"provider_id":"reseller"}),
+        json!({"provider_id":"reseller","model_id":"shared"}),
+        json!({"paged":true}),
+    ] {
+        let response = get(&store, query);
+        assert_eq!(
+            response.models["reseller/shared"]["quality.decommissioned"],
+            true
+        );
+        assert!(response.quality_scores.is_some());
+    }
+    assert!(
+        !get(&store, json!({"at_ms":1000})).models["reseller/shared"]
+            .contains_key("quality.decommissioned")
+    );
+    assert!(get(&store, json!({"fact_prefixes":["model."]}))
+        .quality_scores
+        .is_none());
+    let marked_version = store.catalog_version().unwrap();
+    call(
+        "quality.restore",
+        json!({"model":"lab/shared","reason":"reinstated"}),
+    );
+    assert_eq!(store.catalog_version().unwrap(), marked_version);
+    assert_eq!(
+        get(&store, json!({})).models["reseller/shared"]["quality.decommissioned"],
+        true
+    );
+    call(
+        "quality.restore",
+        json!({"model":"lab/shared","reason":"reinstated","dry_run":false}),
+    );
+    assert!(store.catalog_version().unwrap() > marked_version);
+    assert!(
+        !get(&store, json!({"paged":true})).models["reseller/shared"]
+            .contains_key("quality.decommissioned")
+    );
+    let history = call("quality.marks", json!({"model":"lab/shared"}));
+    assert_eq!(history["marks"].as_array().unwrap().len(), 2);
+    assert_eq!(history["marks"][0]["decommissioned"], false);
+    assert_eq!(history["marks"][1]["decommissioned"], true);
+    assert!(!call("quality.marks", json!({}))["marks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m["model"] == "lab/shared"));
+    call(
+        "quality.decommission",
+        json!({"model":"reseller/own","reason":"row key","dry_run":false}),
+    );
+    assert_eq!(
+        get(&store, json!({})).models["reseller/own"]["quality.decommissioned"],
+        true
+    );
+    for tool in ["quality.decommission", "quality.restore"] {
+        let error = serve_tool_call(&store, &serde_json::to_vec(&json!({"name":tool,"arguments":{"model":"missing/model","reason":"unknown","dry_run":false}})).unwrap()).unwrap_err();
+        assert_eq!(error.code, "bad_request");
+        let error = serve_tool_call(
+            &store,
+            &serde_json::to_vec(
+                &json!({"name":tool,"arguments":{"model":"lab/shared","reason":"  "}}),
+            )
+            .unwrap(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "bad_request");
+    }
+}
+
+#[test]
 fn quality_grade_commit_refreshes_named_provider_and_cached_pages() {
     let (store, _dir) = fixture(true);
     let status_version = || serve_status(&store, b"{}").unwrap().catalog_version;

@@ -150,8 +150,8 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             .filter(|row| row.replaces.is_null())
             .map(|row| row.fact_key.clone()),
     );
-    // Grades are intentionally empty in the shipped file. Exercise the actual
-    // serving path with fixture grades rather than promising unproduced keys.
+    // Quality facts join operator history, so normalized upstream fixtures
+    // alone cannot demonstrate them. Exercise their actual serving path.
     let quality = super::golden_payload::render_synthetic_quality_scores();
     curated.extend(
         quality["response"]["models"]
@@ -168,7 +168,8 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             }),
     );
     let media = super::golden_payload::render_media_quality();
-    for case in media.values() {
+    let marks = super::golden_payload::render_quality_tools();
+    for case in media.values().chain(marks.values()) {
         if let Some(models) = case["response"]["models"].as_object() {
             curated.extend(models.values().flat_map(|facts| {
                 facts
@@ -365,7 +366,12 @@ pub(crate) const ADDITION_ONLY: &[&str] = &[
 ];
 
 /// Operator judgments are joined at read time, never inferred from upstream.
-const QUALITY_ONLY: &[&str] = &["quality.elo", "quality.eq", "quality.grade"];
+const QUALITY_ONLY: &[&str] = &[
+    "quality.elo",
+    "quality.eq",
+    "quality.grade",
+    "quality.decommissioned",
+];
 
 /// `catalog.get` computes `model.lineage` on current reads, never the normalizer.
 const LINEAGE_ONLY: &[&str] = &["model.lineage"];

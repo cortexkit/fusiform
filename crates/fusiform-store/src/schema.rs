@@ -74,6 +74,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 10,
         statements: SCHEMA_V10,
     },
+    Migration {
+        version: 11,
+        statements: SCHEMA_V11,
+    },
 ];
 
 const SCHEMA_V1: &str = r#"
@@ -639,3 +643,26 @@ DROP TABLE quality_grade_era;
 ALTER TABLE quality_grade_era_v10 RENAME TO quality_grade_era;
 CREATE INDEX quality_grade_era_key ON quality_grade_era(model, id);
 "#;
+
+// Import once at migration time so reopening cannot overwrite operator changes.
+const SCHEMA_V11: &str = concat!(
+    r#"
+CREATE TABLE model_mark_era (
+    id             INTEGER PRIMARY KEY,
+    model          TEXT NOT NULL,
+    decommissioned INTEGER NOT NULL CHECK (decommissioned IN (0, 1)),
+    marked_by      TEXT NOT NULL,
+    reason         TEXT NOT NULL,
+    recorded_at_ms INTEGER NOT NULL
+) STRICT;
+CREATE INDEX model_mark_era_key ON model_mark_era(model, id);
+WITH doc(body) AS (VALUES ('"#,
+    include_str!("decommissioned-v11.json"),
+    r#"'))
+INSERT INTO model_mark_era (model, decommissioned, marked_by, reason, recorded_at_ms)
+SELECT value, 1, 'operator',
+       'One-time import of the operator''s grades sheet, DECOMISSIONED column',
+       1794564000000
+FROM doc, json_each(body, '$.ids');
+"#
+);

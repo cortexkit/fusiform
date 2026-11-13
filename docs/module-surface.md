@@ -17,7 +17,8 @@ Integration test names below are libtest paths in the module crate's
 
 Tools, as served: `catalog.get`, `catalog.history`, `catalog.status`,
 `catalog.correct`, `catalog.mark_artifact`, `catalog.retract_artifact`,
-`plan.prices`, `quality.grade`, `quality.withdraw`, `quality.grades`.
+`plan.prices`, `quality.grade`, `quality.withdraw`, `quality.grades`,
+`quality.decommission`, `quality.restore`, `quality.marks`.
 
 | Tool | Execution mode | What it does |
 | --- | --- | --- |
@@ -31,6 +32,9 @@ Tools, as served: `catalog.get`, `catalog.history`, `catalog.status`,
 | `quality.grade` | mutating | preview or commit live operator ELO and EQ grades |
 | `quality.withdraw` | mutating | preview or commit a grade withdrawal, retaining history |
 | `quality.grades` | pure | current grades, or one key's full history newest first |
+| `quality.decommission` | mutating | preview or commit an operator routing veto |
+| `quality.restore` | mutating | preview or commit removal of a routing veto, retaining history |
+| `quality.marks` | pure | current decommissioned keys, or one key's mark history newest first |
 
 Tests check that the list above names exactly the tools in the protocol
 crate's `TOOLS` constant

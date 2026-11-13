@@ -248,7 +248,8 @@ fn version_helper_callers_are_all_named_and_fenced() {
         BTreeSet::from([
             "lib.rs:advance_catalog_version".into(),
             "lib.rs:advance_catalog_version_at_start".into(),
-            "quality.rs:append_quality_grade".into()
+            "quality.rs:append_quality_grade".into(),
+            "quality.rs:append_model_mark".into()
         ])
     );
 }
@@ -318,7 +319,7 @@ fn planted_reopened_migration_handle_is_reported() {
 fn no_write_escapes_the_fence() {
     // Every file that can issue SQL against the store. `schema.rs` is excluded
     // deliberately and checked separately below.
-    // Its v8 quality_grade_era import INSERT runs through the retained migration
+    // Its grade and mark import INSERTs run through the retained migration
     // handle, not a live write API; the migration-handle control covers it.
     let mut writes_seen = 0usize;
 
@@ -357,7 +358,7 @@ fn no_write_escapes_the_fence() {
     //
     // The count is MEASURED and EXACT, and the enumeration is here so the next
     // reader can check it rather than trust it. All with their SQL keyword
-    // straddling a `\` continuation; all in lib.rs except the last:
+    // in lib.rs unless a different file is named:
     //
     //   INSERT INTO observation
     //   INSERT INTO era
@@ -371,6 +372,7 @@ fn no_write_escapes_the_fence() {
     //                                           writes both a curated model
     //                                           row's claim and its tombstone)
     //   INSERT INTO quality_grade_era          (quality.rs: grade or withdrawal)
+    //   INSERT INTO model_mark_era             (quality.rs: decommission or restore)
     //   INSERT INTO fact_override_era          (fact_overrides.rs: claim or tombstone)
     //
     // ingest.rs, serve.rs and correct.rs issue none: they build plans and read,
@@ -394,8 +396,8 @@ fn no_write_escapes_the_fence() {
     // list that quietly became wrong, which is worse than no list — a reader
     // checking the guard against three sites concludes it is complete.
     assert_eq!(
-        writes_seen, 10,
-        "the write detector found {writes_seen} write sites; ten are enumerated \
+        writes_seen, 11,
+        "the write detector found {writes_seen} write sites; eleven are enumerated \
          above. If you ADDED a write, add it to that list and update this number \
          — the list is how the next reader checks this guard, and a stale list \
          is worse than none. If you added nothing, either WRITE_KEYWORDS has \

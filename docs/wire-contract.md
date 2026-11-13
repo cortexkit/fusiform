@@ -26,7 +26,8 @@ A call is a JSON object `{"name": "<tool>", "arguments": {...}}`
    serves one surface and no presets
    (`scope_and_preset::a_named_preset_is_refused_and_an_absent_one_is_served`).
 4. The requests for `catalog.get`, `catalog.history`, `catalog.status` and
-   `catalog.correct`, `quality.grade`, `quality.withdraw` and `quality.grades`
+   `catalog.correct`, `quality.grade`, `quality.withdraw`, `quality.grades`,
+   `quality.decommission`, `quality.restore` and `quality.marks`
    are declared to reject unknown fields, so a misspelled
    field is an error rather than a silently different answer. The test covers
    `catalog.get` (`route::a_malformed_request_is_refused_rather_than_defaulted`).
@@ -919,6 +920,38 @@ kind of judgment.
 With a key it returns that key's full history newest first, withdrawals
 included; no history refuses `no_coverage`. Request and response types live in
 `fusiform-protocol`.
+
+#### Operator routing veto
+
+`quality.decommissioned: true` is an operator judgment: **routing must never
+select a row carrying it**. The fact is absent, never false, when the newest
+mark for the key is a restoration or no mark exists. Like grades, it joins on
+the row's served `model.canonical_id`, falling back to its own row key; reseller
+rows sharing that canonical id receive the same veto. Alias rows without a
+served canonical identity are excluded exactly as for grades.
+Only current reads serve marks. `at_ms` omits them. The existing `quality_scores`
+disclosure attributes grades and marks to the operator, with `graded_at_ms` the
+newest recording time among the quality records actually served. Filtering and
+paging omit the disclosure when no quality facts survive.
+
+`quality.decommission {model, reason, dry_run?: true}` and
+`quality.restore {model, reason, dry_run?: true}` are Mutating, preview-by-default
+tools. Unknown served keys and empty reasons refuse `bad_request`.
+Only `dry_run: false` appends an era and advances `catalog_version` atomically;
+previews write nothing. Both responses have `dry_run`, `model`, `current` (last
+mark or null), `new`, `affected_count`, and `affected_ids` (at most ten row ids
+in lexical order). Mark records contain `model`, `decommissioned` (boolean),
+`marked_by`, `reason`, and `recorded_at_ms`. Repeated marks and restorations
+remain in the append-only history.
+
+`quality.marks {model?: key}` is Pure. Without a key, `{marks: [...]}` lists
+current decommissioned keys ordered by key. With a key it returns full history,
+newest first, including restorations; no history refuses `no_coverage`.
+`quality.grades` remains unchanged.
+
+CLI equivalents are `ck models decommission <model> --reason TEXT [--commit]`,
+`ck models restore <model> --reason TEXT [--commit]`, and
+`ck models marks [--model <key>]`. Writes preview unless `--commit` is supplied.
 
 ### 5.10 Model lineage
 

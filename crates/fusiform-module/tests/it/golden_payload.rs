@@ -913,7 +913,7 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
     serde_json::json!({"request":request, "response":response})
 }
 
-fn render_quality_tools() -> serde_json::Map<String, serde_json::Value> {
+pub(super) fn render_quality_tools() -> serde_json::Map<String, serde_json::Value> {
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -945,6 +945,18 @@ fn render_quality_tools() -> serde_json::Map<String, serde_json::Value> {
         }])
         .unwrap();
     let mut cases = serde_json::Map::new();
+    store
+        .append_eras(&[fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "synthetic".into(),
+            model_id: "unmarked".into(),
+            fact_key: fusiform_store::FactKey::existence(),
+            value_json: "\"present\"".into(),
+            boundary_at: Timestamp(1000),
+            boundary_kind: BoundaryKind::Seed,
+            observation_id: None,
+        }])
+        .unwrap();
     for (label, name, arguments) in [
         (
             "quality.grade — preview",
@@ -961,6 +973,26 @@ fn render_quality_tools() -> serde_json::Map<String, serde_json::Value> {
             "quality.grades",
             serde_json::json!({"model":key}),
         ),
+        (
+            "quality.decommission — preview",
+            "quality.decommission",
+            serde_json::json!({"model":key,"reason":"routing veto"}),
+        ),
+        (
+            "quality.decommission — commit",
+            "quality.decommission",
+            serde_json::json!({"model":key,"reason":"routing veto","dry_run":false}),
+        ),
+        (
+            "catalog.get — marked and unmarked rows",
+            "catalog.get",
+            serde_json::json!({"provider_id":"synthetic","fact_prefixes":["existence","quality."]}),
+        ),
+        (
+            "quality.marks — history",
+            "quality.marks",
+            serde_json::json!({"model":key}),
+        ),
     ] {
         let request = serde_json::json!({"name":name,"arguments":arguments});
         let mut response = serde_json::to_value(
@@ -970,8 +1002,26 @@ fn render_quality_tools() -> serde_json::Map<String, serde_json::Value> {
         if response.get("new").is_some() {
             response["new"]["recorded_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
         }
+        if name == "catalog.get" {
+            response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+            response["catalog_version"] = serde_json::json!(NOW_PLACEHOLDER);
+            response["quality_scores"]["graded_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+            assert_eq!(
+                response["models"]["synthetic/model"]["quality.decommissioned"],
+                true
+            );
+            assert!(response["models"]["synthetic/unmarked"]
+                .get("quality.decommissioned")
+                .is_none());
+        }
         if let Some(rows) = response
             .get_mut("grades")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            rows[0]["recorded_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+        }
+        if let Some(rows) = response
+            .get_mut("marks")
             .and_then(serde_json::Value::as_array_mut)
         {
             rows[0]["recorded_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
@@ -2525,6 +2575,9 @@ fn every_read_response_field_reaches_the_fixture() {
             "QualityGradeWire",
             "QualityWriteResponse",
             "QualityGradesResponse",
+            "ModelMarkWire",
+            "QualityMarkWriteResponse",
+            "QualityMarksResponse",
             "CanonicalLinkWire",
             "WireCorrectionWire",
             "FactOverrideWire",

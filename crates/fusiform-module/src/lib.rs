@@ -463,6 +463,36 @@ pub fn manifest() -> ModuleManifest {
                     "additionalProperties":false
                 }),
             },
+            Tool {
+                name: route::TOOL_QUALITY_DECOMMISSION.to_string(),
+                description: Some("Mark a served key unroutable. Previews unless dry_run is false; history is retained.".into()),
+                execution_mode: ExecutionMode::Mutating,
+                schema: serde_json::json!({
+                    "type":"object", "properties": {
+                        "model":{"type":"string"}, "reason":{"type":"string"},
+                        "dry_run":{"type":"boolean", "default":true}
+                    }, "required":["model","reason"], "additionalProperties":false
+                }),
+            },
+            Tool {
+                name: route::TOOL_QUALITY_RESTORE.to_string(),
+                description: Some("Restore a served key to routing eligibility. Previews unless dry_run is false; history is retained.".into()),
+                execution_mode: ExecutionMode::Mutating,
+                schema: serde_json::json!({
+                    "type":"object", "properties": {
+                        "model":{"type":"string"}, "reason":{"type":"string"},
+                        "dry_run":{"type":"boolean", "default":true}
+                    }, "required":["model","reason"], "additionalProperties":false
+                }),
+            },
+            Tool {
+                name: route::TOOL_QUALITY_MARKS.to_string(),
+                description: Some("List current decommissioned keys, or one key's mark history newest first, including restorations.".into()),
+                execution_mode: ExecutionMode::Pure,
+                schema: serde_json::json!({
+                    "type":"object", "properties":{"model":{"type":"string"}}, "additionalProperties":false
+                }),
+            },
         ],
         // EMPTY, and that is a claim rather than an omission.
         //

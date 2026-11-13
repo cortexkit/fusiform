@@ -51,6 +51,7 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "Anthropic",
+          "quality.decommissioned": true,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -126,6 +127,10 @@
         "auth_method": "apikey",
         "kind": "upstream",
         "provider_id": "anthropic"
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794564000000,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -340,6 +345,7 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "OpenAI",
+          "quality.decommissioned": true,
           "quality.elo": 1479,
           "quality.eq": 1555,
           "rate.cache_read": {
@@ -519,7 +525,7 @@
         "provider_id": "openai"
       },
       "quality_scores": {
-        "graded_at_ms": 1794404263242,
+        "graded_at_ms": 1794564000000,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -3853,6 +3859,36 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — marked and unmarked rows": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "existence",
+          "quality."
+        ],
+        "provider_id": "synthetic"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": -1,
+      "models": {
+        "synthetic/model": {
+          "existence": "present",
+          "quality.decommissioned": true
+        },
+        "synthetic/unmarked": {
+          "existence": "present"
+        }
+      },
+      "quality_scores": {
+        "graded_at_ms": -1,
+        "graded_by": "operator"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — meta apikey excludes the curated row": {
     "request": {
       "arguments": {
@@ -4192,6 +4228,7 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "Anthropic",
+          "quality.decommissioned": true,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -4262,6 +4299,10 @@
             "value": "@ai-sdk/anthropic"
           }
         }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794564000000,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -4660,6 +4701,7 @@
           "model.open_weights": true,
           "model.status": null,
           "provider.name": "OpenCode Go",
+          "quality.decommissioned": true,
           "quality.elo": 1703,
           "quality.eq": 1819,
           "rate.cache_read": {
@@ -4713,7 +4755,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794404263242,
+        "graded_at_ms": 1794564000000,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -4770,6 +4812,7 @@
           "model.open_weights": true,
           "model.status": "deprecated",
           "provider.name": "OpenCode Go",
+          "quality.decommissioned": true,
           "quality.elo": 884,
           "quality.eq": 1510,
           "rate.cache_read": {
@@ -4823,7 +4866,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794404263242,
+        "graded_at_ms": 1794564000000,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -5753,6 +5796,7 @@
         }
       ],
       "served_facts": [
+        "quality.decommissioned",
         "quality.elo",
         "quality.eq",
         "quality.grade",
@@ -5862,6 +5906,7 @@
           "model.open_weights": false,
           "model.status": "deprecated",
           "provider.name": "OpenAI",
+          "quality.decommissioned": true,
           "rate.cache_write": {
             "reason": "not_established",
             "state": "unpriced"
@@ -5883,6 +5928,10 @@
         "provider_id": "openai",
         "review_by_ms": 1796515200000,
         "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794564000000,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -6292,6 +6341,7 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "OpenAI",
+          "quality.decommissioned": true,
           "quality.elo": 1479,
           "quality.eq": 1555,
           "rate.cache_read": {
@@ -6426,6 +6476,7 @@
           "model.open_weights": false,
           "model.status": "deprecated",
           "provider.name": "OpenAI",
+          "quality.decommissioned": true,
           "rate.cache_write": {
             "reason": "not_established",
             "state": "unpriced"
@@ -6449,7 +6500,7 @@
         "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
       },
       "quality_scores": {
-        "graded_at_ms": 1794404263242,
+        "graded_at_ms": 1794564000000,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -6822,6 +6873,7 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "OpenAI",
+          "quality.decommissioned": true,
           "quality.elo": 1479,
           "quality.eq": 1555,
           "rate.cache_read": {
@@ -6941,7 +6993,7 @@
         "source_ref": "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses."
       },
       "quality_scores": {
-        "graded_at_ms": 1794404263242,
+        "graded_at_ms": 1794564000000,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -7082,6 +7134,7 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "Anthropic",
+          "quality.decommissioned": true,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -7152,6 +7205,10 @@
             "value": "@ai-sdk/anthropic"
           }
         }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794564000000,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -7320,6 +7377,7 @@
           "model.open_weights": true,
           "model.status": null,
           "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.decommissioned": true,
           "quality.elo": 1703,
           "quality.eq": 1819,
           "rate.cache_read": {
@@ -7430,6 +7488,7 @@
           "model.open_weights": true,
           "model.status": null,
           "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.decommissioned": true,
           "quality.elo": 1703,
           "quality.eq": 1819,
           "rate.cache_read": {
@@ -7540,6 +7599,7 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.decommissioned": true,
           "rate.cache_read": {
             "reason": "no_api_card",
             "state": "unpriced"
@@ -7662,7 +7722,7 @@
         "source_ref": "https://www.kimi.com/code/docs/en/kimi-code/membership.html"
       },
       "quality_scores": {
-        "graded_at_ms": 1794404263242,
+        "graded_at_ms": 1794564000000,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -8026,6 +8086,7 @@
           "model.open_weights": true,
           "model.status": null,
           "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.decommissioned": true,
           "quality.elo": 1703,
           "quality.eq": 1819,
           "rate.cache_read": {
@@ -8084,6 +8145,7 @@
           "model.open_weights": true,
           "model.status": null,
           "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.decommissioned": true,
           "quality.elo": 1703,
           "quality.eq": 1819,
           "rate.cache_read": {
@@ -8142,6 +8204,7 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.decommissioned": true,
           "rate.cache_read": {
             "state": "stated_zero"
           },
@@ -8213,7 +8276,7 @@
         }
       },
       "quality_scores": {
-        "graded_at_ms": 1794404263242,
+        "graded_at_ms": 1794564000000,
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
@@ -8272,6 +8335,7 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "Anthropic",
+          "quality.decommissioned": true,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -8379,6 +8443,10 @@
         "provider_id": "anthropic",
         "review_by_ms": 1796515200000,
         "source_ref": "https://support.anthropic.com/en/articles/9797557"
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794564000000,
+        "graded_by": "operator"
       },
       "resolved_at_ms": -1,
       "source": "models.dev",
@@ -9108,6 +9176,57 @@
       "unit_policy": "US list price, monthly-billed, web subscription. An operator on an annual term, in another country, or subscribed through an app store pays something else, and this plane cannot see which."
     }
   },
+  "quality.decommission — commit": {
+    "request": {
+      "arguments": {
+        "dry_run": false,
+        "model": "synthetic/model",
+        "reason": "routing veto"
+      },
+      "name": "quality.decommission"
+    },
+    "response": {
+      "affected_count": 1,
+      "affected_ids": [
+        "synthetic/model"
+      ],
+      "current": null,
+      "dry_run": false,
+      "model": "synthetic/model",
+      "new": {
+        "decommissioned": true,
+        "marked_by": "operator",
+        "model": "synthetic/model",
+        "reason": "routing veto",
+        "recorded_at_ms": -1
+      }
+    }
+  },
+  "quality.decommission — preview": {
+    "request": {
+      "arguments": {
+        "model": "synthetic/model",
+        "reason": "routing veto"
+      },
+      "name": "quality.decommission"
+    },
+    "response": {
+      "affected_count": 1,
+      "affected_ids": [
+        "synthetic/model"
+      ],
+      "current": null,
+      "dry_run": true,
+      "model": "synthetic/model",
+      "new": {
+        "decommissioned": true,
+        "marked_by": "operator",
+        "model": "synthetic/model",
+        "reason": "routing veto",
+        "recorded_at_ms": -1
+      }
+    }
+  },
   "quality.grade — chat refuses single grade": {
     "error": {
       "code": "bad_request",
@@ -9230,6 +9349,25 @@
           "reason": "initial evaluation",
           "recorded_at_ms": 123,
           "withdrawn": false
+        }
+      ]
+    }
+  },
+  "quality.marks — history": {
+    "request": {
+      "arguments": {
+        "model": "synthetic/model"
+      },
+      "name": "quality.marks"
+    },
+    "response": {
+      "marks": [
+        {
+          "decommissioned": true,
+          "marked_by": "operator",
+          "model": "synthetic/model",
+          "reason": "routing veto",
+          "recorded_at_ms": -1
         }
       ]
     }

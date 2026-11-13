@@ -39,7 +39,7 @@ pub use curated::{
     CuratedModelEra, NewCuratedModel, CURATED_MODELS_FILE, CURATED_MODEL_NOT_SERVED,
 };
 pub use fact_overrides::{FactOverrideEra, NewFactOverride};
-pub use quality::{QualityGrade, QualityGradeEra};
+pub use quality::{ModelMarkEra, QualityGrade, QualityGradeEra};
 
 /// A lease-guarded, migrated catalog store.
 pub struct CatalogStore {

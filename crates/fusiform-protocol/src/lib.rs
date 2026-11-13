@@ -84,6 +84,9 @@ pub const TOOL_CORRECT: &str = "catalog.correct";
 pub const TOOL_QUALITY_GRADE: &str = "quality.grade";
 pub const TOOL_QUALITY_WITHDRAW: &str = "quality.withdraw";
 pub const TOOL_QUALITY_GRADES: &str = "quality.grades";
+pub const TOOL_QUALITY_DECOMMISSION: &str = "quality.decommission";
+pub const TOOL_QUALITY_RESTORE: &str = "quality.restore";
+pub const TOOL_QUALITY_MARKS: &str = "quality.marks";
 
 /// Every tool name, so a dispatch and a manifest cannot disagree about which
 /// tools exist.
@@ -125,6 +128,9 @@ pub const TOOLS: &[&str] = &[
     TOOL_QUALITY_GRADE,
     TOOL_QUALITY_WITHDRAW,
     TOOL_QUALITY_GRADES,
+    TOOL_QUALITY_DECOMMISSION,
+    TOOL_QUALITY_RESTORE,
+    TOOL_QUALITY_MARKS,
 ];
 
 /// Ask what curated subscription prices fusiform holds.
@@ -1089,6 +1095,11 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// runner support and transport quirks. No header/body overrides are served.
 pub const SERVED_FACTS: &[ServedFact] = &[
     ServedFact {
+        key: "quality.decommissioned",
+        class: FactClass::Advisory,
+        note: "operator routing veto: routing must never select a row carrying this fact. True only; absence means not decommissioned. Current reads only, disclosed in quality_scores.",
+    },
+    ServedFact {
         key: "quality.elo",
         class: FactClass::Advisory,
         note: "operator-assigned general quality score for routing selection, not request bytes; current reads only, disclosed in quality_scores.",
@@ -1712,6 +1723,8 @@ pub enum ToolResponse {
     PlanPrices(PlanPricesResponse),
     QualityWrite(QualityWriteResponse),
     QualityGrades(QualityGradesResponse),
+    QualityMarkWrite(QualityMarkWriteResponse),
+    QualityMarks(QualityMarksResponse),
 }
 
 /// A `catalog.history` request: every era for one fact.
@@ -1781,7 +1794,7 @@ pub struct CuratedModelWire {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct QualityScoresWire {
     pub graded_by: String,
-    /// Newest recorded_at_ms among the current grades served in this response.
+    /// Newest recorded_at_ms among the current grades and marks served here.
     pub graded_at_ms: i64,
 }
 
@@ -1865,6 +1878,49 @@ pub struct QualityWriteResponse {
 pub struct QualityGradesResponse {
     /// Current grades ordered by key, or one key's history newest first.
     pub grades: Vec<QualityGradeWire>,
+}
+
+/// Decommission or restore a served key. Both tools preview by default.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QualityMarkRequest {
+    pub model: String,
+    pub reason: String,
+    #[serde(default = "default_true")]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QualityMarksRequest {
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelMarkWire {
+    pub model: String,
+    pub decommissioned: bool,
+    pub marked_by: String,
+    pub reason: String,
+    pub recorded_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QualityMarkWriteResponse {
+    pub dry_run: bool,
+    pub model: String,
+    pub current: Option<ModelMarkWire>,
+    pub new: ModelMarkWire,
+    pub affected_count: usize,
+    /// At most ten reached served row ids, in lexical order.
+    pub affected_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QualityMarksResponse {
+    /// Current decommissioned keys, or one key's history newest first.
+    pub marks: Vec<ModelMarkWire>,
 }
 
 /// Provenance for a curated `model.canonical_id`, not an upstream observation.

@@ -2,10 +2,109 @@
 
 use super::*;
 use fusiform_protocol::{
-    QualityGradeRequest, QualityGradeWire, QualityGradesRequest, QualityGradesResponse,
-    QualityWithdrawRequest, QualityWriteResponse,
+    ModelMarkWire, QualityGradeRequest, QualityGradeWire, QualityGradesRequest,
+    QualityGradesResponse, QualityMarkRequest, QualityMarkWriteResponse, QualityMarksRequest,
+    QualityMarksResponse, QualityWithdrawRequest, QualityWriteResponse,
 };
 use fusiform_store::{QualityGrade, QualityGradeEra};
+
+fn mark_wire(row: fusiform_store::ModelMarkEra) -> ModelMarkWire {
+    ModelMarkWire {
+        model: row.model,
+        decommissioned: row.decommissioned,
+        marked_by: row.marked_by,
+        reason: row.reason,
+        recorded_at_ms: row.recorded_at_ms,
+    }
+}
+
+pub(super) fn marks(store: &CatalogStore, body: &[u8]) -> Result<QualityMarksResponse, RouteError> {
+    let request: QualityMarksRequest = if body.is_empty() {
+        QualityMarksRequest::default()
+    } else {
+        serde_json::from_slice(body)
+            .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?
+    };
+    let rows = if let Some(model) = request.model {
+        let mut history = store
+            .model_mark_history(&model)
+            .map_err(|e| store_error(&e))?;
+        if history.is_empty() {
+            return Err(RouteError {
+                code: "no_coverage",
+                message: format!("no model mark history for {model:?}"),
+            });
+        }
+        history.reverse();
+        history
+    } else {
+        store.model_marks().map_err(|e| store_error(&e))?
+    };
+    Ok(QualityMarksResponse {
+        marks: rows.into_iter().map(mark_wire).collect(),
+    })
+}
+
+pub(super) fn mark(
+    store: &CatalogStore,
+    body: &[u8],
+    decommissioned: bool,
+) -> Result<QualityMarkWriteResponse, RouteError> {
+    let request: QualityMarkRequest = serde_json::from_slice(body)
+        .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?;
+    if request.reason.trim().is_empty() {
+        return Err(RouteError::bad_request("reason must not be empty"));
+    }
+    // Count all served identities, independent of the public reply frame budget.
+    let catalog = serve_catalog_get_with_limits(store, b"{}", usize::MAX, usize::MAX)?;
+    let affected: Vec<_> = catalog
+        .models
+        .iter()
+        .filter_map(|(id, facts)| {
+            let canonical = facts
+                .get("model.canonical_id")
+                .and_then(serde_json::Value::as_str);
+            if canonical.is_none() && catalog.aliased.iter().any(|a| &a.model == id) {
+                return None;
+            }
+            (canonical.unwrap_or(id) == request.model).then(|| id.clone())
+        })
+        .collect();
+    if affected.is_empty() {
+        return Err(RouteError::bad_request(format!("unknown model mark key {:?}; use a canonical model id carried by a current served row, or the provider/model row id when it has no canonical id", request.model)));
+    }
+    let current = store
+        .model_mark_history(&request.model)
+        .map_err(|e| store_error(&e))?
+        .pop()
+        .map(mark_wire);
+    let new = ModelMarkWire {
+        model: request.model.clone(),
+        decommissioned,
+        marked_by: "operator".into(),
+        reason: request.reason.clone(),
+        recorded_at_ms: now_ms(),
+    };
+    if !request.dry_run {
+        store
+            .append_model_mark(
+                &request.model,
+                decommissioned,
+                "operator",
+                &request.reason,
+                new.recorded_at_ms,
+            )
+            .map_err(|e| store_error(&e))?;
+    }
+    Ok(QualityMarkWriteResponse {
+        dry_run: request.dry_run,
+        model: request.model,
+        current,
+        new,
+        affected_count: affected.len(),
+        affected_ids: affected.into_iter().take(10).collect(),
+    })
+}
 
 fn wire(row: QualityGradeEra) -> QualityGradeWire {
     QualityGradeWire {

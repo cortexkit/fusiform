@@ -49,6 +49,27 @@ pub struct QualityGradeEra {
     pub recorded_at_ms: i64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelMarkEra {
+    pub id: i64,
+    pub model: String,
+    pub decommissioned: bool,
+    pub marked_by: String,
+    pub reason: String,
+    pub recorded_at_ms: i64,
+}
+
+fn decode_mark(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelMarkEra> {
+    Ok(ModelMarkEra {
+        id: row.get(0)?,
+        model: row.get(1)?,
+        decommissioned: row.get(2)?,
+        marked_by: row.get(3)?,
+        reason: row.get(4)?,
+        recorded_at_ms: row.get(5)?,
+    })
+}
+
 fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<QualityGradeEra> {
     let elo: Option<String> = row.get(2)?;
     let eq: Option<String> = row.get(3)?;
@@ -78,6 +99,57 @@ fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<QualityGradeEra> {
 }
 
 impl CatalogStore {
+    /// Append an operator mark and publish its catalog version atomically.
+    pub fn append_model_mark(
+        &self,
+        model: &str,
+        decommissioned: bool,
+        marked_by: &str,
+        reason: &str,
+        recorded_at_ms: i64,
+    ) -> Result<i64, CatalogError> {
+        Ok(self.inner.with_conn_fenced(|tx| {
+            tx.execute(
+                "INSERT INTO model_mark_era (model, decommissioned, marked_by, reason, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![model, decommissioned, marked_by, reason, recorded_at_ms],
+            )?;
+            crate::advance_catalog_version_in(tx, None, fusiform_core::Timestamp(recorded_at_ms))?;
+            Ok(tx.last_insert_rowid())
+        })?)
+    }
+
+    /// Current decommissioned keys; a restoration hides the prior mark.
+    pub fn model_marks(&self) -> Result<Vec<ModelMarkEra>, CatalogError> {
+        self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, model, decommissioned, marked_by, reason, recorded_at_ms FROM model_mark_era m \
+                 WHERE decommissioned = 1 AND id = (SELECT MAX(id) FROM model_mark_era WHERE model = m.model) ORDER BY model",
+            )?;
+            let rows = stmt.query_map([], decode_mark)?.collect();
+            rows
+        })
+    }
+
+    /// Full mark history in insertion order, including restorations.
+    pub fn model_mark_history(&self, model: &str) -> Result<Vec<ModelMarkEra>, CatalogError> {
+        self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, model, decommissioned, marked_by, reason, recorded_at_ms FROM model_mark_era WHERE model = ?1 ORDER BY id",
+            )?;
+            let rows = stmt.query_map([model], decode_mark)?.collect();
+            rows
+        })
+    }
+
+    /// Restorations also invalidate cached response packing.
+    pub fn latest_model_mark_id(&self) -> Result<i64, CatalogError> {
+        self.raw_conn(|conn| {
+            conn.query_row("SELECT COALESCE(MAX(id), 0) FROM model_mark_era", [], |r| {
+                r.get(0)
+            })
+        })
+    }
+
     /// Append one judgment or withdrawal. Decimal tokens are TEXT, never REAL.
     pub fn append_quality_grade(
         &self,

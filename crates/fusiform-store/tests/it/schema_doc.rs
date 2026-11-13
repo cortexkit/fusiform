@@ -25,6 +25,118 @@ use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_store::CatalogStore;
 
 #[test]
+fn decommission_v11_import_on_populated_v10_and_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let descriptor = StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("marks.db").to_string_lossy().into(),
+        },
+    };
+    {
+        let old = cortexkit_store::open_sqlite(&descriptor).unwrap();
+        old.migrate(
+            fusiform_store::schema::NAMESPACE,
+            &fusiform_store::schema::MIGRATIONS[..10],
+        )
+        .unwrap();
+        old.with_conn_fenced(|tx| tx.execute_batch(r#"
+            INSERT INTO observation (source, observed_at_ms, outcome) VALUES ('models.dev', 1000, 'changed');
+            INSERT INTO era (source, provider_id, model_id, fact_key, value_json, boundary_at_ms, boundary_kind)
+                VALUES ('models.dev','test','model','existence','"present"',1000,'seed');
+            INSERT INTO quality_grade_era (model, grade, withdrawn, graded_by, reason, recorded_at_ms)
+                VALUES ('test/model','87.500',0,'operator','evaluation',1000);
+        "#)).unwrap();
+    }
+    let watermark;
+    {
+        let store = CatalogStore::open(&descriptor).unwrap();
+        let marks = store.model_marks().unwrap();
+        assert_eq!(marks.len(), 107);
+        let mut expected: Vec<String> = serde_json::from_str::<serde_json::Value>(include_str!(
+            "../../src/decommissioned-v11.json"
+        ))
+        .unwrap()["ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|id| id.as_str().unwrap().to_owned())
+            .collect();
+        expected.sort();
+        assert_eq!(
+            marks.iter().map(|r| r.model.clone()).collect::<Vec<_>>(),
+            expected
+        );
+        for mark in marks {
+            assert!(mark.decommissioned);
+            assert_eq!(mark.marked_by, "operator");
+            assert_eq!(
+                mark.reason,
+                "One-time import of the operator's grades sheet, DECOMISSIONED column"
+            );
+            assert_eq!(mark.recorded_at_ms, 1794564000000);
+        }
+        assert_eq!(store.catalog_version().unwrap(), 0);
+        let conn = rusqlite::Connection::open(dir.path().join("marks.db")).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM observation", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row("SELECT value_json FROM era", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "\"present\""
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT grade FROM quality_grade_era WHERE model='test/model'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "87.500"
+        );
+        store
+            .append_model_mark("openai/gpt-4.1", false, "operator", "restored", 5000)
+            .unwrap();
+        assert_eq!(store.catalog_version().unwrap(), 5000);
+        store
+            .append_model_mark("test/model", true, "operator", "retired", 1)
+            .unwrap();
+        assert_eq!(store.catalog_version().unwrap(), 5001);
+        watermark = store.latest_model_mark_id().unwrap();
+    }
+    let store = CatalogStore::open(&descriptor).unwrap();
+    assert_eq!(store.latest_model_mark_id().unwrap(), watermark);
+    let history = store.model_mark_history("openai/gpt-4.1").unwrap();
+    assert_eq!(history.len(), 2);
+    assert!(history[0].decommissioned && !history[1].decommissioned);
+    assert!(!store
+        .model_marks()
+        .unwrap()
+        .iter()
+        .any(|r| r.model == "openai/gpt-4.1"));
+    drop(store);
+    let old = cortexkit_store::open_sqlite(&descriptor).unwrap();
+    let outcome = old
+        .migrate(
+            fusiform_store::schema::NAMESPACE,
+            &fusiform_store::schema::MIGRATIONS[..10],
+        )
+        .unwrap();
+    assert!(outcome.store_ahead());
+    assert_eq!((outcome.recorded, outcome.chain_max), (11, 10));
+    let conn = rusqlite::Connection::open(dir.path().join("marks.db")).unwrap();
+    for value in ["2", "-1", "'not-a-boolean'"] {
+        assert!(conn.execute(&format!("INSERT INTO model_mark_era (model, decommissioned, marked_by, reason, recorded_at_ms) VALUES ('test/invalid', {value}, 'operator', 'invalid', 1)"), []).is_err());
+    }
+}
+
+#[test]
 fn quality_grade_v8_import_preserves_exact_rows_on_populated_v7() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     for migration in &fusiform_store::schema::MIGRATIONS[..7] {
@@ -174,7 +286,7 @@ fn quality_grade_v8_reopen_never_reimports_and_v7_reports_store_ahead() {
         outcome.store_ahead(),
         "the v7 binary's existing refusal guard must reject a newer store"
     );
-    assert_eq!(outcome.recorded, 10);
+    assert_eq!(outcome.recorded, 11);
     assert_eq!(outcome.chain_max, 7);
 }
 
@@ -261,15 +373,15 @@ fn fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it() {
         outcome.store_ahead(),
         "the existing v8 refusal guard must reject a newer store"
     );
-    assert_eq!((outcome.recorded, outcome.chain_max), (10, 8));
+    assert_eq!((outcome.recorded, outcome.chain_max), (11, 8));
     let outcome = old
         .migrate(
             fusiform_store::schema::NAMESPACE,
             &fusiform_store::schema::MIGRATIONS[..9],
         )
         .unwrap();
-    assert!(outcome.store_ahead(), "v9 must also refuse a v10 store");
-    assert_eq!((outcome.recorded, outcome.chain_max), (10, 9));
+    assert!(outcome.store_ahead(), "v9 must also refuse a newer store");
+    assert_eq!((outcome.recorded, outcome.chain_max), (11, 9));
 }
 
 #[test]

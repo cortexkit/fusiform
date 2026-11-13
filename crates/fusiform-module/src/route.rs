@@ -71,6 +71,7 @@ pub use fusiform_protocol::{
     TOOL_QUALITY_GRADE, TOOL_QUALITY_GRADES, TOOL_QUALITY_WITHDRAW, TOOL_RETRACT_ARTIFACT,
     TOOL_STATUS,
 };
+pub use fusiform_protocol::{TOOL_QUALITY_DECOMMISSION, TOOL_QUALITY_MARKS, TOOL_QUALITY_RESTORE};
 
 /// Why a request could not be served.
 ///
@@ -209,6 +210,13 @@ pub fn serve_tool_call(store: &CatalogStore, body: &[u8]) -> Result<ToolResponse
         TOOL_QUALITY_GRADE => quality::grade(store, &args).map(ToolResponse::QualityWrite),
         TOOL_QUALITY_WITHDRAW => quality::withdraw(store, &args).map(ToolResponse::QualityWrite),
         TOOL_QUALITY_GRADES => quality::grades(store, &args).map(ToolResponse::QualityGrades),
+        TOOL_QUALITY_DECOMMISSION => {
+            quality::mark(store, &args, true).map(ToolResponse::QualityMarkWrite)
+        }
+        TOOL_QUALITY_RESTORE => {
+            quality::mark(store, &args, false).map(ToolResponse::QualityMarkWrite)
+        }
+        TOOL_QUALITY_MARKS => quality::marks(store, &args).map(ToolResponse::QualityMarks),
         // Named explicitly rather than served anyway. A module that answers to
         // any tool name keeps answering after a consumer's typo, and the
         // consumer believes it called something else.
@@ -768,6 +776,7 @@ struct WholeCatalogKey {
     store_instance: u64,
     catalog_version: i64,
     latest_era_id: i64,
+    latest_model_mark_id: i64,
     source: SourceId,
     at_ms: Option<i64>,
     fact_prefixes: Option<Vec<String>>,
@@ -807,6 +816,7 @@ impl WholeCatalogKey {
             store_instance: store.instance_id(),
             catalog_version: store.catalog_version().map_err(|e| store_error(&e))?,
             latest_era_id: store.latest_era_id().map_err(|e| store_error(&e))?,
+            latest_model_mark_id: store.latest_model_mark_id().map_err(|e| store_error(&e))?,
             source,
             at_ms: *at_ms,
             fact_prefixes,
@@ -1919,7 +1929,7 @@ fn finish_plane_view(
                 }
             }
         }
-        apply_quality_scores(store, &mut response)?;
+        apply_quality_scores(store, &mut response, requested_prefixes)?;
         apply_model_lineage(&mut response);
     }
     let Some(plane) = plane else {
@@ -2019,9 +2029,19 @@ fn apply_model_lineage(response: &mut CatalogGetResponse) {
 fn apply_quality_scores(
     store: &CatalogStore,
     response: &mut CatalogGetResponse,
+    requested_prefixes: Option<&Vec<String>>,
 ) -> Result<(), RouteError> {
+    let requested = |key: &str| {
+        requested_prefixes.is_none_or(|prefixes| prefixes.iter().any(|p| key.starts_with(p)))
+    };
     let scores: BTreeMap<_, _> = store
         .quality_grades()
+        .map_err(|e| store_error(&e))?
+        .into_iter()
+        .map(|row| (row.model.clone(), row))
+        .collect();
+    let marks: BTreeMap<_, _> = store
+        .model_marks()
         .map_err(|e| store_error(&e))?
         .into_iter()
         .map(|row| (row.model.clone(), row))
@@ -2040,7 +2060,18 @@ fn apply_quality_scores(
         {
             continue;
         }
-        let Some(row) = scores.get(canonical.unwrap_or(identity)) else {
+        let key = canonical.unwrap_or(identity).to_owned();
+        if let Some(mark) = marks
+            .get(&key)
+            .filter(|_| requested("quality.decommissioned"))
+        {
+            facts.insert(
+                "quality.decommissioned".into(),
+                serde_json::Value::Bool(true),
+            );
+            newest = Some(newest.map_or(mark.recorded_at_ms, |n: i64| n.max(mark.recorded_at_ms)));
+        }
+        let Some(row) = scores.get(&key) else {
             continue;
         };
         let grade = row
@@ -2061,9 +2092,12 @@ fn apply_quality_scores(
             _ => continue,
         };
         for (key, value) in values {
+            if !requested(key) {
+                continue;
+            }
             facts.insert(key.to_string(), serde_json::Value::Number(value.clone()));
+            newest = Some(newest.map_or(row.recorded_at_ms, |n: i64| n.max(row.recorded_at_ms)));
         }
-        newest = Some(newest.map_or(row.recorded_at_ms, |n: i64| n.max(row.recorded_at_ms)));
     }
     response.quality_scores = newest.map(|graded_at_ms| fusiform_protocol::QualityScoresWire {
         graded_by: "operator".to_string(),
@@ -2078,6 +2112,7 @@ fn retain_quality_disclosure(response: &mut CatalogGetResponse) {
         facts.contains_key("quality.elo")
             || facts.contains_key("quality.eq")
             || facts.contains_key("quality.grade")
+            || facts.contains_key("quality.decommissioned")
     }) {
         response.quality_scores = None;
     }
