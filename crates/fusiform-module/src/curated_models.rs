@@ -495,11 +495,13 @@ mod tests {
         ("cloudflare-workers-ai", "@cf/cloudflare/clef"),
         ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
         ("elevenlabs", "eleven_flash_v2_5"),
+        ("google", "gemini-3.5-transcribe-live"),
         ("google", "gemini-3.8-flash-tts"),
         ("google", "gemini-omni-1.2-flash"),
         ("meta", "muse-wonder-full-1.0"),
         ("openai", "gpt-6-luna-decisions"),
         ("openai", "gpt-image-2.6-flare"),
+        ("openai", "gpt-live-transcribe"),
         ("openai", "gpt-transcribe"),
         ("typesafe", "jev-1.13.0"),
     ];

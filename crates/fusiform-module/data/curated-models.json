@@ -4,6 +4,51 @@
   "models": [
     {
       "provider_id": "openai",
+      "model_id": "gpt-live-transcribe",
+      "auth_methods": ["apikey"],
+      "facts": {
+        "existence": "present",
+        "model.name": "GPT-Live-Transcribe",
+        "model.type": "transcription",
+        "capability.input_modalities": ["audio", "text"],
+        "capability.output_modalities": ["text"],
+        "rate.input_audio.per_second": {
+          "state": "priced",
+          "units": 17000000,
+          "exponent": 9,
+          "currency": "USD",
+          "unit_provenance": {"kind": "stated"},
+          "per": 60,
+          "increment": {"kind": "unknown"},
+          "minimum_quantity": {"kind": "unknown"}
+        },
+        "wire.api": {"value": "https://api.openai.com/v1", "from": "curated"}
+      },
+      "source_ref": "Read 2026-11-13. https://platform.openai.com/docs/pricing#audio-tokens: \"gpt-live-transcribe | Live transcription | - | - | $0.017 / minute\". https://developers.openai.com/api/docs/models/gpt-live-transcribe: \"GPT-Live-Transcribe\"; \"Input modalities: audio, text\"; \"Output modalities: text\"; \"Realtime audio duration\", \"Price | $0.017 | minute\". Served as $0.017 per 60 seconds, not a token rate. No rounding rule or minimum is stated, so increment and minimum_quantity are unknown; GPT-Live-1's per-second rule is not applied. The model page lists \"Realtime transcription | v1/realtime/transcription_sessions | Supported\": used through Realtime transcription sessions at https://api.openai.com/v1/realtime/transcription_sessions. The curated API base is the same OpenAI v1 base; no unverified wire.family is served.",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
+    },
+    {
+      "provider_id": "google",
+      "model_id": "gemini-3.5-transcribe-live",
+      "auth_methods": ["apikey"],
+      "facts": {
+        "existence": "present",
+        "model.name": "Gemini 3.5 Transcribe Live",
+        "model.type": "transcription",
+        "capability.input_modalities": ["audio"],
+        "capability.output_modalities": ["text"],
+        "rate.input_audio": {"state": "priced", "units": 3500000000, "exponent": 9, "currency": "USD", "unit_provenance": {"kind": "stated"}},
+        "rate.output": {"state": "priced", "units": 21000000000, "exponent": 9, "currency": "USD", "unit_provenance": {"kind": "stated"}},
+        "limit.audio_tokens_per_second": 25,
+        "wire.api": {"value": "https://generativelanguage.googleapis.com/v1beta", "from": "curated"}
+      },
+      "source_ref": "Read 2026-11-13. https://ai.google.dev/gemini-api/docs/pricing#gemini-3.5-transcribe-live: \"Gemini 3.5 Transcribe Live\", \"Our low-latency, real-time speech-to-text model for bidirectional streaming audio transcription over WebSockets.\"; \"Paid Tier, per 1M tokens in USD\"; Input price \"$3.50 or $0.005/min* (audio)\"; \"Output price (including thinking tokens)\" \"$21.00 or $0.004/min* (text)\". \"Estimated pricing is based on 25 audio tokens per second for input and 175 text tokens per minute for output, for an effective blended rate of ~$0.009 per min for Live Transcribe.\" A Free Tier is listed as \"Free of charge\" for input and output. Served rates are the paid per-million-token prices; the per-minute figures are Google's estimates, not the billing unit. The audio conversion follows the pricing footnote, not Google's general 32-token audio default. https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe lists \"gemini-3.5-transcribe-live (Live API)\" and the pricing link \"Gemini 3.5 Transcribe Live\". The curated API base matches the Gemini API base served for google/gemini-3.8-flash; no unverified wire.family is served.",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
+    },
+    {
+      "provider_id": "openai",
       "model_id": "gpt-image-2.6-flare",
       "auth_methods": ["apikey"],
       "facts": {

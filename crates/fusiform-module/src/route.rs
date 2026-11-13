@@ -1893,7 +1893,11 @@ fn finish_plane_view(
                     crate::attachment_limits::apply(provider, facts);
                     crate::temperature_ranges::apply(provider, facts);
                 }
-                if facts.contains_key("rate.input_audio") {
+                // A curated model can state a more specific conversion than
+                // the provider default; keep that sourced claim intact.
+                if facts.contains_key("rate.input_audio")
+                    && !facts.contains_key("limit.audio_tokens_per_second")
+                {
                     // An alias borrows the target's conversion as well as its audio rate.
                     let (audio_provider, audio_model) = alias
                         .map(|alias| {

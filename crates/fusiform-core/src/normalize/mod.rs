@@ -376,6 +376,7 @@ pub struct NormalizeOutcome {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChargeUnitEvidence {
     input_audio_per_token: std::collections::BTreeSet<String>,
+    input_audio_models: std::collections::BTreeSet<(String, String)>,
     /// `(provider_id, model_id)` rows left unattributed although the provider
     /// is listed.
     input_audio_excluded: std::collections::BTreeSet<(String, String)>,
@@ -415,9 +416,24 @@ impl ChargeUnitEvidence {
         self
     }
 
+    /// Attribute only this model's audio input when its documentation does
+    /// not establish the billing unit of the provider's other models.
+    pub fn with_input_audio_model(
+        mut self,
+        provider_id: impl Into<String>,
+        model_id: impl Into<String>,
+    ) -> Self {
+        self.input_audio_models
+            .insert((provider_id.into(), model_id.into()));
+        self
+    }
+
     /// Whether this row's `cost.input_audio` is a per-million-token rate.
     pub fn bills_input_audio_per_token(&self, provider_id: &str, model_id: &str) -> bool {
-        self.input_audio_per_token.contains(provider_id)
+        (self.input_audio_per_token.contains(provider_id)
+            || self
+                .input_audio_models
+                .contains(&(provider_id.to_string(), model_id.to_string())))
             && !self
                 .input_audio_excluded
                 .contains(&(provider_id.to_string(), model_id.to_string()))

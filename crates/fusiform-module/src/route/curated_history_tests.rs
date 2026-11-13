@@ -187,6 +187,92 @@ fn jev_input_units(response: &CatalogGetResponse) -> i64 {
 }
 
 #[test]
+fn live_transcribe_serves_sourced_duration_pricing() {
+    let (store, _dir) = store();
+    let first = 1_794_528_000_000i64;
+    apply_to_store(&store, &shipped(), first + DAY_MS).unwrap();
+    let expected = json!({
+        "state":"priced", "units":17_000_000, "exponent":9, "currency":"USD",
+        "unit_provenance":{"kind":"stated"}, "per":60,
+        "increment":{"kind":"unknown"}, "minimum_quantity":{"kind":"unknown"}
+    });
+    for args in [
+        json!({"provider_id":"openai", "model_id":"gpt-live-transcribe"}),
+        json!({"provider_id":"openai"}),
+        json!({"provider_id":"openai", "model_id":"gpt-live-transcribe", "at_ms":first + 1}),
+    ] {
+        let response = get(&store, args);
+        let facts = &response.models["openai/gpt-live-transcribe"];
+        assert_eq!(facts["model.name"], "GPT-Live-Transcribe");
+        assert_eq!(facts["model.type"], "transcription");
+        assert_eq!(facts["rate.input_audio.per_second"], expected);
+        assert_eq!(
+            facts.keys().filter(|key| key.starts_with("rate.")).count(),
+            1
+        );
+        assert_eq!(
+            facts["wire.api"],
+            json!({"value":"https://api.openai.com/v1", "from":"curated"})
+        );
+        let source = response
+            .curated
+            .iter()
+            .find(|row| row.model == "openai/gpt-live-transcribe")
+            .unwrap();
+        assert!(source.source_ref.contains("Price | $0.017 | minute"));
+        assert!(source
+            .source_ref
+            .contains("v1/realtime/transcription_sessions"));
+        assert_eq!(source.review_by_ms, first + 60 * DAY_MS);
+    }
+}
+
+#[test]
+fn gemini_transcribe_live_serves_sourced_token_pricing_and_conversion() {
+    let (store, _dir) = store();
+    let first = 1_794_528_000_000i64;
+    apply_to_store(&store, &shipped(), first + DAY_MS).unwrap();
+    for args in [
+        json!({"provider_id":"google", "model_id":"gemini-3.5-transcribe-live"}),
+        json!({"provider_id":"google"}),
+        json!({"provider_id":"google", "model_id":"gemini-3.5-transcribe-live", "at_ms":first + 1}),
+    ] {
+        let response = get(&store, args);
+        let facts = &response.models["google/gemini-3.5-transcribe-live"];
+        assert_eq!(facts["model.name"], "Gemini 3.5 Transcribe Live");
+        assert_eq!(facts["model.type"], "transcription");
+        for (key, units) in [
+            ("rate.input_audio", 3_500_000_000i64),
+            ("rate.output", 21_000_000_000),
+        ] {
+            assert_eq!(
+                facts[key],
+                json!({"state":"priced", "units":units, "exponent":9,
+                "currency":"USD", "unit_provenance":{"kind":"stated"}})
+            );
+        }
+        assert_eq!(facts["limit.audio_tokens_per_second"], 25);
+        assert_eq!(
+            facts["wire.api"],
+            json!({"value":"https://generativelanguage.googleapis.com/v1beta", "from":"curated"})
+        );
+        let source = response
+            .curated
+            .iter()
+            .find(|row| row.model == "google/gemini-3.5-transcribe-live")
+            .unwrap();
+        for quote in [
+            "$3.50 or $0.005/min* (audio)",
+            "$21.00 or $0.004/min* (text)",
+            "25 audio tokens per second",
+        ] {
+            assert!(source.source_ref.contains(quote), "{quote}");
+        }
+        assert_eq!(source.review_by_ms, first + 60 * DAY_MS);
+    }
+}
+
+#[test]
 fn transcribe_serves_a_unit_rate_and_records_its_denominator_only_in_curated_history() {
     const MODEL: &str = "gpt-transcribe";
     const ID: &str = "openai/gpt-transcribe";
@@ -266,9 +352,9 @@ fn a_read_after_the_first_era_serves_jevs_recorded_rates_and_disclosure() {
     let (store, _dir) = store();
     let boot = jev_established_at() + 5 * DAY_MS;
     let written = apply_to_store(&store, &shipped(), boot).unwrap();
-    // The test table releases all eleven curated rows, so the first boot writes
+    // The test table releases all thirteen curated rows, so the first boot writes
     // one era per row.
-    assert_eq!(written, 11);
+    assert_eq!(written, 13);
 
     let file_row = &shipped().models[&(TYPESAFE.to_string(), JEV.to_string())];
     for at in [
@@ -400,7 +486,7 @@ fn a_changed_curated_price_opens_an_era_dated_at_the_boot_that_carries_it() {
 fn re_applying_an_unchanged_or_only_redated_file_writes_nothing() {
     let (store, _dir) = store();
     let boot = jev_established_at() + DAY_MS;
-    assert_eq!(apply_to_store(&store, &shipped(), boot).unwrap(), 11);
+    assert_eq!(apply_to_store(&store, &shipped(), boot).unwrap(), 13);
     assert_eq!(
         apply_to_store(&store, &shipped(), boot + DAY_MS).unwrap(),
         0
@@ -504,8 +590,8 @@ fn a_row_held_from_its_first_boot_is_first_served_at_its_release() {
     let held_boot = jev_established_at() + DAY_MS;
     assert_eq!(
         apply_to_store(&store, &table(holding(TYPESAFE, JEV)), held_boot).unwrap(),
-        11,
-        "ten served rows and one tombstone for the held row"
+        13,
+        "twelve served rows and one tombstone for the held row"
     );
     let released_at = held_boot + DAY_MS;
     assert_eq!(apply_to_store(&store, &shipped(), released_at).unwrap(), 1);

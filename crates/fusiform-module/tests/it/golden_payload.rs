@@ -499,6 +499,10 @@ fn render_all() -> String {
         .unwrap()
         .extend(render_curated_wire());
     ordinary.as_object_mut().unwrap().insert(
+        "catalog.get — Realtime audio input from upstream".into(),
+        render_realtime_audio(),
+    );
+    ordinary.as_object_mut().unwrap().insert(
         "catalog.get — a curated row at an instant".into(),
         render_curated_history(),
     );
@@ -676,6 +680,14 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
             serde_json::json!({"provider_id":"openai","model_id":"gpt-transcribe"}),
         ),
         (
+            "catalog.get — live transcription duration rate",
+            serde_json::json!({"provider_id":"openai","model_id":"gpt-live-transcribe"}),
+        ),
+        (
+            "catalog.get — Gemini Transcribe Live token rates",
+            serde_json::json!({"provider_id":"google","model_id":"gemini-3.5-transcribe-live"}),
+        ),
+        (
             "catalog.get — provider default endpoint",
             serde_json::json!({"provider_id":"openai","model_id":"gpt-6.1-sol"}),
         ),
@@ -799,6 +811,15 @@ fn render_fact_override_history() -> serde_json::Value {
         60_000_000_000i64
     );
     assert_eq!(response["fact_overrides"].as_array().unwrap().len(), 2);
+    serde_json::json!({"request":request, "response":response})
+}
+
+fn render_realtime_audio() -> serde_json::Value {
+    let request = serde_json::json!({"name":"catalog.get", "arguments":{
+        "provider_id":"openai", "model_id":"gpt-realtime-2.1", "fact_prefixes":["rate."]
+    }});
+    let mut response = super::input_audio_rates::realtime_audio_response();
+    response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
     serde_json::json!({"request":request, "response":response})
 }
 
@@ -1189,15 +1210,15 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
     let curated_wire = render_curated_wire();
     let quality_tools = render_quality_tools();
     let media_quality = render_media_quality();
-    // The seven single cases rendered outside `cases()`: the first provider page,
+    // The eight single cases rendered outside `cases()`: the first provider page,
     // the seed and synthetic identities, synthetic grades, curated history,
-    // dated fact overrides, and synthetic plan concurrency.
+    // dated fact overrides, Realtime audio input, and synthetic plan concurrency.
     for (text, expected) in [
         (
             GOLDEN.to_string(),
             cases().len()
                 + plain_plane_cases
-                + 7
+                + 8
                 + curated_wire.len()
                 + quality_tools.len()
                 + media_quality.len()
@@ -1240,6 +1261,10 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         ),
         (
             serde_json::json!({"fact_override_history":render_fact_override_history()}).to_string(),
+            1,
+        ),
+        (
+            serde_json::json!({"realtime_audio":render_realtime_audio()}).to_string(),
             1,
         ),
         (

@@ -25,6 +25,7 @@ const SEED: &str = include_str!("../../data/models-dev-seed.json");
 /// google-vertex publish the same `input_audio` number), and a google model
 /// the shipped table excludes.
 const ROWS: &[(&str, &str)] = &[
+    ("openai", "gpt-realtime-2.1"),
     ("google", "gemini-3.8-flash"),
     ("google", "gemini-4-argon"),
     ("ofox", "google/gemini-3.8-flash"),
@@ -49,6 +50,12 @@ fn doc() -> String {
             .or_insert_with(|| serde_json::json!({"id": provider, "models": {}}))["models"]
             [model] = row;
     }
+    // The seed has no second OpenAI audio input price. Plant one on another
+    // seed row to prove a future publication cannot inherit model-only evidence.
+    let mut control = seed["openai"]["models"]["gpt-6.1-sol"].clone();
+    assert!(control.is_object());
+    control["cost"]["input_audio"] = serde_json::json!(32);
+    out.get_mut("openai").unwrap()["models"]["gpt-6.1-sol"] = control;
     serde_json::Value::Object(out).to_string()
 }
 
@@ -124,6 +131,58 @@ fn read(store: &CatalogStore, args: serde_json::Value) -> serde_json::Value {
 pub(super) fn current_audio_response() -> serde_json::Value {
     let (store, _dir) = store();
     read(&store, serde_json::json!({"provider_id": "google"}))
+}
+
+pub(super) fn realtime_audio_response() -> serde_json::Value {
+    let (store, _dir) = store();
+    read(
+        &store,
+        serde_json::json!({"provider_id":"openai", "model_id":"gpt-realtime-2.1", "fact_prefixes":["rate."]}),
+    )
+}
+
+#[test]
+fn realtime_audio_input_is_ingested_only_for_the_documented_model() {
+    const MODEL: &str = "gpt-realtime-2.1";
+    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    assert_eq!(seed["openai"]["models"][MODEL]["cost"]["input_audio"], 32);
+    let (store, _dir) = store();
+    let before = rates(&store, "openai", MODEL, Some(POLLED_AT - 1));
+    assert!(before.get("rate.input_audio").is_none());
+    for at in [None, Some(POLLED_AT), Some(POLLED_AT + 1)] {
+        let facts = rates(&store, "openai", MODEL, at);
+        let audio = &facts["rate.input_audio"];
+        assert_eq!(audio["state"], "priced");
+        assert_eq!(audio["units"], 32_000_000_000i64);
+        assert_eq!(audio["exponent"], 9);
+        assert_eq!(audio["currency"], "USD");
+        assert_eq!(
+            audio["unit_provenance"],
+            facts["rate.input"]["unit_provenance"]
+        );
+        assert_eq!(facts["rate.cache_read"]["units"], 400_000_000);
+    }
+    let history = store
+        .fact_history(
+            fusiform_core::SourceId::ModelsDev,
+            "openai",
+            MODEL,
+            &fusiform_store::FactKey::from_stored("rate.input_audio".into()),
+        )
+        .unwrap();
+    assert_eq!(history.len(), 1);
+    let fixture: serde_json::Value = serde_json::from_str(&doc()).unwrap();
+    let control = fixture["openai"]["models"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .find(|id| id.as_str() != MODEL)
+        .unwrap();
+    assert!(rates(&store, "openai", control, None)
+        .get("rate.input_audio")
+        .is_none());
+    assert!(!fusiform_module::input_audio::evidence()
+        .bills_input_audio_per_token("openai", "future-audio-model"));
 }
 
 fn rates(
@@ -413,7 +472,11 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
         for (provider, row) in sources {
             for (model, published) in seed[provider]["models"].as_object().unwrap() {
                 let excluded = row.excluded_models.iter().any(|m| &m.model_id == model);
-                if published["cost"].get(cost_key).is_some() && !excluded {
+                let included = row
+                    .included_models
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(model));
+                if published["cost"].get(cost_key).is_some() && !excluded && included {
                     expected.insert(
                         (provider.clone(), model.clone(), format!("rate.{cost_key}")),
                         (),
@@ -452,16 +515,17 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
     assert_eq!(plan.disappeared_models, 0);
     // The count a deploy should expect, pinned so a reviewer sees it move:
     // Google's 14 eligible input rows, plus two Google output rows and one
-    // OpenAI output row. Live Preview carries both independent audio facts.
+    // OpenAI output row. Realtime 2.1 adds one OpenAI input era. Live Preview
+    // carries both independent audio facts.
     // Gemini 4 Carbon joined in the November seed: Google bills it one input
     // price for every modality, which equals its models.dev audio price.
-    assert_eq!(plan.eras.len(), 17, "{:?}", written.keys());
+    assert_eq!(plan.eras.len(), 18, "{:?}", written.keys());
     assert_eq!(
         written
             .keys()
             .filter(|(_, _, key)| key == "rate.input_audio")
             .count(),
-        14
+        15
     );
     assert_eq!(
         written
@@ -477,4 +541,9 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
             key.into()
         )));
     }
+    assert!(written.contains_key(&(
+        "openai".into(),
+        "gpt-realtime-2.1".into(),
+        "rate.input_audio".into()
+    )));
 }

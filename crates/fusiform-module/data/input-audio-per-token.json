@@ -27,6 +27,14 @@
           "reason": "The pricing page has no row for the preview model (only the GA Gemini 3.1 Flash-Lite), and models.dev's input_audio (0.5) differs from its input (0.25), so neither an explicit audio row nor a single unsplit input price supports the number."
         }
       ]
+    },
+    {
+      "provider_id": "openai",
+      "included_models": ["gpt-realtime-2.1"],
+      "source_ref": "https://developers.openai.com/api/docs/pricing (accessed 2026-11-13); https://developers.openai.com/api/docs/models/gpt-realtime-2.1 (accessed 2026-11-13)",
+      "quote": "\"Prices per 1M tokens unless noted.\" Audio, columns Model / Type / Input / Output / Cached Input: \"gpt-realtime-2.1 | Audio | $32.00 | $64.00 | $0.40\". The model page's \"Audio tokens\" table states \"Input | $32 | 1M tokens\". Only this model's input-audio unit is established; other OpenAI models require their own source checks. Cached audio input equals the already-served text cache-read price, so no separate cached-audio role is added.",
+      "established_at_ms": 1794528000000,
+      "review_by_ms": 1799712000000
     }
   ],
   "declined": [

@@ -255,6 +255,17 @@ spend-pricing consumer recognises it. It requires a positive `per` and explicit
 rate, including its denominator, belongs to the curated row's stored claim in
 `curated_model_era`; it never enters models.dev's upstream fact eras.
 
+`openai/gpt-live-transcribe` uses the same duration-rate shape, at $0.017 per
+60 seconds, with unknown rounding and minimum. It runs through Realtime
+transcription sessions, not the ordinary transcription endpoint; GPT-Live-1's
+per-second rounding rule is not evidence for this model.
+`google/gemini-3.5-transcribe-live` instead carries paid token rates: $3.50 per
+million audio input tokens and $21 per million text output tokens (including
+thinking), plus the pricing footnote's 25 audio tokens per second. Its free
+tier and Google's estimated per-minute equivalents are disclosed in its source
+note, not served as paid duration rates. A model's curated audio conversion
+takes precedence over a provider-wide current-read default.
+
 `google/gemini-3.8-flash-tts` is curated as speech with text input and audio
 output: $0.50/M text input, $9/M audio output, and 25 output audio tokens per
 second. Google's [pricing page](https://ai.google.dev/gemini-api/docs/pricing)
@@ -674,6 +685,7 @@ Each row in `providers`:
 | `quote` | verbatim text from that page stating audio input is priced per million tokens; it must name the per-million-token unit |
 | `established_at_ms`, `review_by_ms` | when the page was read; exactly 60 days later |
 | `excluded_models` | models of this provider whose published `input_audio` the page does not support, each with `model_id` and `reason` |
+| `included_models` | optional nonempty list of unique model ids; evidence admits exactly these models, never their siblings or future rows; cannot be set together with `excluded_models` |
 | `audio_tokens_per_second` | optional object with a positive integer default `value`, an `https` `source_ref` and a verbatim `quote` from the provider's documentation stating the conversion; optional `model_overrides` are described below; covered by the provider row's review date |
 
 Each entry in `audio_tokens_per_second.model_overrides` has a unique `model_id`
@@ -704,6 +716,15 @@ withdraws those facts on the next poll. Point-in-time reads replay what was
 stored then. The table is passed to `fusiform_core::normalize_models_dev_with`
 as data, so the core crate does no file IO.
 
+OpenAI input evidence is restricted to `gpt-realtime-2.1`: its embedded upstream
+`cost.input_audio` is 32 and the vendor states $32 per million audio input tokens.
+No override supplies that price. The first poll with this evidence writes one
+`rate.input_audio` era for that row; earlier point-in-time reads remain without
+it. Other OpenAI models stay unattributed until their own source checks. The
+check against the embedded seed requires every included model to still publish `cost.input_audio`,
+and a test pins this row's upstream $32 to the quoted vendor price. Cached audio
+input needs no extra role: $0.40 matches the existing `rate.cache_read`.
+
 The optional `audio_tokens_per_second` is applied only on current reads as
 `limit.audio_tokens_per_second`, a JSON integer. It is joined onto a provider's
 served rows only when their facts contain `rate.input_audio`, including aliases
@@ -717,7 +738,9 @@ clips each reported exactly `ceil(25 × duration in seconds)` audio input tokens
 in the Gemini API's `usageMetadata.promptTokensDetails`. The billed count is the
 authority for the charged conversion even though Google's audio page states
 32; its pricing page uses 25 per second for newer speech models.
-The conversion is never stored or replayed on `at_ms` reads. Selecting only
+The provider-derived conversion is never stored or replayed on `at_ms` reads.
+An explicit conversion in a curated model row is preserved instead of replaced
+by the provider default, and belongs to that row's dated history. Selecting only
 `limit.audio_tokens_per_second` still evaluates the audio-rate gate internally;
 the response contains only the facts the caller selected. An absent conversion
 is not a default or a zero.

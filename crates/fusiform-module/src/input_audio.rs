@@ -41,6 +41,10 @@ pub struct InputAudioSource {
     pub quote: String,
     pub established_at_ms: i64,
     pub review_by_ms: i64,
+    /// When present, evidence covers only these model ids, not the provider.
+    /// An empty list cannot establish any billing unit.
+    #[serde(default)]
+    pub included_models: Option<Vec<String>>,
     /// Models of this provider whose published `input_audio` the page does not
     /// support, each with the reason. Their audio key stays unattributed.
     #[serde(default)]
@@ -140,6 +144,8 @@ pub(crate) fn load_for_schema(doc: &str, schema: &str) -> (InputAudioSources, Ve
     let mut rows = InputAudioSources::new();
     let mut rejects = Vec::new();
     for raw in doc.providers {
+        let included_present = raw.get("included_models").is_some();
+        let excluded_present = raw.get("excluded_models").is_some();
         let row: InputAudioSource = match serde_json::from_value(raw) {
             Ok(row) => row,
             Err(error) => {
@@ -157,6 +163,20 @@ pub(crate) fn load_for_schema(doc: &str, schema: &str) -> (InputAudioSources, Ve
             Some("source_ref must be an https URL to the provider's pricing page")
         } else if !row.quote.contains("1M tokens") && !row.quote.contains("million tokens") {
             Some("quote must state the per-million-token unit it establishes")
+        } else if included_present && schema != SCHEMA {
+            Some("included_models is supported only for input-audio evidence")
+        } else if included_present && excluded_present {
+            Some("included_models and excluded_models cannot both be set")
+        } else if included_present
+            && row.included_models.as_ref().is_none_or(|models| {
+                let mut ids = std::collections::BTreeSet::new();
+                models.is_empty()
+                    || models
+                        .iter()
+                        .any(|id| id.trim().is_empty() || !ids.insert(id))
+            })
+        {
+            Some("included_models needs a nonempty list of unique model ids")
         } else if row.audio_tokens_per_second.as_ref().is_some_and(|audio| {
             audio.value == 0
                 || !audio.source_ref.starts_with("https://")
@@ -237,12 +257,22 @@ pub fn sources() -> &'static InputAudioSources {
     ROWS.get_or_init(|| load_reporting_rejects(DOCUMENT).0)
 }
 
-/// The normalizer's view of a table: which providers bill audio per token,
-/// less the models each one excludes.
+/// The normalizer's view of provider-wide or model-only input evidence.
 pub fn evidence_from(rows: &InputAudioSources) -> ChargeUnitEvidence {
     rows.values().fold(
-        ChargeUnitEvidence::input_audio_per_token(rows.keys().cloned()),
+        ChargeUnitEvidence::input_audio_per_token(
+            rows.values()
+                .filter(|row| row.included_models.is_none())
+                .map(|row| row.provider_id.clone()),
+        ),
         |evidence, row| {
+            let evidence =
+                row.included_models
+                    .iter()
+                    .flatten()
+                    .fold(evidence, |evidence, model| {
+                        evidence.with_input_audio_model(row.provider_id.clone(), model.clone())
+                    });
             row.excluded_models.iter().fold(evidence, |evidence, m| {
                 evidence.excluding_input_audio_of(row.provider_id.clone(), m.model_id.clone())
             })
@@ -256,7 +286,7 @@ pub fn evidence() -> ChargeUnitEvidence {
 }
 
 /// Listed providers the embedded seed does not carry, or carries with no
-/// `cost.input_audio` on any row, and excluded models the seed does not
+/// `cost.input_audio` on any row, included or excluded models the seed does not
 /// carry with `cost.input_audio`, and audio token overrides naming models
 /// absent from that provider: those entries should be corrected or removed.
 pub fn unused_rows(rows: &InputAudioSources, seed: &serde_json::Value) -> Vec<String> {
@@ -265,6 +295,19 @@ pub fn unused_rows(rows: &InputAudioSources, seed: &serde_json::Value) -> Vec<St
     for row in rows.values() {
         let provider = &row.provider_id;
         let models = seed[provider.as_str()]["models"].as_object();
+        if let Some(included) = &row.included_models {
+            for model_id in included {
+                if !models
+                    .and_then(|models| models.get(model_id))
+                    .is_some_and(publishes_audio)
+                {
+                    unused.push(format!(
+                        "{provider}/{model_id}: included, but the embedded seed has no such row \
+                        publishing cost.input_audio; correct or remove the inclusion"
+                    ));
+                }
+            }
+        }
         if !models.is_some_and(|models| models.values().any(publishes_audio)) {
             unused.push(format!(
                 "{provider}: no row in the embedded seed publishes cost.input_audio; \
@@ -322,6 +365,67 @@ mod tests {
 
     fn seed() -> serde_json::Value {
         serde_json::from_str(include_str!("../data/models-dev-seed.json")).unwrap()
+    }
+
+    #[test]
+    fn included_models_are_exact_nonempty_and_exclusive() {
+        let openai = document()["providers"][1].clone();
+        let load = |row: serde_json::Value| {
+            load_reporting_rejects(&json!({"schema":SCHEMA, "providers":[row]}).to_string())
+        };
+        let (rows, rejects) = load(openai.clone());
+        assert!(rejects.is_empty(), "{rejects:?}");
+        let evidence = evidence_from(&rows);
+        assert!(evidence.bills_input_audio_per_token("openai", "gpt-realtime-2.1"));
+        assert!(!evidence.bills_input_audio_per_token("openai", "gpt-6.1-sol"));
+        assert!(!evidence.bills_input_audio_per_token("openai", "future-audio-model"));
+        assert!(!evidence.bills_input_audio_per_token("other", "gpt-realtime-2.1"));
+        for included in [
+            json!([]),
+            json!(null),
+            json!([""]),
+            json!([" "]),
+            json!(["same", "same"]),
+        ] {
+            let mut row = openai.clone();
+            row["included_models"] = included;
+            let (rows, rejects) = load(row);
+            assert!(rows.is_empty());
+            assert_eq!(rejects.len(), 1);
+            assert!(rejects[0].contains("nonempty list of unique model ids"));
+        }
+        let mut row = openai.clone();
+        row["excluded_models"] = json!([]);
+        let (rows, rejects) = load(row);
+        assert!(rows.is_empty());
+        assert_eq!(rejects.len(), 1);
+        assert!(rejects[0].contains("cannot both be set"));
+
+        let mut row = openai;
+        row["included_models"] = json!(["not-in-the-embedded-seed"]);
+        let (rows, rejects) = load(row);
+        assert!(rejects.is_empty());
+        let unused = unused_rows(&rows, &seed());
+        assert_eq!(unused.len(), 1, "{unused:?}");
+        assert!(unused[0].starts_with("openai/not-in-the-embedded-seed:"));
+        assert!(unused[0].contains("correct or remove the inclusion"));
+    }
+
+    #[test]
+    fn realtime_audio_source_matches_the_embedded_price() {
+        let row = &sources()["openai"];
+        assert_eq!(
+            row.included_models.as_deref(),
+            Some(["gpt-realtime-2.1".to_string()].as_slice())
+        );
+        assert!(row
+            .quote
+            .contains("gpt-realtime-2.1 | Audio | $32.00 | $64.00 | $0.40"));
+        assert!(row.quote.contains("Input | $32 | 1M tokens"));
+        assert_eq!(
+            seed()["openai"]["models"]["gpt-realtime-2.1"]["cost"]["input_audio"],
+            json!(32)
+        );
     }
 
     #[test]

@@ -141,7 +141,7 @@ value would do to a consumer:
 | `quality.eq` | advisory | operator-assigned writing and judgment score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
 | `limit.context` | byte-affecting | integer token count, or `null` |
 | `limit.output` | byte-affecting | integer token count, or `null`; a sourced current-read override is disclosed in `fact_overrides` (§5.8) |
-| `limit.audio_tokens_per_second` | advisory | integer audio tokens per second of input audio, curated from the provider's documentation; current reads only, on rows serving `rate.input_audio` from a provider whose docs state the figure; otherwise no fact |
+| `limit.audio_tokens_per_second` | advisory | integer audio tokens per second of input audio, curated from the provider's documentation; provider defaults join only current rows serving `rate.input_audio`; a model-specific curated row may store its own sourced figure, also available in that row's history; otherwise no fact |
 | `limit.images_per_request` | advisory | documented integer image count per request, only on first-party image-input rows; current reads only; absent means unknown, never unlimited |
 | `limit.image_bytes` | advisory | integer raw-file bytes per image, only on first-party image-input rows; current reads only; absent means unknown, never unlimited |
 | `limit.image_long_edge_px` | advisory | integer image long edge in pixels with no count condition; check the conditional family for stricter bounds; only on first-party image-input rows, never aliases or gateways; current reads only; absent means unknown, never unlimited |

@@ -439,6 +439,26 @@ fn an_evidenced_provider_prices_input_audio_per_token() {
 /// Evidence is per provider: the same model id and the same number on a
 /// provider whose documentation was never read stays unattributed.
 #[test]
+fn model_only_audio_evidence_does_not_admit_siblings_or_other_providers() {
+    let doc = serde_json::json!({
+        "p": {"models": {
+            "verified": {"cost":{"input_audio":32}},
+            "future": {"cost":{"input_audio":32}}
+        }},
+        "other": {"models":{"verified":{"cost":{"input_audio":32}}}}
+    });
+    let evidence = ChargeUnitEvidence::none().with_input_audio_model("p", "verified");
+    let outcome = normalize_models_dev_with(&serde_json::to_vec(&doc).unwrap(), &evidence).unwrap();
+    assert!(audio_rate(model(&outcome, "p/verified")).is_some());
+    for id in ["p/future", "other/verified"] {
+        assert!(audio_rate(model(&outcome, id)).is_none());
+        assert!(unattributed_audio(&outcome, id));
+    }
+    let excluded = evidence.excluding_input_audio_of("p", "verified");
+    assert!(!excluded.bills_input_audio_per_token("p", "verified"));
+}
+
+#[test]
 fn evidence_for_one_provider_does_not_attribute_another() {
     let doc = serde_json::json!({
         "google": {"models": {"gemini-3.8-flash": {
