@@ -1072,6 +1072,18 @@ Standard is implicit and never listed. Tier names match model rows'
 rows, not here. Plan entitlements are joined at read time, never stored as
 plan-price eras. Their own review dates can expire independently of the price.
 
+Each priced row may also carry `concurrency`, a simultaneous-request cap for
+the subscription account, not a requests-per-time rate. **Absent means unknown,
+never unlimited and never zero.** The object carries a positive integer `limit`,
+`scope` (`account` for all models together, or `account_model` for each model
+separately), optional `per_model` model-key-to-positive-integer overrides,
+`source_ref`, a verbatim first-party `quote`, `established_at_ms` and `review_by_ms`.
+`per_model` is valid only with `account_model`; omitted overrides use `limit`.
+Like service tiers, concurrency is joined by `(provider_id, tier)` at each
+current read, omitted for tombstones, and never stored or given an era. Its
+independent review is due after 60 days. Consumers choose their own settings
+overrides; the catalog does not infer a cap from usage or rate limits.
+
 ## 10. Versioning
 
 1. The wire types are the `fusiform-protocol` crate, whose version moves with

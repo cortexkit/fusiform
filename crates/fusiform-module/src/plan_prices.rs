@@ -42,6 +42,8 @@ pub struct PlanPrice {
     pub quota_value: Option<fusiform_protocol::QuotaValueWire>,
     /// Current-read entitlements, independent of the stored price claim.
     pub service_tiers: Option<fusiform_protocol::ServiceTiersWire>,
+    /// Current-read request caps, never part of the stored price claim.
+    pub concurrency: Option<fusiform_protocol::ConcurrencyWire>,
     pub refusal_reason: Option<String>,
     /// When the price took effect, as best the source allows.
     ///
@@ -107,7 +109,40 @@ static LOADED: OnceLock<Vec<PlanPrice>> = OnceLock::new();
 
 /// The curated rows, parsed once per process.
 pub fn rows() -> &'static Vec<PlanPrice> {
+    if let Some(rows) = PLANTED.with(|planted| planted.get()) {
+        return rows;
+    }
     LOADED.get_or_init(|| load_reporting_rejects(PLAN_PRICES).0)
+}
+
+thread_local! {
+    static PLANTED: std::cell::Cell<Option<&'static Vec<PlanPrice>>> = const { std::cell::Cell::new(None) };
+}
+
+#[doc(hidden)]
+#[must_use]
+pub struct Planted {
+    previous: Option<&'static Vec<PlanPrice>>,
+    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+/// Use fixture plans on the calling thread until the returned guard is dropped.
+/// Normal serving uses the embedded file; only tests call this fixture seam.
+#[doc(hidden)]
+pub fn plant(doc: &str) -> Planted {
+    let (rows, rejects) = load_reporting_rejects(doc);
+    assert!(rejects.is_empty(), "{rejects:?}");
+    let rows = Box::leak(Box::new(rows));
+    Planted {
+        previous: PLANTED.with(|planted| planted.replace(Some(rows))),
+        _thread_bound: std::marker::PhantomData,
+    }
+}
+
+impl Drop for Planted {
+    fn drop(&mut self) {
+        PLANTED.with(|planted| planted.set(self.previous));
+    }
 }
 
 /// Parse, returning the rows and a reason for each one refused.
@@ -259,12 +294,25 @@ pub fn load_reporting_rejects(doc: &str) -> (Vec<PlanPrice>, Vec<String>) {
             },
         };
 
+        // A malformed cap must not erase an independently sourced price.
+        let concurrency = match cell.get("concurrency") {
+            None => None,
+            Some(value) => match parse_concurrency(value) {
+                Ok(value) => Some(value),
+                Err(reason) => {
+                    rejects.push(at(&format!("concurrency: {reason}")));
+                    None
+                }
+            },
+        };
+
         rows.push(PlanPrice {
             provider_id: provider_id.to_string(),
             tier: tier.to_string(),
             price,
             quota_value,
             service_tiers,
+            concurrency,
             refusal_reason: refusal.map(str::to_string),
             boundary_at_ms,
             established_by: established_by.to_string(),
@@ -374,6 +422,41 @@ fn parse_service_tiers(
     Ok(value)
 }
 
+fn parse_concurrency(
+    value: &serde_json::Value,
+) -> Result<fusiform_protocol::ConcurrencyWire, String> {
+    use fusiform_protocol::{ConcurrencyScope, ConcurrencyWire};
+    if value
+        .get("per_model")
+        .is_some_and(serde_json::Value::is_null)
+    {
+        return Err("per_model must be a map when present".into());
+    }
+    let value: ConcurrencyWire =
+        serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+    if value.limit == 0 {
+        return Err("limit must be a positive integer".into());
+    }
+    if let Some(per_model) = &value.per_model {
+        if value.scope != ConcurrencyScope::AccountModel {
+            return Err("per_model requires account_model scope".into());
+        }
+        if per_model.values().any(|limit| *limit == 0) {
+            return Err("per_model limits must be positive integers".into());
+        }
+    }
+    if [&value.source_ref, &value.quote]
+        .iter()
+        .any(|s| s.trim().is_empty())
+    {
+        return Err("source_ref and quote must not be empty".into());
+    }
+    if value.review_by_ms <= value.established_at_ms {
+        return Err("review_by_ms must be after established_at_ms".into());
+    }
+    Ok(value)
+}
+
 /// The curated rows as the store records them.
 ///
 /// Lives here rather than at the startup call site because `main.rs` is
@@ -413,7 +496,7 @@ pub struct Overdue {
     pub source_ref: String,
 }
 
-/// Which prices, quota values and service tiers are past their own review dates.
+/// Which prices, quota values, service tiers and caps are past their review dates.
 ///
 /// Takes the instant rather than reading the clock, so the gate can be driven
 /// in both directions. A check that can only ever be run against the real
@@ -477,6 +560,17 @@ pub fn overdue_at(rows: &[PlanPrice], now_ms: i64) -> Vec<Overdue> {
                     });
                 }
             }
+            if let Some(value) = &r.concurrency {
+                if value.review_by_ms < now_ms {
+                    overdue.push(Overdue {
+                        subject: "concurrency",
+                        provider_id: r.provider_id.clone(),
+                        tier: r.tier.clone(),
+                        days_overdue: (now_ms - value.review_by_ms) / 86_400_000,
+                        source_ref: value.source_ref.clone(),
+                    });
+                }
+            }
             overdue
         })
         .collect()
@@ -493,7 +587,7 @@ pub fn overdue_at(rows: &[PlanPrice], now_ms: i64) -> Vec<Overdue> {
 pub fn overdue_report(overdue: &[Overdue]) -> String {
     let mut out = String::from(
         "NOT A BUILD FAILURE. Nothing changed; a review date passed.\n\n\
-         These curated subscription prices, quota values or service tiers are past their review date. Nothing \
+         These curated subscription prices, quota values, service tiers or concurrency caps are past their review date. Nothing \
          reveals a plan reprice — no fetch, no diff, no contradiction — so this \
          date is the only signal that a price may have moved, and the damage is \
          retroactive: every window priced in the stale period used the old \
@@ -512,8 +606,10 @@ pub fn overdue_report(overdue: &[Overdue]) -> String {
          For quota_value, revisit the measurement or operator statement (or the \
          refusal reason). Update its figure and provenance, including as_of_ms \
          for a measured value, and its review_by_ms.\n\n\
-         For service_tiers, revisit the entitlement and both rates at the source \
-         (or the refusal reason). Update its provenance and review_by_ms.\n\n\
+          For service_tiers, revisit the entitlement and both rates at the source \
+          (or the refusal reason). Update its provenance and review_by_ms.\n\n\
+          For concurrency, reread the source and quote for the cap and scope. \
+          Update established_at_ms and review_by_ms, with review due in 60 days.\n\n\
          Confirming a price unchanged is a real result and the commit should \
          look like one. If it did not move, the only edit is the provenance.\n\n\
          What this gate CANNOT tell you: whether a price is still correct. It \
@@ -569,6 +665,161 @@ mod tests {
             .remove("quota_value");
         doc["cells"][0]["service_tiers"] = value;
         doc
+    }
+
+    fn concurrency_value() -> serde_json::Value {
+        serde_json::json!({
+            "limit": 3, "scope": "account",
+            "source_ref": "https://example/concurrency",
+            "quote": "Three requests can run simultaneously per account.",
+            "established_at_ms": 1, "review_by_ms": 1000
+        })
+    }
+
+    fn concurrency_document(value: serde_json::Value) -> serde_json::Value {
+        let mut doc = service_tiers_document(serde_json::Value::Null);
+        doc["cells"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("service_tiers");
+        doc["cells"][0]["concurrency"] = value;
+        doc
+    }
+
+    #[test]
+    fn malformed_concurrency_is_counted_without_losing_the_price() {
+        let mut cases = vec![("null".to_string(), serde_json::Value::Null)];
+        for (field, bad) in [
+            ("limit", serde_json::json!(0)),
+            ("limit", serde_json::json!(-1)),
+            ("limit", serde_json::json!(1.5)),
+            ("scope", serde_json::json!("model")),
+            ("scope", serde_json::json!("ACCOUNT")),
+            ("source_ref", serde_json::json!("")),
+            ("source_ref", serde_json::json!(" ")),
+            ("quote", serde_json::json!("")),
+            ("quote", serde_json::json!(" ")),
+            ("review_by_ms", serde_json::json!(1)),
+        ] {
+            let mut value = concurrency_value();
+            value[field] = bad.clone();
+            cases.push((format!("{field}: {bad}"), value));
+        }
+        for field in [
+            "limit",
+            "scope",
+            "source_ref",
+            "quote",
+            "established_at_ms",
+            "review_by_ms",
+        ] {
+            let mut value = concurrency_value();
+            value.as_object_mut().unwrap().remove(field);
+            cases.push((format!("missing {field}"), value));
+        }
+        let mut account_with_models = concurrency_value();
+        account_with_models["per_model"] = serde_json::json!({"model-a": 2});
+        cases.push(("per_model with account scope".into(), account_with_models));
+        for scope in ["account", "account_model"] {
+            let mut value = concurrency_value();
+            value["scope"] = scope.into();
+            value["per_model"] = serde_json::Value::Null;
+            cases.push((format!("null per_model with {scope}"), value));
+        }
+        for bad in [
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+        ] {
+            let mut value = concurrency_value();
+            value["scope"] = "account_model".into();
+            value["per_model"] = serde_json::json!({"model-a": bad});
+            cases.push((format!("per_model: {bad}"), value));
+        }
+        for (case, value) in cases {
+            let (rows, rejects) = load_reporting_rejects(&concurrency_document(value).to_string());
+            assert_eq!(rejects.len(), 1, "{case}: {rejects:?}");
+            assert!(
+                rejects[0].contains("cell 0: concurrency"),
+                "{case}: {rejects:?}"
+            );
+            assert_eq!(rows.len(), 1, "{case}: the price must survive");
+            assert_eq!(rows[0].price.unwrap().minor_units, 2000, "{case}");
+            assert!(rows[0].concurrency.is_none(), "{case}");
+        }
+    }
+
+    #[test]
+    fn well_formed_concurrency_loads_and_absence_stays_unknown() {
+        let mut per_model = concurrency_value();
+        per_model["scope"] = "account_model".into();
+        per_model["per_model"] = serde_json::json!({"acme/model-a": 2});
+        let mut model_default = concurrency_value();
+        model_default["scope"] = "account_model".into();
+        for value in [concurrency_value(), model_default, per_model] {
+            let (rows, rejects) =
+                load_reporting_rejects(&concurrency_document(value.clone()).to_string());
+            assert!(rejects.is_empty(), "{rejects:?}");
+            assert_eq!(
+                serde_json::to_value(rows[0].concurrency.as_ref().unwrap()).unwrap(),
+                value
+            );
+        }
+        assert!(rows_for_test().iter().all(|r| r.concurrency.is_none()));
+    }
+
+    #[test]
+    fn concurrency_review_expires_independently_of_price() {
+        let mut value = concurrency_value();
+        let review_by = 1 + 60 * 86_400_000i64;
+        value["review_by_ms"] = review_by.into();
+        let (rows, rejects) = load_reporting_rejects(&concurrency_document(value).to_string());
+        assert!(rejects.is_empty(), "{rejects:?}");
+        assert!(overdue_at(&rows, review_by).is_empty());
+        let overdue = overdue_at(&rows, review_by + 3 * 86_400_000);
+        assert_eq!(overdue.len(), 1);
+        assert_eq!(overdue[0].subject, "concurrency");
+        let message = overdue_report(&overdue);
+        for term in [
+            "acme/pro concurrency",
+            "3 day(s)",
+            "https://example/concurrency",
+            "quote",
+            "60 days",
+        ] {
+            assert!(message.contains(term), "missing {term}: {message}");
+        }
+    }
+
+    #[test]
+    fn changing_only_concurrency_writes_no_plan_price_era() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.db");
+        let store = fusiform_store::CatalogStore::open(&cortexkit_store_types::StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: cortexkit_store_types::Isolation::Module,
+            backend: cortexkit_store_types::StorageBackend::Sqlite {
+                path: path.to_string_lossy().into_owned(),
+            },
+        })
+        .unwrap();
+        let mut doc = concurrency_document(concurrency_value());
+        let (rows, rejects) = load_reporting_rejects(&doc.to_string());
+        assert!(rejects.is_empty());
+        assert_eq!(store.append_plan_prices(&store_rows(&rows)).unwrap(), 1);
+        doc["cells"][0]["concurrency"]["limit"] = 10.into();
+        doc["cells"][0]["concurrency"]["established_at_ms"] = 2.into();
+        doc["cells"][0]["concurrency"]["review_by_ms"] = 2000.into();
+        let (changed, rejects) = load_reporting_rejects(&doc.to_string());
+        assert!(rejects.is_empty());
+        assert_ne!(rows[0].concurrency, changed[0].concurrency);
+        assert_eq!(store.append_plan_prices(&store_rows(&changed)).unwrap(), 0);
+        let conn = rusqlite::Connection::open(path).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM plan_price_era", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "cap changes must not enter price history");
     }
 
     #[test]

@@ -161,6 +161,10 @@ pub struct PlanPriceWire {
     /// Standard is implicit; model rows say which models offer each tier.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_tiers: Option<ServiceTiersWire>,
+    /// Concurrent-request cap for this subscription. Absent means unknown,
+    /// never unlimited and never zero. This is current curation, not history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<ConcurrencyWire>,
     /// Why there is no price, when there is none.
     ///
     /// A POSITIVE claim rather than a gap. "Tier not observed" and "tier
@@ -242,6 +246,33 @@ pub enum ServiceTiersWire {
         refusal_reason: String,
         review_by_ms: i64,
     },
+}
+
+/// A sourced concurrent-request cap, joined onto current plan reads only.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConcurrencyWire {
+    /// Positive number of simultaneous requests, not a requests-per-time rate.
+    pub limit: u64,
+    pub scope: ConcurrencyScope,
+    /// Model-key overrides of `limit`, valid only for `account_model` scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_model: Option<std::collections::BTreeMap<String, u64>>,
+    pub source_ref: String,
+    /// Verbatim first-party statement supporting the cap and its scope.
+    pub quote: String,
+    pub established_at_ms: i64,
+    pub review_by_ms: i64,
+}
+
+/// Whether requests across models share the account's cap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConcurrencyScope {
+    /// All models together share one cap per account.
+    Account,
+    /// Each model has its own cap per account.
+    AccountModel,
 }
 
 /// A speed mode matching the model row's `rate.<dim>.mode.<name>` suffix.

@@ -1860,6 +1860,13 @@ fn render_plan_prices(response: &serde_json::Value) -> String {
             },
             None => out.push_str("      service tiers unknown (not curated)\n"),
         }
+        match row.get("concurrency").filter(|v| !v.is_null()) {
+            Some(value) => match serde_json::from_value(value.clone()) {
+                Ok(value) => out.push_str(&render_concurrency(&value)),
+                Err(_) => out.push_str("      concurrency unknown (malformed response)\n"),
+            },
+            None => out.push_str("      concurrency unknown (not curated)\n"),
+        }
     }
 
     if let Some(policy) = response["unit_policy"].as_str() {
@@ -1898,6 +1905,32 @@ fn render_quota_value(value: &fusiform_protocol::QuotaValueWire) -> String {
             format_instant(*review_by_ms),
         ),
     }
+}
+
+fn render_concurrency(value: &fusiform_protocol::ConcurrencyWire) -> String {
+    let scope = match value.scope {
+        fusiform_protocol::ConcurrencyScope::Account => "account (all models together)",
+        fusiform_protocol::ConcurrencyScope::AccountModel => {
+            "account_model (each model separately)"
+        }
+    };
+    let mut out = format!(
+        "      concurrency: {} concurrent requests, scope {scope}\n",
+        value.limit
+    );
+    if let Some(per_model) = &value.per_model {
+        for (model, limit) in per_model {
+            out.push_str(&format!("        {model}: {limit} concurrent requests\n"));
+        }
+    }
+    out.push_str(&format!(
+        "        established on {}, review by {}\n        source {}\n        quote {}\n",
+        format_instant(value.established_at_ms),
+        format_instant(value.review_by_ms),
+        value.source_ref,
+        value.quote,
+    ));
+    out
 }
 
 fn render_service_tiers(value: &fusiform_protocol::ServiceTiersWire) -> String {
@@ -2491,6 +2524,48 @@ mod tests {
         assert!(
             !out.contains("quota value 0"),
             "absence must not invent zero: {out}"
+        );
+    }
+
+    #[test]
+    fn concurrency_renders_scope_overrides_and_provenance() {
+        let mut response = serde_json::json!({"prices":[{
+            "provider_id":"acme", "tier":"pro",
+            "concurrency":{
+                "limit":3, "scope":"account", "source_ref":"https://example/concurrency",
+                "quote":"Three concurrent requests per account.",
+                "established_at_ms":1793404800000i64, "review_by_ms":1798588800000i64
+            }
+        }]});
+        let out = render_plan_prices(&response);
+        for term in [
+            "concurrency: 3 concurrent requests, scope account (all models together)",
+            "established on 2026-10-31",
+            "review by 2026-12-30",
+            "source https://example/concurrency",
+            "quote Three concurrent requests per account.",
+        ] {
+            assert!(out.contains(term), "missing {term}: {out}");
+        }
+        response["prices"][0]["concurrency"]["scope"] = "account_model".into();
+        response["prices"][0]["concurrency"]["per_model"] = serde_json::json!({"acme/model-a":2});
+        let out = render_plan_prices(&response);
+        assert!(
+            out.contains("scope account_model (each model separately)"),
+            "{out}"
+        );
+        assert!(out.contains("acme/model-a: 2 concurrent requests"), "{out}");
+    }
+
+    #[test]
+    fn concurrency_absence_is_unknown_not_unlimited_or_zero() {
+        let out = render_plan_prices(
+            &serde_json::json!({"prices":[{"provider_id":"acme", "tier":"pro"}]}),
+        );
+        assert!(out.contains("concurrency unknown (not curated)"), "{out}");
+        assert!(
+            !out.contains("concurrency: 0") && !out.contains("unlimited"),
+            "{out}"
         );
     }
 

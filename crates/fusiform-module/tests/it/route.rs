@@ -2543,6 +2543,72 @@ fn a_named_read_of_a_retired_model_says_so() {
 }
 
 #[test]
+fn plan_prices_joins_current_concurrency_and_omits_unknown_and_retired_caps() {
+    let f = fixture();
+    let cap = serde_json::json!({
+        "limit":3, "scope":"account", "source_ref":"https://example/concurrency",
+        "quote":"Three concurrent requests per account.",
+        "established_at_ms":1, "review_by_ms":5_184_000_001i64
+    });
+    let mut doc = serde_json::json!({"cells":[{
+        "provider_id":"acme", "tier":"pro",
+        "price":{"minor_units":2000,"exponent":2,"currency":"USD","period":"month"},
+        "concurrency":cap,
+        "boundary_at_ms":1, "established_by":"reader", "established_at_ms":2,
+        "review_by_ms":9_000_000_000_000i64, "source_ref":"price page"
+    }, {
+        "provider_id":"acme", "tier":"other",
+        "price":{"minor_units":1000,"exponent":2,"currency":"USD","period":"month"},
+        "boundary_at_ms":1, "established_by":"reader", "established_at_ms":2,
+        "review_by_ms":9_000_000_000_000i64, "source_ref":"price page"
+    }]});
+    let _planted = fusiform_module::plan_prices::plant(&doc.to_string());
+    let curated = fusiform_module::plan_prices::store_rows(fusiform_module::plan_prices::rows());
+    f.store.append_plan_prices(&curated).unwrap();
+    let call = serde_json::to_vec(
+        &serde_json::json!({"name":"plan.prices", "arguments":{"provider_id":"acme"}}),
+    )
+    .unwrap();
+    let serve = || {
+        let ToolResponse::PlanPrices(response) = serve_tool_call(&f.store, &call).unwrap() else {
+            panic!("wrong response arm");
+        };
+        serde_json::to_value(response).unwrap()["prices"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let served = serve();
+    assert_eq!(served.len(), 2);
+    assert_eq!(
+        served.iter().find(|r| r["tier"] == "pro").unwrap()["concurrency"],
+        cap
+    );
+    assert!(served
+        .iter()
+        .find(|r| r["tier"] == "other")
+        .unwrap()
+        .get("concurrency")
+        .is_none());
+
+    // The current cap changes without touching the stored price era.
+    doc["cells"][0]["concurrency"]["limit"] = 10.into();
+    let _changed = fusiform_module::plan_prices::plant(&doc.to_string());
+    let served = serve();
+    assert_eq!(
+        served.iter().find(|r| r["tier"] == "pro").unwrap()["concurrency"]["limit"],
+        10
+    );
+
+    let remaining: Vec<_> = curated.into_iter().filter(|r| r.tier != "pro").collect();
+    assert_eq!(f.store.append_plan_prices(&remaining).unwrap(), 1);
+    let served = serve();
+    let retired = served.iter().find(|r| r["tier"] == "pro").unwrap();
+    assert!(retired.get("price").is_none());
+    assert!(retired.get("concurrency").is_none());
+}
+
+#[test]
 fn plan_prices_joins_service_tiers_for_each_openai_plan() {
     use fusiform_protocol::{QuotaDecimal, ServiceTier, ServiceTierWire, ServiceTiersWire};
     let f = fixture();

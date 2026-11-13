@@ -34,6 +34,7 @@ Each row in `prices`:
 | `refusal_reason` | refusal rows only | why there is no price |
 | `quota_value` | when curated, priced rows only | §5 |
 | `service_tiers` | when curated, priced rows only | §5.1 |
+| `concurrency` | when curated, priced rows only | §5.2 |
 | `boundary_at_ms` | always | when the price took effect, as best the source allows |
 | `established_by`, `established_at_ms` | always | who read the source and when |
 | `review_by_ms` | always | when someone must read the source again |
@@ -131,12 +132,29 @@ Malformed fields are counted rejects without dropping the price
 The route test `route::plan_prices_joins_service_tiers_for_each_openai_plan`
 checks each curated plan and omission on other providers.
 
+### 5.2. Concurrency
+
+`concurrency` records how many requests may run simultaneously per subscription
+account. Absent means unknown, never unlimited and never zero. Its positive
+integer `limit` is shared across all models for `scope: "account"`, or applies
+separately to each model for `scope: "account_model"`. Only the latter permits
+an optional `per_model` map of model keys to positive integer overrides; other
+models use `limit`.
+
+Each cap carries `source_ref`, a verbatim first-party `quote`,
+`established_at_ms` and `review_by_ms`, due after 60 days. These are concurrent
+requests, not a usage allowance or a requests-per-time rate. Like service tiers,
+caps are joined onto current reads by `(provider_id, tier)`, omitted for
+tombstones, and never stored. Changing only concurrency writes no
+`plan_price_era`. Malformed caps are counted rejects without dropping the price;
+their review dates expire independently of the price.
+
 ## 6. The file
 
 `plan-prices.json` has schema `plan-prices/v1`, a `cells` array, and the
 `unit_policy` and `tier_vocabulary` statements served above. Each cell:
 `provider_id`, `tier`, either `price` or `refusal_reason`, optional
-`quota_value` and `service_tiers`, `boundary_at_ms`, `established_by`, `established_at_ms`,
+`quota_value`, `service_tiers` and `concurrency`, `boundary_at_ms`, `established_by`, `established_at_ms`,
 `review_by_ms`, `source_ref`, and an optional free-text `note` that is not
 served.
 

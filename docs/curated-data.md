@@ -58,6 +58,20 @@ the other providers remain unknown. Review service tiers after 30 days because
 Pro 500 and the published consumption rates are recent. Model availability
 stays on model rows.
 
+The optional `concurrency` field on a plan-price cell records a sourced cap on
+simultaneous requests. Absent means unknown, **never unlimited and never zero**.
+It carries a positive integer `limit`, `scope` (`account` for all models together
+or `account_model` for each model separately), optional `per_model` positive
+integer overrides keyed by model, `source_ref`, a verbatim first-party `quote`,
+`established_at_ms` and `review_by_ms`. Overrides are valid only with
+`account_model`; other models use `limit`. Empty source or quote, nonpositive or
+noninteger limits, unknown scopes, missing provenance and `per_model` with
+`account` are counted rejects without losing the price. These caps are joined
+onto current reads, omitted for tombstones, never stored and never create a
+price era. Review each cap after 60 days; the review-date gate checks it
+independently of the price. Usage allowances and requests-per-time limits do
+not establish concurrency.
+
 The seed and the enrollment descriptor are covered in
 [`architecture.md`](architecture.md) and
 [`backup-and-restore.md`](backup-and-restore.md). Unit tests named below are in
