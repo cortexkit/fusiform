@@ -886,7 +886,10 @@ appears once at response level:
 ```
 
 The example uses synthetic grades. `graded_at_ms` is the newest `recorded_at_ms`
-among grades actually served in this response, in epoch milliseconds. An
+among grades actually served in this response, in epoch milliseconds. On a
+paged read each page is its own response: its `quality_scores` describes only
+that page's grades, so pages of one snapshot can differ (or one can omit it).
+A reader merging pages takes the newest `graded_at_ms` across them. An
 unrelated grade write does not redate another model's grade. There is no
 per-model attribution duplication. The object
 is omitted for an empty grade table, unmatched rows, filters excluding quality,
