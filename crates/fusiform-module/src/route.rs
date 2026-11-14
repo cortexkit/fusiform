@@ -4035,6 +4035,72 @@ mod alias_tests {
     }
 
     #[test]
+    fn hydrogen_antigravity_alias_serves_its_route_and_borrowed_facts() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-4-hydrogen", 300_000_000);
+        store
+            .append_eras(&[
+                era_at("gemini-4-hydrogen", "limit.output", "65536", 1_000),
+                era_at(
+                    "gemini-4-hydrogen",
+                    "capability.reasoning_options",
+                    r#"[{"type":"effort","values":["minimal","low","medium","high","xhigh"]}]"#,
+                    2_000,
+                ),
+            ])
+            .unwrap();
+        let args = r#"{"provider_id":"google","model_id":"antigravity-gemini-4-hydrogen"}"#;
+        let got = get(&store, args).unwrap();
+        let facts = &got.models["google/antigravity-gemini-4-hydrogen"];
+        assert_eq!(facts["limit.context"], 1_048_576);
+        assert_eq!(facts["limit.output"], 262_144);
+        assert_eq!(
+            facts["capability.reasoning_options"],
+            serde_json::json!([{"type":"effort","values":["low", "medium", "high", "xhigh"]}])
+        );
+        assert_eq!(
+            facts["route.reasoning_wire_ids"],
+            serde_json::json!({
+                "low":"gemini-4-hydrogen-low", "medium":"gemini-4-hydrogen-medium",
+                "high":"gemini-4-hydrogen-high", "xhigh":"gemini-4-hydrogen-xhigh"
+            })
+        );
+        assert_eq!(facts["route.reasoning_default"], "high");
+        assert_eq!(facts["rate.input"]["units"], 300_000_000);
+        assert_eq!(
+            facts["rate.input"]["inherited_from"]["model_id"],
+            "gemini-4-hydrogen"
+        );
+        assert_eq!(facts["rate.input"]["inherited_from"]["basis"], "alias");
+        assert_eq!(got.aliased[0].target_model_id, "gemini-4-hydrogen");
+        let direct = get(
+            &store,
+            r#"{"provider_id":"google","model_id":"gemini-4-hydrogen"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            direct.models["google/gemini-4-hydrogen"]["limit.output"],
+            65_536
+        );
+    }
+
+    #[test]
+    fn hydrogen_antigravity_upstream_row_wins_over_alias() {
+        let (store, _d) = store();
+        seed_model(&store, "gemini-4-hydrogen", 300_000_000);
+        seed_model(&store, "antigravity-gemini-4-hydrogen", 7);
+        let got = get(
+            &store,
+            r#"{"provider_id":"google","model_id":"antigravity-gemini-4-hydrogen"}"#,
+        )
+        .unwrap();
+        let rate = &got.models["google/antigravity-gemini-4-hydrogen"]["rate.input"];
+        assert!(got.aliased.is_empty());
+        assert_eq!(rate["units"], 7);
+        assert!(rate.get("inherited_from").is_none());
+    }
+
+    #[test]
     fn a_named_alias_read_serves_the_target_under_the_alias_key() {
         let (store, _d) = store();
         seed_model(&store, "gemini-3.8-flash", 300_000_000);

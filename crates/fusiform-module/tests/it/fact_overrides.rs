@@ -1221,3 +1221,63 @@ fn carbon_and_its_antigravity_alias_serve_the_sourced_output_limit() {
     );
     assert!(historical.fact_overrides.is_empty());
 }
+
+#[test]
+fn hydrogen_antigravity_alias_serves_the_sourced_output_limit() {
+    let seed: Value =
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+    let hydrogen = seed["google"]["models"]["gemini-4-hydrogen"].clone();
+    assert_eq!(hydrogen["limit"]["output"], json!(65_536));
+    let mut google = seed["google"].clone();
+    google["models"] = json!({"gemini-4-hydrogen": hydrogen});
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    ingest(
+        &store,
+        &serde_json::to_vec(&json!({"google": google})).unwrap(),
+        1_000,
+    );
+    let alias = &fusiform_module::aliases::aliases()
+        [&("google".into(), "antigravity-gemini-4-hydrogen".into())];
+    for response in [
+        get(
+            &store,
+            json!({"provider_id":"google","model_id":"antigravity-gemini-4-hydrogen"}),
+        ),
+        get(&store, json!({"provider_id":"google"})),
+        paged(&store, json!({})),
+        get(
+            &store,
+            json!({"provider_id":"google","model_id":"antigravity-gemini-4-hydrogen","fact_prefixes":["limit."]}),
+        ),
+    ] {
+        let identity = "google/antigravity-gemini-4-hydrogen";
+        assert_eq!(response.models[identity]["limit.output"], json!(262_144));
+        let rows = disclosed_fact(&response, identity, "limit.output");
+        assert_eq!(rows.len(), 1);
+        let row = rows[0];
+        let limit = alias.limit_output.as_ref().unwrap();
+        assert_eq!(row.model_id, "antigravity-gemini-4-hydrogen");
+        assert_eq!(row.replaces, json!(65_536));
+        assert_eq!(row.source_ref, limit.source_ref);
+        assert_eq!(row.quote, limit.quote);
+        assert_eq!(row.established_at_ms, alias.established_at_ms);
+        assert_eq!(row.review_by_ms, alias.review_by_ms);
+    }
+    let target = get(
+        &store,
+        json!({"provider_id":"google","model_id":"gemini-4-hydrogen"}),
+    );
+    assert_eq!(
+        target.models["google/gemini-4-hydrogen"]["limit.output"],
+        json!(65_536)
+    );
+}

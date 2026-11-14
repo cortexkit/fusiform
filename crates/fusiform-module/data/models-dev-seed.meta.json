@@ -1,9 +1,9 @@
 {
-  "fetched_at": "2026-11-11T16:31:35Z",
-  "fetched_at_ms": 1794414695173,
-  "model_count": 8991,
+  "fetched_at": "2026-11-14T16:28:52Z",
+  "fetched_at_ms": 1794673732302,
+  "model_count": 9135,
   "note": "Bootstrap snapshot for a fresh install with no network. fetched_at_ms is load-bearing: it is the instant of the recorded `seeded` observation and the left edge of the first real fetch's observation window. Refresh via scripts/refresh-seed.sh.",
-  "provider_count": 235,
-  "sha256": "f55606113b377c543af6c9da092fcd59c73828f9ef7cd0e57d3a48a6ea8c45de",
+  "provider_count": 236,
+  "sha256": "cd6306210d8182d401597795d3c1e7b768ace88dc0b8c9708ed30143b1f3961e",
   "source_url": "https://models.dev/api.json"
 }

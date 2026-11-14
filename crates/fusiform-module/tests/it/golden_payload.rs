@@ -455,6 +455,10 @@ fn render_all() -> String {
         .as_object_mut()
         .unwrap()
         .extend(render_temperature());
+    ordinary.as_object_mut().unwrap().insert(
+        "catalog.get — Hydrogen alias with its own output limit".into(),
+        render_hydrogen_alias(),
+    );
     let planes: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
     for (label, case) in planes.as_object().unwrap() {
         assert!(
@@ -517,6 +521,28 @@ fn render_all() -> String {
     let mut text = serde_json::to_string_pretty(&ordinary).unwrap();
     text.push('\n');
     text
+}
+
+fn render_hydrogen_alias() -> serde_json::Value {
+    let mut seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    seed.as_object_mut().unwrap().retain(|provider, row| {
+        if provider != "google" {
+            return false;
+        }
+        row["models"]
+            .as_object_mut()
+            .unwrap()
+            .retain(|id, _| id == "gemini-4-hydrogen");
+        true
+    });
+    let (store, _dir) = super::temperature::store(seed);
+    let request = serde_json::json!({"name":"catalog.get","arguments":{
+        "provider_id":"google","model_id":"antigravity-gemini-4-hydrogen","fact_prefixes":["limit."]
+    }});
+    let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+    let mut response = serde_json::to_value(response).unwrap();
+    response["resolved_at_ms"] = NOW_PLACEHOLDER.into();
+    serde_json::json!({"request":request,"response":response})
 }
 
 /// Keep consumer price vectors separate so adding seed rows changes no
@@ -1315,15 +1341,16 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         .values()
         .filter(|case| case["request"]["arguments"].get("auth_method").is_none())
         .count();
-    // The eight single cases rendered outside `cases()`: the first provider page,
+    // The nine single cases rendered outside `cases()`: the first provider page,
     // the seed and synthetic identities, synthetic grades, curated history,
-    // dated fact overrides, Realtime audio input, and synthetic plan concurrency.
+    // dated fact overrides, Realtime audio input, synthetic plan concurrency,
+    // and the Hydrogen alias output limit.
     for (text, expected) in [
         (
             GOLDEN.to_string(),
             cases().len()
                 + plain_plane_cases
-                + 8
+                + 9
                 + curated_wire.len()
                 + quality_tools.len()
                 + media_quality.len()
@@ -1355,6 +1382,10 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
             2,
         ),
         (serde_json::to_string(&render_temperature()).unwrap(), 6),
+        (
+            serde_json::json!({"hydrogen_alias":render_hydrogen_alias()}).to_string(),
+            1,
+        ),
         (serde_json::json!({"paged":render_paged()}).to_string(), 1),
         (
             serde_json::json!({"canonical":render_canonical_link()}).to_string(),
