@@ -149,6 +149,7 @@ value would do to a consumer:
 | `limit.image_long_edge_px.above_images.<n>` | advisory | stricter integer image long edge in pixels when more than n image and document blocks occur across the whole request, history included; n is a positive decimal integer without leading zeros; only on first-party image-input rows, never aliases or gateways; current reads only; absent means no stated condition; a reader unable to count must take the smaller of the base and conditional values |
 | `limit.document_pages` | advisory | integer pages per document, only on first-party PDF-input rows; current reads only; absent means unknown, never unlimited |
 | `limit.document_bytes` | advisory | integer raw-file bytes per document, only on first-party PDF-input rows; current reads only; absent means unknown, never unlimited |
+| `limit.output_duration_ms` | advisory | documented integer maximum duration in milliseconds of one generated video clip, curated from the provider's documentation; current reads only; absent means unknown, never unlimited; excludes the combined length obtained by appending more generated segments to a video |
 | `capability.reasoning` | byte-affecting | `true`, `false` or `null` |
 | `capability.reasoning_options` | byte-affecting | the upstream's `reasoning_options` array verbatim, or `null` |
 | `capability.structured_output` | advisory | `true` or `false` only when published by models.dev; otherwise no fact |
@@ -159,6 +160,8 @@ value would do to a consumer:
 | `capability.attachment` | advisory | `true`, `false` or `null` |
 | `capability.input_modalities` | advisory | list of modality strings, or `null` |
 | `capability.output_modalities` | advisory | list of modality strings, or `null` |
+| `capability.aspect_ratios` | advisory | documented list of supported video aspect-ratio strings, curated from the provider's documentation; strings match exactly as the vendor writes them; current reads only; absent means unknown, not an empty list |
+| `capability.output_audio` | advisory | documented boolean indicating whether generated video carries an audio track, curated from the provider's documentation; current reads only; absent means unknown, not `false`; does not promise an audio on/off switch or silent output |
 | `model.family` | advisory | upstream family string, or `null` |
 | `model.open_weights` | advisory | `true`, `false` or `null` |
 | `model.canonical_id` | advisory | upstream canonical model id, or `null` |
