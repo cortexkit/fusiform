@@ -99,7 +99,7 @@
         "provider_id": "google",
         "model_id": "gemini-4-hydrogen"
       },
-      "basis": "The plugin resolves low, medium, high and xhigh to the corresponding gemini-4-hydrogen wire ids, defaulting to high. OpenCode 1 lists only low, medium and high because its Google library cannot carry xhigh; the native client sends xhigh as thinkingLevel number 100.",
+      "basis": "The plugin resolves low, medium, high and xhigh to the corresponding gemini-4-hydrogen wire ids, defaulting to high. OpenCode 1 lists only low, medium and high because its Google library cannot carry xhigh (antigravity-auth commits 2fa058f3 and 5b186315); the native client sends xhigh as thinkingLevel number 100.",
       "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/packages/core/src/model-registry.ts#L107-L135 (native routes), #L323-L337 (public model), #L635-L648 (tier mapping); https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/test-fixtures/agy-cli-1.5.5/hydrogen-evidence.json (native xhigh request); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
       "established_at_ms": 1794528000000,
       "review_by_ms": 1799712000000,
