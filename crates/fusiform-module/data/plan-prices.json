@@ -259,6 +259,22 @@
       "established_at_ms": 1793145600000,
       "review_by_ms": 1798329600000,
       "source_ref": "https://www.kimi.com/zh-hans/resources/kimi-k2-7-code-pricing"
+    },
+    {
+      "provider_id": "ollama-cloud",
+      "tier": "free",
+      "price": {"minor_units": 0, "exponent": 2, "currency": "USD", "period": "month"},
+      "quota_value": {
+        "state": "not_established",
+        "refusal_reason": "A free plan has no fee to value usage against, and no Ollama Cloud account is measured. The operator can state a figure.",
+        "review_by_ms": 1799798400000
+      },
+      "note": "Ollama's own wording: 'The free plan now includes a small amount of monthly usage for a set of starter models. Add usage credits to access all models on the free plan with pay-as-you-go pricing: no service fees, no subscription required.' (https://ollama.com/blog/transparent-pricing, read 2026-11-14). A free plan has no subscription fee, so the price is zero. The pricing page (https://ollama.com/pricing) lists a '$0' entry labelled 'Pay as you go' and never says whether it is the same plan as the blog's free plan; neither page states a free-plan concurrency limit or names its starter models. Only free is curated, because it is the tier the operator's account holds; the paid tiers (Pro $20, Max $100, Team $500 per month) are not curated until an account holds one. USD and month follow the US web listing.",
+      "boundary_at_ms": 1794614400000,
+      "established_by": "fusiform",
+      "established_at_ms": 1794614400000,
+      "review_by_ms": 1799798400000,
+      "source_ref": "https://ollama.com/blog/transparent-pricing"
     }
   ],
   "why_this_basis": "US list price, MONTHLY-BILLED basis. Recorded rather than assumed, and the basis is chosen for its FAILURE DIRECTION rather than for consistency: a higher denominator produces a lower multiplier, so recording the monthly-billed price makes a subscription look WORSE than it is for an annual subscriber. Every other known residual in the consuming calculation biases toward 'keep paying', so the one term that errs pessimistic is the one pushing back. Do not 'correct' this to the annual figure: it would remove the only conservative term. anthropic/pro is $17 billed annually against $20 monthly, a 15% spread, and that difference is deliberately not modelled here \u2014 an operator on an annual term or a grandfathered rate overrides this plane on their own credential record, which is where a fact about one account belongs. WEB-SUBSCRIPTION prices, additionally: the Max help centre states 'these prices are for web subscriptions only. Mobile pricing may vary depending on your app platform.' An operator who subscribed through an app store may pay an app-store markup this plane cannot see, which is a third basis axis beyond country and billing term. Same remedy as the others \u2014 the credential override carries what one account actually pays.",
