@@ -514,19 +514,23 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
     assert_eq!(plan.new_models, 0);
     assert_eq!(plan.disappeared_models, 0);
     // The count a deploy should expect, pinned so a reviewer sees it move:
-    // Google's 14 eligible input rows, plus two Google output rows and one
+    // Google's 15 eligible input rows, plus two Google output rows and one
     // OpenAI output row. Realtime 2.1 adds one OpenAI input era. Live Preview
     // carries both independent audio facts.
-    // Gemini 4 Carbon joined in the November seed: Google bills it one input
-    // price for every modality, which equals its models.dev audio price.
-    assert_eq!(plan.eras.len(), 18, "{:?}", written.keys());
+    // Gemini 4 Carbon and Hydrogen each have an eligible input audio rate.
+    assert_eq!(plan.eras.len(), 19, "{:?}", written.keys());
     assert_eq!(
         written
             .keys()
             .filter(|(_, _, key)| key == "rate.input_audio")
             .count(),
-        15
+        16
     );
+    assert!(written.contains_key(&(
+        "google".into(),
+        "gemini-4-hydrogen".into(),
+        "rate.input_audio".into()
+    )));
     assert_eq!(
         written
             .keys()

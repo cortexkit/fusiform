@@ -5,8 +5,8 @@
 //! Nine families were seeded into `model-creators.json` and two were removed
 //! before shipping, by a check run once, by hand, in a throwaway script:
 //! `deepseek` prices only its `-flash` and `-thinking` lines and publishes no
-//! bare `deepseek` family row, and `google` publishes `gemma` UNPRICED while
-//! pricing every closed Gemini family.
+//! bare `deepseek` family row, and at the time `google` published `gemma`
+//! unpriced while pricing every closed Gemini family.
 //!
 //! Both rows would have shipped looking like coverage and inheriting nothing.
 //! THE ORIGINATOR OF AN OPEN-WEIGHT MODEL IS NOT OBLIGED TO SELL IT, so
@@ -22,8 +22,8 @@
 //! the embedded seed, which is a snapshot. The live store is current and the
 //! seed ages, so the two can disagree — a creator that stops pricing a family
 //! leaves this fence passing on stale evidence. That is not hypothetical:
-//! `gemma -> google` was removed precisely because google publishes gemma
-//! unpriced, and a creator can change that in either direction.
+//! `gemma -> google` was removed when google published gemma unpriced; Google
+//! now prices both seed rows. A creator can change that in either direction.
 //!
 //! The seed is used anyway because CI has no store, and a test that skips when
 //! a live store is absent reports green while doing nothing — which this
@@ -76,10 +76,10 @@ struct Doc {
 }
 
 /// `family` -> how many priced rows the named creator publishes in it.
-fn priced_rows_per_curated_family() -> BTreeMap<String, (String, usize)> {
-    let seed: serde_json::Value = serde_json::from_str(SEED).expect("the seed parses");
-    let doc: Doc = serde_json::from_str(CREATORS).expect("the creator table parses");
-
+fn priced_rows_per_curated_family(
+    seed: &serde_json::Value,
+    doc: Doc,
+) -> BTreeMap<String, (String, usize)> {
     doc.creators
         .into_iter()
         .map(|row| {
@@ -104,9 +104,19 @@ fn priced_rows_per_curated_family() -> BTreeMap<String, (String, usize)> {
         .collect()
 }
 
+fn dead_creators(table: &BTreeMap<String, (String, usize)>) -> Vec<String> {
+    table
+        .iter()
+        .filter(|(_, (_, n))| *n == 0)
+        .map(|(family, (creator, _))| format!("{family} -> {creator}"))
+        .collect()
+}
+
 #[test]
 fn every_curated_creator_publishes_a_price_in_the_family_it_claims() {
-    let table = priced_rows_per_curated_family();
+    let seed: serde_json::Value = serde_json::from_str(SEED).expect("the seed parses");
+    let doc: Doc = serde_json::from_str(CREATORS).expect("the creator table parses");
+    let table = priced_rows_per_curated_family(&seed, doc);
 
     assert!(
         !table.is_empty(),
@@ -114,11 +124,7 @@ fn every_curated_creator_publishes_a_price_in_the_family_it_claims() {
          file must carry rows"
     );
 
-    let dead: Vec<String> = table
-        .iter()
-        .filter(|(_, (_, n))| *n == 0)
-        .map(|(family, (creator, _))| format!("{family} -> {creator}"))
-        .collect();
+    let dead = dead_creators(&table);
 
     assert!(
         dead.is_empty(),
@@ -126,45 +132,28 @@ fn every_curated_creator_publishes_a_price_in_the_family_it_claims() {
          creator publishes no PRICED row in that family at all — they are \
          coverage that inherits nothing: {dead:?}. Either the creator is wrong, \
          or that originator does not sell its own weights (which is ordinary: \
-         google publishes gemma unpriced) and the row should be removed rather \
+         an originator might not price a family) and the row should be removed rather \
          than kept."
     );
 }
 
-/// The fence must be able to fail, proven against a creator known to be dead.
+/// The fence must convict an unpriced family while accepting a priced one.
 ///
 /// Without this, the test above passes identically against a build whose
 /// counter always returns a positive number — and a fence that cannot fail is
 /// the shape this repository keeps finding.
 #[test]
 fn the_fence_convicts_a_creator_that_does_not_sell_its_own_weights() {
-    let seed: serde_json::Value = serde_json::from_str(SEED).expect("the seed parses");
-
-    // `google` publishes `gemma` and prices none of it. This is the exact row
-    // removed before shipping, held here as the fence's control rather than as
-    // a claim about what the table contains.
-    let priced = seed
-        .get("google")
-        .and_then(|p| p.get("models"))
-        .and_then(|m| m.as_object())
-        .map(|models| {
-            models
-                .values()
-                .filter(|m| {
-                    m.get("family").and_then(|f| f.as_str()) == Some("gemma")
-                        && m.get("cost")
-                            .and_then(|c| c.get("input"))
-                            .is_some_and(|v| !v.is_null())
-                })
-                .count()
-        })
-        .expect("google must be in the seed");
-
-    assert_eq!(
-        priced, 0,
-        "control: google must still publish gemma unpriced. If this changes, \
-         the fence above has lost the example that proves it can fail, and \
-         `gemma -> google` becomes a row worth adding rather than one worth \
-         refusing"
-    );
+    let seed = serde_json::json!({"creator":{"models":{
+        "unpriced":{"family":"unpriced"},
+        "priced":{"family":"priced","cost":{"input":1}}
+    }}});
+    let doc: Doc = serde_json::from_value(serde_json::json!({"creators":[
+        {"family":"unpriced","creator_provider_id":"creator"},
+        {"family":"priced","creator_provider_id":"creator"}
+    ]}))
+    .unwrap();
+    let table = priced_rows_per_curated_family(&seed, doc);
+    assert_eq!(table["priced"].1, 1);
+    assert_eq!(dead_creators(&table), vec!["unpriced -> creator"]);
 }

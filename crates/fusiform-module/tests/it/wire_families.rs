@@ -39,6 +39,7 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
         ("opencode-go", "gpt-6-luna", ""),
         ("google", "gemini-4-argon", ""),
         ("google", "gemini-4-carbon", ""),
+        ("google", "gemini-4-hydrogen", ""),
         ("google", "gemini-3.1-flash-image", ""),
         ("anthropic", "claude-opus-5-5", ""),
     ];
