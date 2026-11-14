@@ -1230,6 +1230,11 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "documented output-audio tokens per second for this model; distinct from the input-audio conversion. Absent means unknown, never a default.",
     },
     ServedFact {
+        key: "limit.output_duration_ms",
+        class: FactClass::Advisory,
+        note: "documented integer maximum duration in milliseconds of a single generated video clip, curated from the provider's documentation; current reads only. Absent means unknown, never unlimited; video extension is not a single clip.",
+    },
+    ServedFact {
         key: "limit.output_video_tokens_per_second.resolution.360p",
         class: FactClass::Advisory,
         note: "documented output video tokens per second at 360p; absent means unknown.",
@@ -1395,6 +1400,16 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         key: "capability.output_modalities",
         class: FactClass::Advisory,
         note: "null when unpublished, which is not the same as an empty list",
+    },
+    ServedFact {
+        key: "capability.aspect_ratios",
+        class: FactClass::Advisory,
+        note: "documented list of supported video aspect-ratio strings, curated from the provider's documentation; strings match exactly as the vendor writes them; current reads only. Absent means unknown, not an empty list.",
+    },
+    ServedFact {
+        key: "capability.output_audio",
+        class: FactClass::Advisory,
+        note: "documented boolean indicating whether generated video carries an audio track, curated from the provider's documentation; current reads only. Absent means unknown, not false; does not promise an audio on/off switch or silent output.",
     },
     ServedFact {
         key: "model.family",

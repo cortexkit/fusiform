@@ -202,7 +202,9 @@ fn omni_serves_only_documented_video_facts() {
             "existence":"present", "model.name":"Gemini Omni 1.2 Flash", "model.type":"video",
             "model.lineage":"gemini",
             "capability.input_modalities":["image","text","video"], "capability.output_modalities":["text","video"],
+            "capability.aspect_ratios":["9:16","16:9"], "capability.output_audio":true,
             "limit.images_per_request":3600,
+            "limit.output_duration_ms":15000,
             "limit.temperature_min":0.0, "limit.temperature_max":2.0,
             "rate.input":price(150,2), "rate.output":price(9,0), "rate.output_video":price(12,0),
             "limit.output_video_tokens_per_second.resolution.360p":1931,
@@ -216,6 +218,43 @@ fn omni_serves_only_documented_video_facts() {
     assert!(fusiform_module::wire_families::is_known(
         "google.interactions"
     ));
+}
+
+#[test]
+fn omni_video_facts_survive_prefix_filters_and_are_not_shared() {
+    let (store, _dir) = empty_store();
+    let id = "google/gemini-omni-1.2-flash";
+    let expected = [
+        ("limit.output_duration_ms", json!(15000)),
+        ("capability.aspect_ratios", json!(["9:16", "16:9"])),
+        ("capability.output_audio", json!(true)),
+    ];
+    for prefix in ["limit.", "capability."] {
+        for named in [false, true] {
+            let mut args = json!({"fact_prefixes":[prefix]});
+            if named {
+                args["provider_id"] = json!("google");
+                args["model_id"] = json!("gemini-omni-1.2-flash");
+            }
+            let response = super::curated_wire::get(&store, args.clone());
+            for (key, value) in &expected {
+                if key.starts_with(prefix) {
+                    assert_eq!(response.models[id].get(*key), Some(value), "{args}: {key}");
+                }
+            }
+            for (model, facts) in &response.models {
+                assert!(
+                    facts.keys().all(|key| key.starts_with(prefix)),
+                    "{args}: {model}"
+                );
+                if model != id {
+                    for (key, _) in &expected {
+                        assert!(!facts.contains_key(*key), "{model} must not claim {key}");
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn image_store(output: i64) -> (CatalogStore, tempfile::TempDir) {

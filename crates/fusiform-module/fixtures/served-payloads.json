@@ -1549,22 +1549,28 @@
           ],
           "model": "google/gemini-omni-1.2-flash",
           "review_by_ms": 1799452800000,
-          "source_ref": "Read 2026-11-10. https://ai.google.dev/gemini-api/docs/pricing: per 1M tokens in USD, input \"$1.50 (text / image / video)\"; output \"$9.00 (text)\", \"$12.00 (video)\"; \"calculated at a rate of 5,792 tokens per second of 720p video\"; 360p \"1,931 tokens/s\", 1080p with upsampling \"8,688 tokens/s\", 4K with upsampling \"17,376 tokens/s\". https://ai.google.dev/gemini-api/docs/models/gemini-omni-flash: Stable \"gemini-omni-1.2-flash\", \"Gemini Omni 1.2 Flash\". https://ai.google.dev/gemini-api/docs/omni: \"Interactions API\", \"POST https://generativelanguage.googleapis.com/v1beta/interactions\". Image, text and video input; text and video output. Output conversions are resolution-selected token counts, not time-billed rates; 1080p and 4K include upsampling. No unstated context, output limit or audio conversion is served."
+          "source_ref": "Read 2026-11-10. https://ai.google.dev/gemini-api/docs/pricing: per 1M tokens in USD, input \"$1.50 (text / image / video)\"; output \"$9.00 (text)\", \"$12.00 (video)\"; \"calculated at a rate of 5,792 tokens per second of 720p video\"; 360p \"1,931 tokens/s\", 1080p with upsampling \"8,688 tokens/s\", 4K with upsampling \"17,376 tokens/s\". https://ai.google.dev/gemini-api/docs/models/gemini-omni-flash: Stable \"gemini-omni-1.2-flash\", \"Gemini Omni 1.2 Flash\". https://ai.google.dev/gemini-api/docs/omni: \"Interactions API\", \"POST https://generativelanguage.googleapis.com/v1beta/interactions\". Image, text and video input; text and video output. Output conversions are resolution-selected token counts, not time-billed rates; 1080p and 4K include upsampling. No unstated context, output limit or audio conversion is served. Video facts read 2026-11-14. https://ai.google.dev/gemini-api/docs/omni: \"You can set the video `duration` in `response_format` to any whole second from 3 to 15 seconds (for example, `\"15s\"`).\" \"Setting a duration over 15 seconds returns an invalid argument error.\" The documented \"up to 30 seconds total for extended videos\" is extension, not one generated clip. Aspect ratios: \"Supported values: \"9:16\", \"16:9\"\"; \"Landscape (16:9) is the default.\" Audio: \"By default the model will try to generate an appropriate audio track for a video.\" https://ai.google.dev/gemini-api/docs/models/gemini-omni-flash: output video \"3s-15s\"; output \"Video with native Audio, Text\". Google documents no audio on/off switch and does not promise silent output."
         }
       ],
       "models": {
         "google/gemini-omni-1.2-flash": {
+          "capability.aspect_ratios": [
+            "9:16",
+            "16:9"
+          ],
           "capability.input_modalities": [
             "image",
             "text",
             "video"
           ],
+          "capability.output_audio": true,
           "capability.output_modalities": [
             "text",
             "video"
           ],
           "existence": "present",
           "limit.images_per_request": 3600,
+          "limit.output_duration_ms": 15000,
           "limit.output_video_tokens_per_second.resolution.1080p": 8688,
           "limit.output_video_tokens_per_second.resolution.360p": 1931,
           "limit.output_video_tokens_per_second.resolution.4k": 17376,
@@ -6471,6 +6477,7 @@
         "limit.document_pages",
         "limit.document_bytes",
         "limit.output_audio_tokens_per_second",
+        "limit.output_duration_ms",
         "limit.output_video_tokens_per_second.resolution.360p",
         "limit.output_video_tokens_per_second.resolution.720p",
         "limit.output_video_tokens_per_second.resolution.1080p",
@@ -6490,6 +6497,8 @@
         "capability.attachment",
         "capability.input_modalities",
         "capability.output_modalities",
+        "capability.aspect_ratios",
+        "capability.output_audio",
         "model.family",
         "model.open_weights",
         "model.canonical_id",
