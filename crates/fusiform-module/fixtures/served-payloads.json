@@ -7159,6 +7159,250 @@
       "source": "models.dev"
     }
   },
+  "catalog.history — historical rate keys": {
+    "request": {
+      "arguments": {
+        "fact_prefix": "rate.cached_",
+        "model_id": "gpt-realtime-2.1",
+        "provider_id": "openai",
+        "served": true
+      },
+      "name": "catalog.history"
+    },
+    "response": {
+      "eras": [],
+      "fact_keys": [
+        "rate.cached_input_audio"
+      ],
+      "fact_prefix": "rate.cached_",
+      "model_id": "gpt-realtime-2.1",
+      "provider_id": "openai",
+      "served_by_key": {
+        "rate.cached_input_audio": [
+          {
+            "from_ms": 1000,
+            "state": "absent",
+            "until_ms": 1794528000000
+          },
+          {
+            "from_ms": 1794528000000,
+            "override": {
+              "replaces": null,
+              "source_ref": "https://developers.openai.com/api/docs/pricing (accessed 2026-11-13); https://developers.openai.com/api/docs/models/gpt-realtime-2.1 (accessed 2026-11-13)"
+            },
+            "source": "override",
+            "state": "value",
+            "until_ms": null,
+            "value": {
+              "currency": "USD",
+              "exponent": 9,
+              "state": "priced",
+              "unit_provenance": {
+                "kind": "stated"
+              },
+              "units": 400000000
+            }
+          }
+        ]
+      },
+      "source": "models.dev"
+    }
+  },
+  "catalog.history — served cache lifetime": {
+    "request": {
+      "arguments": {
+        "fact_key": "rate.cache_write.ttl.1h",
+        "model_id": "claude-opus-5-5",
+        "provider_id": "anthropic",
+        "served": true
+      },
+      "name": "catalog.history"
+    },
+    "response": {
+      "eras": [],
+      "fact_key": "rate.cache_write.ttl.1h",
+      "model_id": "claude-opus-5-5",
+      "provider_id": "anthropic",
+      "served": [
+        {
+          "from_ms": 1000,
+          "state": "absent",
+          "until_ms": 1794089713000
+        },
+        {
+          "from_ms": 1794089713000,
+          "source": "cache_lifetime",
+          "state": "value",
+          "until_ms": null,
+          "value": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 8000000000
+          }
+        }
+      ],
+      "source": "models.dev"
+    }
+  },
+  "catalog.history — served override addition": {
+    "request": {
+      "arguments": {
+        "fact_key": "rate.cached_input_audio",
+        "model_id": "gpt-realtime-2.1",
+        "provider_id": "openai",
+        "served": true
+      },
+      "name": "catalog.history"
+    },
+    "response": {
+      "eras": [],
+      "fact_key": "rate.cached_input_audio",
+      "model_id": "gpt-realtime-2.1",
+      "provider_id": "openai",
+      "served": [
+        {
+          "from_ms": 1000,
+          "state": "absent",
+          "until_ms": 1794528000000
+        },
+        {
+          "from_ms": 1794528000000,
+          "override": {
+            "replaces": null,
+            "source_ref": "https://developers.openai.com/api/docs/pricing (accessed 2026-11-13); https://developers.openai.com/api/docs/models/gpt-realtime-2.1 (accessed 2026-11-13)"
+          },
+          "source": "override",
+          "state": "value",
+          "until_ms": null,
+          "value": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "stated"
+            },
+            "units": 400000000
+          }
+        }
+      ],
+      "source": "models.dev"
+    }
+  },
+  "catalog.history — served upstream rate": {
+    "request": {
+      "arguments": {
+        "fact_key": "rate.input",
+        "model_id": "claude-sonnet-4-5",
+        "provider_id": "anthropic",
+        "served": true
+      },
+      "name": "catalog.history"
+    },
+    "response": {
+      "eras": [
+        {
+          "boundary_at_ms": 1000,
+          "boundary_kind": "seed",
+          "value": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          }
+        },
+        {
+          "boundary_at_ms": 9000,
+          "boundary_kind": "corrected",
+          "correction": {
+            "affected_from_ms": 3000,
+            "affected_until_ms": 9000,
+            "fields": [
+              {
+                "class": "input",
+                "field": "rate"
+              }
+            ],
+            "reason": "normalizer scaled tiered rates by 1000x"
+          },
+          "value": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          }
+        }
+      ],
+      "fact_key": "rate.input",
+      "last_changed_at_ms": 9000,
+      "model_id": "claude-sonnet-4-5",
+      "provider_id": "anthropic",
+      "served": [
+        {
+          "from_ms": 1000,
+          "source": "upstream",
+          "state": "value",
+          "until_ms": 3000,
+          "value": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          }
+        },
+        {
+          "correction": {
+            "affected_from_ms": 3000,
+            "affected_until_ms": 9000,
+            "fields": [
+              {
+                "class": "input",
+                "field": "rate"
+              }
+            ],
+            "reason": "normalizer scaled tiered rates by 1000x"
+          },
+          "from_ms": 3000,
+          "reason": "correction",
+          "state": "refused",
+          "until_ms": 9001
+        },
+        {
+          "from_ms": 9001,
+          "source": "upstream",
+          "state": "value",
+          "until_ms": null,
+          "value": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          }
+        }
+      ],
+      "source": "models.dev"
+    }
+  },
   "catalog.status": {
     "request": {
       "arguments": {

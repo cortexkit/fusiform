@@ -17,6 +17,7 @@ mod cache_lifetimes;
 pub mod correct;
 mod curated;
 mod fact_overrides;
+mod history;
 pub mod ingest;
 mod quality;
 mod readers;

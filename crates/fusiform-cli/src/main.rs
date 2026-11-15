@@ -34,6 +34,7 @@
 //! ck models get [--provider P] [--model M] [--at MS] [--rates|--capabilities]
 //!               [--include-retired] [--auth-method M]
 //! ck models history --provider P --model M --fact rate.input
+//!                   [--served] [--fact-prefix rate. (instead of --fact)]
 //! ck models correct --provider P --model M --field rate.input
 //!                   --from MS --until MS --reason <finding> [--commit]
 //! ```
@@ -95,6 +96,8 @@ options:
                             apikey, chatgpt, oauth, antigravity, gateway
   --fact <key>              which fact, for history
                             (rate.input, limit.context, existence, ...)
+  --fact-prefix <prefix>    list historical keys instead of selecting one fact
+  --served                 show the dated-read timeline (history only)
   --at <epoch-ms>           resolve the catalog at a past instant (get only:
                             history returns the whole timeline)
   --rates                   only pricing facts
@@ -230,6 +233,8 @@ struct Args {
     eq: Option<serde_json::Number>,
     grade: Option<serde_json::Number>,
     fact: Option<String>,
+    fact_prefix: Option<String>,
+    served: bool,
     at_ms: Option<i64>,
     prefixes: Option<Vec<String>>,
     include_retired: bool,
@@ -266,6 +271,9 @@ struct Args {
 /// which this repo has now produced three times in a day — the artifact under
 /// test has to be the thing that ships.
 fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String> {
+    if args.command != "history" && (args.served || args.fact_prefix.is_some()) {
+        return Err("--served and --fact-prefix apply to history only".into());
+    }
     if args.command != "grade" && (args.elo.is_some() || args.eq.is_some() || args.grade.is_some())
     {
         return Err("--elo, --eq and --grade apply to grade only".into());
@@ -395,17 +403,20 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
         "history" => {
             let provider = args.provider.as_ref().ok_or("history needs --provider")?;
             let model = args.model.as_ref().ok_or("history needs --model")?;
-            let fact = args.fact.as_ref().ok_or(
-                "history needs --fact (rate.input, limit.context, capability.reasoning, existence)",
-            )?;
-            Ok((
-                fusiform_module::route::TOOL_HISTORY,
-                serde_json::json!({
-                    "provider_id": provider,
-                    "model_id": model,
-                    "fact_key": fact,
-                }),
-            ))
+            if args.fact.is_some() == args.fact_prefix.is_some() {
+                return Err("history needs exactly one of --fact and --fact-prefix".into());
+            }
+            let mut body = serde_json::json!({"provider_id":provider, "model_id":model});
+            if let Some(fact) = &args.fact {
+                body["fact_key"] = fact.clone().into();
+            }
+            if let Some(prefix) = &args.fact_prefix {
+                body["fact_prefix"] = prefix.clone().into();
+            }
+            if args.served {
+                body["served"] = true.into();
+            }
+            Ok((fusiform_module::route::TOOL_HISTORY, body))
         }
         "correct" => {
             let provider = args.provider.as_ref().ok_or("correct needs --provider")?;
@@ -1337,11 +1348,41 @@ fn render_history(response: &serde_json::Value) -> String {
             .unwrap_or("?"),
         response
             .get("fact_key")
+            .or_else(|| response.get("fact_prefix"))
             .and_then(|v| v.as_str())
             .unwrap_or("?"),
     ));
 
     out.push('\n');
+
+    if let Some(keys) = response.get("fact_keys").and_then(|value| value.as_array()) {
+        for key in keys {
+            let key = key.as_str().unwrap_or("?");
+            let _ = writeln!(out, "  {key}");
+            if let Some(segments) = response.get("served_by_key").and_then(|all| all.get(key)) {
+                out.push_str(&render_history_segments(segments));
+            }
+        }
+        if keys.is_empty() {
+            out.push_str("no historical keys under this prefix\n");
+        }
+        return out;
+    }
+    if let Some(segments) = response.get("served") {
+        out.push_str(&render_history_segments(segments));
+        if let Some(origin) = response
+            .get("inherited_from")
+            .filter(|o| o["mapping"] == "current")
+        {
+            let _ = writeln!(
+                out,
+                "current alias mapping: {}/{} (not dated)",
+                origin["provider_id"].as_str().unwrap_or("?"),
+                origin["model_id"].as_str().unwrap_or("?")
+            );
+        }
+        return out;
+    }
 
     let Some(eras) = response.get("eras").and_then(|v| v.as_array()) else {
         return out;
@@ -1465,6 +1506,50 @@ fn render_history(response: &serde_json::Value) -> String {
     }
 
     out.push_str(&render_last_changed(response));
+    out
+}
+
+fn render_history_segments(segments: &serde_json::Value) -> String {
+    let mut out = String::new();
+    for segment in segments.as_array().into_iter().flatten() {
+        let from = format_instant(segment["from_ms"].as_i64().unwrap_or(0));
+        let until = segment["until_ms"]
+            .as_i64()
+            .map(format_instant)
+            .unwrap_or_else(|| "still in force".into());
+        let state = segment["state"].as_str().unwrap_or("?");
+        let _ = write!(out, "  {from} to {until}  {state}");
+        if let Some(source) = segment["source"].as_str() {
+            let _ = write!(out, " ({source})");
+        }
+        if let Some(value) = segment.get("value") {
+            let _ = write!(out, " {value}");
+        }
+        if let Some(reason) = segment["reason"].as_str() {
+            let _ = write!(out, " {reason}");
+        }
+        out.push('\n');
+        if let Some(detail) = segment.get("override") {
+            let _ = writeln!(
+                out,
+                "    source: {}; replaces: {}",
+                detail["source_ref"].as_str().unwrap_or("?"),
+                detail["replaces"]
+            );
+        }
+        if let Some(detail) = segment.get("correction") {
+            let _ = writeln!(
+                out,
+                "    correction {} to {}: {}",
+                detail["affected_from_ms"],
+                detail["affected_until_ms"],
+                detail["reason"].as_str().unwrap_or("?")
+            );
+        }
+    }
+    if out.is_empty() {
+        out.push_str("no dated segments\n");
+    }
     out
 }
 
@@ -1649,6 +1734,8 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         eq: None,
         grade: None,
         fact: None,
+        fact_prefix: None,
+        served: false,
         at_ms: None,
         prefixes: None,
         include_retired: false,
@@ -1686,6 +1773,8 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
                 }
             }
             "--fact" => args.fact = Some(value()?),
+            "--fact-prefix" => args.fact_prefix = Some(value()?),
+            "--served" => args.served = true,
             "--at" => {
                 let raw = value()?;
                 args.at_ms = Some(
@@ -4135,5 +4224,73 @@ mod paging_tests {
             let error = classify_call_error("catalog.get", subc_client_rs::CallError::Module(body));
             assert_eq!(matches!(error, CallFailure::SnapshotChanged), restart);
         }
+    }
+}
+
+#[cfg(test)]
+mod served_history_tests {
+    use super::*;
+
+    fn request(flags: &[&str]) -> Result<(&'static str, serde_json::Value), String> {
+        let mut argv = vec![
+            "ck-models",
+            "history",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-realtime-2.1",
+        ];
+        argv.extend_from_slice(flags);
+        request_for(&parse_args(argv.into_iter().map(OsString::from))?)
+    }
+
+    #[test]
+    fn history_served_and_prefix_flags_cross_the_wire() {
+        let (_, body) = request(&["--fact", "rate.cached_input_audio", "--served"]).unwrap();
+        assert_eq!(body["served"], true);
+        assert_eq!(body["fact_key"], "rate.cached_input_audio");
+        assert!(body.get("fact_prefix").is_none());
+        let (_, body) = request(&["--fact-prefix", "rate."]).unwrap();
+        assert_eq!(body["fact_prefix"], "rate.");
+        assert!(body.get("fact_key").is_none() && body.get("served").is_none());
+        assert!(request(&[]).unwrap_err().contains("exactly one"));
+        assert!(request(&["--fact", "rate.input", "--fact-prefix", "rate."])
+            .unwrap_err()
+            .contains("exactly one"));
+    }
+
+    #[test]
+    fn history_renders_served_states_sources_and_key_lists() {
+        let response = serde_json::json!({"provider_id":"openai", "model_id":"gpt-realtime-2.1", "fact_key":"rate.cached_input_audio", "eras":[], "served":[
+            {"from_ms":1000, "until_ms":2000, "state":"absent"},
+            {"from_ms":2000, "until_ms":3000, "state":"value", "source":"override", "value":{"units":7}, "override":{"source_ref":"quoted source", "replaces":null}},
+            {"from_ms":3000, "until_ms":4000, "state":"refused", "reason":"correction", "correction":{"affected_from_ms":3000, "affected_until_ms":3999, "reason":"wrong scale"}},
+            {"from_ms":4000, "until_ms":null, "state":"refused", "reason":"no_coverage"}
+        ]});
+        let text = render_history(&response);
+        for expected in [
+            "absent",
+            "value (override)",
+            "quoted source",
+            "replaces: null",
+            "refused correction",
+            "wrong scale",
+            "no_coverage",
+            "still in force",
+        ] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+        assert!(!text.contains("check the fact key"));
+        let listed = render_history(
+            &serde_json::json!({"provider_id":"openai", "model_id":"gpt-realtime-2.1", "fact_prefix":"rate.", "fact_keys":["rate.input", "rate.output"]}),
+        );
+        assert!(
+            listed.contains("rate.\n") && listed.contains("  rate.input\n  rate.output\n"),
+            "{listed}"
+        );
+        let alias = render_history(
+            &serde_json::json!({"provider_id":"google", "model_id":"alias", "served":[], "inherited_from":{"provider_id":"google", "model_id":"target", "mapping":"current"}}),
+        );
+        assert!(alias.contains("current alias mapping: google/target (not dated)"));
     }
 }

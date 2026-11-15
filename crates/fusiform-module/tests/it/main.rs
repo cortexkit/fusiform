@@ -34,6 +34,7 @@ mod restart_health;
 mod route;
 mod scope_and_preset;
 mod served_corrections;
+mod served_history;
 mod shrink_guard;
 mod structured_output;
 mod temperature;

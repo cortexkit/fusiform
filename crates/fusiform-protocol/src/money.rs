@@ -432,6 +432,10 @@ pub struct InheritedFrom {
     /// plane whose marginal cost is zero.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
+    /// History aliases name today's target, not a historical identity mapping.
+    /// Present only on an opt-in served history response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mapping: Option<String>,
 }
 
 impl Floor {

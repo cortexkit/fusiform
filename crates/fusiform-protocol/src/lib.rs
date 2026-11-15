@@ -1759,11 +1759,7 @@ pub enum ToolResponse {
     QualityMarks(QualityMarksResponse),
 }
 
-/// A `catalog.history` request: every era for one fact.
-///
-/// The fact is named explicitly rather than defaulting to "all facts for this
-/// model", because a model's full history is thousands of rows and an operator
-/// asking a question has one fact in mind.
+/// Upstream eras and, optionally, the dated-read timeline for a fact or prefix.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HistoryRequest {
@@ -1773,7 +1769,14 @@ pub struct HistoryRequest {
     pub model_id: String,
     /// A key in the served vocabulary: `rate.input`, `limit.context`,
     /// `capability.reasoning`, `existence`.
-    pub fact_key: String,
+    #[serde(default)]
+    pub fact_key: Option<String>,
+    /// List historical keys under this prefix instead of selecting one fact.
+    /// Exactly one of `fact_key` and `fact_prefix` is required.
+    #[serde(default)]
+    pub fact_prefix: Option<String>,
+    #[serde(default)]
+    pub served: Option<bool>,
 }
 
 /// What a correction says, as an operator reads it.
@@ -1979,12 +1982,22 @@ pub struct CanonicalLinkWire {
 }
 
 /// A `catalog.history` response.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HistoryResponse {
     pub source: String,
     pub provider_id: String,
     pub model_id: String,
-    pub fact_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fact_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fact_prefix: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fact_keys: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub served: Option<Vec<HistorySegment>>,
+    /// Prefix requests reuse each dated snapshot across all matching keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub served_by_key: Option<BTreeMap<String, Vec<HistorySegment>>>,
     /// Oldest first: a history is read forwards.
     pub eras: Vec<HistoryEra>,
     /// This row is curated at read time and has no stored eras. The source
@@ -2043,6 +2056,69 @@ pub struct HistoryResponse {
     /// is the one to ask for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inherited_from: Option<crate::money::InheritedFrom>,
+}
+
+/// One interval of a dated `catalog.get` result for one fact, including
+/// `from_ms` and excluding `until_ms`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HistorySegment {
+    pub from_ms: i64,
+    /// `null` means still in force.
+    pub until_ms: Option<i64>,
+    pub state: HistoryState,
+    #[serde(
+        default,
+        deserialize_with = "history_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub value: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<HistorySource>,
+    #[serde(rename = "override", skip_serializing_if = "Option::is_none")]
+    pub override_detail: Option<HistoryOverride>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<HistoryRefusalReason>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correction: Option<CorrectionDetail>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryState {
+    Value,
+    Absent,
+    Refused,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HistorySource {
+    Upstream,
+    Override,
+    Curated,
+    CacheLifetime,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryRefusalReason {
+    Correction,
+    NoCoverage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HistoryOverride {
+    pub source_ref: String,
+    /// `null` identifies an addition rather than a replacement.
+    pub replaces: serde_json::Value,
+}
+
+// A present JSON null is a served value (for example, an unknown limit),
+// whereas a missing value member belongs to an absent or refused segment.
+fn history_value<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error> {
+    serde_json::Value::deserialize(deserializer).map(Some)
 }
 
 /// A `catalog.status` request.

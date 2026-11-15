@@ -1004,13 +1004,38 @@ See [curated data §12](curated-data.md#12-model-lineage-model-lineagejson).
 
 ## 6. `catalog.history`
 
-Every era for one fact, oldest first.
+Every upstream era for one fact, oldest first, with an optional dated-read
+timeline or a listing of historical fact keys.
 
-Request: `provider_id`, `model_id` and `fact_key` (all required), optional
-`source`.
+Request: required `provider_id` and `model_id`, exactly one of `fact_key` and
+`fact_prefix`, and optional `source` and `served` (boolean). Supplying both key
+selectors or neither is `bad_request`.
 
-Response: `source`, `provider_id`, `model_id`, `fact_key`, `eras`, and the
-optional `last_changed_at_ms`, `inherited_from` and `curated`.
+For `fact_key`, the response is `source`, `provider_id`, `model_id`, `fact_key`,
+`eras`, and the optional `last_changed_at_ms`, `inherited_from` and `curated`.
+Without `served: true`, this response is unchanged.
+
+With `served: true`, `served` is an ordered, contiguous, gap-free timeline from
+the same `history_begins_at_ms` reported by `catalog.status`. Each segment has
+`from_ms`, `until_ms` (`null` means still in force), and `state`: `value`,
+`absent`, or `refused`. A value segment also has `value` and `source`:
+`upstream`, `override`, `curated`, or `cache_lifetime`. Override segments carry
+`override: {source_ref, replaces}`. Refused segments have `reason: "correction"`
+and `correction` with the same extent and reason as a dated read, or
+`reason: "no_coverage"` without a correction when the dated read refuses because
+the model has no record at that instant. `absent` means the dated read succeeds
+but does not include the fact. Adjacent identical results are merged.
+The timeline uses the same resolver as `catalog.get` with `at_ms`, not the
+current-read overlays: aliases, inheritance, billing planes, wire corrections
+and quality are not historical. For an alias, `served` is empty and
+`inherited_from.mapping: "current"` identifies the target as today's mapping.
+
+For `fact_prefix`, `fact_keys` lists, in sorted order, all matching keys ever
+recorded in upstream eras, overrides, curated rows or cache-lifetime rules for
+the model. This includes historical keys no longer present on current reads.
+With `served: true`, `served_by_key` maps each listed key to its timeline. The
+resolver snapshots are shared across keys, so listing timelines does not repeat
+the dated catalog reads for every key. Alias ids list no historical keys.
 
 Each era carries `value`, `boundary_at_ms`, `boundary_kind` (`observed`,
 `asserted`, `seed` or `corrected`), `window_from_ms` on observed boundaries
@@ -1033,8 +1058,8 @@ only, and `correction` (`affected_from_ms`, `affected_until_ms`, `reason`,
    `alias` (`crates/fusiform-module/src/route.rs`: `alias_tests::history_of_an_alias_names_the_target`).
 5. A curated row has no eras; `curated` names its source
    (`crates/fusiform-module/src/route.rs`: `curated_tests::curated_history_names_the_source_without_storing_eras_or_changing_status`).
-   The curated row's own history is recorded separately and served through
-   `catalog.get` with `at_ms` (§3 item 7), not through `catalog.history`.
+   The curated row's own history is recorded separately and appears in the
+   optional served timeline as well as `catalog.get` with `at_ms` (§3 item 7).
 
 ## 7. `catalog.status`
 

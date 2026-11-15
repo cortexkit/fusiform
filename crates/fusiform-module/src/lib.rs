@@ -292,9 +292,15 @@ pub fn manifest() -> ModuleManifest {
                         "source": {"type": "string"},
                         "provider_id": {"type": "string"},
                         "model_id": {"type": "string"},
-                        "fact_key": {"type": "string"}
+                        "fact_key": {"type": "string"},
+                        "fact_prefix": {"type": "string"},
+                        "served": {"type": "boolean"}
                     },
-                    "required": ["provider_id", "model_id", "fact_key"],
+                    "required": ["provider_id", "model_id"],
+                    "oneOf": [
+                        {"required": ["fact_key"], "not": {"required": ["fact_prefix"]}},
+                        {"required": ["fact_prefix"], "not": {"required": ["fact_key"]}}
+                    ],
                     "additionalProperties": false
                 }),
             },

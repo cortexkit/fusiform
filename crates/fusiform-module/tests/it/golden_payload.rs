@@ -450,6 +450,10 @@ fn render_all() -> String {
     ordinary
         .as_object_mut()
         .unwrap()
+        .extend(super::served_history::golden_cases());
+    ordinary
+        .as_object_mut()
+        .unwrap()
         .extend(render_attachment_limits());
     ordinary
         .as_object_mut()
@@ -1400,6 +1404,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
     let quality_tools = render_quality_tools();
     let media_quality = render_media_quality();
     let login_methods = render_login_methods();
+    let served_history = super::served_history::golden_cases();
     let plain_login_cases = login_methods
         .values()
         .filter(|case| case["request"]["arguments"].get("auth_method").is_none())
@@ -1419,6 +1424,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
                 + media_quality.len()
                 + plain_login_cases
                 + render_cache_lifetimes().len()
+                + served_history.len()
                 + render_attachment_limits().len()
                 + render_temperature().len(),
         ),
@@ -1444,6 +1450,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
             1,
         ),
         (serde_json::to_string(&render_cache_lifetimes()).unwrap(), 4),
+        (serde_json::to_string(&served_history).unwrap(), 4),
         (
             serde_json::to_string(&render_attachment_limits()).unwrap(),
             2,
@@ -1970,7 +1977,7 @@ fn plane_refusal_cases_never_fall_back_to_api_rows() {
 /// This is narrower than it first looked. The initial version of this file
 /// claimed every instant was a literal, which was false for exactly that one
 /// read, and the test failed on its second run.
-fn store() -> (CatalogStore, tempfile::TempDir) {
+pub(super) fn store() -> (CatalogStore, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".to_string(),
@@ -2459,6 +2466,43 @@ fn cases() -> Vec<(&'static str, String)> {
 
 /// The one field that cannot be pinned, and what stands in for it.
 const NOW_PLACEHOLDER: i64 = -1;
+
+#[test]
+fn served_history_override_addition_tracks_dated_get() {
+    let (store, _dir) = super::cache_lifetimes::store(None);
+    fusiform_module::fact_overrides::apply_to_store(
+        &store,
+        fusiform_module::fact_overrides::overrides(),
+        1_800_000_000_000,
+    )
+    .unwrap();
+    let response = serve_tool_call(
+        &store,
+        br#"{"name":"catalog.history","arguments":{"provider_id":"openai","model_id":"gpt-realtime-2.1","fact_key":"rate.cached_input_audio","served":true}}"#,
+    )
+    .expect("served history accepts the dated-read selector");
+    let response = serde_json::to_value(response).unwrap();
+    let segments = response["served"].as_array().expect("served timeline");
+    assert_eq!(segments.first().unwrap()["from_ms"], 1_000);
+    assert_eq!(segments.first().unwrap()["state"], "absent");
+    let last = segments.last().unwrap();
+    assert_eq!(last["state"], "value");
+    assert_eq!(last["source"], "override");
+    assert!(last["override"]["replaces"].is_null());
+    let at = last["from_ms"].as_i64().unwrap();
+    let dated = fusiform_module::route::serve_catalog_get(
+        &store,
+        &serde_json::to_vec(&serde_json::json!({
+            "provider_id":"openai", "model_id":"gpt-realtime-2.1", "at_ms":at
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        last["value"],
+        dated.models["openai/gpt-realtime-2.1"]["rate.cached_input_audio"]
+    );
+}
 
 fn render() -> String {
     let (store, _dir) = store();

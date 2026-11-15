@@ -30,6 +30,7 @@ use serde::Deserialize;
 #[cfg(test)]
 mod paging_tests;
 
+mod history;
 mod page_plan;
 mod quality;
 use page_plan::{serve_planned_page, ProviderRange};
@@ -229,11 +230,19 @@ pub fn serve_tool_call(store: &CatalogStore, body: &[u8]) -> Result<ToolResponse
 
 /// Serve `catalog.history`: every era for one fact.
 pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse, RouteError> {
-    let request: HistoryRequest = serde_json::from_slice(body)
-        .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?;
-    let source = parse_source(request.source.as_deref())?;
+    history::serve(store, body)
+}
 
-    let fact = FactKey::from_stored(request.fact_key.clone());
+fn upstream_history(
+    store: &CatalogStore,
+    request: HistoryRequest,
+) -> Result<HistoryResponse, RouteError> {
+    let source = parse_source(request.source.as_deref())?;
+    let fact_key = request
+        .fact_key
+        .clone()
+        .expect("validated history fact key");
+    let fact = FactKey::from_stored(fact_key.clone());
 
     let rows = store
         .fact_history(source, &request.provider_id, &request.model_id, &fact)
@@ -262,7 +271,7 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
         if let Some(row) =
             curated_in_effect(store, source, &request.provider_id, &request.model_id)?
         {
-            if row.facts.contains_key(&request.fact_key) {
+            if row.facts.contains_key(&fact_key) {
                 return Ok(HistoryResponse {
                     source: source.as_str().to_string(),
                     provider_id: request.provider_id,
@@ -272,6 +281,7 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
                     curated: Some(curated_disclosure(row)),
                     last_changed_at_ms: None,
                     inherited_from: None,
+                    ..HistoryResponse::default()
                 });
             }
         }
@@ -295,6 +305,7 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
                 curated: None,
                 last_changed_at_ms: None,
                 inherited_from: Some(alias_origin(store, source, alias)),
+                ..HistoryResponse::default()
             });
         }
         if !provider_is_served(store, source, &request.provider_id)? {
@@ -397,6 +408,7 @@ pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryRespons
         curated: None,
         last_changed_at_ms,
         inherited_from,
+        ..HistoryResponse::default()
     })
 }
 
@@ -2208,6 +2220,7 @@ fn borrow_plane_rates(
         let marker = serde_json::to_value(fusiform_protocol::money::InheritedFrom {
             provider_id: provider.to_string(),
             model_id: Some(origin.model_id.clone()),
+            mapping: None,
             family,
             basis: "quota_proxy".to_string(),
         })
@@ -2276,6 +2289,7 @@ fn apply_billing_plane(
                 .to_string(),
             basis: "quota_proxy".to_string(),
             model_id: None,
+            mapping: None,
         })
         .expect("a struct of strings serialises");
         for (key, value) in facts.iter_mut() {
@@ -6295,6 +6309,7 @@ fn mark_rates_borrowed_through_alias(
         family,
         basis: "alias".to_string(),
         model_id: Some(alias.target_model_id.clone()),
+        mapping: None,
     })
     .expect("a struct of strings serialises");
     for (key, value) in facts.iter_mut() {
@@ -6409,6 +6424,7 @@ fn alias_origin(
         family,
         basis: "alias".to_string(),
         model_id: Some(alias.target_model_id.clone()),
+        mapping: None,
     }
 }
 

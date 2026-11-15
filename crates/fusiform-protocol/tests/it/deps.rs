@@ -21,6 +21,21 @@ use std::process::{Command, Output, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
+#[test]
+fn history_segments_preserve_null_values_and_refusal_reasons() {
+    for segment in [
+        serde_json::json!({"from_ms":1, "until_ms":2, "state":"value", "value":null, "source":"upstream"}),
+        serde_json::json!({"from_ms":2, "until_ms":3, "state":"absent"}),
+        serde_json::json!({"from_ms":3, "until_ms":4, "state":"refused", "reason":"no_coverage"}),
+        serde_json::json!({"from_ms":4, "until_ms":5, "state":"refused", "reason":"correction", "correction":{"affected_from_ms":4, "affected_until_ms":4, "reason":"wrong", "fields":[]}}),
+        serde_json::json!({"from_ms":5, "until_ms":null, "state":"value", "value":0, "source":"override", "override":{"source_ref":"quoted source", "replaces":null}}),
+    ] {
+        let decoded: fusiform_protocol::HistorySegment =
+            serde_json::from_value(segment.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), segment);
+    }
+}
+
 fn read_pipe(pipe: impl Read + Send + 'static) -> Receiver<std::io::Result<Vec<u8>>> {
     let (send, receive) = mpsc::channel();
     std::thread::spawn(move || {
@@ -347,7 +362,7 @@ fn every_response_type_round_trips() {
         source: "models.dev".into(),
         provider_id: "anthropic".into(),
         model_id: "claude-sonnet-4-5".into(),
-        fact_key: "rate.input".into(),
+        fact_key: Some("rate.input".into()),
         eras: vec![HistoryEra {
             value: serde_json::json!({"units": 3_000_000_000i64}),
             boundary_at_ms: 5_000,
@@ -355,6 +370,7 @@ fn every_response_type_round_trips() {
             correction: None,
             window_from_ms: Some(1_000),
         }],
+        ..HistoryResponse::default()
     };
     let back: HistoryResponse =
         serde_json::from_str(&serde_json::to_string(&history).unwrap()).unwrap();
