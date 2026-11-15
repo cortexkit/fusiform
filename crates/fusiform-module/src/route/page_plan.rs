@@ -362,17 +362,25 @@ mod tests {
             "later providers must actually carry grades"
         );
         let mut expected = whole.clone();
-        scope_page(
-            &mut expected,
-            &BTreeSet::from(["cloudflare-workers-ai".into(), "elevenlabs".into()]),
-        );
+        let providers: BTreeSet<_> = whole
+            .models
+            .keys()
+            .map(|id| model_provider(id).to_string())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .take(2)
+            .collect();
+        assert_eq!(providers.len(), 2);
+        scope_page(&mut expected, &providers);
         assert!(expected.quality_scores.is_none());
         expected.next_page_token = Some(format!(
-            "v1:{}:{}:elevenlabs",
-            whole.catalog_version, whole.resolved_at_ms,
+            "v1:{}:{}:{}",
+            whole.catalog_version,
+            whole.resolved_at_ms,
+            providers.last().unwrap(),
         ));
         // Both ungraded providers fit exactly when measured as a real reply;
-        // charging a later provider's quality disclosure would evict ElevenLabs.
+        // charging a later provider's quality disclosure would evict the second.
         let budget = serde_json::to_vec(&expected).unwrap().len();
         request.paged = true;
         let page =

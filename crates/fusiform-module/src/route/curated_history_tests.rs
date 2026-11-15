@@ -351,10 +351,11 @@ fn transcribe_serves_a_unit_rate_and_records_its_denominator_only_in_curated_his
 fn a_read_after_the_first_era_serves_jevs_recorded_rates_and_disclosure() {
     let (store, _dir) = store();
     let boot = jev_established_at() + 5 * DAY_MS;
-    let written = apply_to_store(&store, &shipped(), boot).unwrap();
-    // The test table releases all thirteen curated rows, so the first boot writes
-    // one era per row.
-    assert_eq!(written, 13);
+    let released = shipped();
+    let written = apply_to_store(&store, &released, boot).unwrap();
+    // The test table releases every curated row, so the first boot writes one
+    // era per row.
+    assert_eq!(written, released.models.len());
 
     let file_row = &shipped().models[&(TYPESAFE.to_string(), JEV.to_string())];
     for at in [
@@ -486,7 +487,11 @@ fn a_changed_curated_price_opens_an_era_dated_at_the_boot_that_carries_it() {
 fn re_applying_an_unchanged_or_only_redated_file_writes_nothing() {
     let (store, _dir) = store();
     let boot = jev_established_at() + DAY_MS;
-    assert_eq!(apply_to_store(&store, &shipped(), boot).unwrap(), 13);
+    let released = shipped();
+    assert_eq!(
+        apply_to_store(&store, &released, boot).unwrap(),
+        released.models.len()
+    );
     assert_eq!(
         apply_to_store(&store, &shipped(), boot + DAY_MS).unwrap(),
         0
@@ -588,10 +593,11 @@ fn a_removed_row_is_tombstoned_and_a_read_after_it_is_refused() {
 fn a_row_held_from_its_first_boot_is_first_served_at_its_release() {
     let (store, _dir) = store();
     let held_boot = jev_established_at() + DAY_MS;
+    let held = table(holding(TYPESAFE, JEV));
     assert_eq!(
-        apply_to_store(&store, &table(holding(TYPESAFE, JEV)), held_boot).unwrap(),
-        13,
-        "twelve served rows and one tombstone for the held row"
+        apply_to_store(&store, &held, held_boot).unwrap(),
+        held.models.len(),
+        "one era per curated row, including a tombstone for the held row"
     );
     let released_at = held_boot + DAY_MS;
     assert_eq!(apply_to_store(&store, &shipped(), released_at).unwrap(), 1);
