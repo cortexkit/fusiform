@@ -1743,6 +1743,31 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794528000000,
+          "established_by": "fusiform",
+          "fact_key": "rate.cached_input_audio",
+          "model": "openai/gpt-realtime-2.1",
+          "model_id": "gpt-realtime-2.1",
+          "notes": "USD per million cached audio input tokens; not rate.cache_read, which prices cached text. Only this exact provider/model row is covered.",
+          "provider_id": "openai",
+          "quote": "Realtime & Audio, columns Model | Modality | Input | Output | Cached input: | gpt-realtime-2.1 | Audio | $32.00 | $64.00 | $0.40 |. The model page's Audio tokens table: Cached input | $0.4 | 1M tokens",
+          "reason": "Cached audio input has its own token price, separate from cached text input. models.dev publishes no cached-audio rate, so the vendor's documented price is added only while upstream records no value for this role.",
+          "replaces": null,
+          "review_by_ms": 1799712000000,
+          "source_ref": "https://developers.openai.com/api/docs/pricing (accessed 2026-11-13); https://developers.openai.com/api/docs/models/gpt-realtime-2.1 (accessed 2026-11-13)",
+          "value": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "stated"
+            },
+            "units": 400000000
+          }
+        }
+      ],
       "models": {
         "openai/gpt-realtime-2.1": {
           "rate.cache_read": {
@@ -1752,6 +1777,15 @@
             "unit_provenance": {
               "kind": "assumed_by_policy",
               "policy": "models-dev-usd-v1"
+            },
+            "units": 400000000
+          },
+          "rate.cached_input_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "stated"
             },
             "units": 400000000
           },
@@ -6558,6 +6592,7 @@
         "rate.cache_write",
         "rate.reasoning",
         "rate.input_audio",
+        "rate.cached_input_audio",
         "rate.output_audio",
         "rate.input_image",
         "rate.output_image",

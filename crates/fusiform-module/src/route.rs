@@ -3525,6 +3525,13 @@ mod inheritance_tests {
             "rate.cache_write",
             r#"{"state":"stated_zero"}"#,
         );
+        add_rate(
+            &store,
+            "zai",
+            "glm-x",
+            "rate.cached_input_audio",
+            r#"{"state":"priced","units":400000000,"exponent":9,"currency":"USD"}"#,
+        );
         seed(&store, "ollama-cloud", "glm-x", None, true);
 
         let mut facts = facts_of(&store, "ollama-cloud", "glm-x");
@@ -3541,6 +3548,7 @@ mod inheritance_tests {
             "rate.output",
             "rate.cache_read",
             "rate.cache_write",
+            "rate.cached_input_audio",
         ] {
             let v = facts.get(key).unwrap_or_else(|| {
                 panic!(
@@ -4794,7 +4802,9 @@ mod billing_plane_tests {
     fn quota_proxies_mark_each_unmarked_rate_with_its_real_family() {
         let (store, _dir) = store();
         for (provider, method) in [("openai", "chatgpt"), ("anthropic", "oauth")] {
-            seed(&store, provider, "test-model", card());
+            let mut rates = card();
+            rates.push(("rate.cached_input_audio", priced(400_000_000)));
+            seed(&store, provider, "test-model", rates);
             for model in [None, Some("test-model")] {
                 let response =
                     get(&store, request(provider, model, method, Some("rate."))).unwrap();
@@ -4807,6 +4817,7 @@ mod billing_plane_tests {
                     "rate.output.above_context.272000",
                     "rate.cache_read",
                     "rate.reasoning",
+                    "rate.cached_input_audio",
                 ] {
                     assert_eq!(
                         facts[key]["inherited_from"],

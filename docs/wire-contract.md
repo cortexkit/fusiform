@@ -177,10 +177,11 @@ value would do to a consumer:
 | `successor` | advisory | sourced replacement `provider/model` identity on retired aliases; otherwise no fact |
 | `rate.input` | money | rate value (§4.3), per million input tokens |
 | `rate.output` | money | per million output tokens |
-| `rate.cache_read` | money | per million cached-read tokens |
+| `rate.cache_read` | money | per million cached text input tokens |
 | `rate.cache_write` | money | per million cache-write tokens |
 | `rate.reasoning` | money | per million reasoning tokens |
 | `rate.input_audio` | money | per million audio input tokens, only for providers whose docs establish per-token audio billing |
+| `rate.cached_input_audio` | money | per million cached audio input tokens, distinct from cached text (`rate.cache_read`); absent means not established, never free |
 
 Names are for consumer display only, never identifiers. Names on upstream rows are
 stored as ordinary eras, so renames are preserved and `at_ms` reads return the
@@ -786,8 +787,9 @@ optional `notes`, `established_by`, `established_at_ms` and `review_by_ms`.
 An entry is either a REPLACEMENT, whose `replaces` is the upstream value it
 corrects, or an ADDITION, whose `replaces` is always present and `null`: a
 fact models.dev publishes no value for, sourced from the vendor's own
-documentation. The added facts are `capability.server_side_fallback` and
-`capability.mid_conversation_system`.
+documentation. The added facts are `capability.server_side_fallback`,
+`capability.mid_conversation_system`, `rate.output_image` and
+`rate.cached_input_audio`.
 
 For example, a current `google/gemini-4-argon` read serves
 `limit.output: 65536` where models.dev publishes 32,768, Google's cap for a

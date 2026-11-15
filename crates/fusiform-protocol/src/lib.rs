@@ -1477,7 +1477,7 @@ pub const SERVED_FACTS: &[ServedFact] = &[
     ServedFact {
         key: "rate.cache_read",
         class: FactClass::Money,
-        note: "per million cached-read tokens",
+        note: "per million cached text input tokens, distinct from rate.cached_input_audio",
     },
     ServedFact {
         key: "rate.cache_write",
@@ -1495,6 +1495,11 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "per million audio input tokens, served only for providers whose \
                docs establish per-token audio billing; absent elsewhere means \
                not established, never free",
+    },
+    ServedFact {
+        key: "rate.cached_input_audio",
+        class: FactClass::Money,
+        note: "per million cached audio input tokens, distinct from rate.cache_read (cached text); absent means not established, never free.",
     },
     ServedFact {
         key: "rate.output_audio",

@@ -50,7 +50,7 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 /// replacement and an image-rate addition, before alias and plane projection.
 /// `capability.temperature` replaces only a published boolean when the vendor
 /// documents different acceptance; it never fills an unknown upstream claim.
-pub const OVERRIDABLE_FACTS: [&str; 8] = [
+pub const OVERRIDABLE_FACTS: [&str; 9] = [
     "limit.context",
     "limit.output",
     "capability.server_side_fallback",
@@ -59,15 +59,17 @@ pub const OVERRIDABLE_FACTS: [&str; 8] = [
     "model.status",
     "rate.output",
     "rate.output_image",
+    "rate.cached_input_audio",
 ];
 
 /// The facts only an addition row can serve, because models.dev publishes no
 /// value for them. A read filtered to one of these must still reach the rows
 /// an addition applies to, even though the store holds no matching fact.
-pub const ADDED_FACTS: [&str; 3] = [
+pub const ADDED_FACTS: [&str; 4] = [
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
     "rate.output_image",
+    "rate.cached_input_audio",
 ];
 
 /// Whether a row supplies a fact the stored row lacks (an addition), rather
@@ -93,11 +95,11 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
-        "rate.output_image" => {
+        "rate.output_image" | "rate.cached_input_audio" => {
             if crate::curated_models::invalid_rate(&row.value, false).is_some()
                 || !row.replaces.is_null()
             {
-                Some("rate.output_image must add a sourced token rate with replaces null")
+                Some("rate addition must add a sourced token rate with replaces null")
             } else {
                 None
             }
@@ -146,7 +148,7 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
-        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system, capability.temperature, model.status, rate.output and rate.output_image may be overridden"),
+        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system, capability.temperature, model.status, rate.output, rate.output_image and rate.cached_input_audio may be overridden"),
     }
 }
 
@@ -584,7 +586,7 @@ mod tests {
     fn shipped_overrides_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 27);
+        assert_eq!(rows.len(), 28);
         let row = argon();
         assert_eq!(row.value, json!(65_536));
         assert_eq!(row.replaces, json!(32_768));
@@ -908,8 +910,7 @@ mod tests {
                     load_reporting_rejects(&json!({"overrides": [row]}).to_string());
                 assert!(rows.is_empty(), "{field}");
                 assert_eq!(rejects.len(), 1, "{field}");
-                let reason = if key == "rate.output_image" && matches!(field, "value" | "replaces")
-                {
+                let reason = if key.starts_with("rate.") && matches!(field, "value" | "replaces") {
                     "must add a sourced token rate"
                 } else {
                     reason

@@ -364,6 +364,7 @@ pub(crate) const CURATED_ONLY: &[&str] = &[
 /// rows, so the golden fixture must always carry them.
 pub(crate) const ADDITION_ONLY: &[&str] = &[
     "rate.output_image",
+    "rate.cached_input_audio",
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
 ];

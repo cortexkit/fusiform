@@ -980,6 +980,7 @@ an addition is always written as one. Each fact key has its own rule:
 | `model.status` | replacement of the stored `null` only | `"deprecated"` | `null` |
 | `rate.output` | replacement only | sourced per-million-token rate | exact stored upstream token-rate object, without serve-time currency provenance |
 | `rate.output_image` | addition only | sourced per-million-image-token rate | `null` |
+| `rate.cached_input_audio` | addition only | sourced per-million-cached-audio-token rate, distinct from cached text | `null` |
 
 No other fact may be overridden: other facts have their own curated mechanism
 or serve-time derivation (other rates: inheritance and billing planes; `wire.*`: §9;
