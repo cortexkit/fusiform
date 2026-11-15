@@ -676,6 +676,7 @@ fn candidate_reference_page(
         .chain(response.aliased.iter().map(|row| &row.model))
         .chain(response.billing_rules.iter().map(|row| &row.model))
         .chain(response.canonical_links.iter().map(|row| &row.model))
+        .chain(response.speed_twins.iter().map(|row| &row.model))
         .chain(response.fact_overrides.iter().map(|row| &row.model))
         .map(|model| model_provider(model).to_owned())
         .chain(response.uncertain.iter().map(|row| row.provider_id.clone()))
@@ -758,6 +759,16 @@ fn linear_packing_matches_candidate_reference_boundaries() {
                     notes: Some("not routed".into()),
                 });
         }
+        for model in ["p00/m", "z-speed-only/m"] {
+            full.speed_twins.push(fusiform_protocol::SpeedTwinWire {
+                model: model.into(),
+                twin: format!("{model}-fast"),
+                mode: fusiform_protocol::ServiceTier::Fast,
+                label: "Highspeed".into(),
+                source_ref: "https://example.com/speed".into(),
+                review_by_ms: 1_799_884_800_000,
+            });
+        }
         for model in ["p00/m", "z-override-only/m"] {
             let row = crate::fact_overrides::overrides().values().next().unwrap();
             full.fact_overrides
@@ -792,6 +803,11 @@ fn linear_packing_matches_candidate_reference_boundaries() {
                     .map(|row| model_provider(&row.model).to_owned()),
             )
             .chain(full.wire_corrections.iter().map(|row| row.provider.clone()))
+            .chain(
+                full.speed_twins
+                    .iter()
+                    .map(|row| model_provider(&row.model).to_owned()),
+            )
             .chain(
                 full.fact_overrides
                     .iter()

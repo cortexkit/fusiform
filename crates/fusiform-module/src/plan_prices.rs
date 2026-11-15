@@ -395,7 +395,7 @@ fn parse_service_tiers(
                 if tiers[..i].iter().any(|prior| prior.tier == tier.tier) {
                     return Err("a service tier is listed more than once".into());
                 }
-                for rate in [tier.included_usage_rate, tier.credit_rate] {
+                for rate in std::iter::once(tier.included_usage_rate).chain(tier.credit_rate) {
                     if rate.units <= 0 || rate.exponent > 6 {
                         return Err(
                             "rates must be positive exact decimals with exponent <= 6".into()
@@ -841,6 +841,33 @@ mod tests {
     }
 
     #[test]
+    fn kimi_allegro_fast_tier_omits_an_unstated_credit_rate() {
+        let row = rows()
+            .iter()
+            .find(|row| row.provider_id == "kimi-code-plan-global" && row.tier == "allegro")
+            .unwrap();
+        let value = serde_json::to_value(row.service_tiers.as_ref().unwrap()).unwrap();
+        assert_eq!(
+            value["tiers"],
+            serde_json::json!([{
+                "tier":"fast", "included_usage_rate":{"units":2,"exponent":0}
+            }])
+        );
+        let source = value["source_ref"].as_str().unwrap();
+        assert!(source.contains("Allegro: $99/month"));
+        assert!(source.contains("Allegretto and above"));
+        assert!(source.contains("2× quota usage"));
+        assert!(source.contains("live pricing page now shows only the new plans"));
+        let (rows, rejects) =
+            load_reporting_rejects(&service_tiers_document(value.clone()).to_string());
+        assert!(rejects.is_empty(), "{rejects:?}");
+        assert_eq!(
+            serde_json::to_value(rows[0].service_tiers.as_ref().unwrap()).unwrap(),
+            value
+        );
+    }
+
+    #[test]
     fn malformed_service_tiers_are_counted_without_losing_the_price() {
         let mut cases = vec![("null".to_string(), serde_json::Value::Null)];
         for name in ["standard", "turbo", "FAST"] {
@@ -861,9 +888,11 @@ mod tests {
                 value["tiers"][0][rate][field] = bad.clone();
                 cases.push((format!("{rate} {field} {bad}"), value));
             }
-            let mut value = established_service_tiers();
-            value["tiers"][0].as_object_mut().unwrap().remove(rate);
-            cases.push((format!("missing {rate}"), value));
+            if rate == "included_usage_rate" {
+                let mut value = established_service_tiers();
+                value["tiers"][0].as_object_mut().unwrap().remove(rate);
+                cases.push((format!("missing {rate}"), value));
+            }
         }
         for field in [
             "source_ref",

@@ -459,6 +459,10 @@ fn render_all() -> String {
         .as_object_mut()
         .unwrap()
         .extend(render_temperature());
+    ordinary
+        .as_object_mut()
+        .unwrap()
+        .extend(render_speed_twins());
     ordinary.as_object_mut().unwrap().insert(
         "catalog.get — Hydrogen alias with its own output limit".into(),
         render_hydrogen_alias(),
@@ -529,6 +533,45 @@ fn render_all() -> String {
     let mut text = serde_json::to_string_pretty(&ordinary).unwrap();
     text.push('\n');
     text
+}
+
+pub(super) fn render_speed_twins() -> serde_json::Map<String, serde_json::Value> {
+    let mut seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    seed.as_object_mut().unwrap().retain(|provider, row| {
+        let ids: &[&str] = match provider.as_str() {
+            "kimi-code-plan-global" => &["k3.1-pro", "k3.1-pro-highspeed"],
+            "moonshotai" => &["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"],
+            _ => return false,
+        };
+        row["models"]
+            .as_object_mut()
+            .unwrap()
+            .retain(|id, _| ids.contains(&id.as_str()));
+        true
+    });
+    let (store, _dir) = super::temperature::store(seed);
+    let mut cases = serde_json::Map::new();
+    for model in ["k3.1-pro", "k3.1-pro-highspeed"] {
+        for method in [None, Some("apikey")] {
+            let mut request = serde_json::json!({"name":"catalog.get","arguments":{
+                "provider_id":"kimi-code-plan-global", "model_id":model
+            }});
+            if let Some(method) = method {
+                request["arguments"]["auth_method"] = method.into();
+            }
+            let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+            let mut response = serde_json::to_value(response).unwrap();
+            response["resolved_at_ms"] = NOW_PLACEHOLDER.into();
+            cases.insert(
+                format!(
+                    "catalog.get — speed twin {model} {}",
+                    method.unwrap_or("plain")
+                ),
+                serde_json::json!({"request":request, "response":response}),
+            );
+        }
+    }
+    cases
 }
 
 fn render_hydrogen_alias() -> serde_json::Value {
@@ -1405,6 +1448,12 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
     let media_quality = render_media_quality();
     let login_methods = render_login_methods();
     let served_history = super::served_history::golden_cases();
+    let speed_twins = render_speed_twins();
+    let plain_speed_twins = speed_twins
+        .values()
+        .filter(|case| case["request"]["arguments"].get("auth_method").is_none())
+        .count();
+    assert_eq!(plain_speed_twins, 2);
     let plain_login_cases = login_methods
         .values()
         .filter(|case| case["request"]["arguments"].get("auth_method").is_none())
@@ -1426,7 +1475,8 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
                 + render_cache_lifetimes().len()
                 + served_history.len()
                 + render_attachment_limits().len()
-                + render_temperature().len(),
+                + render_temperature().len()
+                + plain_speed_twins,
         ),
         (
             serde_json::to_string(&curated_wire).unwrap(),
@@ -1456,6 +1506,10 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
             2,
         ),
         (serde_json::to_string(&render_temperature()).unwrap(), 6),
+        (
+            serde_json::to_string(&speed_twins).unwrap(),
+            plain_speed_twins,
+        ),
         (
             serde_json::json!({"hydrogen_alias":render_hydrogen_alias()}).to_string(),
             1,
@@ -2781,6 +2835,7 @@ fn every_read_response_field_reaches_the_fixture() {
             "QualityMarkWriteResponse",
             "QualityMarksResponse",
             "CanonicalLinkWire",
+            "SpeedTwinWire",
             "WireCorrectionWire",
             "FactOverrideWire",
             "WireSourceRef",

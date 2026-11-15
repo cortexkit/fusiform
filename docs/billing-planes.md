@@ -51,10 +51,12 @@ On a `quota_proxy` plane:
    through an alias, see [`wire-contract.md`](wire-contract.md) §4.4) keeps its
    original marker (`billing_plane_tests::quota_proxies_preserve_the_first_hop_of_inherited_rates`,
    `billing_plane_tests::quota_proxies_do_not_erase_alias_markers`).
-3. Mode rates are dropped on every quota proxy, including borrowed API cards,
+3. API mode rates are dropped on every quota proxy, including borrowed API cards,
    because a subscription's access to a priced API mode is not established
    (`billing_plane_tests::quota_proxies_drop_all_mode_rates`,
-   `billing_plane_tests::kimi_quota_proxy_drops_borrowed_mode_rates`).
+    `billing_plane_tests::kimi_quota_proxy_drops_borrowed_mode_rates`).
+   A sourced speed twin is the sole exception: its own separately priced card
+   is joined afterward as the base row's speed mode, not retained from an API mode.
 
 A `quota_proxy` declaration on `apikey` without an explicit price provider is rejected when the file loads
 (`billing_planes.rs`: `a_quota_proxy_on_apikey_without_a_price_provider_is_rejected_with_position`).
@@ -124,13 +126,21 @@ The `(kimi-code-plan-global, apikey)` plane declares
 credential `apikey:kimi-for-coding`; this provider's API key consumes a
 subscription quota rather than buying Moonshot API tokens.
 
-Only an exact `model.canonical_id` of `moonshotai/<id>` with a present
+An exact `model.canonical_id` of `moonshotai/<id>` with a present
 `(moonshotai, <id>)` row in the current catalog establishes a target. The plan's
 entire rate card is replaced by the published non-mode `rate.*` facts on that
 target, including base and context-tier keys. Each carries `inherited_from`
 with `basis: "quota_proxy"`, the target provider, model id and family. API mode
 prices are stripped because they cannot establish subscription mode access.
 Plan-only keys are removed, not mixed into the API card.
+
+The sourced `k3.1-pro-highspeed` twin instead uses the explicit
+`moonshotai/kimi-k3.1-pro-highspeed` API card in `speed-twins.json`, despite
+sharing the base's upstream canonical id. Its input/output proxy rates are
+$4/$20 per million tokens; the base continues to use
+`moonshotai/kimi-k3.1-pro` at $2/$10. The base's `mode.fast` copies the twin's
+projected rates and origin markers after API modes have been stripped.
+Only that twin-derived mode is exempt; unrelated API modes remain absent.
 
 `InheritedFrom.family` is a required string in the existing wire type. As with
 exact-row aliases, an absent or null target family uses the existing empty-string

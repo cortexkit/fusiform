@@ -28,6 +28,7 @@ pub mod plan_prices;
 pub mod route;
 pub mod seed;
 pub mod signals;
+pub mod speed_twins;
 pub mod temperature_ranges;
 pub mod wire_corrections;
 pub mod wire_families;

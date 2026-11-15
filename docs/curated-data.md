@@ -11,6 +11,7 @@ that keep them honest.
 | --- | --- | --- |
 | `model-creators.json` | which provider published an open-weight family | at read time |
 | `model-aliases.json` | route-specific ids and the published row each one is | at read time, current reads only |
+| `speed-twins.json` | separately named speed servings of the same model, their wire ids and exact API proxy cards | at read time, current reads only; never stored |
 | `curated-models.json` | provider rows models.dev does not carry | at read time on current reads; written to `curated_model_era` at start, which point-in-time reads serve (§4) |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
 | store quality grades | operator-assigned ELO and EQ judgments for routing selection | at read time, current reads only (§11) |
@@ -58,10 +59,16 @@ establishment date and its own review date; `not_established` carries a refusal
 reason and review date. Unknown tier names, floats and missing provenance are
 counted rejects without losing the independently sourced price. These fields
 are never stored, so changing only service tiers writes no price era.
-Only OpenAI Plus, Pro 100, Pro 200 and Pro 500 are curated for service tiers;
-the other providers remain unknown. Review service tiers after 30 days because
-Pro 500 and the published consumption rates are recent. Model availability
-stays on model rows.
+OpenAI Plus, Pro 100, Pro 200 and Pro 500 have 30-day service-tier reviews
+because Pro 500 and the consumption rates are recent. Kimi Code Allegro
+includes `fast` for K3.1 Pro Highspeed at 2× included quota usage, reviewed
+after 60 days. Its source quotes the recorded legacy price row, the Help
+Center's legacy names and the membership guide's “Allegretto and above”
+threshold. The original live pricing page now shows only new plan names;
+the recorded price row establishes Allegro above Allegretto. No Kimi
+purchased-credit rate is stated, so `credit_rate` is omitted, never zero.
+The vendor display label lives on `route.mode_labels`, not on the plan.
+Other providers remain unknown. Model availability stays on model rows.
 
 The optional `concurrency` field on a plan-price cell records a sourced cap on
 simultaneous requests. Absent means unknown, **never unlimited and never zero**.
@@ -1283,3 +1290,40 @@ For upstream rows, derived `wire.family` is never stored, appears only on curren
 `at_ms` reads, and respects `wire.family` and `wire.` fact-prefix filters.
 `tests/it/wire_families.rs` exercises real seed witnesses, endpoint withholding,
 aliases, planes, history and filters through the served route.
+
+## 14. Speed twins (`speed-twins.json`)
+
+A speed twin is a separately named serving of the same model, not an alias
+and not another capability tier. Each row records `provider_id`,
+`base_model_id`, `twin_model_id`, the closed `mode` (`fast` or `ultrafast`),
+a vendor display `label`, the twin's exact quota-proxy `api_card`,
+`source_ref`, verbatim `quote`, `established_at_ms` and `review_by_ms` exactly
+60 days later. The table is loaded and validated once per process.
+
+Only `kimi-code-plan-global/k3.1-pro` and `k3.1-pro-highspeed` are paired.
+Moonshot's quickstart states “We are also releasing Kimi K3.1 Pro Highspeed,
+which delivers 2-3× the speed of K3.1 Pro for more responsive interactions.”
+Kimi's models page states “identical model capabilities” and “approximately
+2–3× speed, 2× quota usage”. Its membership page establishes HighSpeed on
+legacy Allegretto and above and new Pro and above. The data quotes those
+pages and the API pricing page's rule that Highspeed doubles regular input,
+output and cache-write prices while cached input stays $0.20 per million.
+The `kimi-for-coding` / `kimi-for-coding-highspeed` near-match is deliberately
+excluded: Kimi identifies them as K2.8 Preview and K2.7 Code Highspeed,
+respectively, so they are different models.
+
+`src/speed_twins.rs` fences both ids' existence in the seed, collisions with
+native base `.mode.<mode>` rates, twins that are also bases, and modes outside
+the closed set. Every fence has a planted-violation test. The scheduled CI
+suite also runs `speed_twins_are_within_their_review_dates`; an expired claim
+names the source to re-read and requires re-dating both review timestamps
+or removing the pairing. The overdue test drives both sides of the deadline.
+
+Current serving copies each non-mode twin rate to the base's mode selector,
+including its inherited-price marker, and adds `route.mode_wire_ids` and
+`route.mode_labels`. The twin gains `model.mode_of` without losing any fact.
+The `speed_twins` response array discloses the claim whenever a derived fact
+survives filtering. Named, provider-wide and paged reads agree; `at_ms` reads
+and stored history are unchanged. Billing-plane reads derive the base mode
+only after projecting the twin onto its own sourced API card, preserving the
+rule that unrelated API mode rates are stripped from quota proxies.

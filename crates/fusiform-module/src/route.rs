@@ -961,6 +961,15 @@ fn serve_catalog_get_request(
     if request.at_ms.is_none() {
         request.fact_prefixes = request.fact_prefixes.as_ref().map(|prefixes| {
             let mut wide = prefixes.clone();
+            if admits_rates(prefixes)
+                || crate::speed_twins::KEYS
+                    .iter()
+                    .any(|key| prefixes.iter().any(|prefix| key.starts_with(prefix)))
+            {
+                // A filtered base-mode read still needs the twin's complete card.
+                wide.push("rate.".to_string());
+                wide.push("existence".to_string());
+            }
             if crate::temperature_ranges::KEYS
                 .iter()
                 .any(|key| prefixes.iter().any(|prefix| key.starts_with(prefix)))
@@ -1521,6 +1530,9 @@ fn scope_page(response: &mut CatalogGetResponse, providers: &BTreeSet<String>) {
         .canonical_links
         .retain(|row| providers.contains(model_provider(&row.model)));
     response
+        .speed_twins
+        .retain(|row| providers.contains(model_provider(&row.model)));
+    response
         .wire_corrections
         .retain(|row| providers.contains(&row.provider));
     response
@@ -1558,7 +1570,7 @@ fn page_catalog(
     let pending_quality_bytes = quality_disclosure_size(response.quality_scores.as_ref())?;
     let mut estimate = PageEstimate {
         bytes: compact_size(&response)? - pending_quality_bytes + token_reserve,
-        present: [false; 11],
+        present: [false; 12],
         pending_quality_bytes,
     };
     let mut count = 0;
@@ -1638,6 +1650,8 @@ struct ProviderRows {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     canonical_links: Vec<fusiform_protocol::CanonicalLinkWire>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    speed_twins: Vec<fusiform_protocol::SpeedTwinWire>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     wire_corrections: Vec<fusiform_protocol::WireCorrectionWire>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     fact_overrides: Vec<fusiform_protocol::FactOverrideWire>,
@@ -1647,7 +1661,7 @@ struct ProviderRows {
 
 // The empty models object is already in the envelope. Optional array headers
 // appear only once per page; provider payloads supply their interior JSON bytes.
-const DISCLOSURE_HEADERS: [&str; 10] = [
+const DISCLOSURE_HEADERS: [&str; 11] = [
     r#","curated":[]"#,
     r#","withheld":[]"#,
     r#","retired":[]"#,
@@ -1655,6 +1669,7 @@ const DISCLOSURE_HEADERS: [&str; 10] = [
     r#","aliased":[]"#,
     r#","billing_rules":[]"#,
     r#","canonical_links":[]"#,
+    r#","speed_twins":[]"#,
     r#","wire_corrections":[]"#,
     r#","fact_overrides":[]"#,
     r#","login_methods":[]"#,
@@ -1663,14 +1678,14 @@ const DISCLOSURE_HEADERS: [&str; 10] = [
 #[derive(Clone, Copy)]
 struct ProviderContribution {
     bytes: usize,
-    present: [bool; 11],
+    present: [bool; 12],
     has_quality: bool,
 }
 
 #[derive(Clone, Copy)]
 struct PageEstimate {
     bytes: usize,
-    present: [bool; 11],
+    present: [bool; 12],
     pending_quality_bytes: usize,
 }
 
@@ -1713,6 +1728,7 @@ impl ProviderRows {
             !self.aliased.is_empty(),
             !self.billing_rules.is_empty(),
             !self.canonical_links.is_empty(),
+            !self.speed_twins.is_empty(),
             !self.wire_corrections.is_empty(),
             !self.fact_overrides.is_empty(),
             !self.login_methods.is_empty(),
@@ -1745,6 +1761,7 @@ impl ProviderRows {
         page.aliased.extend(self.aliased);
         page.billing_rules.extend(self.billing_rules);
         page.canonical_links.extend(self.canonical_links);
+        page.speed_twins.extend(self.speed_twins);
         page.wire_corrections.extend(self.wire_corrections);
         page.fact_overrides.extend(self.fact_overrides);
         page.login_methods.extend(self.login_methods);
@@ -1783,6 +1800,13 @@ fn quality_disclosure_size(
 
 fn partition_providers(response: &mut CatalogGetResponse) -> BTreeMap<String, ProviderRows> {
     let mut providers: BTreeMap<String, ProviderRows> = BTreeMap::new();
+    for row in std::mem::take(&mut response.speed_twins) {
+        providers
+            .entry(model_provider(&row.model).to_owned())
+            .or_default()
+            .speed_twins
+            .push(row);
+    }
     for row in std::mem::take(&mut response.login_methods) {
         providers
             .entry(model_provider(&row.model).to_owned())
@@ -1982,6 +2006,9 @@ fn finish_plane_view(
         apply_model_lineage(&mut response);
     }
     let Some(plane) = plane else {
+        if current {
+            apply_speed_twins(store, source, &mut response, None)?;
+        }
         // Callers that did not ask for a billing claim keep the ordinary view.
         for facts in response.models.values_mut() {
             narrow_to_requested(facts, requested_prefixes);
@@ -1993,6 +2020,9 @@ fn finish_plane_view(
                 .is_some_and(|facts| facts.contains_key("model.canonical_id"))
         });
         retain_quality_disclosure(&mut response);
+        if current {
+            retain_speed_twins(&mut response);
+        }
         retain_served_overrides(&mut response);
         retain_requested_wire_corrections(&mut response, requested_prefixes);
         return Ok(response);
@@ -2006,7 +2036,17 @@ fn finish_plane_view(
     for (identity, facts) in &mut response.models {
         if let Some(declared) = plane.declared {
             if let Some(provider) = declared.borrows_rates_from() {
-                borrow_plane_rates(store, source, response.resolved_at_ms, facts, provider)?;
+                let api_card = identity.split_once('/').and_then(|(p, m)| {
+                    crate::speed_twins::twin(p, m).map(|row| row.api_card.as_str())
+                });
+                borrow_plane_rates(
+                    store,
+                    source,
+                    response.resolved_at_ms,
+                    facts,
+                    provider,
+                    api_card,
+                )?;
             }
             response
                 .billing_rules
@@ -2022,8 +2062,18 @@ fn finish_plane_view(
                 }
             }
         }
+    }
+    if current {
+        let method = response
+            .plane
+            .as_ref()
+            .map(|plane| plane.auth_method.clone());
+        apply_speed_twins(store, source, &mut response, method.as_deref())?;
+    }
+    for facts in response.models.values_mut() {
         narrow_to_requested(facts, requested_prefixes);
     }
+    retain_speed_twins(&mut response);
     response.billing_rules.retain(|rule| {
         response
             .models
@@ -2040,6 +2090,121 @@ fn finish_plane_view(
     retain_quality_disclosure(&mut response);
     retain_requested_wire_corrections(&mut response, requested_prefixes);
     Ok(response)
+}
+
+/// Join only after plane projection, so a base mode and a twin-id call cost alike.
+fn apply_speed_twins(
+    store: &CatalogStore,
+    source: SourceId,
+    response: &mut CatalogGetResponse,
+    auth_method: Option<&str>,
+) -> Result<(), RouteError> {
+    for row in crate::speed_twins::rows().values() {
+        let base = format!("{}/{}", row.provider_id, row.base_model_id);
+        let twin = format!("{}/{}", row.provider_id, row.twin_model_id);
+        if let Some(facts) = response.models.get_mut(&twin) {
+            facts.insert(
+                "model.mode_of".into(),
+                serde_json::json!({
+                    "model_id": row.base_model_id, "mode": row.mode,
+                }),
+            );
+        }
+        if !response.models.contains_key(&base) {
+            continue;
+        }
+        let present = store
+            .read_model(
+                source,
+                &row.provider_id,
+                &row.twin_model_id,
+                Some(Timestamp(response.resolved_at_ms)),
+            )
+            .map_err(|error| store_error(&error))?
+            .0
+            .is_some_and(|model| model.is_present());
+        if !present {
+            continue;
+        }
+        let card = if let Some(facts) = response.models.get(&twin) {
+            facts.clone()
+        } else {
+            // Named base reads still use the twin's full served context, not its
+            // stored zeros or a differently selected billing plane.
+            let args = serde_json::json!({
+                "provider_id": row.provider_id, "model_id": row.twin_model_id,
+                "auth_method": auth_method, "fact_prefixes": ["rate."],
+            });
+            let mut served = serve_catalog_get(
+                store,
+                &serde_json::to_vec(&args).expect("request serializes"),
+            )?;
+            let Some(facts) = served.models.remove(&twin) else {
+                continue;
+            };
+            facts
+        };
+        let facts = response.models.get_mut(&base).expect("base was selected");
+        for (key, value) in card {
+            let Some(dimension) = key.strip_prefix("rate.") else {
+                continue;
+            };
+            if fusiform_store::rate_key::is_mode_rate(&key) {
+                continue;
+            }
+            let (dimension, suffix) = dimension
+                .split_once('.')
+                .map_or((dimension, String::new()), |(dimension, suffix)| {
+                    (dimension, format!(".{suffix}"))
+                });
+            facts.insert(format!("rate.{dimension}.mode.{}{suffix}", row.mode), value);
+        }
+        for (key, value) in [
+            ("route.mode_wire_ids", &row.twin_model_id),
+            ("route.mode_labels", &row.label),
+        ] {
+            facts
+                .entry(key.into())
+                .or_insert_with(|| serde_json::json!({}))
+                .as_object_mut()
+                .expect("speed route fact is an object")
+                .insert(row.mode.clone(), serde_json::json!(value));
+        }
+    }
+    Ok(())
+}
+
+fn retain_speed_twins(response: &mut CatalogGetResponse) {
+    response.speed_twins = crate::speed_twins::rows()
+        .values()
+        .filter_map(|row| {
+            let model = format!("{}/{}", row.provider_id, row.base_model_id);
+            let twin = format!("{}/{}", row.provider_id, row.twin_model_id);
+            let base_served = response.models.get(&model).is_some_and(|facts| {
+                facts.contains_key("route.mode_wire_ids")
+                    || facts.contains_key("route.mode_labels")
+                    || facts.keys().any(|key| {
+                        key.starts_with("rate.") && key.contains(&format!(".mode.{}", row.mode))
+                    })
+            });
+            let twin_served = response
+                .models
+                .get(&twin)
+                .is_some_and(|facts| facts.contains_key("model.mode_of"));
+            (base_served || twin_served).then(|| fusiform_protocol::SpeedTwinWire {
+                model,
+                twin,
+                mode: if row.mode == "fast" {
+                    fusiform_protocol::ServiceTier::Fast
+                } else {
+                    fusiform_protocol::ServiceTier::Ultrafast
+                },
+                label: row.label.clone(),
+                source_ref: row.source_ref.clone(),
+                review_by_ms: row.review_by_ms,
+            })
+        })
+        .collect();
 }
 
 fn retain_requested_wire_corrections(
@@ -2185,17 +2350,17 @@ fn retain_served_overrides(response: &mut CatalogGetResponse) {
 }
 
 /// Replace a plan's entire rate card, never topping up its published zeros.
-/// Only the upstream canonical identity can relate a plan row to an API row.
+/// Only an upstream canonical identity or sourced speed-twin card relates the rows.
 fn borrow_plane_rates(
     store: &CatalogStore,
     source: SourceId,
     at_ms: i64,
     facts: &mut BTreeMap<String, serde_json::Value>,
     provider: &str,
+    api_card: Option<&str>,
 ) -> Result<(), RouteError> {
-    let target = facts
-        .get("model.canonical_id")
-        .and_then(|v| v.as_str())
+    let target = api_card
+        .or_else(|| facts.get("model.canonical_id").and_then(|v| v.as_str()))
         .and_then(|id| id.split_once('/'))
         .filter(|(p, id)| *p == provider && !id.is_empty());
     let origin = if let Some((_, id)) = target {
@@ -2782,6 +2947,7 @@ fn render(
         login_methods: Vec::new(),
         quality_scores: None,
         canonical_links,
+        speed_twins: Vec::new(),
         wire_corrections,
         fact_overrides,
         plane: None,
@@ -5019,6 +5185,233 @@ mod billing_plane_tests {
         .unwrap_err();
         assert_eq!(error.code, "no_coverage");
         assert_canonical_borrow_uses_the_required_empty_family_sentinel();
+    }
+
+    #[test]
+    fn kimi_highspeed_quota_proxy_uses_its_own_api_card() {
+        let (store, _dir) = store();
+        for (id, input, output) in [("kimi-k3.1-pro", 2, 10), ("kimi-k3.1-pro-highspeed", 4, 20)] {
+            seed(
+                &store,
+                "moonshotai",
+                id,
+                vec![
+                    ("rate.input", priced(input)),
+                    ("rate.output", priced(output)),
+                ],
+            );
+        }
+        for id in ["k3.1-pro", "k3.1-pro-highspeed"] {
+            seed(
+                &store,
+                "kimi-code-plan-global",
+                id,
+                vec![
+                    ("model.canonical_id", json!("moonshotai/kimi-k3.1-pro")),
+                    ("rate.input", json!({"state":"stated_zero"})),
+                ],
+            );
+        }
+        let response = get(
+            &store,
+            request(
+                "kimi-code-plan-global",
+                Some("k3.1-pro-highspeed"),
+                "apikey",
+                Some("rate."),
+            ),
+        )
+        .unwrap();
+        let facts = &response.models["kimi-code-plan-global/k3.1-pro-highspeed"];
+        assert_eq!(facts["rate.input"]["units"], 4);
+        assert_eq!(facts["rate.output"]["units"], 20);
+        assert_eq!(
+            facts["rate.input"]["inherited_from"]["model_id"],
+            "kimi-k3.1-pro-highspeed"
+        );
+    }
+
+    fn seed_speed_twins(store: &CatalogStore) {
+        for (id, multiplier) in [("kimi-k3.1-pro", 1), ("kimi-k3.1-pro-highspeed", 2)] {
+            let rates = card()
+                .into_iter()
+                .map(|(key, mut value)| {
+                    if let Some(units) = value["units"].as_i64() {
+                        value["units"] = json!(units * multiplier);
+                    }
+                    (key, value)
+                })
+                .collect();
+            seed(store, "moonshotai", id, rates);
+        }
+        for id in [
+            "k3.1-pro",
+            "k3.1-pro-highspeed",
+            "kimi-for-coding",
+            "kimi-for-coding-highspeed",
+        ] {
+            seed(
+                store,
+                "kimi-code-plan-global",
+                id,
+                vec![
+                    ("model.canonical_id", json!("moonshotai/kimi-k3.1-pro")),
+                    ("rate.input", json!({"state":"stated_zero"})),
+                    ("rate.output", json!({"state":"stated_zero"})),
+                ],
+            );
+        }
+    }
+
+    #[test]
+    fn speed_twins_plain_named_bulk_and_paged_reads_agree() {
+        let (store, _dir) = store();
+        seed_speed_twins(&store);
+        let provider = "kimi-code-plan-global";
+        let bulk = get(&store, json!({"provider_id":provider})).unwrap();
+        let whole = get(&store, json!({})).unwrap();
+        let paged = get(&store, json!({"paged":true})).unwrap();
+        for id in ["k3.1-pro", "k3.1-pro-highspeed"] {
+            let identity = format!("{provider}/{id}");
+            let named = get(&store, json!({"provider_id":provider,"model_id":id})).unwrap();
+            for other in [&bulk, &whole, &paged] {
+                assert_eq!(named.models[&identity], other.models[&identity]);
+                assert_eq!(named.speed_twins, other.speed_twins);
+            }
+            assert_eq!(named.speed_twins.len(), 1);
+        }
+        let base = &bulk.models["kimi-code-plan-global/k3.1-pro"];
+        assert_eq!(
+            base["route.mode_wire_ids"],
+            json!({"fast":"k3.1-pro-highspeed"})
+        );
+        assert_eq!(base["route.mode_labels"], json!({"fast":"Highspeed"}));
+        assert_eq!(base["rate.input.mode.fast"], json!({"state":"stated_zero"}));
+        assert_eq!(
+            bulk.models["kimi-code-plan-global/k3.1-pro-highspeed"]["model.mode_of"],
+            json!({"model_id":"k3.1-pro","mode":"fast"})
+        );
+        for id in ["kimi-for-coding", "kimi-for-coding-highspeed"] {
+            let facts = &bulk.models[&format!("{provider}/{id}")];
+            assert!(!facts.contains_key("model.mode_of"));
+            assert!(!facts.contains_key("route.mode_wire_ids"));
+        }
+    }
+
+    #[test]
+    fn speed_twins_plane_rates_preserve_origins_and_filter_last() {
+        let (store, _dir) = store();
+        seed_speed_twins(&store);
+        let provider = "kimi-code-plan-global";
+        let bulk = get(&store, request(provider, None, "apikey", None)).unwrap();
+        let base = &bulk.models["kimi-code-plan-global/k3.1-pro"];
+        let twin = &bulk.models["kimi-code-plan-global/k3.1-pro-highspeed"];
+        for (key, value) in twin.iter().filter(|(key, _)| key.starts_with("rate.")) {
+            assert!(
+                !key.contains(".mode."),
+                "API modes must still be stripped: {key}"
+            );
+            let dimension = key.strip_prefix("rate.").unwrap();
+            let mode_key = match dimension.split_once('.') {
+                Some((dimension, suffix)) => format!("rate.{dimension}.mode.fast.{suffix}"),
+                None => format!("rate.{dimension}.mode.fast"),
+            };
+            assert_eq!(&base[&mode_key], value, "{mode_key}");
+            assert_eq!(
+                value["inherited_from"]["model_id"],
+                "kimi-k3.1-pro-highspeed"
+            );
+        }
+        assert_eq!(base["rate.input"]["units"], 100);
+        assert_eq!(base["rate.input.mode.fast"]["units"], 200);
+        assert_eq!(
+            base["rate.input.mode.fast"]["inherited_from"]["basis"],
+            "quota_proxy"
+        );
+        for id in ["k3.1-pro", "k3.1-pro-highspeed"] {
+            for prefix in [
+                "rate.input.mode.fast",
+                "route.mode_",
+                "model.mode_of",
+                "capability.",
+            ] {
+                let named =
+                    get(&store, request(provider, Some(id), "apikey", Some(prefix))).unwrap();
+                let filtered_bulk =
+                    get(&store, request(provider, None, "apikey", Some(prefix))).unwrap();
+                let identity = format!("{provider}/{id}");
+                assert_eq!(named.models[&identity], filtered_bulk.models[&identity]);
+                assert!(named.models[&identity]
+                    .keys()
+                    .all(|key| key.starts_with(prefix)));
+                if prefix == "capability." {
+                    assert!(named.speed_twins.is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn speed_twins_preserve_plain_inherited_rates_and_stored_history() {
+        let (store, _dir) = store();
+        seed_speed_twins(&store);
+        let mut value = priced(123);
+        value["inherited_from"] =
+            json!({"provider_id":"origin","family":"weights","basis":"open_weights"});
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "kimi-code-plan-global".into(),
+                model_id: "k3.1-pro-highspeed".into(),
+                fact_key: FactKey::from_stored("rate.input".into()),
+                value_json: value.to_string(),
+                boundary_at: Timestamp(2_000),
+                boundary_kind: BoundaryKind::Seed,
+                observation_id: None,
+            }])
+            .unwrap();
+        let before = store.era_count(SourceId::ModelsDev).unwrap();
+        let version = store.catalog_version().unwrap();
+        let args = json!({"provider_id":"kimi-code-plan-global","model_id":"k3.1-pro","fact_prefixes":["rate.input.mode.fast"]});
+        let response = get(&store, args).unwrap();
+        let rate = &response.models["kimi-code-plan-global/k3.1-pro"]["rate.input.mode.fast"];
+        assert_eq!(rate["units"], 123);
+        assert_eq!(rate["inherited_from"]["provider_id"], "origin");
+        assert_eq!(response.speed_twins.len(), 1);
+        let replay = get(
+            &store,
+            json!({"provider_id":"kimi-code-plan-global","at_ms":1000}),
+        )
+        .unwrap();
+        assert!(replay.speed_twins.is_empty());
+        for facts in replay.models.values() {
+            assert!(!facts.contains_key("model.mode_of"));
+            assert!(!facts.contains_key("route.mode_wire_ids"));
+            assert!(!facts.contains_key("route.mode_labels"));
+            assert!(!facts.contains_key("rate.input.mode.fast"));
+        }
+        assert_eq!(store.era_count(SourceId::ModelsDev).unwrap(), before);
+        assert_eq!(store.catalog_version().unwrap(), version);
+    }
+
+    #[test]
+    fn speed_twins_do_not_advertise_an_absent_twin() {
+        let (store, _dir) = store();
+        seed(
+            &store,
+            "kimi-code-plan-global",
+            "k3.1-pro",
+            vec![("rate.input", priced(1))],
+        );
+        let response = get(
+            &store,
+            json!({"provider_id":"kimi-code-plan-global","model_id":"k3.1-pro"}),
+        )
+        .unwrap();
+        let facts = &response.models["kimi-code-plan-global/k3.1-pro"];
+        assert!(!facts.contains_key("route.mode_wire_ids"));
+        assert!(!facts.contains_key("rate.input.mode.fast"));
+        assert!(response.speed_twins.is_empty());
     }
 
     #[test]

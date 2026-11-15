@@ -632,6 +632,7 @@ where
                     uncertain,
                     aliased,
                     canonical_links,
+                    speed_twins,
                     wire_corrections,
                     fact_overrides,
                     plane: _,
@@ -648,6 +649,7 @@ where
                 merged.uncertain.extend(uncertain);
                 merged.aliased.extend(aliased);
                 merged.canonical_links.extend(canonical_links);
+                merged.speed_twins.extend(speed_twins);
                 merged.wire_corrections.extend(wire_corrections);
                 merged.fact_overrides.extend(fact_overrides);
                 merged.billing_rules.extend(billing_rules);
@@ -2063,10 +2065,14 @@ fn render_service_tiers(value: &fusiform_protocol::ServiceTiersWire) -> String {
                         ServiceTier::Fast => "fast",
                         ServiceTier::Ultrafast => "ultrafast",
                     };
+                    let credits = tier
+                        .credit_rate
+                        .as_ref()
+                        .map(|rate| format!(", {}x credits", render_quota_decimal(rate)))
+                        .unwrap_or_default();
                     format!(
-                        "{name} ({}x usage, {}x credits)",
-                        render_quota_decimal(&tier.included_usage_rate),
-                        render_quota_decimal(&tier.credit_rate),
+                        "{name} ({}x usage{credits})",
+                        render_quota_decimal(&tier.included_usage_rate)
                     )
                 })
                 .collect::<Vec<_>>()
@@ -2763,6 +2769,21 @@ mod tests {
         ] {
             assert!(out.contains(term), "missing {term:?}: {out}");
         }
+    }
+
+    #[test]
+    fn service_tiers_omit_unstated_purchased_credit_rates() {
+        let response = serde_json::json!({"prices":[{
+            "provider_id":"kimi-code-plan-global", "tier":"allegro",
+            "service_tiers": {"state":"established",
+                "tiers":[{"tier":"fast","included_usage_rate":{"units":2,"exponent":0}}],
+                "source_ref":"Kimi membership", "established_by":"fusiform",
+                "established_at_ms":1794700800000i64, "review_by_ms":1799884800000i64
+            }
+        }]});
+        let out = render_plan_prices(&response);
+        assert!(out.contains("service tiers: fast (2x usage)"), "{out}");
+        assert!(!out.contains("credits"), "{out}");
     }
 
     #[test]
@@ -4139,6 +4160,10 @@ mod paging_tests {
             "model":"b/m", "auth_methods":["apikey"], "source_ref":"s", "review_by_ms":2000
         }]);
         second["models"]["b/m"]["quality.elo"] = json!(1284);
+        second["speed_twins"] = json!([{
+            "model":"b/m", "twin":"b/m-fast", "mode":"fast", "label":"Highspeed",
+            "source_ref":"s", "review_by_ms":2000
+        }]);
         second["canonical_links"] = json!([{
             "model":"b/m", "canonical_id":"lab/m", "source_ref":"s", "quote":"q",
             "lab_source_ref":"l", "lab_quote":"lq", "review_by_ms":2000
@@ -4160,6 +4185,7 @@ mod paging_tests {
         .await
         .unwrap();
         assert_eq!(result["canonical_links"][0]["model"], "b/m");
+        assert_eq!(result["speed_twins"][0]["twin"], "b/m-fast");
         assert_eq!(
             result["quality_scores"],
             json!({"graded_by":"operator","graded_at_ms":123})

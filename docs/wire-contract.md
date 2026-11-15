@@ -173,6 +173,9 @@ value would do to a consumer:
 | `wire.shape` | advisory | `{"value": "<published request shape>", "from": "model"}`; otherwise no fact |
 | `wire.family` | byte-affecting | verified request protocol token; current reads only; otherwise the request protocol is not verified |
 | `route.reasoning_wire_ids` | byte-affecting | curated effort → backend model id object on live aliases only; otherwise no fact |
+| `route.mode_wire_ids` | byte-affecting | curated speed tier (`fast` or `ultrafast`) → separately served model id; the runner sends that id |
+| `route.mode_labels` | advisory | vendor display labels for those speed tiers, such as `{"fast":"Highspeed"}` |
+| `model.mode_of` | advisory | `{"model_id":"<base id>","mode":"fast"}` on a speed twin; omit the row from routing pickers, but keep its facts for twin-id pricing |
 | `route.reasoning_default` | byte-affecting | default effort selected when the alias is requested without a tier suffix; a key in `route.reasoning_wire_ids`; otherwise no fact |
 | `successor` | advisory | sourced replacement `provider/model` identity on retired aliases; otherwise no fact |
 | `rate.input` | money | rate value (§4.3), per million input tokens |
@@ -779,6 +782,28 @@ include the value and disclosure; `rate.` alone includes neither. Neither the
 stored fact nor its history changes. Sources and review rules are in
 [`curated-data.md`](curated-data.md) §5.
 
+#### Separately named speed tiers
+
+`speed_twins` discloses current-read speed pairings as an array of
+`{model, twin, mode, label, source_ref, review_by_ms}`, with fully qualified
+`provider/model` identities for `model` and `twin`. It is omitted when no
+speed-twin fact survives filtering. It never appears on `at_ms` reads.
+
+For `kimi-code-plan-global/k3.1-pro`, `route.mode_wire_ids.fast` is
+`k3.1-pro-highspeed` and `route.mode_labels.fast` is `Highspeed`. The twin
+retains all its facts and gains `model.mode_of`. Routing selects `fast` from
+the base's `rate.<dimension>.mode.fast` and the plan's `service_tiers`, omits
+the twin from pickers, and sends the mapped wire id. Calls already made with
+the twin id are priced from the twin row, not from the base.
+
+Each derived mode rate copies the twin's served value in the same read context,
+including `inherited_from`. Plain reads copy the twin's own rates; apikey
+billing-plane reads copy its Moonshot Highspeed proxy card. Context selectors
+follow the mode selector (`rate.input.mode.fast.above_context.<n>`). Other API
+mode rates remain stripped from quota proxies. Fact filters widen internally
+to obtain the twin rates, then narrow back to exactly the requested keys.
+No pairing or derived rate is written to the store.
+
 ### 5.8 Fact overrides
 
 `fact_overrides` discloses each fact whose served value is a sourced curated
@@ -1143,11 +1168,12 @@ Each priced row may carry `service_tiers`, independent of `quota_value`:
 - `state: "established"` carries `tiers`, `source_ref`, `established_by`,
   `established_at_ms` and `review_by_ms`.
 - Each tier has `tier` (`fast` or `ultrafast`, a closed vocabulary),
-  `included_usage_rate` and `credit_rate`. Both rates are exact decimals
+  `included_usage_rate` and optional `credit_rate`. Present rates are exact decimals
   `{units, exponent}`, meaning `units / 10^exponent` relative to Standard.
   For example, Fast consumes included usage at `{units: 25, exponent: 1}`
   (2.5x), and purchased credits after the allowance at `{units: 2, exponent: 0}`
-  (2x). No floats are used.
+  (2x). Absent `credit_rate` means the vendor states no purchased-credit rate,
+  never zero. No floats are used.
 - `state: "not_established"` instead carries `refusal_reason` and `review_by_ms`.
 
 Standard is implicit and never listed. Tier names match model rows'

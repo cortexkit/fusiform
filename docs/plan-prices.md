@@ -114,15 +114,22 @@ never listed. `state: "established"` carries a nonempty `tiers` list plus
 `state: "not_established"` carries `refusal_reason` and `review_by_ms` instead.
 
 Each entry has `tier` (`fast` or `ultrafast` only), `included_usage_rate` and
-`credit_rate`. Both rates are positive exact decimals, `{units, exponent}`,
+optional `credit_rate`. Present rates are positive exact decimals, `{units, exponent}`,
 relative to Standard: 25 with exponent 1 means 2.5x. The first rate consumes
 the plan's included usage; the second consumes purchased credits after the
-allowance runs out. Tier names match model `rate.<dim>.mode.<name>` keys.
+allowance runs out. Absent `credit_rate` means the vendor states no
+purchased-credit rate, never zero. Tier names match model `rate.<dim>.mode.<name>` keys.
 
 OpenAI Plus, Pro 100 and Pro 200 include Fast only (2.5x usage, 2x credits).
 Pro 500 includes Fast and Ultrafast (8x usage, 6x credits). The data quotes
 OpenAI's pricing, Pro-tier and speed pages and carries a 30-day review date.
-Other providers have no field. These are consumption rates, not speed guarantees.
+Kimi Code Allegro includes Fast for K3.1 Pro Highspeed at 2× quota usage,
+with no stated purchased-credit rate and a 60-day review. Its source quotes
+the recorded first-party legacy price ordering (Allegretto $39, Allegro $99),
+Kimi's legacy-plan list and the “Allegretto and above” HighSpeed threshold.
+The live pricing page now lists only new plans. Other providers have no field.
+These are consumption rates, not speed guarantees; vendor display labels
+are on model `route.mode_labels`, not on plan tiers.
 
 Like quota values, service tiers are joined only on current reads, omitted for
 tombstones and never stored. An entitlement-only change writes zero

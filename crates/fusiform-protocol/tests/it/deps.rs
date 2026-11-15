@@ -290,6 +290,7 @@ fn every_response_type_round_trips() {
             lab_quote: r#"{"id":"moonshotai/kimi-k2.6","name":"Kimi K2.6"}"#.into(),
             review_by_ms: 1_797_552_000_000,
         }],
+        speed_twins: Vec::new(),
         next_page_token: None,
         login_methods: vec![LoginMethodsWire {
             model: "openai/gpt-6.1-sol".into(),

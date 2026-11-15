@@ -152,6 +152,18 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
     );
     // Quality facts join operator history, so normalized upstream fixtures
     // alone cannot demonstrate them. Exercise their actual serving path.
+    for case in super::golden_payload::render_speed_twins().values() {
+        for facts in case["response"]["models"].as_object().unwrap().values() {
+            curated.extend(
+                facts
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .filter(|key| fusiform_module::speed_twins::KEYS.contains(&key.as_str()))
+                    .cloned(),
+            );
+        }
+    }
     let quality = super::golden_payload::render_synthetic_quality_scores();
     curated.extend(
         quality["response"]["models"]
@@ -355,6 +367,9 @@ pub(crate) const CURATED_ONLY: &[&str] = &[
     "model.kind",
     "route.reasoning_wire_ids",
     "route.reasoning_default",
+    "route.mode_wire_ids",
+    "route.mode_labels",
+    "model.mode_of",
     "successor",
 ];
 

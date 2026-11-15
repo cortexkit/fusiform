@@ -296,7 +296,9 @@ pub enum ServiceTier {
 pub struct ServiceTierWire {
     pub tier: ServiceTier,
     pub included_usage_rate: QuotaDecimal,
-    pub credit_rate: QuotaDecimal,
+    /// Absent means the vendor states no purchased-credit rate, never zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credit_rate: Option<QuotaDecimal>,
 }
 
 /// Curated subscription prices.
@@ -754,6 +756,11 @@ pub struct CatalogGetResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub canonical_links: Vec<CanonicalLinkWire>,
 
+    /// Sourced separately named servings of the same model at a speed tier.
+    /// Current reads only; omitted when no speed-twin fact survives filtering.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub speed_twins: Vec<SpeedTwinWire>,
+
     /// Current-only endpoint corrections and intentional endpoint withholding.
     /// Omitted when no requested wire field was corrected or withheld.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1104,6 +1111,21 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// `wire.family` verifies the request protocol on current reads; consumers own
 /// runner support and transport quirks. No header/body overrides are served.
 pub const SERVED_FACTS: &[ServedFact] = &[
+    ServedFact {
+        key: "model.mode_of",
+        class: FactClass::Advisory,
+        note: "curated {model_id, mode} on a separately named speed twin; routing pickers omit this row and select the mode on its base. Twin-id calls keep the twin's own prices. Current reads only.",
+    },
+    ServedFact {
+        key: "route.mode_wire_ids",
+        class: FactClass::ByteAffecting,
+        note: "curated fast/ultrafast-to-model-id object on a speed twin's base row. Consumers send the chosen model id on the wire. Current reads only.",
+    },
+    ServedFact {
+        key: "route.mode_labels",
+        class: FactClass::Advisory,
+        note: "vendor display labels for the base row's curated speed modes; fast and ultrafast remain the routing vocabulary. Current reads only.",
+    },
     ServedFact {
         key: "quality.decommissioned",
         class: FactClass::Advisory,
@@ -1967,6 +1989,17 @@ pub struct QualityMarkWriteResponse {
 pub struct QualityMarksResponse {
     /// Current decommissioned keys, or one key's history newest first.
     pub marks: Vec<ModelMarkWire>,
+}
+
+/// Provenance for a base model's separately named speed serving.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SpeedTwinWire {
+    pub model: String,
+    pub twin: String,
+    pub mode: ServiceTier,
+    pub label: String,
+    pub source_ref: String,
+    pub review_by_ms: i64,
 }
 
 /// Provenance for a curated `model.canonical_id`, not an upstream observation.

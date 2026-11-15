@@ -6363,6 +6363,574 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — speed twin k3.1-pro apikey": {
+    "request": {
+      "arguments": {
+        "auth_method": "apikey",
+        "model_id": "k3.1-pro",
+        "provider_id": "kimi-code-plan-global"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "kimi-code-plan-global/k3.1-pro": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "high",
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.temperature": false,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": 131072,
+          "model.canonical_id": "moonshotai/kimi-k3.1-pro",
+          "model.family": "kimi-k3",
+          "model.lineage": "kimi",
+          "model.name": "Kimi K3.1 Pro",
+          "model.open_weights": true,
+          "model.status": null,
+          "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.elo": 1813,
+          "quality.eq": 1829,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3.1-pro",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 200000000
+          },
+          "rate.cache_read.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3.1-pro-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 200000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3.1-pro",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2000000000
+          },
+          "rate.cache_write.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3.1-pro-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4000000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3.1-pro",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2000000000
+          },
+          "rate.input.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3.1-pro-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3.1-pro",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 10000000000
+          },
+          "rate.output.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3.1-pro-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 20000000000
+          },
+          "route.mode_labels": {
+            "fast": "Highspeed"
+          },
+          "route.mode_wire_ids": {
+            "fast": "k3.1-pro-highspeed"
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.kimi.ai/coding/v1"
+          },
+          "wire.family": "openai.chat_completions",
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
+          }
+        }
+      },
+      "plane": {
+        "auth_method": "apikey",
+        "kind": "quota_proxy",
+        "provider_id": "kimi-code-plan-global",
+        "review_by_ms": 1797552000000,
+        "source_ref": "https://www.kimi.com/code/docs/en/kimi-code/membership.html"
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794404263242,
+        "graded_by": "operator"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev",
+      "speed_twins": [
+        {
+          "label": "Highspeed",
+          "mode": "fast",
+          "model": "kimi-code-plan-global/k3.1-pro",
+          "review_by_ms": 1799884800000,
+          "source_ref": "https://platform.moonshot.ai/docs/guide/kimi-k3-1-pro-quickstart ; https://www.kimi.com/code/docs/en/kimi-code/models.html ; https://www.kimi.com/code/docs/en/kimi-code/membership.html ; https://www.kimi.ai/resources/kimi-k3-1-pro-pricing",
+          "twin": "kimi-code-plan-global/k3.1-pro-highspeed"
+        }
+      ]
+    }
+  },
+  "catalog.get — speed twin k3.1-pro plain": {
+    "request": {
+      "arguments": {
+        "model_id": "k3.1-pro",
+        "provider_id": "kimi-code-plan-global"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "kimi-code-plan-global/k3.1-pro": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "high",
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.temperature": false,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": 131072,
+          "model.canonical_id": "moonshotai/kimi-k3.1-pro",
+          "model.family": "kimi-k3",
+          "model.lineage": "kimi",
+          "model.name": "Kimi K3.1 Pro",
+          "model.open_weights": true,
+          "model.status": null,
+          "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.elo": 1813,
+          "quality.eq": 1829,
+          "rate.cache_read": {
+            "state": "stated_zero"
+          },
+          "rate.cache_read.mode.fast": {
+            "state": "stated_zero"
+          },
+          "rate.cache_write": {
+            "state": "stated_zero"
+          },
+          "rate.cache_write.mode.fast": {
+            "state": "stated_zero"
+          },
+          "rate.input": {
+            "state": "stated_zero"
+          },
+          "rate.input.mode.fast": {
+            "state": "stated_zero"
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          },
+          "rate.output.mode.fast": {
+            "state": "stated_zero"
+          },
+          "route.mode_labels": {
+            "fast": "Highspeed"
+          },
+          "route.mode_wire_ids": {
+            "fast": "k3.1-pro-highspeed"
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.kimi.ai/coding/v1"
+          },
+          "wire.family": "openai.chat_completions",
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
+          }
+        }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794404263242,
+        "graded_by": "operator"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev",
+      "speed_twins": [
+        {
+          "label": "Highspeed",
+          "mode": "fast",
+          "model": "kimi-code-plan-global/k3.1-pro",
+          "review_by_ms": 1799884800000,
+          "source_ref": "https://platform.moonshot.ai/docs/guide/kimi-k3-1-pro-quickstart ; https://www.kimi.com/code/docs/en/kimi-code/models.html ; https://www.kimi.com/code/docs/en/kimi-code/membership.html ; https://www.kimi.ai/resources/kimi-k3-1-pro-pricing",
+          "twin": "kimi-code-plan-global/k3.1-pro-highspeed"
+        }
+      ]
+    }
+  },
+  "catalog.get — speed twin k3.1-pro-highspeed apikey": {
+    "request": {
+      "arguments": {
+        "auth_method": "apikey",
+        "model_id": "k3.1-pro-highspeed",
+        "provider_id": "kimi-code-plan-global"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "kimi-code-plan-global/k3.1-pro-highspeed": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "high",
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.temperature": false,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": 131072,
+          "model.canonical_id": "moonshotai/kimi-k3.1-pro",
+          "model.family": "kimi-k3",
+          "model.lineage": "kimi",
+          "model.mode_of": {
+            "mode": "fast",
+            "model_id": "k3.1-pro"
+          },
+          "model.name": "Kimi K3.1 Pro Highspeed",
+          "model.open_weights": true,
+          "model.status": null,
+          "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.elo": 1813,
+          "quality.eq": 1829,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3.1-pro-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 200000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3.1-pro-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4000000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3.1-pro-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "quota_proxy",
+              "family": "kimi-k3",
+              "model_id": "kimi-k3.1-pro-highspeed",
+              "provider_id": "moonshotai"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 20000000000
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.kimi.ai/coding/v1"
+          },
+          "wire.family": "openai.chat_completions",
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
+          }
+        }
+      },
+      "plane": {
+        "auth_method": "apikey",
+        "kind": "quota_proxy",
+        "provider_id": "kimi-code-plan-global",
+        "review_by_ms": 1797552000000,
+        "source_ref": "https://www.kimi.com/code/docs/en/kimi-code/membership.html"
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794404263242,
+        "graded_by": "operator"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev",
+      "speed_twins": [
+        {
+          "label": "Highspeed",
+          "mode": "fast",
+          "model": "kimi-code-plan-global/k3.1-pro",
+          "review_by_ms": 1799884800000,
+          "source_ref": "https://platform.moonshot.ai/docs/guide/kimi-k3-1-pro-quickstart ; https://www.kimi.com/code/docs/en/kimi-code/models.html ; https://www.kimi.com/code/docs/en/kimi-code/membership.html ; https://www.kimi.ai/resources/kimi-k3-1-pro-pricing",
+          "twin": "kimi-code-plan-global/k3.1-pro-highspeed"
+        }
+      ]
+    }
+  },
+  "catalog.get — speed twin k3.1-pro-highspeed plain": {
+    "request": {
+      "arguments": {
+        "model_id": "k3.1-pro-highspeed",
+        "provider_id": "kimi-code-plan-global"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "kimi-code-plan-global/k3.1-pro-highspeed": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "high",
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.temperature": false,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": 131072,
+          "model.canonical_id": "moonshotai/kimi-k3.1-pro",
+          "model.family": "kimi-k3",
+          "model.lineage": "kimi",
+          "model.mode_of": {
+            "mode": "fast",
+            "model_id": "k3.1-pro"
+          },
+          "model.name": "Kimi K3.1 Pro Highspeed",
+          "model.open_weights": true,
+          "model.status": null,
+          "provider.name": "Kimi For Coding (kimi.ai)",
+          "quality.elo": 1813,
+          "quality.eq": 1829,
+          "rate.cache_read": {
+            "state": "stated_zero"
+          },
+          "rate.cache_write": {
+            "state": "stated_zero"
+          },
+          "rate.input": {
+            "state": "stated_zero"
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.kimi.ai/coding/v1"
+          },
+          "wire.family": "openai.chat_completions",
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
+          }
+        }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794404263242,
+        "graded_by": "operator"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev",
+      "speed_twins": [
+        {
+          "label": "Highspeed",
+          "mode": "fast",
+          "model": "kimi-code-plan-global/k3.1-pro",
+          "review_by_ms": 1799884800000,
+          "source_ref": "https://platform.moonshot.ai/docs/guide/kimi-k3-1-pro-quickstart ; https://www.kimi.com/code/docs/en/kimi-code/models.html ; https://www.kimi.com/code/docs/en/kimi-code/membership.html ; https://www.kimi.ai/resources/kimi-k3-1-pro-pricing",
+          "twin": "kimi-code-plan-global/k3.1-pro-highspeed"
+        }
+      ]
+    }
+  },
   "catalog.get — synthetic canonical link": {
     "request": {
       "arguments": {
@@ -7448,6 +8016,9 @@
         }
       ],
       "served_facts": [
+        "model.mode_of",
+        "route.mode_wire_ids",
+        "route.mode_labels",
         "quality.decommissioned",
         "quality.elo",
         "quality.eq",
@@ -10526,6 +11097,22 @@
             "state": "not_established"
           },
           "review_by_ms": 1798329600000,
+          "service_tiers": {
+            "established_at_ms": 1794700800000,
+            "established_by": "fusiform",
+            "review_by_ms": 1799884800000,
+            "source_ref": "https://www.kimi.com/code/docs/en/kimi-code/models.html: K3.1 Pro Highspeed has 'identical model capabilities' and 'approximately 2–3× speed, 2× quota usage'. https://www.kimi.com/code/docs/en/kimi-code/membership.html: 'HighSpeed access (including K3.1 Pro Highspeed and K2.7 Code HighSpeed) | Allegretto and above | Pro and above'. https://www.kimi.com/zh-hans/resources/kimi-k2-7-code-pricing: recorded first-party row 'Monthly price | Moderato: $19/month | Allegretto: $39/month | Allegro: $99/month | Vivace: $199/month'. https://www.kimi.com/en/help/membership/membership-pricing: 'Andante, Moderato, Allegretto, and Allegro are legacy plans.' Allegro's ordering above Allegretto rests on the recorded price row because the live pricing page now shows only the new plans. The fast entitlement and 2× quota usage apply to K3.1 Pro Highspeed; no purchased-credit rate is stated.",
+            "state": "established",
+            "tiers": [
+              {
+                "included_usage_rate": {
+                  "exponent": 0,
+                  "units": 2
+                },
+                "tier": "fast"
+              }
+            ]
+          },
           "source_ref": "https://www.kimi.com/zh-hans/resources/kimi-k2-7-code-pricing",
           "tier": "allegro"
         },
