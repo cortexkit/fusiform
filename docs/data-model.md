@@ -14,12 +14,12 @@ in `crates/fusiform-store/tests/it/history.rs`.
 
 Tables, as shipped: `observation`, `era`, `catalog_version`,
 `observation_artifact_event`, `plan_price_era`, `curated_model_era`,
-`quality_grade_era`, `model_mark_era`, `fact_override_era`, `cortexkit_schema_version`,
-`cortexkit_fence`.
+`quality_grade_era`, `model_mark_era`, `fact_override_era`, `cache_lifetime_era`,
+`cortexkit_schema_version`, `cortexkit_fence`.
 
 - `observation`, `era`, `catalog_version`, `observation_artifact_event`,
-  `plan_price_era`, `curated_model_era`, `quality_grade_era`, `model_mark_era` and
-  `fact_override_era` are fusiform's own, created by the migration chain in
+  `plan_price_era`, `curated_model_era`, `quality_grade_era`, `model_mark_era`,
+  `fact_override_era` and `cache_lifetime_era` are fusiform's own, created by the migration chain in
   `crates/fusiform-store/src/schema.rs` under the namespace `catalog`.
 - `cortexkit_schema_version` belongs to the store crate and records which
   migrations have been applied.
@@ -47,17 +47,19 @@ does not create.
 | 9 | `fact_override_era`, dated history of guarded fact overrides |
 | 10 | `quality_grade_era.grade`, with an exclusive chat-pair or non-chat-number CHECK |
 | 11 | `model_mark_era`, with a one-time import of 107 operator decommissioned keys |
+| 12 | `cache_lifetime_era`, with a frozen first-served history of prompt-cache rules |
 
 A store whose recorded schema version is newer than the running binary's chain
 is refused at open, and the error names the store's version
 (`schema_doc::a_store_written_by_a_newer_binary_is_refused`). Migrations 4, 6,
-7, 8, 9, 10 and 11 are tested against stores that already hold rows
+7, 8, 9, 10, 11 and 12 are tested against stores that already hold rows
 (`schema_doc::the_artifact_table_arrives_on_a_populated_store`,
 `schema_doc::the_plan_price_table_arrives_on_a_populated_store`,
 `schema_doc::the_curated_model_table_arrives_on_a_populated_store`,
 `schema_doc::quality_grade_v8_import_preserves_exact_rows_on_populated_v7`,
 `schema_doc::fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it`,
-`schema_doc::quality_grade_v10_preserves_populated_v8_and_checks_exclusive_dimensions`).
+`schema_doc::quality_grade_v10_preserves_populated_v8_and_checks_exclusive_dimensions`,
+`schema_doc::cache_lifetime_v12_backfills_populated_v11_and_reopen_preserves_history`).
 
 ## 2. Observations
 
@@ -104,7 +106,7 @@ fact is identified by `(source, provider_id, model_id, fact_key)`; the value is
 
 The store never updates or deletes a row in `era`, `observation`,
 `observation_artifact_event`, `plan_price_era`, `curated_model_era`,
-`quality_grade_era` or `fact_override_era`.
+`quality_grade_era`, `fact_override_era` or `cache_lifetime_era`.
 
 - There is no `valid_to` column. An era ends where the next era for the same
   fact begins.
@@ -423,6 +425,36 @@ in force, guarded against the upstream value at that same instant.
 - A failed boot write is logged and non-fatal. Historical reads retain the
   last stored claims; current reads are unaffected.
 
+## 7d. Cache-lifetime rule history
+
+`cache_lifetime_era` records the expanded per-model rules from
+`crates/fusiform-module/data/cache-lifetimes.json`, separately from upstream
+facts. Current reads use the compiled file; dated reads apply the stored rule
+in force to the upstream facts in force at the requested instant, through the
+same guarded price calculation. Derived TTL rates are never stored as upstream
+`era` rows or reported as upstream changes by `catalog.history`.
+
+- The STRICT table holds `id`, `provider_id`, `model_id`, `boundary_at_ms`,
+  `rule_json` and `recorded_at_ms`. `rule_json` holds the whole loaded rule,
+  including provenance and multipliers; SQL NULL is a removal tombstone.
+- Migration v12 imports the frozen `cache-lifetimes-v12.json` once. Initial
+  rules begin at 1794089713000 (2026-11-07T22:15:13Z), except Claude Fable 5.2
+  at 1794341726000 (2026-11-10T20:15:26Z). These are first-serving instants,
+  not source-review dates. `recorded_at_ms` records when the import ran.
+- Every boot calls `CatalogStore::append_cache_lifetimes`. A parsed JSON diff
+  of the whole loaded rule appends only additions, changes and removals. New
+  rules, changed rules, reappearances and tombstones begin at boot, clamped to
+  the key's newest boundary if the clock moved backwards. An unchanged restart
+  writes nothing, and a removed rule is tombstoned only once.
+- The rule in force is the greatest boundary not exceeding `at_ms`, with
+  newest `id` breaking ties. Before a key's first era, or after a tombstone,
+  no lifetime facts or TTL rates are added. The provider/model/boundary/id
+  index supports this lookup. One fenced INSERT writes rules and tombstones;
+  history is never updated or deleted.
+- A failed boot recording is logged and non-fatal: historical reads retain the
+  last stored rules, while current reads are unaffected. Billing-plane reads
+  remain current-only.
+
 ## 8. What is not stored
 
 On upstream rows, `model.name` and `provider.name` are stored per model as ordinary
@@ -441,8 +473,9 @@ force at that instant), or sourced in curation for a provider absent upstream.
   `route::billing_plane_tests::plane_views_never_change_stored_rows_or_catalog_version`
   in `crates/fusiform-module/src/route.rs`). A point-in-time read therefore
   replays what the upstream published, not a rule fusiform holds today. The
-  curated additions to a point-in-time read are curated model rows (§7a) and
-  guarded fact overrides (§7c), each served from its stored history.
+  curated additions to a point-in-time read are curated model rows (§7a),
+  guarded fact overrides (§7c), and cache-lifetime rules (§7d), each served
+  from its stored history.
 - The currency provenance of a rate is attached when it is served, not stored
   (`served_vocabulary::a_stored_rate_carries_no_annotation_fusiform_invented`).
 - Request header/body overrides and experimental mode selectors are never

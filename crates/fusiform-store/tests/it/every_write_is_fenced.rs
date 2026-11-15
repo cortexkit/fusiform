@@ -40,6 +40,7 @@ const STORE_SOURCES: &[&str] = &[
     "readers.rs",
     "curated.rs",
     "fact_overrides.rs",
+    "cache_lifetimes.rs",
     "quality.rs",
 ];
 const VERSION_HELPER: &str = "advance_catalog_version_in";
@@ -374,6 +375,7 @@ fn no_write_escapes_the_fence() {
     //   INSERT INTO quality_grade_era          (quality.rs: grade or withdrawal)
     //   INSERT INTO model_mark_era             (quality.rs: decommission or restore)
     //   INSERT INTO fact_override_era          (fact_overrides.rs: claim or tombstone)
+    //   INSERT INTO cache_lifetime_era         (cache_lifetimes.rs: rule or tombstone)
     //
     // ingest.rs, serve.rs and correct.rs issue none: they build plans and read,
     // and every write they cause goes through `append_eras` in lib.rs.
@@ -396,8 +398,8 @@ fn no_write_escapes_the_fence() {
     // list that quietly became wrong, which is worse than no list — a reader
     // checking the guard against three sites concludes it is complete.
     assert_eq!(
-        writes_seen, 11,
-        "the write detector found {writes_seen} write sites; eleven are enumerated \
+        writes_seen, 12,
+        "the write detector found {writes_seen} write sites; twelve are enumerated \
          above. If you ADDED a write, add it to that list and update this number \
          — the list is how the next reader checks this guard, and a stale list \
          is worse than none. If you added nothing, either WRITE_KEYWORDS has \

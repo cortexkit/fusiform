@@ -555,16 +555,51 @@ pub(super) fn render_cache_lifetimes() -> serde_json::Map<String, serde_json::Va
     let (store, _dir) = super::cache_lifetimes::store(None);
     let mut cases = serde_json::Map::new();
     for (provider, model) in [("anthropic", "claude-opus-5-5"), ("openai", "gpt-6.1-sol")] {
-        let request = serde_json::json!({"name":"catalog.get", "arguments":{"provider_id":provider, "model_id":model}});
-        let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
-        let mut response = serde_json::to_value(response).unwrap();
-        response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
-        cases.insert(
-            format!("catalog.get — cache lifetimes {provider}/{model}"),
-            serde_json::json!({"request":request, "response":response}),
-        );
+        for at in [None, Some(1_794_490_800_000_i64)] {
+            let mut request = serde_json::json!({"name":"catalog.get", "arguments":{"provider_id":provider, "model_id":model}});
+            if let Some(at) = at {
+                request["arguments"]["at_ms"] = serde_json::json!(at);
+            }
+            let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+            let mut response = serde_json::to_value(response).unwrap();
+            if at.is_none() {
+                response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+            }
+            let dated = if at.is_some() { " dated" } else { "" };
+            cases.insert(
+                format!("catalog.get — cache lifetimes{dated} {provider}/{model}"),
+                serde_json::json!({"request":request, "response":response}),
+            );
+        }
     }
     cases
+}
+
+#[test]
+fn current_cache_lifetime_models_keep_the_original_golden_bytes() {
+    use sha2::{Digest, Sha256};
+    let cases = render_cache_lifetimes();
+    // These are the serialized current vectors before dated lifetimes were added.
+    for (identity, digest) in [
+        (
+            "anthropic/claude-opus-5-5",
+            "811b864b3e96cf667c60d21dadf4acee706179ee4d50f42e370c4db7e8d75e38",
+        ),
+        (
+            "openai/gpt-6.1-sol",
+            "46e5f80e345c39fd1ac0ed233367abe839872a7805923d5caac83e1ccc9456b8",
+        ),
+    ] {
+        let label = format!("catalog.get — cache lifetimes {identity}");
+        assert_eq!(
+            format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(&cases[&label]).unwrap())
+            ),
+            digest,
+            "{identity}"
+        );
+    }
 }
 
 pub(super) fn render_attachment_limits() -> serde_json::Map<String, serde_json::Value> {
@@ -1408,7 +1443,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
             serde_json::json!({"search_engines":render_search_engines()}).to_string(),
             1,
         ),
-        (serde_json::to_string(&render_cache_lifetimes()).unwrap(), 2),
+        (serde_json::to_string(&render_cache_lifetimes()).unwrap(), 4),
         (
             serde_json::to_string(&render_attachment_limits()).unwrap(),
             2,

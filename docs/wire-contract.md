@@ -156,7 +156,7 @@ value would do to a consumer:
 | `capability.tool_call` | advisory | `true`, `false` or `null` |
 | `capability.server_side_fallback` | advisory | `true` or `false` on current reads of the `anthropic` rows Anthropic's documentation covers, from sourced additions disclosed in `fact_overrides` (§5.8); otherwise no fact, which means not stated, never `false` |
 | `capability.mid_conversation_system` | advisory | `true` or `false` for persistent `role: "system"` messages inside `messages`, without a beta header, not the beta turn-scoped `clear_at` variant; sourced current-read-only additions on documented `anthropic` rows, disclosed in `fact_overrides` (§5.8), never stored or inherited by resellers, Bedrock, Vertex or Code Assist aliases; any upstream value wins; otherwise no fact, which means not stated, never `false` |
-| `capability.cache_lifetimes` | advisory | prompt-cache lifetimes the model offers, shortest first: durations (`"5m"`, `"30m"`, `"1h"`, `"12h"`, `"24h"`) or OpenAI's `"in_memory"`; curated, first-party `openai` and `anthropic` rows only, current reads only; otherwise no fact ([`curated-data.md`](curated-data.md)) |
+| `capability.cache_lifetimes` | advisory | prompt-cache lifetimes the model offers, shortest first: durations (`"5m"`, `"30m"`, `"1h"`, `"12h"`, `"24h"`) or OpenAI's `"in_memory"`; curated, first-party `openai` and `anthropic` rows only; dated reads use the rule in force from first serving, otherwise no fact ([`curated-data.md`](curated-data.md)) |
 | `capability.attachment` | advisory | `true`, `false` or `null` |
 | `capability.input_modalities` | advisory | list of modality strings, or `null` |
 | `capability.output_modalities` | advisory | list of modality strings, or `null` |
@@ -442,7 +442,11 @@ A rate is a JSON object tagged by `state` (`RateValue` in
   `rate.cache_write.ttl.<lifetime>`, and on a context tier as
   `rate.cache_write.above_context.<tokens>.ttl.<lifetime>`. These are token
   rates (per million tokens) on the rows that list
-  `capability.cache_lifetimes`, current reads only. Each lifetime the model
+  `capability.cache_lifetimes`. Dated reads apply the stored rule in force at
+  `at_ms` to that instant's upstream prices. Rules begin at first serving:
+  2026-11-07T22:15:13Z for the initial models, 2026-11-10T20:15:26Z for
+  Claude Fable 5.2; earlier reads have neither lifetimes nor TTL prices.
+  Each lifetime the model
   offers has its own key, its default included, so a write measured at a
   lifetime prices only at that key. Plain `rate.cache_write` keeps its meaning,
   the vendor's default lifetime. They are absent on the `(openai, chatgpt)`

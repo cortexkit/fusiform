@@ -25,6 +25,123 @@ use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_store::CatalogStore;
 
 #[test]
+fn cache_lifetime_v12_backfills_populated_v11_and_reopen_preserves_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lifetimes.db");
+    let descriptor = StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: path.to_string_lossy().into(),
+        },
+    };
+    {
+        let old = cortexkit_store::open_sqlite(&descriptor).unwrap();
+        old.migrate(
+            fusiform_store::schema::NAMESPACE,
+            &fusiform_store::schema::MIGRATIONS[..11],
+        )
+        .unwrap();
+        old.with_conn_fenced(|tx| tx.execute_batch(r#"
+            INSERT INTO observation (source, observed_at_ms, outcome) VALUES ('models.dev', 1000, 'changed');
+            INSERT INTO era (source, provider_id, model_id, fact_key, value_json, boundary_at_ms, boundary_kind)
+                VALUES ('models.dev','test','model','existence','"present"',1000,'seed');
+        "#)).unwrap();
+    }
+    let store = CatalogStore::open(&descriptor).unwrap();
+    assert!(store
+        .cache_lifetimes_at(1_794_089_712_999, None)
+        .unwrap()
+        .is_empty());
+    let first = store.cache_lifetimes_at(1_794_089_713_000, None).unwrap();
+    assert_eq!(first.len(), 33);
+    assert!(!first.iter().any(|r| r.model_id == "claude-fable-5-2"));
+    let all = store.cache_lifetimes_at(1_794_341_726_000, None).unwrap();
+    assert_eq!(all.len(), 34);
+    let snapshot: serde_json::Value =
+        serde_json::from_str(include_str!("../../src/cache-lifetimes-v12.json")).unwrap();
+    for era in &all {
+        let mut expected = snapshot["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|rule| {
+                rule["provider_id"] == era.provider_id
+                    && rule["model_ids"]
+                        .as_array()
+                        .unwrap()
+                        .contains(&serde_json::json!(era.model_id))
+            })
+            .unwrap()
+            .clone();
+        expected
+            .as_object_mut()
+            .unwrap()
+            .entry("multipliers")
+            .or_insert(serde_json::json!({}));
+        assert_eq!(era.rule.as_ref().unwrap(), &expected);
+        assert_eq!(
+            era.boundary_at_ms,
+            if era.model_id == "claude-fable-5-2" {
+                1_794_341_726_000
+            } else {
+                1_794_089_713_000
+            }
+        );
+    }
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM observation", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        conn.query_row("SELECT value_json FROM era", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "\"present\""
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT strict FROM pragma_table_list WHERE name='cache_lifetime_era'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+    assert!(conn.execute("INSERT INTO cache_lifetime_era (provider_id,model_id,boundary_at_ms,recorded_at_ms) VALUES ('test','bad','not-an-instant',1)", []).is_err());
+    // A same-boundary removal wins by id, without altering the imported rule.
+    store
+        .append_cache_lifetimes(&[], 1_794_341_726_000)
+        .unwrap();
+    drop(store);
+    let reopened = CatalogStore::open(&descriptor).unwrap();
+    assert!(reopened
+        .cache_lifetimes_at(1_794_341_726_000, None)
+        .unwrap()
+        .iter()
+        .all(|r| r.rule.is_none()));
+    assert_eq!(
+        reopened
+            .cache_lifetimes_at(1_794_089_713_000, None)
+            .unwrap(),
+        first
+    );
+    drop(reopened);
+    let old = cortexkit_store::open_sqlite(&descriptor).unwrap();
+    let outcome = old
+        .migrate(
+            fusiform_store::schema::NAMESPACE,
+            &fusiform_store::schema::MIGRATIONS[..11],
+        )
+        .unwrap();
+    assert!(outcome.store_ahead());
+    assert_eq!((outcome.recorded, outcome.chain_max), (12, 11));
+}
+
+#[test]
 fn decommission_v11_import_on_populated_v10_and_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let descriptor = StorageDescriptor {
@@ -129,7 +246,7 @@ fn decommission_v11_import_on_populated_v10_and_reopen() {
         )
         .unwrap();
     assert!(outcome.store_ahead());
-    assert_eq!((outcome.recorded, outcome.chain_max), (11, 10));
+    assert_eq!((outcome.recorded, outcome.chain_max), (12, 10));
     let conn = rusqlite::Connection::open(dir.path().join("marks.db")).unwrap();
     for value in ["2", "-1", "'not-a-boolean'"] {
         assert!(conn.execute(&format!("INSERT INTO model_mark_era (model, decommissioned, marked_by, reason, recorded_at_ms) VALUES ('test/invalid', {value}, 'operator', 'invalid', 1)"), []).is_err());
@@ -286,7 +403,7 @@ fn quality_grade_v8_reopen_never_reimports_and_v7_reports_store_ahead() {
         outcome.store_ahead(),
         "the v7 binary's existing refusal guard must reject a newer store"
     );
-    assert_eq!(outcome.recorded, 11);
+    assert_eq!(outcome.recorded, 12);
     assert_eq!(outcome.chain_max, 7);
 }
 
@@ -373,7 +490,7 @@ fn fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it() {
         outcome.store_ahead(),
         "the existing v8 refusal guard must reject a newer store"
     );
-    assert_eq!((outcome.recorded, outcome.chain_max), (11, 8));
+    assert_eq!((outcome.recorded, outcome.chain_max), (12, 8));
     let outcome = old
         .migrate(
             fusiform_store::schema::NAMESPACE,
@@ -381,7 +498,7 @@ fn fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it() {
         )
         .unwrap();
     assert!(outcome.store_ahead(), "v9 must also refuse a newer store");
-    assert_eq!((outcome.recorded, outcome.chain_max), (11, 9));
+    assert_eq!((outcome.recorded, outcome.chain_max), (12, 9));
 }
 
 #[test]

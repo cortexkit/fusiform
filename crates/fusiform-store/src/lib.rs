@@ -13,6 +13,7 @@
 //! with durable pragmas, and applies migrations. What this crate owns is the
 //! domain: the schema, the writes, and the reads.
 
+mod cache_lifetimes;
 pub mod correct;
 mod curated;
 mod fact_overrides;
@@ -35,6 +36,7 @@ use fusiform_core::{
 };
 use rusqlite::{params, OptionalExtension};
 
+pub use cache_lifetimes::{CacheLifetimeEra, NewCacheLifetime};
 pub use curated::{
     CuratedModelEra, NewCuratedModel, CURATED_MODELS_FILE, CURATED_MODEL_NOT_SERVED,
 };

@@ -168,7 +168,7 @@ fn cache_lifetime_guard_withholds_all_prices_but_keeps_lifetimes() {
 }
 
 #[test]
-fn cache_lifetimes_are_current_only_and_filters_retain_price_inputs() {
+fn cache_lifetimes_before_first_serving_are_absent_and_filters_retain_price_inputs() {
     let (store, _dir) = store(None);
     let historical = get(
         &store,
@@ -197,6 +197,210 @@ fn cache_lifetimes_are_current_only_and_filters_retain_price_inputs() {
             assert!(facts.contains_key(prefix));
         }
     }
+}
+
+const FIRST_SERVED: i64 = 1_794_089_713_000;
+const FABLE_FIRST_SERVED: i64 = 1_794_341_726_000;
+const DATED_READ: i64 = 1_794_490_800_000; // 2026-11-12T13:40:00Z
+
+#[test]
+fn dated_cache_lifetime_prices_start_at_first_serving() {
+    let (store, _dir) = store(None);
+    for (model, boundary, short, long) in [
+        (
+            "claude-opus-5-5",
+            FIRST_SERVED,
+            5_000_000_000_i64,
+            8_000_000_000_i64,
+        ),
+        (
+            "claude-fable-5-2",
+            FABLE_FIRST_SERVED,
+            10_000_000_000,
+            16_000_000_000,
+        ),
+    ] {
+        for (at, present) in [(boundary - 1, false), (boundary, true), (DATED_READ, true)] {
+            let response = get(
+                &store,
+                json!({"provider_id":"anthropic", "model_id":model, "at_ms":at}),
+            );
+            let facts = &response["models"][format!("anthropic/{model}")];
+            if present {
+                assert_eq!(facts["capability.cache_lifetimes"], json!(["5m", "1h"]));
+                price(facts, "rate.cache_write.ttl.5m", short);
+                price(facts, "rate.cache_write.ttl.1h", long);
+            } else {
+                assert!(!facts
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .any(|key| key.contains(".ttl.") || key == "capability.cache_lifetimes"));
+            }
+        }
+    }
+}
+
+#[test]
+fn dated_cache_lifetimes_use_the_upstream_prices_at_the_requested_instant() {
+    let (store, _dir) = store(None);
+    let mut doc: Value = serde_json::from_str(SEED).unwrap();
+    doc.as_object_mut()
+        .unwrap()
+        .retain(|provider, _| provider == "openai" || provider == "anthropic");
+    doc["anthropic"]["models"]["claude-opus-5-5"]["cost"]["input"] = json!(6);
+    doc["anthropic"]["models"]["claude-opus-5-5"]["cost"]["cache_write"] = json!(7.5);
+    let catalog = normalize_models_dev(doc.to_string().as_bytes())
+        .unwrap()
+        .catalog;
+    let change = DATED_READ - 100;
+    let plan = plan_ingest(
+        &store,
+        &catalog,
+        Timestamp(change),
+        BoundaryKind::Asserted,
+        None,
+    )
+    .unwrap();
+    store.append_eras(&plan.eras).unwrap();
+    for (at, short, long) in [
+        (change - 1, 5_000_000_000_i64, 8_000_000_000_i64),
+        (change, 7_500_000_000, 12_000_000_000),
+    ] {
+        let response = get(
+            &store,
+            json!({"provider_id":"anthropic", "model_id":"claude-opus-5-5", "at_ms":at}),
+        );
+        let facts = &response["models"]["anthropic/claude-opus-5-5"];
+        price(facts, "rate.cache_write.ttl.5m", short);
+        price(facts, "rate.cache_write.ttl.1h", long);
+    }
+}
+
+#[test]
+fn cache_lifetime_boot_diff_records_changes_removals_and_new_rules_once() {
+    use fusiform_module::cache_lifetimes::{rules, stored_rules};
+    let (store, dir) = store(None);
+    let original = stored_rules(rules());
+    assert_eq!(
+        store.append_cache_lifetimes(&original, DATED_READ).unwrap(),
+        0
+    );
+    let mut rows = original.clone();
+    let opus = rows
+        .iter_mut()
+        .find(|row| row.model_id == "claude-opus-5-5")
+        .unwrap();
+    opus.rule["multipliers"]["1h"]["numerator"] = json!(3);
+    assert_eq!(store.append_cache_lifetimes(&rows, DATED_READ).unwrap(), 1);
+    assert_eq!(
+        store.append_cache_lifetimes(&rows, DATED_READ + 1).unwrap(),
+        0
+    );
+    let mut added = rows[0].clone();
+    added.model_id = "new-model".into();
+    rows.push(added);
+    assert_eq!(
+        store
+            .append_cache_lifetimes(&rows, DATED_READ + 10)
+            .unwrap(),
+        1
+    );
+    assert!(!store
+        .cache_lifetimes_at(DATED_READ + 9, None)
+        .unwrap()
+        .iter()
+        .any(|r| r.model_id == "new-model"));
+    assert!(store
+        .cache_lifetimes_at(DATED_READ + 10, None)
+        .unwrap()
+        .iter()
+        .any(|r| r.model_id == "new-model"));
+    rows.retain(|row| row.model_id != "claude-opus-5-5");
+    assert_eq!(
+        store
+            .append_cache_lifetimes(&rows, DATED_READ + 20)
+            .unwrap(),
+        1
+    );
+    for (at, expected) in [
+        (DATED_READ - 1, Some(8_000_000_000_i64)),
+        (DATED_READ, Some(12_000_000_000)),
+        (DATED_READ + 19, Some(12_000_000_000)),
+        (DATED_READ + 20, None),
+    ] {
+        let response = get(
+            &store,
+            json!({"provider_id":"anthropic", "model_id":"claude-opus-5-5", "at_ms":at}),
+        );
+        let facts = &response["models"]["anthropic/claude-opus-5-5"];
+        if let Some(units) = expected {
+            price(facts, "rate.cache_write.ttl.1h", units);
+        } else {
+            assert!(!facts
+                .as_object()
+                .unwrap()
+                .keys()
+                .any(|key| key.contains(".ttl.") || key == "capability.cache_lifetimes"));
+        }
+    }
+    drop(store);
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    // A real reopen must neither repeat the backfill nor append an unchanged rule.
+    assert_eq!(
+        store
+            .append_cache_lifetimes(&rows, DATED_READ + 30)
+            .unwrap(),
+        0
+    );
+    let conn = rusqlite::Connection::open(dir.path().join("store.db")).unwrap();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM cache_lifetime_era", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 37);
+    // Current reads still use the compiled rule after stored changes and removal.
+    let current = get(
+        &store,
+        json!({"provider_id":"anthropic", "model_id":"claude-opus-5-5"}),
+    );
+    price(
+        &current["models"]["anthropic/claude-opus-5-5"],
+        "rate.cache_write.ttl.1h",
+        8_000_000_000,
+    );
+}
+
+#[test]
+fn dated_cache_lifetimes_cover_bulk_named_and_filtered_reads() {
+    let (store, _dir) = store(None);
+    for named in [false, true] {
+        for prefix in [
+            "capability.cache_lifetimes",
+            "rate.cache_write.ttl.12h",
+            "rate.cache_write.above_context.272000.ttl.12h",
+        ] {
+            let mut args =
+                json!({"provider_id":"openai", "at_ms":DATED_READ, "fact_prefixes":[prefix]});
+            if named {
+                args["model_id"] = json!("gpt-6.1-sol");
+            }
+            let response = get(&store, args);
+            let facts = response["models"]["openai/gpt-6.1-sol"]
+                .as_object()
+                .unwrap();
+            assert_eq!(facts.len(), 1, "{prefix}: {facts:?}");
+            assert!(facts.contains_key(prefix));
+        }
+    }
+    assert!(serve_catalog_get(&store, &serde_json::to_vec(&json!({"provider_id":"anthropic", "model_id":"claude-opus-5-5", "auth_method":"apikey", "at_ms":DATED_READ})).unwrap()).is_err());
 }
 
 #[test]

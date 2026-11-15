@@ -181,7 +181,8 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             }));
         }
     }
-    // Use real served vectors, not an exemption for a current-only fact.
+    // Collect keys from actual current and dated served vectors rather than
+    // exempting curated facts from the vocabulary check.
     for case in super::golden_payload::render_cache_lifetimes().values() {
         for facts in case["response"]["models"].as_object().unwrap().values() {
             for key in facts
@@ -383,8 +384,8 @@ const LINEAGE_ONLY: &[&str] = &["model.lineage"];
 /// Request protocols are verified on current reads, never stored as upstream claims.
 const WIRE_ONLY: &[&str] = &["wire.family"];
 
-/// Cache lifetimes are curated for first-party OpenAI/Anthropic current reads
-/// only; normalization must not turn upstream claims into this curated fact.
+/// Cache lifetimes are curated for first-party OpenAI/Anthropic reads;
+/// normalization must not turn upstream claims into this curated fact.
 const CACHE_ONLY: &[&str] = &["capability.cache_lifetimes"];
 
 /// Audio-token conversions come from provider documentation at read time;

@@ -253,6 +253,7 @@ impl ModuleHandler for Fusiform {
         }
 
         record_fact_overrides_at_start(&store, now_ms());
+        record_cache_lifetimes_at_start(&store, now_ms());
 
         // Move the catalog version once per start, after the compiled data
         // above is in place. A deploy that changes only compiled data (an alias,
@@ -312,6 +313,21 @@ fn record_fact_overrides_at_start(store: &CatalogStore, boot_at_ms: i64) {
         Ok(n) => eprintln!("fusiform: recorded {n} fact override change(s)"),
         Err(e) => eprintln!(
             "fusiform: could not record fact overrides, so point-in-time reads \
+             serve what the store already held; current reads are unaffected: {e}"
+        ),
+    }
+}
+
+/// Current reads remain available if recording fails; dated reads keep the
+/// last successfully recorded rules rather than silently using today's file.
+fn record_cache_lifetimes_at_start(store: &CatalogStore, boot_at_ms: i64) {
+    let rows =
+        fusiform_module::cache_lifetimes::stored_rules(fusiform_module::cache_lifetimes::rules());
+    match store.append_cache_lifetimes(&rows, boot_at_ms) {
+        Ok(0) => {}
+        Ok(n) => eprintln!("fusiform: recorded {n} cache lifetime rule change(s)"),
+        Err(e) => eprintln!(
+            "fusiform: could not record cache lifetime rules, so point-in-time reads \
              serve what the store already held; current reads are unaffected: {e}"
         ),
     }
@@ -444,5 +460,47 @@ mod fact_override_boot_tests {
             .advance_catalog_version_at_start(fusiform_core::Timestamp(1_800_000_000_000))
             .unwrap();
         assert_eq!(store.catalog_version().unwrap(), 1_800_000_000_000);
+    }
+}
+
+#[cfg(test)]
+mod cache_lifetime_boot_tests {
+    use super::*;
+    use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+
+    #[test]
+    fn cache_lifetime_boot_noop_and_write_failure_leave_history_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.db");
+        let store = CatalogStore::open(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: path.to_string_lossy().into(),
+            },
+        })
+        .unwrap();
+        let boot = 1_800_000_000_000;
+        let rows = fusiform_module::cache_lifetimes::stored_rules(
+            fusiform_module::cache_lifetimes::rules(),
+        );
+        let original = store.cache_lifetimes_at(boot, None).unwrap();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("CREATE TRIGGER refuse_lifetime BEFORE INSERT ON cache_lifetime_era BEGIN SELECT RAISE(ABORT, 'lifetime refused'); END;").unwrap();
+        assert_eq!(store.append_cache_lifetimes(&rows, boot).unwrap(), 0);
+        record_cache_lifetimes_at_start(&store, boot);
+        assert_eq!(store.cache_lifetimes_at(boot, None).unwrap(), original);
+        conn.execute_batch("DROP TRIGGER refuse_lifetime;").unwrap();
+        store.append_cache_lifetimes(&[], boot).unwrap();
+        conn.execute_batch("CREATE TRIGGER refuse_lifetime BEFORE INSERT ON cache_lifetime_era BEGIN SELECT RAISE(ABORT, 'lifetime refused'); END;").unwrap();
+        // Reappearing claims would write, so the trigger exercises a real failure.
+        assert!(store.append_cache_lifetimes(&rows, boot + 1).is_err());
+        record_cache_lifetimes_at_start(&store, boot + 1);
+        assert!(store
+            .cache_lifetimes_at(boot + 1, None)
+            .unwrap()
+            .iter()
+            .all(|r| r.rule.is_none()));
     }
 }

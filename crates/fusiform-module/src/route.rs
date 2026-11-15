@@ -932,6 +932,20 @@ fn serve_catalog_get_request(
     // model would otherwise produce a different no-coverage refusal.
     let plane = select_billing_plane(&request)?;
     let requested_prefixes = request.fact_prefixes.clone();
+    request.fact_prefixes = request.fact_prefixes.as_ref().map(|prefixes| {
+        let mut wide = prefixes.clone();
+        if prefixes.iter().any(|prefix| {
+            "capability.cache_lifetimes".starts_with(prefix)
+                || "rate.cache_write".starts_with(prefix)
+                || prefix.starts_with("rate.cache_write")
+        }) {
+            // Current and dated TTL prices need all input and cache-write tiers,
+            // even when the caller requested only one derived key.
+            wide.push("rate.".to_string());
+            wide.push("existence".to_string());
+        }
+        wide
+    });
     if request.at_ms.is_none() {
         request.fact_prefixes = request.fact_prefixes.as_ref().map(|prefixes| {
             let mut wide = prefixes.clone();
@@ -941,16 +955,6 @@ fn serve_catalog_get_request(
             {
                 // The served acceptance flag, including replacements, gates ranges.
                 wide.push("capability.temperature".to_string());
-                wide.push("existence".to_string());
-            }
-            if prefixes.iter().any(|prefix| {
-                "capability.cache_lifetimes".starts_with(prefix)
-                    || "rate.cache_write".starts_with(prefix)
-                    || prefix.starts_with("rate.cache_write")
-            }) {
-                // TTL prices need the input and cache-write rates to validate
-                // every tier, even when only one derived key was requested.
-                wide.push("rate.".to_string());
                 wide.push("existence".to_string());
             }
             if ["quality.elo", "quality.eq"]
@@ -1170,7 +1174,7 @@ fn serve_catalog_get_request(
                 response,
                 plane,
                 requested_prefixes.as_ref(),
-                at.is_none(),
+                at,
             );
         }
     }
@@ -1353,7 +1357,7 @@ fn serve_catalog_get_request(
         response,
         plane,
         requested_prefixes.as_ref(),
-        at.is_none(),
+        at,
     )?;
     // Observed plane rows keep their envelope when billing rules remove all
     // selected rates. Curated rows and plain bulk rows require a selected fact.
@@ -1906,12 +1910,24 @@ fn finish_plane_view(
     mut response: CatalogGetResponse,
     plane: Option<SelectedPlane>,
     requested_prefixes: Option<&Vec<String>>,
-    current: bool,
+    at: Option<Timestamp>,
 ) -> Result<CatalogGetResponse, RouteError> {
+    let current = at.is_none();
+    let historical_rules = at
+        .map(|at| crate::cache_lifetimes::at(store, at.0, None))
+        .transpose()
+        .map_err(|e| store_error(&e))?;
+    let rules = historical_rules
+        .as_ref()
+        .unwrap_or_else(|| crate::cache_lifetimes::rules());
+    for (identity, facts) in &mut response.models {
+        if let Some((provider, model)) = identity.split_once('/') {
+            crate::cache_lifetimes::apply(rules, provider, model, facts);
+        }
+    }
     if current {
         for (identity, facts) in &mut response.models {
             if let Some((provider, model)) = identity.split_once('/') {
-                crate::cache_lifetimes::apply(provider, model, facts);
                 // Attachment limits are rules of the endpoint that receives the
                 // request, not of the model. An alias routes through another
                 // backend (Code Assist for the Antigravity rows), whose limits no

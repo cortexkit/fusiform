@@ -78,6 +78,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 11,
         statements: SCHEMA_V11,
     },
+    Migration {
+        version: 12,
+        statements: SCHEMA_V12,
+    },
 ];
 
 const SCHEMA_V1: &str = r#"
@@ -666,5 +670,33 @@ SELECT value, 1, 'operator',
        'One-time import of the operator''s grades sheet, DECOMISSIONED column',
        1794564000000
 FROM doc, json_each(body, '$.ids');
+"#
+);
+
+// Freeze the first-served rules independently of the live compiled file.
+// Establishment dates describe source review, not when these rules were served.
+const SCHEMA_V12: &str = concat!(
+    r#"
+CREATE TABLE cache_lifetime_era (
+    id             INTEGER PRIMARY KEY,
+    provider_id    TEXT NOT NULL,
+    model_id       TEXT NOT NULL,
+    boundary_at_ms INTEGER NOT NULL,
+    rule_json      TEXT,
+    recorded_at_ms INTEGER NOT NULL
+) STRICT;
+CREATE INDEX cache_lifetime_era_key
+    ON cache_lifetime_era(provider_id, model_id, boundary_at_ms, id);
+WITH doc(body) AS (VALUES ('"#,
+    include_str!("cache-lifetimes-v12.json"),
+    r#"'))
+INSERT INTO cache_lifetime_era
+    (provider_id, model_id, boundary_at_ms, rule_json, recorded_at_ms)
+SELECT rule.value ->> 'provider_id', model.value,
+       CASE WHEN rule.value ->> 'provider_id' = 'anthropic' AND model.value = 'claude-fable-5-2'
+            THEN 1794341726000 ELSE 1794089713000 END,
+       json_set(rule.value, '$.multipliers', json(COALESCE(rule.value -> 'multipliers', '{}'))),
+       CAST(unixepoch('subsec') * 1000 AS INTEGER)
+FROM doc, json_each(body, '$.rules') AS rule, json_each(rule.value, '$.model_ids') AS model;
 "#
 );

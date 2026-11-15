@@ -47,6 +47,10 @@ curated model rows are also applied on every start, to `curated_model_era`,
 which point-in-time reads of those rows are served from; current reads serve
 the compiled file.
 
+Cache-lifetime rules are likewise recorded at start in `cache_lifetime_era`.
+Point-in-time reads apply the rule in force to the upstream prices at that same
+instant; current reads keep using the compiled rules.
+
 ## 3. The rules that shape everything else
 
 1. **Fusiform describes; it never dispatches.** It says what a model is and
@@ -67,12 +71,12 @@ the compiled file.
    tombstone eras, corrections are eras that mark a window, and artifact marks
    and retractions are events ([`data-model.md`](data-model.md) §3, §5, §6).
 6. **Historical curation is recorded separately from upstream.** Inheritance,
-    aliases, cache lifetimes, lineage and billing planes remain current-only.
-    Curated model rows and guarded fact overrides are diffed into their own
-    append-only tables on every boot. A point-in-time read serves their claims
+    aliases, lineage and billing planes remain current-only.
+    Curated model rows, guarded fact overrides and cache-lifetime rules are
+    diffed into their own append-only tables on every boot. A point-in-time read serves their claims
     in force at its instant; an override's upstream guard uses the upstream
     value stored at that same instant. Current reads keep using the compiled
-    files ([`data-model.md`](data-model.md) §7a, §7c). Operator quality grades
+    files ([`data-model.md`](data-model.md) §7a, §7c, §7d). Operator quality grades
     have their own store history but are omitted from catalog `at_ms` reads.
 7. **Refuse rather than answer wrongly.** An unknown provider, an instant
    before the record begins, an undeclared billing plane, and a store that

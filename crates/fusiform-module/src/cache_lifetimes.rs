@@ -1,21 +1,21 @@
-//! Current-only first-party prompt-cache lifetimes and guarded write prices.
+//! First-party prompt-cache lifetime rules and guarded write prices.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const DOCUMENT: &str = include_str!("../data/cache-lifetimes.json");
 const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Multiplier {
     pub numerator: u64,
     pub denominator: u64,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Rule {
     pub provider_id: String,
     pub model_ids: Vec<String>,
@@ -114,6 +114,43 @@ pub fn rules() -> &'static Rules {
     RULES.get_or_init(|| load_reporting_rejects(DOCUMENT).0)
 }
 
+/// The same expanded per-model rules used for serving, ready for boot recording.
+pub fn stored_rules(rules: &Rules) -> Vec<fusiform_store::NewCacheLifetime> {
+    rules
+        .iter()
+        .map(
+            |((provider, model), rule)| fusiform_store::NewCacheLifetime {
+                provider_id: provider.clone(),
+                model_id: model.clone(),
+                rule: serde_json::to_value(rule).expect("cache lifetime rule is JSON"),
+            },
+        )
+        .collect()
+}
+
+/// Load rules in force at the read's instant; tombstones deliberately add none.
+pub fn at(
+    store: &fusiform_store::CatalogStore,
+    at_ms: i64,
+    provider_id: Option<&str>,
+) -> Result<Rules, fusiform_store::CatalogError> {
+    store
+        .cache_lifetimes_at(at_ms, provider_id)?
+        .into_iter()
+        .filter_map(|era| {
+            era.rule.map(|value| {
+                let rule = serde_json::from_value(value.clone()).map_err(|_| {
+                    fusiform_store::CatalogError::Decode {
+                        column: "cache_lifetime_era.rule_json",
+                        value: value.to_string(),
+                    }
+                })?;
+                Ok(((era.provider_id, era.model_id), rule))
+            })
+        })
+        .collect()
+}
+
 pub fn overdue_at(rules: &Rules, now_ms: i64) -> Vec<String> {
     rules
         .iter()
@@ -170,8 +207,13 @@ fn input_suffix(key: &str) -> Option<&str> {
 /// Return whether the row's cache-write prices disagree with the price
 /// implied by the shortest TTL.
 /// Lifetimes survive a mismatch, but no derived price from that row does.
-pub fn apply(provider: &str, model: &str, facts: &mut BTreeMap<String, Value>) -> bool {
-    let Some(rule) = rules().get(&(provider.to_string(), model.to_string())) else {
+pub fn apply(
+    rules: &Rules,
+    provider: &str,
+    model: &str,
+    facts: &mut BTreeMap<String, Value>,
+) -> bool {
+    let Some(rule) = rules.get(&(provider.to_string(), model.to_string())) else {
         return false;
     };
     facts.insert(
@@ -320,12 +362,12 @@ mod tests {
                 rate(4_999_999_999_i64),
             ),
         ]);
-        assert!(apply("openai", "gpt-6.1-sol", &mut facts));
+        assert!(apply(rules(), "openai", "gpt-6.1-sol", &mut facts));
         assert!(facts.contains_key("capability.cache_lifetimes"));
         assert!(!facts.keys().any(|key| key.contains(".ttl.")));
         let mut unlisted = facts.clone();
         unlisted.remove("capability.cache_lifetimes");
-        assert!(!apply("gateway", "gpt-6.1-sol", &mut unlisted));
+        assert!(!apply(rules(), "gateway", "gpt-6.1-sol", &mut unlisted));
         assert!(!unlisted.contains_key("capability.cache_lifetimes"));
     }
 }

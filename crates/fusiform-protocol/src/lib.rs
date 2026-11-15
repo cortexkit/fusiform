@@ -1322,9 +1322,11 @@ pub const SERVED_FACTS: &[ServedFact] = &[
     ServedFact {
         key: "capability.cache_lifetimes",
         class: FactClass::ByteAffecting,
-        note: "curated current-read lifetimes for first-party OpenAI and \
+        note: "curated lifetimes for first-party OpenAI and \
                Anthropic only: duration strings or OpenAI's own in_memory, \
-               shortest first. Absent means not curated. Consumers choose a \
+               shortest first. Dated reads use the stored rule from first \
+               serving and that instant's upstream prices. Absent means no \
+               rule in force. Consumers choose a \
                lifetime and encode the request themselves. TTL write rates use \
                rate.cache_write.ttl.<lifetime>, or \
                rate.cache_write.above_context.<tokens>.ttl.<lifetime>; these \
