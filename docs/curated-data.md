@@ -274,6 +274,17 @@ says both prices double on 2027-01-01; only the current prices are served. `elev
 and minimum. Its documented 40,000-character request cap is not a token limit.
 Neither row borrows a text-output price or an input-audio conversion.
 
+Search engines are curated as API-key-only rows with `model.type: "search"`.
+`exa/search`, `tavily/search`, `brave/web-search` and `deepseek/search` serve
+`rate.request.per_request` at $7, $8, $5 and $0.75 per 1,000 requests,
+respectively, with unknown increment and minimum. Exa's base covers up to 10
+results; additional results are not served as a rate. Tavily's rate is for
+basic depth at the pay-as-you-go credit price, Brave's is for its Search plan,
+and DeepSeek bills only successful, non-empty requests. `kimi-for-coding/search`
+shares a membership quota and `ollama-cloud/web-search` is included with an
+account; neither has a published per-search price, so neither serves a rate.
+These rows make no claims in the `wire.*`, context-limit or capability fields.
+
 A curated row may declare a sourced HTTPS `wire.api` as exactly
 `{value, from: "curated"}` and a verified `wire.family` token. These are the
 row's own claims, disclosed through `curated`, not provider-default wire

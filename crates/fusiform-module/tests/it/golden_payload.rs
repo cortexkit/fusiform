@@ -518,6 +518,10 @@ fn render_all() -> String {
         "catalog.get — dated Flash Image split rates".into(),
         render_fact_override_history(),
     );
+    ordinary.as_object_mut().unwrap().insert(
+        "catalog.get — curated search engines".into(),
+        render_search_engines(),
+    );
     let mut text = serde_json::to_string_pretty(&ordinary).unwrap();
     text.push('\n');
     text
@@ -888,6 +892,30 @@ fn render_fact_override_history() -> serde_json::Value {
     );
     assert_eq!(response["fact_overrides"].as_array().unwrap().len(), 2);
     serde_json::json!({"request":request, "response":response})
+}
+
+fn render_search_engines() -> serde_json::Value {
+    let (store, _dir) = store();
+    let mut requests = Vec::new();
+    let mut responses = Vec::new();
+    for (provider, model) in [
+        ("exa", "search"),
+        ("tavily", "search"),
+        ("brave", "web-search"),
+        ("deepseek", "search"),
+        ("kimi-for-coding", "search"),
+        ("ollama-cloud", "web-search"),
+    ] {
+        let request = serde_json::json!({"name":"catalog.get", "arguments":{
+            "provider_id":provider, "model_id":model
+        }});
+        let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+        let mut response = serde_json::to_value(response).unwrap();
+        response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+        requests.push(request);
+        responses.push(response);
+    }
+    serde_json::json!({"request": requests, "response": responses})
 }
 
 fn render_realtime_audio() -> serde_json::Value {
@@ -1341,16 +1369,16 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         .values()
         .filter(|case| case["request"]["arguments"].get("auth_method").is_none())
         .count();
-    // The nine single cases rendered outside `cases()`: the first provider page,
+    // The ten cases rendered outside `cases()`: the first provider page,
     // the seed and synthetic identities, synthetic grades, curated history,
     // dated fact overrides, Realtime audio input, synthetic plan concurrency,
-    // and the Hydrogen alias output limit.
+    // the Hydrogen alias output limit, and the grouped search-engine reads.
     for (text, expected) in [
         (
             GOLDEN.to_string(),
             cases().len()
                 + plain_plane_cases
-                + 9
+                + 10
                 + curated_wire.len()
                 + quality_tools.len()
                 + media_quality.len()
@@ -1376,6 +1404,10 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
             media_quality.len(),
         ),
         (render(), cases().len()),
+        (
+            serde_json::json!({"search_engines":render_search_engines()}).to_string(),
+            1,
+        ),
         (serde_json::to_string(&render_cache_lifetimes()).unwrap(), 2),
         (
             serde_json::to_string(&render_attachment_limits()).unwrap(),

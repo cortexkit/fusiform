@@ -17,7 +17,11 @@ const DOCUMENT: &str = include_str!("../data/curated-models.json");
 // Each unit-billed key must first be recognised by the consumer that prices
 // spend: an unknown rate key makes that consumer refuse a whole pricing day.
 // Grow this list one deliberate key at a time, never by a key pattern.
-const UNIT_BILLED_RATE_KEYS: &[&str] = &["rate.input_audio.per_second", "rate.input.per_character"];
+const UNIT_BILLED_RATE_KEYS: &[&str] = &[
+    "rate.input_audio.per_second",
+    "rate.input.per_character",
+    "rate.request.per_request",
+];
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -491,18 +495,24 @@ mod tests {
     /// The rows the shipped file carries, named so a row that silently fails to
     /// load (or a new one) changes this test rather than passing a count.
     const SHIPPED: &[(&str, &str)] = &[
+        ("brave", "web-search"),
         ("cloudflare-workers-ai", "@cf/cloudflare/clairic"),
         ("cloudflare-workers-ai", "@cf/cloudflare/clef"),
         ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
+        ("deepseek", "search"),
         ("elevenlabs", "eleven_flash_v2_5"),
+        ("exa", "search"),
         ("google", "gemini-3.5-transcribe-live"),
         ("google", "gemini-3.8-flash-tts"),
         ("google", "gemini-omni-1.2-flash"),
+        ("kimi-for-coding", "search"),
         ("meta", "muse-wonder-full-1.0"),
+        ("ollama-cloud", "web-search"),
         ("openai", "gpt-6-luna-decisions"),
         ("openai", "gpt-image-2.6-flare"),
         ("openai", "gpt-live-transcribe"),
         ("openai", "gpt-transcribe"),
+        ("tavily", "search"),
         ("typesafe", "jev-1.13.0"),
     ];
 

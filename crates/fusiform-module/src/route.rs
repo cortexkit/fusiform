@@ -6439,6 +6439,86 @@ mod curated_tests {
     }
 
     #[test]
+    fn search_rows_serve_sourced_request_rates_on_named_provider_and_whole_reads() {
+        let (store, _dir) = store();
+        let whole = get(&store, json!({}));
+        for (provider, model, name, amount) in [
+            ("exa", "search", "Exa Search", Some((7, 0))),
+            ("tavily", "search", "Tavily Search", Some((8, 0))),
+            (
+                "brave",
+                "web-search",
+                "Brave Search API (Web Search)",
+                Some((5, 0)),
+            ),
+            ("deepseek", "search", "DeepSeek Search", Some((75, 2))),
+            ("kimi-for-coding", "search", "Kimi Code Search", None),
+            ("ollama-cloud", "web-search", "Ollama Web Search", None),
+        ] {
+            let id = format!("{provider}/{model}");
+            let provider_read = get(&store, json!({"provider_id": provider}));
+            let named = get(&store, json!({"provider_id": provider, "model_id": model}));
+            for response in [&whole, &provider_read, &named] {
+                let facts = response.models.get(&id).expect(&id);
+                assert_eq!(facts["existence"], "present", "{id}");
+                assert_eq!(facts["model.type"], "search", "{id}");
+                assert_eq!(facts["model.name"], name, "{id}");
+                let rates: BTreeMap<_, _> = facts
+                    .iter()
+                    .filter(|(key, _)| key.starts_with("rate."))
+                    .collect();
+                match amount {
+                    Some((units, exponent)) => assert_eq!(
+                        serde_json::to_value(rates).unwrap(),
+                        json!({"rate.request.per_request": {
+                            "state": "priced", "units": units, "exponent": exponent,
+                            "currency": "USD", "unit_provenance": {"kind": "stated"},
+                            "per": 1000, "increment": {"kind": "unknown"},
+                            "minimum_quantity": {"kind": "unknown"}
+                        }}),
+                        "{id}"
+                    ),
+                    None => assert!(rates.is_empty(), "{id}: no per-search price is published"),
+                }
+                assert!(!facts.keys().any(|key| key.starts_with("wire.")
+                    || key.starts_with("capability.")
+                    || key == "limit.context"));
+                let disclosure = response.curated.iter().find(|row| row.model == id).unwrap();
+                assert_eq!(disclosure.auth_methods, ["apikey"]);
+                assert_eq!(disclosure.review_by_ms, 1799884800000);
+            }
+            let api = get(
+                &store,
+                json!({"provider_id": provider, "model_id": model, "auth_method": "apikey"}),
+            );
+            let mut expected_api = named.models[&id].clone();
+            if provider == "deepseek" {
+                // An explicit API-key request already applies a provider-wide
+                // cache-write rule. Without a token input rate it refuses the
+                // cache price; the ordinary search card remains request-only.
+                expected_api.insert(
+                    "rate.cache_write".into(),
+                    json!({"state": "unpriced", "reason": "not_established"}),
+                );
+            }
+            assert_eq!(api.models[&id], expected_api, "{id}: apikey");
+            for method in ["oauth", "chatgpt", "antigravity"] {
+                let result = serve_catalog_get(
+                    &store,
+                    &serde_json::to_vec(
+                        &json!({"provider_id": provider, "model_id": model, "auth_method": method}),
+                    )
+                    .unwrap(),
+                );
+                match result {
+                    Ok(response) => assert!(!response.models.contains_key(&id), "{id}: {method}"),
+                    Err(error) => assert_eq!(error.code, "no_coverage", "{id}: {method}"),
+                }
+            }
+        }
+    }
+
+    #[test]
     fn plain_and_oauth_reads_serve_published_curated_facts() {
         let (store, _dir) = store();
         for args in [

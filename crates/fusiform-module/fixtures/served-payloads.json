@@ -3732,6 +3732,253 @@
       ]
     }
   },
+  "catalog.get — curated search engines": {
+    "request": [
+      {
+        "arguments": {
+          "model_id": "search",
+          "provider_id": "exa"
+        },
+        "name": "catalog.get"
+      },
+      {
+        "arguments": {
+          "model_id": "search",
+          "provider_id": "tavily"
+        },
+        "name": "catalog.get"
+      },
+      {
+        "arguments": {
+          "model_id": "web-search",
+          "provider_id": "brave"
+        },
+        "name": "catalog.get"
+      },
+      {
+        "arguments": {
+          "model_id": "search",
+          "provider_id": "deepseek"
+        },
+        "name": "catalog.get"
+      },
+      {
+        "arguments": {
+          "model_id": "search",
+          "provider_id": "kimi-for-coding"
+        },
+        "name": "catalog.get"
+      },
+      {
+        "arguments": {
+          "model_id": "web-search",
+          "provider_id": "ollama-cloud"
+        },
+        "name": "catalog.get"
+      }
+    ],
+    "response": [
+      {
+        "catalog_version": 0,
+        "curated": [
+          {
+            "auth_methods": [
+              "apikey"
+            ],
+            "model": "exa/search",
+            "review_by_ms": 1799884800000,
+            "source_ref": "Read 2026-11-15. https://exa.ai/pricing: \"Each endpoint has a base price per request that includes up to 10 results.\" The `/search` (`auto`, `fast`) row states \"$7 / 1k requests\" as its base price and \"$1 / 1k results\" for each result above 10. Results above 10 incur that additional charge, which is not served as a rate. https://docs.exa.ai/reference/search, `type`: \"The search mode to use. Defaults to `auto`, a balanced mode recommended for most applications.\" Text and highlights inside `/search` have no separate published charge. https://exa.ai/docs/search/quickstart sets `type=\"auto\"` and `contents={\"highlights\": True}`; its example response itemises `\"costDollars\": { \"total\": 0.007, \"search\": { \"neural\": 0.007 } }`, the base $0.007. AI page summaries are separately priced, not included in this rate. No increment or minimum is stated, so both are unknown."
+          }
+        ],
+        "models": {
+          "exa/search": {
+            "existence": "present",
+            "model.name": "Exa Search",
+            "model.type": "search",
+            "rate.request.per_request": {
+              "currency": "USD",
+              "exponent": 0,
+              "increment": {
+                "kind": "unknown"
+              },
+              "minimum_quantity": {
+                "kind": "unknown"
+              },
+              "per": 1000,
+              "state": "priced",
+              "unit_provenance": {
+                "kind": "stated"
+              },
+              "units": 7
+            }
+          }
+        },
+        "resolved_at_ms": -1,
+        "source": "models.dev"
+      },
+      {
+        "catalog_version": 0,
+        "curated": [
+          {
+            "auth_methods": [
+              "apikey"
+            ],
+            "model": "tavily/search",
+            "review_by_ms": 1799884800000,
+            "source_ref": "Read 2026-11-15. https://docs.tavily.com/documentation/api-credits: \"Basic Search (`basic`):\" \"Each request costs 1 API credit.\" \"Pay-as-you-go: $0.008 per credit (allows you to be charged per credit once your plan’s credit limit is reached).\" Monthly plans include credits; this is the pay-as-you-go price per credit, yielding $8 per 1,000 basic-depth searches, not a monthly-plan effective price or the advanced-depth price. No increment or minimum is stated, so both are unknown."
+          }
+        ],
+        "models": {
+          "tavily/search": {
+            "existence": "present",
+            "model.name": "Tavily Search",
+            "model.type": "search",
+            "rate.request.per_request": {
+              "currency": "USD",
+              "exponent": 0,
+              "increment": {
+                "kind": "unknown"
+              },
+              "minimum_quantity": {
+                "kind": "unknown"
+              },
+              "per": 1000,
+              "state": "priced",
+              "unit_provenance": {
+                "kind": "stated"
+              },
+              "units": 8
+            }
+          }
+        },
+        "resolved_at_ms": -1,
+        "source": "models.dev"
+      },
+      {
+        "catalog_version": 0,
+        "curated": [
+          {
+            "auth_methods": [
+              "apikey"
+            ],
+            "model": "brave/web-search",
+            "review_by_ms": 1799884800000,
+            "source_ref": "Read 2026-11-15. https://brave.com/search/api, Search plan: \"$5 per 1,000 requests\". https://brave.com/search/api/guides/what-sets-brave-search-api-apart: \"Brave Search API paid plans begin at $3 CPM.\" The rate depends on the plan; the served rate is the Search plan displayed on the pricing page, not the guide's starting price. No increment or minimum is stated, so both are unknown."
+          }
+        ],
+        "models": {
+          "brave/web-search": {
+            "existence": "present",
+            "model.name": "Brave Search API (Web Search)",
+            "model.type": "search",
+            "rate.request.per_request": {
+              "currency": "USD",
+              "exponent": 0,
+              "increment": {
+                "kind": "unknown"
+              },
+              "minimum_quantity": {
+                "kind": "unknown"
+              },
+              "per": 1000,
+              "state": "priced",
+              "unit_provenance": {
+                "kind": "stated"
+              },
+              "units": 5
+            }
+          }
+        },
+        "resolved_at_ms": -1,
+        "source": "models.dev"
+      },
+      {
+        "catalog_version": 0,
+        "curated": [
+          {
+            "auth_methods": [
+              "apikey"
+            ],
+            "model": "deepseek/search",
+            "review_by_ms": 1799884800000,
+            "source_ref": "Read 2026-11-15. https://api-docs.deepseek.com/guides/search: \"Search and Fetch are billed per successful request, not by tokens or by the number of returned results:\" Billing table: \"Search | Per 1,000 successful requests | $0.75\". \"Failed requests, empty search results, and timeouts are not billed.\" \"`count` only controls how many results are returned and does not affect the per-request price.\" The served rate is $0.75 per 1,000 successful Search requests. No increment or minimum is stated, so both are unknown."
+          }
+        ],
+        "models": {
+          "deepseek/search": {
+            "existence": "present",
+            "limit.temperature_max": 2,
+            "limit.temperature_min": 0,
+            "model.lineage": "deepseek",
+            "model.name": "DeepSeek Search",
+            "model.type": "search",
+            "rate.request.per_request": {
+              "currency": "USD",
+              "exponent": 2,
+              "increment": {
+                "kind": "unknown"
+              },
+              "minimum_quantity": {
+                "kind": "unknown"
+              },
+              "per": 1000,
+              "state": "priced",
+              "unit_provenance": {
+                "kind": "stated"
+              },
+              "units": 75
+            }
+          }
+        },
+        "resolved_at_ms": -1,
+        "source": "models.dev"
+      },
+      {
+        "catalog_version": 0,
+        "curated": [
+          {
+            "auth_methods": [
+              "apikey"
+            ],
+            "model": "kimi-for-coding/search",
+            "review_by_ms": 1799884800000,
+            "source_ref": "Read 2026-11-15. https://www.kimi.com/code/docs/kimi-code/membership.html: \"Kimi Code 是 Kimi 会员权益 中面向开发者的智能编程服务，随 Kimi 会员订阅一同提供，与 Kimi 会员共享同一套额度。CLI、VS Code、桌面端及第三方工具发起的请求，均计入该额度。\" \"所有登录设备和 API Key 共享同一套配额；超过 30 天未活跃的设备会自动解绑，重新 `/login` 即可恢复。\" Kimi Code membership requests share the membership quota. No per-search price is published for this endpoint, so no rate is served. The provider id matches the API-key identity `apikey:kimi-for-coding`."
+          }
+        ],
+        "models": {
+          "kimi-for-coding/search": {
+            "existence": "present",
+            "model.name": "Kimi Code Search",
+            "model.type": "search"
+          }
+        },
+        "resolved_at_ms": -1,
+        "source": "models.dev"
+      },
+      {
+        "catalog_version": 0,
+        "curated": [
+          {
+            "auth_methods": [
+              "apikey"
+            ],
+            "model": "ollama-cloud/web-search",
+            "review_by_ms": 1799884800000,
+            "source_ref": "Read 2026-11-15. https://ollama.com/blog/web-search: \"Web search is included with a free Ollama account, with much higher rate limits available by upgrading your Ollama subscription.\" \"Create an API key from your Ollama account.\" No per-search price is published, so no rate is served; included access is not a zero-dollar rate."
+          }
+        ],
+        "models": {
+          "ollama-cloud/web-search": {
+            "existence": "present",
+            "model.name": "Ollama Web Search",
+            "model.type": "search"
+          }
+        },
+        "resolved_at_ms": -1,
+        "source": "models.dev"
+      }
+    ]
+  },
   "catalog.get — curated unit-billed transcription rate": {
     "request": {
       "arguments": {
