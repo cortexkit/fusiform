@@ -443,10 +443,11 @@ A rate is a JSON object tagged by `state` (`RateValue` in
   `rate.cache_write.above_context.<tokens>.ttl.<lifetime>`. These are token
   rates (per million tokens) on the rows that list
   `capability.cache_lifetimes`. Dated reads apply the stored rule in force at
-  `at_ms` to that instant's upstream prices. Rules begin at first serving:
-  2026-11-07T22:15:13Z for the initial models, 2026-11-10T20:15:26Z for
-  Claude Fable 5.2; earlier reads have neither lifetimes nor TTL prices.
-  Each lifetime the model
+  `at_ms` to that instant's upstream prices. Rules begin when fusiform first
+  served them: 2026-11-07T22:15:13Z for every model listed in
+  `crates/fusiform-module/data/cache-lifetimes.json` except Claude Fable 5.2,
+  and 2026-11-10T20:15:26Z for Claude Fable 5.2. Earlier dated reads carry
+  neither lifetimes nor TTL prices. Each lifetime the model
   offers has its own key, its default included, so a write measured at a
   lifetime prices only at that key. Plain `rate.cache_write` keeps its meaning,
   the vendor's default lifetime. They are absent on the `(openai, chatgpt)`
