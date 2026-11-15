@@ -2695,6 +2695,16 @@ fn plan_prices_joins_service_tiers_for_each_openai_plan() {
         "the omission control needs a non-OpenAI row"
     );
     for row in other_providers {
+        if row.provider_id == "kimi-code-plan-global" && row.tier == "allegro" {
+            let value = serde_json::to_value(row).unwrap();
+            assert_eq!(
+                value["service_tiers"]["tiers"],
+                serde_json::json!([{
+                    "tier":"fast", "included_usage_rate":{"units":2,"exponent":0}
+                }])
+            );
+            continue;
+        }
         assert!(row.service_tiers.is_none());
         assert!(serde_json::to_value(row)
             .unwrap()

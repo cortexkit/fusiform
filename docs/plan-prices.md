@@ -123,7 +123,11 @@ purchased-credit rate, never zero. Tier names match model `rate.<dim>.mode.<name
 OpenAI Plus, Pro 100 and Pro 200 include Fast only (2.5x usage, 2x credits).
 Pro 500 includes Fast and Ultrafast (8x usage, 6x credits). The data quotes
 OpenAI's pricing, Pro-tier and speed pages and carries a 30-day review date.
-Other providers have no field, which means unknown.
+Kimi Code Allegro includes Fast for K3.1 Pro Highspeed at 2× quota usage,
+with no stated purchased-credit rate and a 60-day review. Its source quotes
+the recorded first-party legacy price ordering (Allegretto $39, Allegro $99),
+Kimi's legacy-plan list and the “Allegretto and above” HighSpeed threshold.
+The live pricing page now lists only new plans. Other providers have no field.
 These are consumption rates, not speed guarantees; vendor display labels
 are on model `route.mode_labels`, not on plan tiers.
 
