@@ -399,9 +399,9 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
         "model_count": model_count,
         "models_priced": models_priced,
         "store_open": signals.store_is_open(),
-        "bus_published_version": signals.bus_published_version(),
-        "bus_publish_failures": signals.bus_publish_failures(),
-        "bus_last_error": signals.bus_last_error(),
+        "process_bus_published_version": signals.bus_published_version(),
+        "process_bus_publish_failures": signals.bus_publish_failures(),
+        "process_bus_last_error": signals.bus_last_error(),
         // A fresh observation of the store at startup, not adopted history.
         "store_quick_check": signals.store_quick_check().map(|check| serde_json::json!({
             "result": check.result,

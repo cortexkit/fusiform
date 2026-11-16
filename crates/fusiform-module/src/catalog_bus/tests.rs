@@ -347,10 +347,10 @@ async fn tool_reply_does_not_wait_for_the_bus_and_status_exposes_counters() {
         "bus failures cannot degrade serving health"
     );
     let metrics = serde_json::to_value(health).unwrap();
-    assert_eq!(metrics["metrics"]["bus_published_version"], 123);
-    assert_eq!(metrics["metrics"]["bus_publish_failures"], 1);
+    assert_eq!(metrics["metrics"]["process_bus_published_version"], 123);
+    assert_eq!(metrics["metrics"]["process_bus_publish_failures"], 1);
     assert_eq!(
-        metrics["metrics"]["bus_last_error"],
+        metrics["metrics"]["process_bus_last_error"],
         "synthetic status error"
     );
     task.abort();

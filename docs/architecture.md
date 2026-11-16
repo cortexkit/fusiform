@@ -120,8 +120,9 @@ instant; current reads keep using the compiled rules.
 - Readers treat `catalog_changed` as a wake to pull the catalog, not as catalog
   data, and retain a slow polling backstop. Bus absence affects refresh latency,
   never serving health: `bus_published_version`, `bus_publish_failures` and
-  `bus_last_error` are lock-free process signals exposed in both status and
-  health metrics, not reasons for Degraded.
+  `bus_last_error` are lock-free process signals on `catalog.status`, and the
+  same three appear in health metrics with the `process_` prefix every
+  process-scoped metric carries. None is a reason for Degraded.
 
 ## 5. What fusiform does not do
 
