@@ -15,8 +15,8 @@ members = ["crates/fusiform-core",
 # builds from a clone of itself alone.
 [workspace.dependencies]
 fusiform-testkit = { path = "crates/fusiform-testkit" }
-subc-client-rs = "0.40.3"
-subc-protocol = "0.37.1"
+subc-client-rs = "0.41.1"
+subc-protocol = "0.37.2"
 subc-transport = "0.18.0"
 
 cortexkit-store = { version = "0.2.0", features = ["sqlite"] }
