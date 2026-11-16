@@ -69,12 +69,22 @@ fi
 # Does the lock resolve against the manifests. Every dependency is a crates.io
 # version pinned in the lock, so this answers the same question CI's --locked
 # build does, in a fraction of a second and without compiling anything.
-if ! cargo metadata --locked --offline --format-version 1 > /dev/null 2>&1; then
-    echo "pre-push refused: Cargo.lock does not resolve --locked" >&2
+#
+# --offline also fails when a crate the lock pins has not been downloaded here
+# yet (a lock just moved by `cargo update` on another machine, or a cleared
+# cache). That is not a stale lock, so print cargo's own reason rather than
+# guess which of the two it is.
+if ! metadata_err=$(cargo metadata --locked --offline --format-version 1 2>&1 > /dev/null); then
+    echo "pre-push refused: Cargo.lock does not resolve --locked offline" >&2
     echo >&2
-    echo "  A manifest changed without the lock following it. CI builds with" >&2
-    echo "  --locked, so the push would fail there. Update each dependency" >&2
-    echo "  whose version you changed, by name, and gate on it:" >&2
+    printf '%s\n' "$metadata_err" | sed -n '1,6s/^/  cargo: /p' >&2
+    echo >&2
+    echo "  If cargo could not download a crate, fetch it once and push again:" >&2
+    echo >&2
+    echo "      cargo fetch --locked" >&2
+    echo >&2
+    echo "  If a manifest changed without the lock following it, update each" >&2
+    echo "  dependency whose version you changed, by name, and gate on it:" >&2
     echo >&2
     echo "      cargo update -p <crate> [-p <crate> ...]" >&2
     echo "      cargo t --workspace && cargo c" >&2
