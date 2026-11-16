@@ -1082,8 +1082,9 @@ fn serve_catalog_get_prepared(
 
     let at = request.at_ms.map(Timestamp);
 
-    // A one-instant named read builds the same request-owned inputs that a
-    // timeline reuses across its boundaries. All served rules remain below.
+    // A one-instant named read loads the same request-owned inputs that a
+    // served history reuses at each of its boundaries; the overrides, curated
+    // rows, billing rules and refusals below apply to both unchanged.
     let owned = match (prepared, at, &request.provider_id, &request.model_id) {
         (None, Some(_), Some(provider), Some(model)) => Some(dated_model::DatedModel::load(
             store, source, provider, model,
