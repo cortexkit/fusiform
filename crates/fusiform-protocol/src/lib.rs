@@ -2214,6 +2214,15 @@ pub struct PollChanges {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StatusResponse {
     pub source: String,
+    /// Last catalog version acknowledged by the bus in this process, or null.
+    #[serde(default)]
+    pub bus_published_version: Option<i64>,
+    /// Failed bus publication attempts in this process; serving is unaffected.
+    #[serde(default)]
+    pub bus_publish_failures: u64,
+    /// The last observed publication error, retained after recovery.
+    #[serde(default)]
+    pub bus_last_error: Option<String>,
     /// A change CURSOR, not a snapshot identity.
     ///
     /// # What it is for

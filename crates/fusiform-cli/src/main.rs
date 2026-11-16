@@ -186,11 +186,9 @@ async fn main() {
 
 /// Drop any module identity inherited from the environment.
 ///
-/// `subc-client-rs` falls back to `SUBC_MODULE_ID` and `SUBC_LAUNCH_NONCE` from
-/// the process environment when a call carries no explicit consumer identity
-/// (`consumer_identity_from_env` in `subc-client-rs` 0.23.2, read 2026-09-30),
-/// and there is no way to say "explicitly none" — an absent identity in
-/// `CallOptions` *means* "read the environment".
+/// `subc-client-rs` binds the connection's caller identity from the launch
+/// environment. Remove it before connecting: an operator CLI is not the
+/// supervised module whose shell it may have inherited.
 ///
 /// Those variables are injected by the supervisor into a supervised module's
 /// process. A CLI is not a module. But an operator running this from a shell
@@ -2839,11 +2837,9 @@ mod tests {
 
     /// A module identity inherited from the environment is dropped.
     ///
-    /// `subc-client-rs` reads `SUBC_MODULE_ID` and `SUBC_LAUNCH_NONCE` from the
-    /// process environment when a call carries no explicit consumer identity,
-    /// and an absent identity in `CallOptions` MEANS "read the environment" —
-    /// there is no way to say "explicitly none". So the only way for this CLI
-    /// to have no module identity is for those variables not to be set.
+    /// The SDK binds a consumer's caller identity at connection time. Clearing
+    /// the launch environment before connecting keeps this CLI an unsupervised
+    /// operator rather than the module whose shell it inherited.
     ///
     /// Found against a live daemon: the CLI inherited `SUBC_MODULE_ID=aft` from
     /// the shell it was run in and every route it opened was attributed to that

@@ -56,6 +56,7 @@ pub struct CatalogStore {
     /// path re-derived from the environment that could disagree with it.
     path: std::path::PathBuf,
     instance_id: u64,
+    catalog_changes: tokio::sync::Notify,
 }
 
 static NEXT_STORE_INSTANCE: AtomicU64 = AtomicU64::new(1);
@@ -427,6 +428,7 @@ impl CatalogStore {
             readers,
             path: std::path::PathBuf::from(path),
             instance_id: NEXT_STORE_INSTANCE.fetch_add(1, Ordering::Relaxed),
+            catalog_changes: tokio::sync::Notify::new(),
         })
     }
 
@@ -1421,6 +1423,15 @@ impl CatalogStore {
         Ok(v)
     }
 
+    /// A coalesced wake after a committed version advance, not a version payload.
+    pub async fn catalog_changed(&self) {
+        self.catalog_changes.notified().await;
+    }
+
+    pub(crate) fn signal_catalog_changed(&self) {
+        self.catalog_changes.notify_one();
+    }
+
     /// Append-only era watermark for invalidating derived reads. Corrections
     /// and standalone era appends need not advance the public catalog version.
     /// MAX on the integer primary key visits only the last entry, not all eras.
@@ -1561,6 +1572,7 @@ impl CatalogStore {
         let issued = self
             .inner
             .with_conn_fenced(|tx| advance_catalog_version_in(tx, Some(observation_id), now))?;
+        self.signal_catalog_changed();
         Ok(issued)
     }
 
@@ -1575,6 +1587,7 @@ impl CatalogStore {
         let issued = self
             .inner
             .with_conn_fenced(|tx| advance_catalog_version_in(tx, None, now))?;
+        self.signal_catalog_changed();
         Ok(issued)
     }
 }

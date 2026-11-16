@@ -108,14 +108,16 @@ impl CatalogStore {
         reason: &str,
         recorded_at_ms: i64,
     ) -> Result<i64, CatalogError> {
-        Ok(self.inner.with_conn_fenced(|tx| {
+        let id = self.inner.with_conn_fenced(|tx| {
             tx.execute(
                 "INSERT INTO model_mark_era (model, decommissioned, marked_by, reason, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![model, decommissioned, marked_by, reason, recorded_at_ms],
             )?;
             crate::advance_catalog_version_in(tx, None, fusiform_core::Timestamp(recorded_at_ms))?;
             Ok(tx.last_insert_rowid())
-        })?)
+        })?;
+        self.signal_catalog_changed();
+        Ok(id)
     }
 
     /// Current decommissioned keys; a restoration hides the prior mark.
@@ -159,7 +161,7 @@ impl CatalogStore {
         reason: &str,
         recorded_at_ms: i64,
     ) -> Result<i64, CatalogError> {
-        Ok(self.inner.with_conn_fenced(|tx| {
+        let id = self.inner.with_conn_fenced(|tx| {
             tx.execute(
                 "INSERT INTO quality_grade_era \
                  (model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms, grade) \
@@ -177,7 +179,9 @@ impl CatalogStore {
             )?;
             crate::advance_catalog_version_in(tx, None, fusiform_core::Timestamp(recorded_at_ms))?;
             Ok(tx.last_insert_rowid())
-        })?)
+        })?;
+        self.signal_catalog_changed();
+        Ok(id)
     }
 
     /// Current, non-withdrawn grades, read through the pool without a writer lease.

@@ -103,8 +103,25 @@ instant; current reads keep using the compiled rules.
   never hold several catalog copies in memory at once.
 - Health is computed from in-memory signals with no I/O
   ([`module-surface.md`](module-surface.md) §6).
-- Fusiform emits no pushes. Consumers pull, and compare `catalog_version` to
-  learn whether anything changed.
+- One best-effort catalog publisher starts after the store's startup advance.
+  Store writes signal it only after the version transaction commits; they never
+  await the bus. The task reads the single `catalog_version` row, publishes only
+  a version newer than its last acknowledged version, and coalesces queued wakes.
+  Failed attempts retry after 1 s, doubling to a 60 s cap and rereading the
+  latest version on every attempt. A separate 60 s wake checks for advances even
+  if a write site missed its signal.
+- The publisher lazily opens a second supervisor connection using
+  `SubcConsumer::connect_default(ConsumerOptions::default())`. The SDK binds
+  fusiform's identity from the launch environment. `cortexkit-bus-client`
+  obtains the server address and credential from ck-bus through that connection;
+  fusiform reads no credential file. A failed connection or publish drops the
+  bus client and reconnects on the next attempt. This connection is an outbound
+  client, not another tool provider; it adds no served route.
+- Readers treat `catalog_changed` as a wake to pull the catalog, not as catalog
+  data, and retain a slow polling backstop. Bus absence affects refresh latency,
+  never serving health: `bus_published_version`, `bus_publish_failures` and
+  `bus_last_error` are lock-free process signals exposed in both status and
+  health metrics, not reasons for Degraded.
 
 ## 5. What fusiform does not do
 
@@ -118,8 +135,9 @@ instant; current reads keep using the compiled rules.
   route, subscription or contract. That is the consumer's knowledge.
 - It does not infer identity from similar names: aliases and creators are
   curated with a cited source.
-- It does not hold credentials and makes no outbound calls other than the
-  models.dev fetch. See `SECURITY.md`.
+- It does not hold upstream credentials. Outbound connections are the models.dev
+  fetch and the local catalog-event bus; the bus SDK maintains its own
+  daemon-issued credential in memory.
 
 ## 6. Where to read next
 

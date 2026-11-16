@@ -18,6 +18,8 @@ fusiform-store = { path = "../fusiform-store" }
 subc-client-rs = { workspace = true }
 subc-protocol = { workspace = true }
 cortexkit-store-types = { workspace = true }
+cortexkit-bus-client = "0.1.1"
+arc-swap = "1"
 
 async-trait = { workspace = true }
 blake3 = { workspace = true }
@@ -30,6 +32,7 @@ serde_json = { workspace = true, features = ["arbitrary_precision"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sync"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 fusiform-testkit = { workspace = true }
 # Only to POISON a store in a test: dropping the table an adoption read queries
 # is the cheapest way to drive a real store-read failure, and the alternative

@@ -591,6 +591,9 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
 
     Ok(StatusResponse {
         source: source.as_str().to_string(),
+        bus_published_version: None,
+        bus_publish_failures: 0,
+        bus_last_error: None,
         catalog_version,
         failures,
         // Read from the contract table rather than collected from the snapshot.

@@ -7979,6 +7979,9 @@
       "name": "catalog.status"
     },
     "response": {
+      "bus_last_error": null,
+      "bus_publish_failures": 0,
+      "bus_published_version": null,
       "catalog_version": 0,
       "era_count": 438,
       "failures": {

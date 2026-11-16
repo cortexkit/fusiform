@@ -117,7 +117,7 @@ impl ModuleHandler for Fusiform {
             };
         };
 
-        serve_request(store, body).await
+        serve_request(store, Arc::clone(&self.signals), body).await
     }
 
     async fn on_hello_ack(&self, ack: &ModuleHelloAckBody) {
@@ -285,6 +285,12 @@ impl ModuleHandler for Fusiform {
             .adopt_from_store(&store, fusiform_core::SourceId::ModelsDev);
 
         *self.store.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&store));
+
+        tokio::spawn(fusiform_module::catalog_bus::run_publisher(
+            Arc::clone(&store),
+            Arc::clone(&self.signals),
+            fusiform_module::catalog_bus::CatalogBus::default(),
+        ));
 
         // The poll loop starts only now, so no tick can run without a store.
         let signals = Arc::clone(&self.signals);

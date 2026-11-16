@@ -82,11 +82,16 @@ different questions (`catalog.status` carries only the second).
    instant "now" resolved to, and sending that instant back as `at_ms` returns
    the same values (`served_corrections::a_read_can_be_replayed_by_the_instant_it_resolved`).
 2. `catalog_version` is `max(now_ms, previous + 1)` at each poll that writes,
-   each committed quality grade or withdrawal, and each start of the module
+   each committed quality grade or withdrawal, each decommission mark or
+   restoration, and each start of the module
    process. The start covers data compiled into the build (aliases, curated
    rows, overrides, billing planes), which changes only with a deploy
    (`history::a_process_start_advances_the_catalog_version_without_a_poll`).
-   Previews and the one-time grade import do not advance it. It never goes backwards, even across a restore of the
+   Seed ingestion also advances it to the snapshot's fetch instant. Previews,
+   the one-time grade import, corrections, and artifact marks or retractions do
+   not advance it. Corrections affect only a past window; artifact marks change
+   history's `last_changed_at`, not current catalog values.
+   It never goes backwards, even across a restore of the
    database ([`data-model.md`](data-model.md) §4). It describes the store at
    read time: a point-in-time read of old values carries today's version. It
    is not a snapshot identifier.
@@ -1094,6 +1099,9 @@ What fusiform has been doing. Request: optional `source`, optional `polls`
 | Field | Meaning |
 | --- | --- |
 | `catalog_version` | §3; a cursor to compare, not a snapshot identity |
+| `bus_published_version` | last catalog version acknowledged by the bus in this process; null before the first acknowledgement |
+| `bus_publish_failures` | failed publication attempts during this process lifetime; starts at 0 |
+| `bus_last_error` | text from the last observed publication error, null before any error; retained after recovery |
 | `model_count` | stored upstream models present now; curated rows and aliases are not counted |
 | `models_priced` | how many of those carry at least one rate (`route::status_reports_how_many_models_can_be_priced`) |
 | `served_facts` | every key fusiform can serve, whether or not any model carries it (`route::status_names_served_keys_no_model_in_this_store_carries`) |
@@ -1109,6 +1117,27 @@ wrote nothing (`route::status_reports_what_each_poll_changed`,
 `route::a_poll_that_wrote_nothing_reports_no_changes`). Optional fields absent
 from an older module's response still decode
 (`deps::a_status_response_without_the_newest_fields_still_parses`).
+
+The three bus fields are also health metrics and never make health Degraded.
+Older responses decode with null versions/errors and a zero failure count.
+
+### Catalog-change event
+
+Fusiform publishes `catalog_changed`, version 1, through the bus client with no
+per-reader subject suffix: every catalog reader receives the same wake. The client builds subject
+`ck.{acct}.event.fusiform.catalog_changed.v1` using the daemon-issued account.
+The body is exactly `{"catalog_version": <i64>}` and `Nats-Msg-Id` is the decimal
+catalog version, so duplicate retries collapse. The event contains no catalog
+facts: readers wake and re-read `catalog.status` or `catalog.get`.
+
+One task publishes after startup and after committed version advances listed in
+§3. Multiple advances awaiting publication coalesce into the newest version read
+from the store; the task never publishes an older or equal version after an
+acknowledged one. Publication is outside every write transaction and never
+delays a tool reply. Failures retry with capped exponential backoff (1–60 s),
+and a 60 s store check catches an unsignalled advance. Readers must keep a slow
+polling backstop: the bus is a latency optimisation, not a replacement for the
+catalog read contract.
 
 ## 8. Writes
 

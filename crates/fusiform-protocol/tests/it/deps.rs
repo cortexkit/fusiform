@@ -378,6 +378,9 @@ fn every_response_type_round_trips() {
     assert_eq!(back, history);
 
     let status = StatusResponse {
+        bus_published_version: Some(7),
+        bus_publish_failures: 1,
+        bus_last_error: Some("synthetic publication error".into()),
         served_facts: vec!["rate.input".to_string()],
         failures: Some(fusiform_protocol::FailureHistoryWire {
             ever: 2,
@@ -408,6 +411,18 @@ fn every_response_type_round_trips() {
     let back: StatusResponse =
         serde_json::from_str(&serde_json::to_string(&status).unwrap()).unwrap();
     assert_eq!(back, status);
+    let mut older = serde_json::to_value(&status).unwrap();
+    for field in [
+        "bus_published_version",
+        "bus_publish_failures",
+        "bus_last_error",
+    ] {
+        older.as_object_mut().unwrap().remove(field);
+    }
+    let older: StatusResponse = serde_json::from_value(older).unwrap();
+    assert_eq!(older.bus_published_version, None);
+    assert_eq!(older.bus_publish_failures, 0);
+    assert_eq!(older.bus_last_error, None);
 }
 
 /// A status response from an older module still parses.

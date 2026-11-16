@@ -13,6 +13,7 @@ pub mod attachment_limits;
 pub mod billing_planes;
 pub mod cache_lifetimes;
 pub mod canonical_links;
+pub mod catalog_bus;
 pub mod creators;
 pub mod curated_models;
 pub mod enrollment;
@@ -64,9 +65,20 @@ where
 }
 
 /// Serve and serialize a tool call on the blocking pool, not the reader runtime.
-pub async fn serve_request(store: Arc<CatalogStore>, body: Vec<u8>) -> HandlerOutcome {
+pub async fn serve_request(
+    store: Arc<CatalogStore>,
+    signals: Arc<signals::Signals>,
+    body: Vec<u8>,
+) -> HandlerOutcome {
     let bulk = route::needs_catalog_permit(&body);
-    let work = move || match route::serve_tool_call(&store, &body) {
+    let work = move || match route::serve_tool_call(&store, &body).map(|mut response| {
+        if let fusiform_protocol::ToolResponse::Status(status) = &mut response {
+            status.bus_published_version = signals.bus_published_version();
+            status.bus_publish_failures = signals.bus_publish_failures();
+            status.bus_last_error = signals.bus_last_error();
+        }
+        response
+    }) {
         Ok(response) => match serde_json::to_vec(&response) {
             Ok(bytes) => HandlerOutcome::Response(bytes),
             Err(e) => HandlerOutcome::Error {

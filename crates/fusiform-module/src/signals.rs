@@ -1,7 +1,7 @@
 //! The mechanical signals the health path reads.
 //!
-//! Values here are atomics or set-once startup records stamped by the code
-//! that does the work, and read by nothing but [`crate::health`]. That shape is
+//! Values here are lock-free snapshots or set-once startup records stamped by
+//! the code that does the work, and read by status and [`crate::health`]. That shape is
 //! the whole point: asking a component how it is doing gets an opinion, and a
 //! wedged component's opinion is that it is fine. A counter that only advances
 //! when a poll actually completes cannot say a poll completed.
@@ -161,6 +161,9 @@ pub struct Signals {
     catalog_write_failed: AtomicU64,
     /// Published once after the startup page check; health never waits for it.
     store_quick_check: OnceLock<StoreQuickCheck>,
+    bus_published_version: AtomicI64,
+    bus_publish_failures: AtomicU64,
+    bus_last_error: arc_swap::ArcSwapOption<String>,
 }
 
 /// The startup check's observation, not a claim about later writes.
@@ -199,7 +202,36 @@ impl Signals {
             adoption_failed: AtomicU64::new(0),
             catalog_write_failed: AtomicU64::new(0),
             store_quick_check: OnceLock::new(),
+            bus_published_version: AtomicI64::new(NEVER),
+            bus_publish_failures: AtomicU64::new(0),
+            bus_last_error: arc_swap::ArcSwapOption::empty(),
         }
+    }
+
+    /// Stamp only acknowledged publications, never queued attempts.
+    pub fn bus_published(&self, version: i64) {
+        self.bus_published_version
+            .fetch_max(version, Ordering::Relaxed);
+    }
+
+    pub fn bus_publish_failed(&self, error: &impl std::fmt::Display) {
+        self.bus_last_error
+            .store(Some(std::sync::Arc::new(error.to_string())));
+        self.bus_publish_failures.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn bus_published_version(&self) -> Option<i64> {
+        let version = self.bus_published_version.load(Ordering::Relaxed);
+        (version != NEVER).then_some(version)
+    }
+
+    pub fn bus_publish_failures(&self) -> u64 {
+        self.bus_publish_failures.load(Ordering::Relaxed)
+    }
+
+    /// Keep the last observed error even after recovery, like the failure count.
+    pub fn bus_last_error(&self) -> Option<String> {
+        self.bus_last_error.load().as_deref().cloned()
     }
 
     /// Stamp a completed poll that observed something.
