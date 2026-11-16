@@ -806,7 +806,7 @@ fn print_status(response: &serde_json::Value) {
     if let Some(begins) = get("history_begins_at_ms").and_then(|v| v.as_i64()) {
         println!("history from     {}", format_instant(begins));
     }
-
+    print!("{}", render_bus(response));
     // Failed polls across the WHOLE history, printed before the poll window
     // rather than inside it.
     //
@@ -1134,6 +1134,34 @@ fn render_fact_overrides(response: &serde_json::Value) -> String {
 /// This file has already shipped `1 models arrived` to production: every unit
 /// test of the pluralisation passed, because the pluralisation was correct and
 /// the defect was in the caller. Nothing exercised the line an operator reads.
+/// Whether readers are being woken on the bus, so an operator can check the
+/// publisher without reading health metrics. Silent for a module too old to
+/// report it. The counts are this process's only: a restart starts them again.
+fn render_bus(response: &serde_json::Value) -> String {
+    let failures = response
+        .get("bus_publish_failures")
+        .and_then(|v| v.as_u64())
+        .map(|n| usize::try_from(n).unwrap_or(usize::MAX));
+    let published = response
+        .get("bus_published_version")
+        .and_then(|v| v.as_i64());
+    if failures.is_none() && published.is_none() {
+        return String::new();
+    }
+    let mut line = match published {
+        Some(version) => format!("bus              published version {version}"),
+        None => "bus              nothing published yet in this process".to_string(),
+    };
+    if let Some(failures) = failures.filter(|n| *n > 0) {
+        line.push_str(&format!(", {} in this process", count(failures, "failure")));
+        if let Some(error) = response.get("bus_last_error").and_then(|v| v.as_str()) {
+            line.push_str(&format!(" (last: {error})"));
+        }
+    }
+    line.push('\n');
+    line
+}
+
 fn render_failures(response: &serde_json::Value) -> String {
     let Some(f) = response.get("failures") else {
         return String::new();
@@ -3500,6 +3528,28 @@ mod tests {
             "",
             "a clean history must print nothing rather than a zero line"
         );
+    }
+
+    #[test]
+    fn the_bus_line_reports_the_publisher() {
+        let healthy = serde_json::json!({
+            "bus_published_version": 1_794_797_372_999i64, "bus_publish_failures": 0,
+        });
+        assert_eq!(
+            render_bus(&healthy),
+            "bus              published version 1794797372999\n"
+        );
+        let failing = serde_json::json!({
+            "bus_published_version": null, "bus_publish_failures": 3,
+            "bus_last_error": "ck-bus unavailable",
+        });
+        assert_eq!(
+            render_bus(&failing),
+            "bus              nothing published yet in this process, 3 failures \
+             in this process (last: ck-bus unavailable)\n"
+        );
+        // A module too old to report the bus prints nothing, not a guess.
+        assert_eq!(render_bus(&serde_json::json!({})), "");
     }
 }
 
