@@ -39,6 +39,25 @@ type Claim = (serde_json::Value, serde_json::Value);
 type Newest = (i64, Option<Claim>);
 
 impl CatalogStore {
+    /// All override eras for one model, oldest first, including tombstones.
+    pub fn model_fact_override_eras(
+        &self,
+        provider: &str,
+        model: &str,
+    ) -> Result<Vec<FactOverrideEra>, CatalogError> {
+        let raw = self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT provider_id, model_id, fact_key, boundary_at_ms, value_json, replaces_json,
+                        reason, source_ref, quote, notes, established_by, established_at_ms, review_by_ms
+                 FROM fact_override_era WHERE provider_id = ?1 AND model_id = ?2
+                 ORDER BY boundary_at_ms, id",
+            )?;
+            let rows = stmt.query_map(params![provider, model], raw_era)?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })?;
+        raw.into_iter().map(RawEra::decode).collect()
+    }
+
     /// Diff the compiled overrides at boot, retaining original provenance when
     /// only source wording or review dates change. As for curated model rows,
     /// the first era starts at establishment; changes, reappearances and
@@ -191,14 +210,7 @@ impl CatalogStore {
                        ORDER BY d.boundary_at_ms DESC, d.id DESC LIMIT 1) \
                  ORDER BY c.provider_id, c.model_id, c.fact_key",
             )?;
-            let rows = stmt.query_map(params![at_ms, provider_id], |r| {
-                Ok(RawEra {
-                    provider: r.get(0)?, model: r.get(1)?, key: r.get(2)?, boundary: r.get(3)?,
-                    value: r.get(4)?, replaces: r.get(5)?, reason: r.get(6)?, source: r.get(7)?,
-                    quote: r.get(8)?, notes: r.get(9)?, established_by: r.get(10)?,
-                    established_at: r.get(11)?, review_by: r.get(12)?,
-                })
-            })?.collect::<Result<Vec<_>, _>>()?;
+            let rows = stmt.query_map(params![at_ms, provider_id], raw_era)?.collect::<Result<Vec<_>, _>>()?;
             Ok(rows)
         })?;
         raw.into_iter().map(RawEra::decode).collect()
@@ -219,6 +231,24 @@ struct RawEra {
     established_by: String,
     established_at: i64,
     review_by: Option<i64>,
+}
+
+fn raw_era(r: &rusqlite::Row<'_>) -> rusqlite::Result<RawEra> {
+    Ok(RawEra {
+        provider: r.get(0)?,
+        model: r.get(1)?,
+        key: r.get(2)?,
+        boundary: r.get(3)?,
+        value: r.get(4)?,
+        replaces: r.get(5)?,
+        reason: r.get(6)?,
+        source: r.get(7)?,
+        quote: r.get(8)?,
+        notes: r.get(9)?,
+        established_by: r.get(10)?,
+        established_at: r.get(11)?,
+        review_by: r.get(12)?,
+    })
 }
 
 impl RawEra {

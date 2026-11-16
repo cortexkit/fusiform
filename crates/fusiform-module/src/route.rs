@@ -30,6 +30,7 @@ use serde::Deserialize;
 #[cfg(test)]
 mod paging_tests;
 
+mod dated_model;
 mod history;
 mod page_plan;
 mod quality;
@@ -444,10 +445,17 @@ fn refuse_before_the_record(
     let Some(asked) = at else {
         return Ok(());
     };
-    let Some(begins) = store
-        .record_begins_at(source)
-        .map_err(|e| store_error(&e))?
-    else {
+    refuse_before_begin(
+        store
+            .record_begins_at(source)
+            .map_err(|e| store_error(&e))?,
+        Some(asked),
+    )
+}
+
+fn refuse_before_begin(begins: Option<Timestamp>, at: Option<Timestamp>) -> Result<(), RouteError> {
+    let Some(asked) = at else { return Ok(()) };
+    let Some(begins) = begins else {
         // No records at all: an empty store cannot bound anything, and the
         // seed writes one on first boot. Refusing here would fail a fresh
         // install for a coverage claim it has no way to make.
@@ -894,11 +902,31 @@ fn serve_catalog_get_with_cache(
 
 fn serve_catalog_get_request(
     store: &CatalogStore,
+    request: CatalogGetRequest,
+    page_budget: usize,
+    frame_limit: usize,
+    oversized: &Mutex<Option<OversizedCatalog>>,
+    range: Option<&ProviderRange>,
+) -> Result<CatalogGetResponse, RouteError> {
+    serve_catalog_get_prepared(
+        store,
+        request,
+        page_budget,
+        frame_limit,
+        oversized,
+        range,
+        None,
+    )
+}
+
+fn serve_catalog_get_prepared(
+    store: &CatalogStore,
     mut request: CatalogGetRequest,
     page_budget: usize,
     frame_limit: usize,
     oversized: &Mutex<Option<OversizedCatalog>>,
     range: Option<&ProviderRange>,
+    prepared: Option<&dated_model::DatedModel>,
 ) -> Result<CatalogGetResponse, RouteError> {
     let source = parse_source(request.source.as_deref())?;
     if request.page_token.is_some() && !request.paged {
@@ -1054,6 +1082,16 @@ fn serve_catalog_get_request(
 
     let at = request.at_ms.map(Timestamp);
 
+    // A one-instant named read builds the same request-owned inputs that a
+    // timeline reuses across its boundaries. All served rules remain below.
+    let owned = match (prepared, at, &request.provider_id, &request.model_id) {
+        (None, Some(_), Some(provider), Some(model)) => Some(dated_model::DatedModel::load(
+            store, source, provider, model,
+        )?),
+        _ => None,
+    };
+    let prepared = prepared.or(owned.as_ref());
+
     let whole_key = WholeCatalogKey::new(store, &request, source, frame_limit)?;
 
     // Checked ONCE, before the branch, so both read paths inherit it.
@@ -1064,7 +1102,11 @@ fn serve_catalog_get_request(
     // separate times in this crate and diverged every time it was written
     // twice. Placing this above the split makes the divergence unwritable
     // rather than merely absent.
-    refuse_before_the_record(store, source, at)?;
+    if let Some(prepared) = prepared {
+        refuse_before_begin(prepared.begins, at)?;
+    } else {
+        refuse_before_the_record(store, source, at)?;
+    }
 
     if let Some(key) = &whole_key {
         // A short lock around one entry; no store read or render under the lock.
@@ -1092,10 +1134,20 @@ fn serve_catalog_get_request(
         // curated file. The upstream-wins rule is asked at the same instant:
         // a curated row stands aside wherever models.dev had the model present
         // then, exactly as a current read stands aside while it is present now.
-        for era in store
-            .curated_models_at(at.0, request.provider_id.as_deref())
-            .map_err(|e| store_error(&e))?
-        {
+        let eras = match prepared {
+            Some(prepared) => prepared
+                .curated
+                .iter()
+                .rev()
+                .find(|era| era.boundary_at_ms <= at.0)
+                .cloned()
+                .into_iter()
+                .collect(),
+            None => store
+                .curated_models_at(at.0, request.provider_id.as_deref())
+                .map_err(|e| store_error(&e))?,
+        };
+        for era in eras {
             if request
                 .model_id
                 .as_deref()
@@ -1106,7 +1158,16 @@ fn serve_catalog_get_request(
             let Some(claim) = era.claim else {
                 continue;
             };
-            if upstream_publishes_at(store, source, &era.provider_id, &era.model_id, Some(at))? {
+            let publishes = match prepared {
+                Some(prepared) => prepared
+                    .read_model(&era.provider_id, &era.model_id, at)
+                    .0
+                    .is_some_and(|model| model.is_present()),
+                None => {
+                    upstream_publishes_at(store, source, &era.provider_id, &era.model_id, Some(at))?
+                }
+            };
+            if publishes {
                 continue;
             }
             curated.push(std::borrow::Cow::Owned(crate::curated_models::from_store(
@@ -1199,6 +1260,7 @@ fn serve_catalog_get_request(
                 plane,
                 requested_prefixes.as_ref(),
                 at,
+                prepared,
             );
         }
     }
@@ -1210,7 +1272,10 @@ fn serve_catalog_get_request(
                 // The requested instant on a point-in-time read, as on every
                 // other path, so the response says which instant it describes.
                 resolved_at: at.unwrap_or_else(|| Timestamp(now_ms())),
-                catalog_version: store.catalog_version().map_err(|e| store_error(&e))?,
+                catalog_version: match prepared {
+                    Some(prepared) => prepared.version,
+                    None => store.catalog_version().map_err(|e| store_error(&e))?,
+                },
                 models: Vec::new(),
                 withheld: Vec::new(),
                 uncertain: Vec::new(),
@@ -1220,7 +1285,7 @@ fn serve_catalog_get_request(
     } else if let (Some(provider_id), Some(model_id)) =
         (request.provider_id.as_deref(), request.model_id.as_deref())
     {
-        single_model_snapshot(store, source, provider_id, model_id, at, &request)?
+        single_model_snapshot(store, source, provider_id, model_id, at, &request, prepared)?
     } else {
         let query = CatalogQuery {
             source,
@@ -1290,7 +1355,10 @@ fn serve_catalog_get_request(
     #[cfg(test)]
     CATALOG_RENDER_COUNT.with(|count| count.set(count.get() + 1));
     let historical_overrides = at
-        .map(|at| crate::fact_overrides::at(store, at.0, request.provider_id.as_deref()))
+        .map(|at| match prepared {
+            Some(prepared) => Ok(prepared.overrides_at(at)),
+            None => crate::fact_overrides::at(store, at.0, request.provider_id.as_deref()),
+        })
         .transpose()
         .map_err(|e| store_error(&e))?;
     let mut response = render(
@@ -1382,6 +1450,7 @@ fn serve_catalog_get_request(
         plane,
         requested_prefixes.as_ref(),
         at,
+        prepared,
     )?;
     // Observed plane rows keep their envelope when billing rules remove all
     // selected rates. Curated rows and plain bulk rows require a selected fact.
@@ -1950,10 +2019,14 @@ fn finish_plane_view(
     plane: Option<SelectedPlane>,
     requested_prefixes: Option<&Vec<String>>,
     at: Option<Timestamp>,
+    prepared: Option<&dated_model::DatedModel>,
 ) -> Result<CatalogGetResponse, RouteError> {
     let current = at.is_none();
     let historical_rules = at
-        .map(|at| crate::cache_lifetimes::at(store, at.0, None))
+        .map(|at| match prepared {
+            Some(prepared) => Ok(prepared.lifetimes_at(at).cloned().unwrap_or_default()),
+            None => crate::cache_lifetimes::at(store, at.0, None),
+        })
         .transpose()
         .map_err(|e| store_error(&e))?;
     let rules = historical_rules
@@ -2567,6 +2640,7 @@ fn single_model_snapshot(
     model_id: &str,
     at: Option<Timestamp>,
     request: &CatalogGetRequest,
+    prepared: Option<&dated_model::DatedModel>,
 ) -> Result<(CatalogSnapshot, Vec<fusiform_protocol::RetiredModelWire>), RouteError> {
     // Must agree with the bulk path's resolution, and the reason is a consumer
     // dependency rather than tidiness.
@@ -2590,9 +2664,12 @@ fn single_model_snapshot(
     // adding `provider_id` to a request says a different function now computes
     // the field a guard reads.
     let resolved_at = at.unwrap_or_else(|| Timestamp(now_ms()));
-    let (found, withheld) = store
-        .read_model(source, provider_id, model_id, Some(resolved_at))
-        .map_err(|e| store_error(&e))?;
+    let (found, withheld) = match prepared {
+        Some(prepared) => prepared.read_model(provider_id, model_id, resolved_at),
+        None => store
+            .read_model(source, provider_id, model_id, Some(resolved_at))
+            .map_err(|e| store_error(&e))?,
+    };
 
     // A name fusiform has never recorded is a REFUSAL, not an empty answer.
     //
@@ -2608,7 +2685,10 @@ fn single_model_snapshot(
     // fusiform recognises, and saying otherwise would send someone hunting a
     // typo they did not make.
     if found.is_none() {
-        if !provider_is_served(store, source, provider_id)? {
+        if !match prepared {
+            Some(prepared) => prepared.provider_known(),
+            None => provider_is_served(store, source, provider_id)?,
+        } {
             return Err(RouteError::no_coverage(format!(
                 "unknown provider {provider_id:?}: fusiform has never recorded \
                  a model under that id"
@@ -2621,21 +2701,32 @@ fn single_model_snapshot(
         // had the model, the curated reason is the one that says when a read
         // would answer.
         if let Some(at) = at {
-            if let Some(refusal) = curated_refusal_at(store, provider_id, model_id, at)? {
+            let refusal = match prepared {
+                Some(prepared) => {
+                    curated_refusal_from_eras(&prepared.curated, provider_id, model_id, at)
+                }
+                None => curated_refusal_at(store, provider_id, model_id, at)?,
+            };
+            if let Some(refusal) = refusal {
                 return Err(refusal);
             }
         }
-        if !store
-            .model_is_known(source, provider_id, model_id)
-            .map_err(|e| store_error(&e))?
-        {
+        if !match prepared {
+            Some(prepared) => prepared.model_known(),
+            None => store
+                .model_is_known(source, provider_id, model_id)
+                .map_err(|e| store_error(&e))?,
+        } {
             return Err(unknown_model(provider_id, model_id));
         }
         // Known, and absent at this instant: that is a real answer about a real
         // model, so it stays an empty result rather than becoming an error.
     }
 
-    let catalog_version = store.catalog_version().map_err(|e| store_error(&e))?;
+    let catalog_version = match prepared {
+        Some(prepared) => prepared.version,
+        None => store.catalog_version().map_err(|e| store_error(&e))?,
+    };
 
     let mut models = Vec::new();
     let mut retired: Vec<fusiform_protocol::RetiredModelWire> = Vec::new();
@@ -2749,21 +2840,25 @@ fn single_model_snapshot(
     // consumer asking for the catalog must get the same qualification on the
     // same fact. The single-model path is the one that silently lacked
     // correction handling for hours, and this is the same seam.
-    let uncertain = store
-        .uncertain_facts_at(source, resolved_at)
-        .map_err(|e| store_error(&e))?
-        .into_iter()
-        .filter(|((p, m, _), _)| p == provider_id && m == model_id)
-        .map(|((provider_id, model_id, fact_key), (prior, boundary))| {
-            fusiform_store::serve::UncertainFact {
-                provider_id,
-                model_id,
-                fact_key,
-                superseded_after: prior,
-                superseded_by: boundary,
-            }
-        })
-        .collect();
+    let uncertain = if let Some(prepared) = prepared {
+        prepared.uncertain_at(provider_id, model_id, resolved_at)
+    } else {
+        store
+            .uncertain_facts_at(source, resolved_at)
+            .map_err(|e| store_error(&e))?
+            .into_iter()
+            .filter(|((p, m, _), _)| p == provider_id && m == model_id)
+            .map(|((provider_id, model_id, fact_key), (prior, boundary))| {
+                fusiform_store::serve::UncertainFact {
+                    provider_id,
+                    model_id,
+                    fact_key,
+                    superseded_after: prior,
+                    superseded_by: boundary,
+                }
+            })
+            .collect()
+    };
 
     Ok((
         CatalogSnapshot {
@@ -3157,16 +3252,25 @@ fn curated_refusal_at(
     model_id: &str,
     at: Timestamp,
 ) -> Result<Option<RouteError>, RouteError> {
-    let id = format!("{provider_id}/{model_id}");
     let eras = store
         .curated_model_eras(provider_id, model_id)
         .map_err(|e| store_error(&e))?;
+    Ok(curated_refusal_from_eras(&eras, provider_id, model_id, at))
+}
+
+fn curated_refusal_from_eras(
+    eras: &[fusiform_store::CuratedModelEra],
+    provider_id: &str,
+    model_id: &str,
+    at: Timestamp,
+) -> Option<RouteError> {
+    let id = format!("{provider_id}/{model_id}");
     let Some(first) = eras.first() else {
         // The file carries the row but this store has no record of it: the
         // boot that records the file has not run, or failed.
         let in_file = crate::curated_models::models()
             .contains_key(&(provider_id.to_string(), model_id.to_string()));
-        return Ok(in_file.then(|| {
+        return in_file.then(|| {
             RouteError::no_coverage(format!(
                 "{id} is a curated row with no stored history: fusiform records \
                  a curated row when a build carrying it starts, and this store \
@@ -3175,26 +3279,26 @@ fn curated_refusal_at(
                  and review date",
                 at.0
             ))
-        }));
+        });
     };
     // Eras are oldest first, so the last one at or before the instant is the
     // one in force, as on the read path.
     match eras.iter().rev().find(|era| era.boundary_at_ms <= at.0) {
-        None => Ok(Some(RouteError::no_coverage(format!(
+        None => Some(RouteError::no_coverage(format!(
             "{id} is a curated row, and fusiform's record of it begins at {}: \
              fusiform did not serve it before then, so it has no value to give \
              at {}. A read at or after {} answers it, as does a read without \
              at_ms",
             first.boundary_at_ms, at.0, first.boundary_at_ms
-        )))),
-        Some(era) if era.claim.is_none() => Ok(Some(RouteError::no_coverage(format!(
+        ))),
+        Some(era) if era.claim.is_none() => Some(RouteError::no_coverage(format!(
             "{id} is a curated row fusiform stopped serving at {}: from then its \
              curated file no longer carried it, or held it, so fusiform has no \
              value to give at {}. A read before {} answers with the value served \
              then",
             era.boundary_at_ms, at.0, era.boundary_at_ms
-        )))),
-        Some(_) => Ok(None),
+        ))),
+        Some(_) => None,
     }
 }
 
@@ -6510,6 +6614,7 @@ fn aliased_response(
         &alias.target_model_id,
         None,
         &target_request,
+        None,
     )?;
     if !retired.is_empty() {
         return Ok(None);

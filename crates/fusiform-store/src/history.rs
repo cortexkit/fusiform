@@ -1,13 +1,45 @@
 //! Read-only candidate instants and key inventory for served history.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use fusiform_core::SourceId;
 use rusqlite::params;
 
-use crate::{CatalogError, CatalogStore};
+use crate::serve::HistoryRow;
+use crate::{CatalogError, CatalogStore, FactKey};
 
 impl CatalogStore {
+    /// One model's upstream eras, including later corrections and observation
+    /// windows needed to qualify earlier reads. Never loads other models.
+    pub fn model_fact_histories(
+        &self,
+        source: SourceId,
+        provider: &str,
+        model: &str,
+    ) -> Result<BTreeMap<FactKey, Vec<HistoryRow>>, CatalogError> {
+        self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT value_json, boundary_at_ms, boundary_kind, prior_observation_at_ms,
+                        corrected_fields_json, affected_from_ms, affected_until_ms,
+                        correction_reason, fact_key
+                 FROM era WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3
+                 ORDER BY fact_key, boundary_at_ms",
+            )?;
+            let rows = stmt.query_map(params![source.as_str(), provider, model], |row| {
+                Ok((
+                    FactKey::from_stored(row.get(8)?),
+                    crate::serve::history_row(row)?,
+                ))
+            })?;
+            let mut facts: BTreeMap<_, Vec<_>> = BTreeMap::new();
+            for row in rows {
+                let (key, era) = row?;
+                facts.entry(key).or_default().push(era);
+            }
+            Ok(facts)
+        })
+    }
+
     /// Every instant at which a dated model read can change, across all facts.
     /// Correction extents are closed, so the first readable instant is end + 1.
     pub fn model_history_boundaries(

@@ -8,6 +8,254 @@ use serde_json::{json, Value};
 
 const BOOT: i64 = 1_800_000_000_000;
 
+// Use the shipped catalog as background load: a tiny store hides queries that
+// scan other models once for every boundary of the requested model.
+fn oscillating_store() -> (CatalogStore, tempfile::TempDir) {
+    use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+    use fusiform_core::{BoundaryKind, ObservationOutcome, Timestamp};
+    use fusiform_store::{ingest::plan_ingest, NewObservation};
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    let mut document: Value =
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+    for index in 0..229 {
+        for (model, count) in [
+            ("deepseek/deepseek-v4.1-flash", 229),
+            ("moonshotai/kimi-k3", 224),
+        ] {
+            if index < count {
+                let row = &mut document["openrouter"]["models"][model];
+                assert!(row.is_object(), "seed is missing {model}");
+                row["cost"]["input"] = json!(0.1 + (index % 2) as f64 * 0.1);
+                row["cost"]["output"] = json!(0.3 + (index % 2) as f64 * 0.2);
+            }
+        }
+        let at = Timestamp(1_000 + index * 1_000);
+        let observation = store
+            .record_observation(&NewObservation {
+                source: SourceId::ModelsDev,
+                observed_at: at,
+                outcome: ObservationOutcome::Seeded,
+                normalized_hash: None,
+                raw_hash: None,
+                etag: None,
+                duration_ms: None,
+                detail: None,
+            })
+            .unwrap();
+        let catalog = fusiform_core::normalize_models_dev_with(
+            &serde_json::to_vec(&document).unwrap(),
+            &fusiform_module::input_audio::evidence(),
+        )
+        .unwrap()
+        .catalog;
+        let plan = plan_ingest(
+            &store,
+            &catalog,
+            at,
+            BoundaryKind::Asserted,
+            Some(observation),
+        )
+        .unwrap();
+        store.append_eras(&plan.eras).unwrap();
+    }
+    (store, dir)
+}
+
+#[test]
+#[ignore = "realistic-store timing; run explicitly in release mode"]
+fn served_history_many_boundaries_timing() {
+    let (store, _dir) = oscillating_store();
+    let mut slow = Vec::new();
+    for (provider, model, expected_hash) in [
+        (
+            "openrouter",
+            "deepseek/deepseek-v4.1-flash",
+            "1ffa586f4000a5671e406f7e3d5e2ad10ba85389b426027f23d6155c036c44ad",
+        ),
+        (
+            "openrouter",
+            "moonshotai/kimi-k3",
+            "c90083b5a13dd6d062ec480c0a51c240c616c844f5f3a2e4cd6962f362589d20",
+        ),
+        (
+            "anthropic",
+            "claude-sonnet-4-5",
+            "197064223bdcc5930dfa10d2328a3d0ba172188cdf7a7caf35795a2d9a3f4846",
+        ),
+    ] {
+        let body = serde_json::to_vec(&json!({
+            "provider_id":provider, "model_id":model, "fact_prefix":"rate.", "served":true
+        }))
+        .unwrap();
+        let start = std::time::Instant::now();
+        let response = serve_history(&store, &body).unwrap();
+        let elapsed = start.elapsed();
+        let bytes = serde_json::to_vec(&response).unwrap();
+        // Captured from the unoptimized resolver, not computed by another
+        // invocation of the implementation under test.
+        assert_eq!(blake3::hash(&bytes).to_hex().as_str(), expected_hash);
+        let segments: usize = response
+            .served_by_key
+            .as_ref()
+            .unwrap()
+            .values()
+            .map(Vec::len)
+            .sum();
+        eprintln!("history timing {provider}/{model}: {elapsed:?}, {} boundaries, {segments} segments, {} bytes, blake3 {}",
+            store.model_history_boundaries(SourceId::ModelsDev, provider, model).unwrap().len(),
+            bytes.len(), blake3::hash(&bytes));
+        if elapsed.as_secs_f64() >= 1.0 {
+            slow.push(format!("{provider}/{model}: {elapsed:?}"));
+        }
+    }
+    assert!(slow.is_empty(), "slow histories: {slow:?}");
+}
+
+#[test]
+fn served_history_many_boundaries_with_all_dated_layers() {
+    use fusiform_core::{BoundaryKind, Correction, FieldId, Timestamp, TokenClass};
+    use fusiform_protocol::HistorySource;
+    use fusiform_store::{FactKey, NewCacheLifetime, NewEra};
+    let (store, _dir) = super::cache_lifetimes::store(None);
+    overlays(&store);
+    let provider = "typesafe";
+    let model = "jev-1.13.0";
+    let rate = |units| json!({"state":"priced", "currency":"USD", "exponent":9, "units":units});
+    let era = |key: &str, value: Value, at| NewEra {
+        source: SourceId::ModelsDev,
+        provider_id: provider.into(),
+        model_id: model.into(),
+        fact_key: FactKey::from_stored(key.into()),
+        value_json: value.to_string(),
+        boundary_at: Timestamp(at),
+        boundary_kind: BoundaryKind::Asserted,
+        observation_id: None,
+    };
+    let start = BOOT + 1_000;
+    let mut eras = vec![era("existence", json!("present"), start)];
+    for index in 0..229 {
+        eras.push(era(
+            "rate.input",
+            rate(1_000 + index % 2 * 1_000),
+            start + index * 1_000,
+        ));
+        eras.push(era(
+            "rate.cache_write",
+            rate(1_250 + index % 2 * 1_250),
+            start + index * 1_000,
+        ));
+    }
+    eras.push(era("existence", json!("absent"), start + 229_000));
+    let mut correction = era("rate.input", rate(100), start + 240_000);
+    correction.boundary_kind = BoundaryKind::Corrected(Correction {
+        fields: vec![FieldId::Rate {
+            class: TokenClass::Input,
+        }],
+        affected_from: Timestamp(start + 4_000),
+        affected_until: Timestamp(start + 6_500),
+        reason: "synthetic correction window".into(),
+    });
+    eras.push(correction);
+    store.append_eras(&eras).unwrap();
+    let mut claim = store
+        .fact_overrides_at(BOOT, None)
+        .unwrap()
+        .into_iter()
+        .find_map(|era| era.claim)
+        .unwrap();
+    claim.provider_id = provider.into();
+    claim.model_id = model.into();
+    claim.fact_key = "rate.cached_input_audio".into();
+    claim.value = rate(42);
+    claim.replaces = Value::Null;
+    store
+        .append_fact_overrides(&[claim], start + 2_000)
+        .unwrap();
+    let rule = store
+        .cache_lifetimes_at(i64::MAX, Some("anthropic"))
+        .unwrap()
+        .into_iter()
+        .find(|era| era.model_id == "claude-opus-5-5")
+        .unwrap()
+        .rule
+        .unwrap();
+    store
+        .append_cache_lifetimes(
+            &[NewCacheLifetime {
+                provider_id: provider.into(),
+                model_id: model.into(),
+                rule,
+            }],
+            start + 3_000,
+        )
+        .unwrap();
+    store.append_cache_lifetimes(&[], start + 230_000).unwrap();
+    let mut curated = store
+        .curated_model_eras(provider, model)
+        .unwrap()
+        .last()
+        .unwrap()
+        .claim
+        .clone()
+        .unwrap();
+    curated.facts.insert("rate.input".into(), rate(999));
+    store
+        .append_curated_models(&[curated], &[], start + 231_000)
+        .unwrap();
+    let response = serve_history(
+        &store,
+        &serde_json::to_vec(&json!({
+            "provider_id":provider, "model_id":model, "fact_prefix":"rate.", "served":true
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let mut sources = BTreeSet::new();
+    let mut refusals = BTreeSet::new();
+    let mut checked = 0;
+    for (key, segments) in response.served_by_key.unwrap() {
+        for segment in segments {
+            if let Some(source) = segment.source {
+                sources.insert(format!("{source:?}"));
+            }
+            if let Some(reason) = segment.reason {
+                refusals.insert(format!("{reason:?}"));
+            }
+            assert_parity(&store, provider, model, &key, &segment, segment.from_ms);
+            if let Some(until) = segment.until_ms {
+                assert_parity(&store, provider, model, &key, &segment, until - 1);
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 450, "only {checked} segments checked");
+    for source in [
+        HistorySource::Upstream,
+        HistorySource::Override,
+        HistorySource::Curated,
+        HistorySource::CacheLifetime,
+    ] {
+        assert!(
+            sources.contains(&format!("{source:?}")),
+            "missing {source:?}"
+        );
+    }
+    assert_eq!(
+        refusals,
+        BTreeSet::from(["Correction".into(), "NoCoverage".into()])
+    );
+    eprintln!("many-boundary layered parity: {checked} segments");
+}
+
 fn overlays(store: &CatalogStore) {
     fusiform_module::fact_overrides::apply_to_store(
         store,
@@ -70,6 +318,32 @@ fn assert_parity(
             );
         }
         Ok(read) => {
+            if !read
+                .curated
+                .iter()
+                .any(|row| row.model == format!("{provider}/{model}"))
+            {
+                let expected: Vec<_> = store
+                    .uncertain_facts_at(SourceId::ModelsDev, fusiform_core::Timestamp(at))
+                    .unwrap()
+                    .into_iter()
+                    .filter(|((p, m, _), _)| p == provider && m == model)
+                    .map(|((provider_id, model_id, key), (prior, boundary))| {
+                        fusiform_protocol::UncertainFactWire {
+                            provider_id,
+                            model_id,
+                            fact_key: key.as_str().into(),
+                            superseded_after_ms: prior.0,
+                            superseded_by_ms: boundary.0,
+                        }
+                    })
+                    .collect();
+                assert_eq!(
+                    serde_json::to_value(&read.uncertain).unwrap(),
+                    serde_json::to_value(expected).unwrap(),
+                    "uncertainty for {label}"
+                );
+            }
             if let Some(withheld) = read
                 .withheld
                 .iter()

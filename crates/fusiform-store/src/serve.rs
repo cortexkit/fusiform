@@ -43,6 +43,34 @@ pub struct ModelFacts {
 }
 
 impl ModelFacts {
+    /// Remove corrected facts while preserving their refusal disclosures. The
+    /// caller supplies corrections covering the resolved instant, oldest first.
+    pub fn withhold_corrected(
+        &mut self,
+        corrections: &crate::CorrectionsByFact,
+    ) -> Vec<WithheldFact> {
+        let mut withheld = Vec::new();
+        self.facts.retain(|fact_key, _| {
+            let key = (
+                self.provider_id.clone(),
+                self.model_id.clone(),
+                fact_key.clone(),
+            );
+            if let Some(records) = corrections.get(&key) {
+                withheld.push(WithheldFact {
+                    provider_id: self.provider_id.clone(),
+                    model_id: self.model_id.clone(),
+                    fact_key: fact_key.clone(),
+                    corrections: records.clone(),
+                });
+                false
+            } else {
+                true
+            }
+        });
+        withheld
+    }
+
     /// Whether the catalog currently describes this model as existing.
     ///
     /// A model with no existence fact at all is treated as absent rather than
@@ -637,40 +665,20 @@ impl CatalogStore {
         // decided about corrections independently; two of them decided wrong.
         let corrections = self.all_corrections_covering(source, resolved_at)?;
 
-        let mut facts = BTreeMap::new();
-        let mut withheld = Vec::new();
-        for (fact_key, value_json) in rows {
-            let fact_key = FactKey::from_stored(fact_key);
-            if !corrections.is_empty() {
-                let key = (
-                    provider_id.to_string(),
-                    model_id.to_string(),
-                    fact_key.clone(),
-                );
-                if let Some(records) = corrections.get(&key) {
-                    withheld.push(WithheldFact {
-                        provider_id: provider_id.to_string(),
-                        model_id: model_id.to_string(),
-                        fact_key,
-                        corrections: records.clone(),
-                    });
-                    continue;
-                }
-            }
-            facts.insert(fact_key, value_json);
-        }
+        let mut model = ModelFacts {
+            provider_id: provider_id.to_string(),
+            model_id: model_id.to_string(),
+            facts: rows
+                .into_iter()
+                .map(|(key, value)| (FactKey::from_stored(key), value))
+                .collect(),
+        };
+        let withheld = model.withhold_corrected(&corrections);
 
         // A model whose every fact was withheld is not absent: it is a model
         // whose record is known bad. Returning None would report it as never
         // published, which is the misreading this whole path exists to prevent.
-        Ok((
-            Some(ModelFacts {
-                provider_id: provider_id.to_string(),
-                model_id: model_id.to_string(),
-                facts,
-            }),
-            withheld,
-        ))
+        Ok((Some(model), withheld))
     }
 
     fn point_in_time_rows_for_model(
@@ -743,6 +751,27 @@ impl HistoryRow {
     pub fn window(&self) -> Option<(Timestamp, Timestamp)> {
         self.prior_observation_at.map(|p| (p, self.boundary_at))
     }
+}
+
+pub(crate) fn history_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryRow> {
+    let boundary_at = Timestamp(r.get(1)?);
+    let correction = match r.get::<_, Option<String>>(4)? {
+        Some(fields_json) => Some(crate::CorrectionRecord {
+            corrected_at: boundary_at,
+            fields_json,
+            affected_from: Timestamp(r.get(5)?),
+            affected_until: Timestamp(r.get(6)?),
+            reason: r.get(7)?,
+        }),
+        None => None,
+    };
+    Ok(HistoryRow {
+        value_json: r.get(0)?,
+        boundary_at,
+        boundary_kind: r.get(2)?,
+        prior_observation_at: r.get::<_, Option<i64>>(3)?.map(Timestamp),
+        correction,
+    })
 }
 
 /// The recent polls with each one's composition, newest first.
@@ -910,28 +939,7 @@ impl CatalogStore {
             )?;
             let mapped = stmt.query_map(
                 params![source.as_str(), provider_id, model_id, fact.as_str()],
-                |r| {
-                    let boundary_at = Timestamp(r.get(1)?);
-                    // The schema's all-or-nothing CHECK guarantees these four
-                    // columns move together, so testing one is enough.
-                    let correction = match r.get::<_, Option<String>>(4)? {
-                        Some(fields_json) => Some(crate::CorrectionRecord {
-                            corrected_at: boundary_at,
-                            fields_json,
-                            affected_from: Timestamp(r.get(5)?),
-                            affected_until: Timestamp(r.get(6)?),
-                            reason: r.get(7)?,
-                        }),
-                        None => None,
-                    };
-                    Ok(HistoryRow {
-                        value_json: r.get(0)?,
-                        boundary_at,
-                        boundary_kind: r.get(2)?,
-                        prior_observation_at: r.get::<_, Option<i64>>(3)?.map(Timestamp),
-                        correction,
-                    })
-                },
+                history_row,
             )?;
             mapped.collect::<rusqlite::Result<Vec<_>>>()
         })?;

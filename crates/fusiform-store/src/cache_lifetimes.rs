@@ -26,6 +26,24 @@ pub struct CacheLifetimeEra {
 type Newest = (i64, Option<serde_json::Value>);
 
 impl CatalogStore {
+    /// All cache-lifetime eras for one model, oldest first, including tombstones.
+    pub fn model_cache_lifetime_eras(
+        &self,
+        provider: &str,
+        model: &str,
+    ) -> Result<Vec<CacheLifetimeEra>, CatalogError> {
+        let raw = self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT provider_id, model_id, boundary_at_ms, rule_json
+                 FROM cache_lifetime_era WHERE provider_id = ?1 AND model_id = ?2
+                 ORDER BY boundary_at_ms, id",
+            )?;
+            let rows = stmt.query_map(params![provider, model], raw_era)?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })?;
+        raw.into_iter().map(decode_era).collect()
+    }
+
     /// Record changed, added and removed compiled rules at boot. Unlike the
     /// frozen migration backfill, new rules start when first served, not at a
     /// source's establishment date. Clock regressions cannot reorder history;
@@ -121,34 +139,35 @@ impl CatalogStore {
                  ORDER BY c.provider_id, c.model_id",
             )?;
             let rows = stmt
-                .query_map(params![at_ms, provider_id], |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, i64>(2)?,
-                        r.get::<_, Option<String>>(3)?,
-                    ))
-                })?
+                .query_map(params![at_ms, provider_id], raw_era)?
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(rows)
         })?;
-        raw.into_iter()
-            .map(|(provider_id, model_id, boundary_at_ms, rule)| {
-                let rule = rule
-                    .map(|value| {
-                        serde_json::from_str(&value).map_err(|_| CatalogError::Decode {
-                            column: "cache_lifetime_era.rule_json",
-                            value,
-                        })
-                    })
-                    .transpose()?;
-                Ok(CacheLifetimeEra {
-                    provider_id,
-                    model_id,
-                    boundary_at_ms,
-                    rule,
-                })
-            })
-            .collect()
+        raw.into_iter().map(decode_era).collect()
     }
+}
+
+type RawEra = (String, String, i64, Option<String>);
+
+fn raw_era(r: &rusqlite::Row<'_>) -> rusqlite::Result<RawEra> {
+    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+}
+
+fn decode_era(
+    (provider_id, model_id, boundary_at_ms, rule): RawEra,
+) -> Result<CacheLifetimeEra, CatalogError> {
+    let rule = rule
+        .map(|value| {
+            serde_json::from_str(&value).map_err(|_| CatalogError::Decode {
+                column: "cache_lifetime_era.rule_json",
+                value,
+            })
+        })
+        .transpose()?;
+    Ok(CacheLifetimeEra {
+        provider_id,
+        model_id,
+        boundary_at_ms,
+        rule,
+    })
 }

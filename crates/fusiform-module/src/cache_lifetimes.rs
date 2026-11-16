@@ -134,9 +134,13 @@ pub fn at(
     at_ms: i64,
     provider_id: Option<&str>,
 ) -> Result<Rules, fusiform_store::CatalogError> {
-    store
-        .cache_lifetimes_at(at_ms, provider_id)?
-        .into_iter()
+    from_eras(store.cache_lifetimes_at(at_ms, provider_id)?)
+}
+
+pub(crate) fn from_eras(
+    eras: impl IntoIterator<Item = fusiform_store::CacheLifetimeEra>,
+) -> Result<Rules, fusiform_store::CatalogError> {
+    eras.into_iter()
         .filter_map(|era| {
             era.rule.map(|value| {
                 let rule = serde_json::from_value(value.clone()).map_err(|_| {

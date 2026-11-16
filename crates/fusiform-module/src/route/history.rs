@@ -77,10 +77,8 @@ pub(super) fn serve(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse
         }
         return Ok(response);
     }
-    let Some(begin) = store
-        .record_begins_at(source)
-        .map_err(|e| store_error(&e))?
-    else {
+    let prepared = dated_model::DatedModel::load(store, source, provider, model)?;
+    let Some(begin) = prepared.begins else {
         response.served = request.fact_key.as_ref().map(|_| Vec::new());
         response.fact_keys = request.fact_prefix.as_ref().map(|_| Vec::new());
         response.served_by_key =
@@ -92,15 +90,24 @@ pub(super) fn serve(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse
     let mut reads = Vec::new();
     let identity = format!("{provider}/{model}");
     for at in boundaries {
-        // The public dated-read entry point includes curated rows, correction
-        // withholding and TTL derivation. Overrides compare against the
-        // upstream value they replace; TTL prices need both input and
-        // cache-write rates for each context tier, so keep the full row.
-        let body = serde_json::to_vec(&serde_json::json!({
-            "source":source.as_str(), "provider_id":provider, "model_id":model, "at_ms":at
-        }))
-        .map_err(|e| RouteError::unavailable(e.to_string()))?;
-        let read = match serve_catalog_get(store, &body) {
+        // Keep the full row for override guards and TTL rate derivation, and
+        // use the dated-get resolver with inputs owned only by this request.
+        let request = CatalogGetRequest {
+            source: Some(source.as_str().into()),
+            provider_id: Some(provider.clone()),
+            model_id: Some(model.clone()),
+            at_ms: Some(at),
+            ..CatalogGetRequest::default()
+        };
+        let read = match serve_catalog_get_prepared(
+            store,
+            request,
+            CATALOG_PAGE_BYTES,
+            REPLY_FRAME_LIMIT_BYTES,
+            &OVERSIZED_CATALOG,
+            None,
+            Some(&prepared),
+        ) {
             Ok(read) => Some(read),
             Err(error) if error.code == fusiform_protocol::CODE_NO_COVERAGE => None,
             Err(error) => return Err(error),
@@ -111,7 +118,9 @@ pub(super) fn serve(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse
         reads.push((at, read));
     }
     if let Some(key) = &request.fact_key {
-        response.served = Some(timeline(store, source, provider, model, key, &reads)?);
+        response.served = Some(timeline(
+            store, source, provider, model, key, &reads, &prepared,
+        )?);
     } else {
         keys.retain(|key| key.starts_with(request.fact_prefix.as_deref().unwrap()));
         if request.served == Some(true) {
@@ -120,7 +129,7 @@ pub(super) fn serve(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse
                     .map(|key| {
                         Ok((
                             key.clone(),
-                            timeline(store, source, provider, model, key, &reads)?,
+                            timeline(store, source, provider, model, key, &reads, &prepared)?,
                         ))
                     })
                     .collect::<Result<_, RouteError>>()?,
@@ -149,6 +158,7 @@ fn timeline(
     model: &str,
     key: &str,
     reads: &[(i64, Option<CatalogGetResponse>)],
+    prepared: &dated_model::DatedModel,
 ) -> Result<Vec<HistorySegment>, RouteError> {
     let identity = format!("{provider}/{model}");
     let mut segments: Vec<HistorySegment> = Vec::new();
@@ -188,27 +198,16 @@ fn timeline(
                     });
                 } else {
                     let curated = if read.curated.iter().any(|row| row.model == identity) {
-                        store
-                            .curated_models_at(*at, Some(provider))
-                            .map_err(|e| store_error(&e))?
-                            .into_iter()
-                            .find(|row| row.model_id == model)
-                            .and_then(|row| row.claim)
+                        prepared
+                            .curated_at(Timestamp(*at))
                             .and_then(|row| row.facts.get(key).cloned())
                     } else {
                         None
                     };
-                    let mut upstream = store
-                        .recorded_value_at(
-                            source,
-                            provider,
-                            model,
-                            &FactKey::from_stored(key.into()),
-                            Timestamp(*at),
-                        )
-                        .map_err(|e| store_error(&e))?
-                        .map(|row| {
-                            let mut value = fact_for_the_wire(&row.value_json);
+                    let mut upstream = prepared
+                        .raw(&FactKey::from_stored(key.into()), Timestamp(*at))
+                        .map(|raw| {
+                            let mut value = fact_for_the_wire(raw);
                             name_the_provenance_of_a_pre_0_11_row(&mut value);
                             value
                         });

@@ -343,9 +343,13 @@ pub fn at(
     at_ms: i64,
     provider_id: Option<&str>,
 ) -> Result<FactOverrides, fusiform_store::CatalogError> {
-    Ok(store
-        .fact_overrides_at(at_ms, provider_id)?
-        .into_iter()
+    Ok(from_eras(store.fact_overrides_at(at_ms, provider_id)?))
+}
+
+pub(crate) fn from_eras(
+    eras: impl IntoIterator<Item = fusiform_store::FactOverrideEra>,
+) -> FactOverrides {
+    eras.into_iter()
         .filter_map(|era| {
             let r = era.claim?;
             Some((
@@ -370,7 +374,7 @@ pub fn at(
                 },
             ))
         })
-        .collect())
+        .collect()
 }
 
 pub fn overdue_at(rows: &FactOverrides, now_ms: i64) -> Vec<String> {
