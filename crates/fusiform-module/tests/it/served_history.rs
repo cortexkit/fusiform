@@ -256,6 +256,80 @@ fn served_history_many_boundaries_with_all_dated_layers() {
     eprintln!("many-boundary layered parity: {checked} segments");
 }
 
+#[test]
+fn served_history_clamped_curated_boundary_matches_sql_tie_break() {
+    let (store, _dir) = super::cache_lifetimes::store(None);
+    overlays(&store);
+    let provider = "typesafe";
+    let model = "jev-1.13.0";
+    let boundary = BOOT + 1_000;
+    let mut claim = store
+        .curated_model_eras(provider, model)
+        .unwrap()
+        .last()
+        .unwrap()
+        .claim
+        .clone()
+        .unwrap();
+    claim.facts.get_mut("rate.input").unwrap()["units"] = json!(111_000_000);
+    store
+        .append_curated_models(&[claim.clone()], &[], boundary)
+        .unwrap();
+
+    // Upstream fact eras cannot tie: their fact/instant key is unique. A
+    // regressing boot clock can clamp curated claims to the same boundary.
+    // SQL chooses the greatest (boundary, id); the prepared read reverses the
+    // history's ascending (boundary, id) order, choosing that same newest id.
+    claim.facts.get_mut("rate.input").unwrap()["units"] = json!(222_000_000);
+    store
+        .append_curated_models(&[claim], &[], boundary - 500)
+        .unwrap();
+    let eras = store.curated_model_eras(provider, model).unwrap();
+    let tied: Vec<_> = eras
+        .iter()
+        .filter(|era| era.boundary_at_ms == boundary)
+        .collect();
+    assert_eq!(
+        tied.len(),
+        2,
+        "the fixture must retain both equal-boundary claims"
+    );
+    assert_eq!(
+        tied[0].claim.as_ref().unwrap().facts["rate.input"]["units"],
+        111_000_000
+    );
+    assert_eq!(
+        tied[1].claim.as_ref().unwrap().facts["rate.input"]["units"],
+        222_000_000
+    );
+
+    let before = dated_get_with_sql_parity(&store, provider, model, boundary - 1).unwrap();
+    assert_eq!(
+        before.models[&format!("{provider}/{model}")]["rate.input"]["units"],
+        42_000_000
+    );
+    for at in [boundary, boundary + 1] {
+        let read = dated_get_with_sql_parity(&store, provider, model, at).unwrap();
+        assert_eq!(
+            read.models[&format!("{provider}/{model}")]["rate.input"]["units"],
+            222_000_000
+        );
+    }
+    for segment in history(&store, provider, model, "rate.input") {
+        assert_parity(
+            &store,
+            provider,
+            model,
+            "rate.input",
+            &segment,
+            segment.from_ms,
+        );
+        if let Some(until) = segment.until_ms {
+            assert_parity(&store, provider, model, "rate.input", &segment, until - 1);
+        }
+    }
+}
+
 fn overlays(store: &CatalogStore) {
     fusiform_module::fact_overrides::apply_to_store(
         store,
@@ -284,6 +358,77 @@ fn history(store: &CatalogStore, provider: &str, model: &str, key: &str) -> Vec<
     .unwrap()
 }
 
+fn dated_get_with_sql_parity(
+    store: &CatalogStore,
+    provider: &str,
+    model: &str,
+    at: i64,
+) -> Result<fusiform_protocol::CatalogGetResponse, fusiform_module::route::RouteError> {
+    let named = serve_catalog_get(
+        store,
+        &serde_json::to_vec(&json!({
+            "provider_id":provider, "model_id":model, "at_ms":at
+        }))
+        .unwrap(),
+    );
+    // A provider-scoped read still selects its rows and historical overlays in
+    // SQL. Both paths then use the same renderer, so this comparison checks the
+    // prepared resolver rather than comparing two uses of that resolver.
+    let sql = serve_catalog_get(
+        store,
+        &serde_json::to_vec(&json!({"provider_id":provider, "at_ms":at})).unwrap(),
+    );
+    let label = format!("{provider}/{model} at {at}");
+    match sql {
+        Err(error) => {
+            let named_error = named
+                .as_ref()
+                .expect_err("named read succeeded while SQL refused");
+            assert_eq!(named_error.code, error.code, "SQL refusal for {label}");
+        }
+        Ok(sql) => {
+            let identity = format!("{provider}/{model}");
+            let read = named.as_ref().ok();
+            assert_eq!(
+                read.and_then(|read| read.models.get(&identity)),
+                sql.models.get(&identity),
+                "SQL model row for {label}"
+            );
+            let withheld: Vec<_> = read
+                .into_iter()
+                .flat_map(|read| &read.withheld)
+                .filter(|row| row.model == identity)
+                .collect();
+            let sql_withheld: Vec<_> = sql
+                .withheld
+                .iter()
+                .filter(|row| row.model == identity)
+                .collect();
+            assert_eq!(
+                serde_json::to_value(withheld).unwrap(),
+                serde_json::to_value(sql_withheld).unwrap(),
+                "SQL withholding for {label}"
+            );
+            let uncertain: Vec<_> = read
+                .into_iter()
+                .flat_map(|read| &read.uncertain)
+                .filter(|row| row.provider_id == provider && row.model_id == model)
+                .collect();
+            let sql_uncertain: Vec<_> = sql
+                .uncertain
+                .iter()
+                .filter(|row| row.provider_id == provider && row.model_id == model)
+                .collect();
+            assert_eq!(
+                serde_json::to_value(uncertain).unwrap(),
+                serde_json::to_value(sql_uncertain).unwrap(),
+                "SQL uncertainty for {label}"
+            );
+        }
+    }
+    named
+}
+
 fn assert_parity(
     store: &CatalogStore,
     provider: &str,
@@ -292,13 +437,7 @@ fn assert_parity(
     segment: &HistorySegment,
     at: i64,
 ) {
-    let read = serve_catalog_get(
-        store,
-        &serde_json::to_vec(&json!({
-            "provider_id":provider, "model_id":model, "at_ms":at
-        }))
-        .unwrap(),
-    );
+    let read = dated_get_with_sql_parity(store, provider, model, at);
     let label = format!("{provider}/{model} {key} at {at}");
     match read {
         Err(error) => {
