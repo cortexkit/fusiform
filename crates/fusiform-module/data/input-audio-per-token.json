@@ -18,6 +18,13 @@
             "basis": "measured",
             "source_ref": "https://ai.google.dev/api/generate-content#UsageMetadata (Gemini API usageMetadata.promptTokensDetails billed audio input counts)",
             "quote": "62 billed gemini-3.8-flash requests on 2026-11-10, clips of 3.5–7 s: each billed ceil(25 × duration in seconds) audio input tokens; Google's audio page states 32 tokens per second, and its pricing page uses 25 per second for newer speech models"
+          },
+          {
+            "model_id": "gemini-4-hydrogen",
+            "value": 31,
+            "basis": "measured",
+            "source_ref": "https://ai.google.dev/api/generate-content#UsageMetadata (Gemini API usageMetadata.promptTokensDetails billed audio input counts)",
+            "quote": "20 billed gemini-4-hydrogen requests on 2026-11-16, WAV clips of 4.3–7.0 s: billed audio input tokens fit 30.49 × seconds + 0.75 (least squares), every clip between 30.2 and 31.1 tokens per second, for example 4,308 ms billed 133 tokens and 7,038 ms billed 216. 31 is the nearest whole rate that never undercounts a clip of 1.5 s or longer; Google's audio page states 32"
           }
         ]
       },

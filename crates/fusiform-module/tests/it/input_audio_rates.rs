@@ -28,6 +28,7 @@ const ROWS: &[(&str, &str)] = &[
     ("openai", "gpt-realtime-2.1"),
     ("google", "gemini-3.8-flash"),
     ("google", "gemini-4-argon"),
+    ("google", "gemini-4-hydrogen"),
     ("ofox", "google/gemini-3.8-flash"),
     ("aihubmix", "gemini-3.8-flash"),
     ("google-vertex", "gemini-3.8-flash"),
@@ -207,7 +208,9 @@ fn audio_tokens_per_second_uses_model_override_and_preserves_provider_default() 
     for (model, expected) in [
         ("gemini-3.8-flash", 25),
         ("gemini-4-argon", 32),
+        ("gemini-4-hydrogen", 31),
         ("antigravity-gemini-3.8-flash", 25),
+        ("antigravity-gemini-4-hydrogen", 31),
     ] {
         let response = read(
             &store,
