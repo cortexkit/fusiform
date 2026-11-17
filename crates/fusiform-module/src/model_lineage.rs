@@ -114,9 +114,7 @@ pub fn load_reporting_rejects(doc: &str) -> (ModelLineage, Vec<String>) {
             let valid_key = !key.is_empty()
                 && !key.chars().any(char::is_whitespace)
                 && match name {
-                    "models" => key
-                        .split_once('/')
-                        .is_some_and(|(provider, model)| !provider.is_empty() && !model.is_empty()),
+                    "models" => valid_model_key(&key),
                     "families" => !key.contains('/'),
                     "labs" => LABS.contains(&key.as_str()),
                     "providers" => LABS.contains(&key.as_str()) || key == "zai",
@@ -132,6 +130,14 @@ pub fn load_reporting_rejects(doc: &str) -> (ModelLineage, Vec<String>) {
         }
     }
     (rows, rejects)
+}
+
+/// Model keys have two nonempty parts; nested model paths remain valid.
+pub(crate) fn valid_model_key(key: &str) -> bool {
+    !key.chars().any(|c| c.is_whitespace() || c.is_control())
+        && key
+            .split_once('/')
+            .is_some_and(|(provider, model)| !provider.is_empty() && !model.is_empty())
 }
 
 pub fn classifications() -> &'static ModelLineage {

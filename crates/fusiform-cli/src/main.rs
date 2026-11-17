@@ -78,11 +78,12 @@ commands:
                             past window (previews by default; --commit writes)
   grade <model> --elo N --eq N --reason TEXT [--commit]
                             set chat quality grades (previews by default)
-  grade <model> --grade N --reason TEXT [--commit]
-                            set a non-chat grade, comparable within model.type
-  withdraw-grade <model> --reason TEXT [--commit]
-                            withdraw a grade, retaining its history
-  grades [--model <key>]     current grades, or one key's full history
+  grade <key> --kind K --grade N --reason TEXT [--commit]
+                            grade transcription, speech, image, video or search engines
+  withdraw-grade <key> [--kind K] --reason TEXT [--commit]
+                            withdraw that kind (or ELO/EQ), retaining history
+  grades [--model <key> | --prefix <prefix>]
+                            current grades (e.g. --prefix local:), or key history
   decommission <model> --reason TEXT [--commit]
                             veto routing (previews by default)
   restore <model> --reason TEXT [--commit]
@@ -230,6 +231,8 @@ struct Args {
     elo: Option<serde_json::Number>,
     eq: Option<serde_json::Number>,
     grade: Option<serde_json::Number>,
+    kind: Option<String>,
+    prefix: Option<String>,
     fact: Option<String>,
     fact_prefix: Option<String>,
     served: bool,
@@ -275,6 +278,12 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
     if args.command != "grade" && (args.elo.is_some() || args.eq.is_some() || args.grade.is_some())
     {
         return Err("--elo, --eq and --grade apply to grade only".into());
+    }
+    if args.kind.is_some() && !matches!(args.command.as_str(), "grade" | "withdraw-grade") {
+        return Err("--kind applies to grade and withdraw-grade only".into());
+    }
+    if args.prefix.is_some() && args.command != "grades" {
+        return Err("--prefix applies to grades only".into());
     }
     // A flag that does nothing must SAY so rather than be dropped.
     //
@@ -325,11 +334,25 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
                 .ok_or("a nonempty --reason is required")?;
             let mut body =
                 serde_json::json!({"model":model,"reason":reason,"dry_run":!args.commit});
+            if let Some(kind) = &args.kind {
+                if !matches!(
+                    kind.as_str(),
+                    "transcription" | "speech" | "image" | "video" | "search"
+                ) {
+                    return Err(
+                        "--kind must be transcription, speech, image, video or search".into(),
+                    );
+                }
+                if !matches!(args.command.as_str(), "grade" | "withdraw-grade") {
+                    return Err("--kind is only valid for grade and withdraw-grade".into());
+                }
+                body["kind"] = serde_json::json!(kind);
+            }
             if args.command == "grade" {
-                let dimensions = match (&args.elo, &args.eq, &args.grade) {
-                    (Some(elo), Some(eq), None) => vec![("elo", elo), ("eq", eq)],
-                    (None, None, Some(grade)) => vec![("grade", grade)],
-                    _ => return Err("grade needs either --elo and --eq (chat), or --grade (non-chat), never both".into()),
+                let dimensions = match (&args.elo, &args.eq, &args.grade, &args.kind) {
+                    (Some(elo), Some(eq), None, None) => vec![("elo", elo), ("eq", eq)],
+                    (None, None, Some(grade), Some(_)) => vec![("grade", grade)],
+                    _ => return Err("grade needs either --elo and --eq without --kind, or --kind K --grade N, never both".into()),
                 };
                 for (name, value) in dimensions {
                     if !value.as_f64().is_some_and(|n| n.is_finite() && n > 0.0) {
@@ -347,13 +370,19 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
                 Ok((tool, body))
             }
         }
-        "grades" => Ok((
-            fusiform_protocol::TOOL_QUALITY_GRADES,
-            args.model.as_ref().map_or_else(
-                || serde_json::json!({}),
-                |model| serde_json::json!({"model":model}),
-            ),
-        )),
+        "grades" => {
+            if args.model.is_some() && args.prefix.is_some() {
+                return Err("--model and --prefix are exclusive".into());
+            }
+            let mut body = serde_json::json!({});
+            if let Some(model) = &args.model {
+                body["model"] = serde_json::json!(model);
+            }
+            if let Some(prefix) = &args.prefix {
+                body["prefix"] = serde_json::json!(prefix);
+            }
+            Ok((fusiform_protocol::TOOL_QUALITY_GRADES, body))
+        }
         "marks" => Ok((
             fusiform_protocol::TOOL_QUALITY_MARKS,
             args.model.as_ref().map_or_else(
@@ -1761,6 +1790,8 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         elo: None,
         eq: None,
         grade: None,
+        kind: None,
+        prefix: None,
         fact: None,
         fact_prefix: None,
         served: false,
@@ -1789,6 +1820,8 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
             "--provider" => args.provider = Some(value()?),
             "--auth-method" => args.auth_method = Some(value()?),
             "--model" => args.model = Some(value()?),
+            "--kind" => args.kind = Some(value()?),
+            "--prefix" => args.prefix = Some(value()?),
             "--elo" | "--eq" | "--grade" => {
                 let number = serde_json::from_str::<serde_json::Number>(&value()?)
                     .map_err(|e| format!("{flag} needs a number: {e}"))?;
@@ -2318,8 +2351,13 @@ fn render_grades(response: &serde_json::Value) -> String {
                 .get("grade")
                 .filter(|grade| !grade.is_null())
                 .map_or_else(
-                    || format!("elo={} eq={}", row["elo"], row["eq"]),
-                    |grade| format!("grade={grade}"),
+                    || {
+                        row["kind"].as_str().map_or_else(
+                            || format!("elo={} eq={}", row["elo"], row["eq"]),
+                            |kind| format!("kind={kind}"),
+                        )
+                    },
+                    |grade| format!("kind={} grade={grade}", row["kind"].as_str().unwrap_or("?")),
                 );
             out.push_str(&format!(
                 "{}  {}{}  {}  {}: {}\n",
@@ -2477,13 +2515,14 @@ mod tests {
             super::request_for(&args)
         };
         for commit in [false, true] {
-            let mut extra = vec!["--grade", "87.500"];
+            let mut extra = vec!["--kind", "transcription", "--grade", "87.500"];
             if commit {
                 extra.push("--commit");
             }
             let (tool, body) = request(&extra).unwrap();
             assert_eq!(tool, "quality.grade");
             assert_eq!(body["grade"].to_string(), "87.500");
+            assert_eq!(body["kind"], "transcription");
             assert_eq!(body["dry_run"], !commit);
             assert!(body.get("elo").is_none() && body.get("eq").is_none());
         }
@@ -2496,6 +2535,9 @@ mod tests {
             vec!["--grade", "-1"],
             vec!["--grade", "1e9999"],
             vec!["--grade", "null"],
+            vec!["--grade", "1"],
+            vec!["--kind", "unknown", "--grade", "1"],
+            vec!["--kind", "speech", "--elo", "1", "--eq", "2"],
         ] {
             assert!(request(&extra).is_err(), "{extra:?}");
         }
@@ -2509,11 +2551,70 @@ mod tests {
             assert!(super::request_for(&args).is_err());
         }
         let rendered = super::render_grades(
-            &serde_json::json!({"grades":[{"model":"lab/transcribe","grade":87.5,"elo":null,"eq":null,"withdrawn":false,"graded_by":"operator","reason":"evaluation","recorded_at_ms":123}]}),
+            &serde_json::json!({"grades":[{"model":"lab/transcribe","kind":"transcription","grade":87.5,"elo":null,"eq":null,"withdrawn":false,"graded_by":"operator","reason":"evaluation","recorded_at_ms":123}]}),
         );
         assert!(rendered.contains("grade=87.5"), "{rendered}");
+        assert!(rendered.contains("kind=transcription"), "{rendered}");
         assert!(!rendered.contains("elo="), "{rendered}");
         assert!(super::USAGE.contains("--grade N"));
+    }
+
+    #[test]
+    fn quality_grade_kind_withdrawals_and_prefix_filters() {
+        let request = |words: &[&str]| {
+            let args = super::parse_args(words.iter().map(std::ffi::OsString::from))?;
+            super::request_for(&args)
+        };
+        let (_, body) = request(&[
+            "ck-fusiform",
+            "grade",
+            "exa/search",
+            "--kind",
+            "search",
+            "--grade",
+            "85",
+            "--reason",
+            "evaluation",
+        ])
+        .unwrap();
+        assert_eq!(body["kind"], "search");
+        let (tool, body) = request(&["ck-fusiform", "grades", "--prefix", "local:"]).unwrap();
+        assert_eq!(tool, "quality.grades");
+        assert_eq!(body, serde_json::json!({"prefix":"local:"}));
+        assert!(request(&[
+            "ck-fusiform",
+            "grades",
+            "--prefix",
+            "local:",
+            "--model",
+            "local:apple/transcriber"
+        ])
+        .is_err());
+        for commit in [false, true] {
+            let mut words = vec![
+                "ck-fusiform",
+                "withdraw-grade",
+                "local:apple/transcriber",
+                "--kind",
+                "transcription",
+                "--reason",
+                "withdrawn",
+            ];
+            if commit {
+                words.push("--commit");
+            }
+            let (tool, body) = request(&words).unwrap();
+            assert_eq!(tool, "quality.withdraw");
+            assert_eq!(body["kind"], "transcription");
+            assert_eq!(body["dry_run"], !commit);
+        }
+        for words in [
+            vec!["ck-fusiform", "get", "--prefix", "local:"],
+            vec!["ck-fusiform", "grades", "--kind", "image"],
+            vec!["ck-fusiform", "get", "--kind", "image"],
+        ] {
+            assert!(request(&words).is_err());
+        }
     }
     use super::*;
 

@@ -444,7 +444,7 @@ pub fn manifest() -> ModuleManifest {
             },
             Tool {
                 name: route::TOOL_QUALITY_GRADE.to_string(),
-                description: Some("Set live operator quality: elo and eq for chat, or grade for other model.type values. Uses a served canonical key, or a row without one. Previews unless dry_run is false.".into()),
+                description: Some("Set live operator quality: elo and eq for chat, or kind and grade for media or search engines. Catalog keys require the matching modality, or model.type=search for search; local:provider/model keys accept task grades only and never join catalog rows. Previews unless dry_run is false.".into()),
                 execution_mode: ExecutionMode::Mutating,
                 schema: serde_json::json!({
                     "type":"object",
@@ -452,23 +452,25 @@ pub fn manifest() -> ModuleManifest {
                         "model":{"type":"string"}, "elo":{"type":"number", "exclusiveMinimum":0},
                         "eq":{"type":"number", "exclusiveMinimum":0}, "reason":{"type":"string"},
                         "grade":{"type":"number", "exclusiveMinimum":0},
+                        "kind":{"type":"string", "enum":["transcription","speech","image","video","search"]},
                         "dry_run":{"type":"boolean", "default":true}
                     },
                     "required":["model","reason"], "additionalProperties":false,
                     "oneOf":[
-                        {"required":["elo","eq"], "not":{"required":["grade"]}},
-                        {"required":["grade"], "not":{"anyOf":[{"required":["elo"]},{"required":["eq"]}]}}
+                        {"required":["elo","eq"], "not":{"anyOf":[{"required":["grade"]},{"required":["kind"]}]}},
+                        {"required":["kind","grade"], "not":{"anyOf":[{"required":["elo"]},{"required":["eq"]}]}}
                     ]
                 }),
             },
             Tool {
                 name: route::TOOL_QUALITY_WITHDRAW.to_string(),
-                description: Some("Withdraw a current operator quality grade. History is retained. Previews unless dry_run is false.".into()),
+                description: Some("Withdraw a current operator quality grade: kind selects one task; omitted kind withdraws ELO/EQ. History is retained. Previews unless dry_run is false.".into()),
                 execution_mode: ExecutionMode::Mutating,
                 schema: serde_json::json!({
                     "type":"object",
                     "properties": {
                         "model":{"type":"string"}, "reason":{"type":"string"},
+                        "kind":{"type":"string", "enum":["transcription","speech","image","video","search"]},
                         "dry_run":{"type":"boolean", "default":true}
                     },
                     "required":["model","reason"], "additionalProperties":false
@@ -476,10 +478,11 @@ pub fn manifest() -> ModuleManifest {
             },
             Tool {
                 name: route::TOOL_QUALITY_GRADES.to_string(),
-                description: Some("List current quality grades, or one key's full history newest first, including withdrawals.".into()),
+                description: Some("List current quality grades, optionally filtered by key prefix (local: for local engines), or one model key's full history newest first including withdrawals. Prefix and model are exclusive.".into()),
                 execution_mode: ExecutionMode::Pure,
                 schema: serde_json::json!({
-                    "type":"object", "properties":{"model":{"type":"string"}},
+                    "type":"object", "properties":{"model":{"type":"string"},"prefix":{"type":"string"}},
+                    "not":{"required":["model","prefix"]},
                     "additionalProperties":false
                 }),
             },

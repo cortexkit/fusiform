@@ -92,6 +92,7 @@ fn decommission_import_serves_canonical_and_reseller_but_not_unmarked() {
     store
         .append_quality_grade(
             "openai/gpt-4.1",
+            None,
             Some(&fusiform_store::QualityGrade::Chat {
                 elo: serde_json::from_str("1200").unwrap(),
                 eq: serde_json::from_str("1300").unwrap(),
@@ -400,6 +401,7 @@ fn quality_grades_lists_current_or_newest_first_history_and_response_dates() {
     store
         .append_quality_grade(
             "reseller/own",
+            None,
             Some(&grade),
             "operator",
             "re-evaluation",
@@ -433,7 +435,7 @@ fn quality_grades_lists_current_or_newest_first_history_and_response_dates() {
         "1400.000"
     );
     store
-        .append_quality_grade("reseller/own", None, "operator", "withdrawn", 789)
+        .append_quality_grade("reseller/own", None, None, "operator", "withdrawn", 789)
         .unwrap();
     let history = quality::grades(&store, br#"{"model":"reseller/own"}"#).unwrap();
     assert!(history.grades[0].withdrawn);
@@ -456,12 +458,13 @@ const GRADES: &str = r#"{"graded_by":"operator","graded_at_ms":123,"purpose":"ro
 ]}"#;
 
 #[test]
-fn quality_grade_media_roundtrip_history_and_type_refusals() {
+fn quality_grade_media_roundtrip_history_and_dimension_refusals() {
     let (store, _dir) = fixture(true);
     for (model, canonical) in [("transcribe", Some("lab/transcribe")), ("own-audio", None)] {
         let mut facts = vec![
             ("existence", json!("present")),
             ("model.type", json!("transcription")),
+            ("capability.input_modalities", json!(["audio"])),
         ];
         if let Some(canonical) = canonical {
             facts.push(("model.canonical_id", json!(canonical)));
@@ -490,9 +493,10 @@ fn quality_grade_media_roundtrip_history_and_type_refusals() {
             &serde_json::to_vec(&json!({"name":name,"arguments":arguments})).unwrap(),
         )
     };
-    let args: Value =
-        serde_json::from_str(r#"{"model":"lab/transcribe","grade":87.500,"reason":"evaluation"}"#)
-            .unwrap();
+    let args: Value = serde_json::from_str(
+        r#"{"model":"lab/transcribe","kind":"transcription","grade":87.500,"reason":"evaluation"}"#,
+    )
+    .unwrap();
     let before = store.catalog_version().unwrap();
     let preview = serde_json::to_value(call("quality.grade", args.clone()).unwrap()).unwrap();
     assert_eq!(preview["dry_run"], true);
@@ -515,50 +519,37 @@ fn quality_grade_media_roundtrip_history_and_type_refusals() {
     ] {
         let response = get(&store, query);
         let facts = &response.models["reseller/transcribe"];
-        assert_eq!(facts["quality.grade"].to_string(), "87.500");
+        assert_eq!(facts["quality.grade.transcription"].to_string(), "87.500");
         assert!(!facts.contains_key("quality.elo") && !facts.contains_key("quality.eq"));
         assert!(response.quality_scores.is_some());
     }
     let past = get(&store, json!({"at_ms":1000}));
-    assert!(!past.models["reseller/transcribe"].contains_key("quality.grade"));
+    assert!(!past.models["reseller/transcribe"].contains_key("quality.grade.transcription"));
     assert!(past.quality_scores.is_none());
     let filtered = get(&store, json!({"fact_prefixes":["model."]}));
     assert!(filtered.quality_scores.is_none());
     call(
         "quality.grade",
-        json!({"model":"reseller/own-audio","grade":12,"reason":"own key","dry_run":false}),
+        json!({"model":"reseller/own-audio","kind":"transcription","grade":12,"reason":"own key","dry_run":false}),
     )
     .unwrap();
     assert_eq!(
-        get(&store, json!({})).models["reseller/own-audio"]["quality.grade"],
+        get(&store, json!({})).models["reseller/own-audio"]["quality.grade.transcription"],
         12
     );
-    for (arguments, kind) in [
-        (
-            json!({"model":"lab/shared","grade":1,"reason":"wrong kind"}),
-            "chat",
-        ),
-        (
-            json!({"model":"lab/transcribe","elo":1,"eq":2,"reason":"wrong kind"}),
-            "transcription",
-        ),
-        (
-            json!({"model":"lab/transcribe","elo":1,"reason":"wrong kind"}),
-            "transcription",
-        ),
-        (
-            json!({"model":"lab/transcribe","grade":1,"elo":2,"eq":3,"reason":"mixed"}),
-            "transcription",
-        ),
+    for arguments in [
+        json!({"model":"lab/shared","grade":1,"reason":"wrong kind"}),
+        json!({"model":"lab/transcribe","elo":1,"eq":2,"reason":"wrong kind"}),
+        json!({"model":"lab/transcribe","elo":1,"reason":"wrong kind"}),
+        json!({"model":"lab/transcribe","grade":1,"elo":2,"eq":3,"reason":"mixed"}),
     ] {
         let error = call("quality.grade", arguments).unwrap_err();
         assert_eq!(error.code, "bad_request");
-        assert!(error.message.contains(kind), "{}", error.message);
-        assert!(error.message.contains("model.type"), "{}", error.message);
+        assert!(error.message.contains("kind"), "{}", error.message);
     }
     let unknown = call(
         "quality.grade",
-        json!({"model":"missing/media","grade":1,"reason":"unknown"}),
+        json!({"model":"missing/media","kind":"transcription","grade":1,"reason":"unknown"}),
     )
     .unwrap_err();
     assert_eq!(unknown.code, "bad_request");
@@ -572,13 +563,14 @@ fn quality_grade_media_roundtrip_history_and_type_refusals() {
     }
     call(
         "quality.withdraw",
-        json!({"model":"lab/transcribe","reason":"withdrawn","dry_run":false}),
+        json!({"model":"lab/transcribe","kind":"transcription","reason":"withdrawn","dry_run":false}),
     )
     .unwrap();
-    assert!(!get(&store, json!({})).models["reseller/transcribe"].contains_key("quality.grade"));
+    assert!(!get(&store, json!({})).models["reseller/transcribe"]
+        .contains_key("quality.grade.transcription"));
     call(
         "quality.grade",
-        json!({"model":"lab/transcribe","grade":99,"reason":"regraded","dry_run":false}),
+        json!({"model":"lab/transcribe","kind":"transcription","grade":99,"reason":"regraded","dry_run":false}),
     )
     .unwrap();
     let history =
@@ -603,7 +595,7 @@ fn fixture(canonical: bool) -> (CatalogStore, tempfile::TempDir) {
     .unwrap();
     for row in store.quality_grades().unwrap() {
         store
-            .append_quality_grade(&row.model, None, "operator", "fixture isolation", 0)
+            .append_quality_grade(&row.model, None, None, "operator", "fixture isolation", 0)
             .unwrap();
     }
     for (provider, model, has_canonical) in [
@@ -650,6 +642,7 @@ fn seed_grades(store: &CatalogStore) {
         store
             .append_quality_grade(
                 row["model"].as_str().unwrap(),
+                None,
                 Some(&grade),
                 "operator",
                 "fixture",
@@ -795,4 +788,36 @@ fn quality_scores_pages_without_graded_rows_omit_disclosure() {
     assert!(second.quality_scores.is_some());
     scope_page(&mut response, &BTreeSet::from(["missing".into()]));
     assert!(response.quality_scores.is_none());
+}
+
+#[test]
+fn quality_scores_page_estimate_charges_each_task_disclosure_once() {
+    for kind in ["transcription", "speech", "image", "video", "search"] {
+        let rows = ProviderRows {
+            models: BTreeMap::from([(
+                "test/model".into(),
+                BTreeMap::from([(format!("quality.grade.{kind}"), json!(80))]),
+            )]),
+            ..Default::default()
+        };
+        let contribution = rows.contribution().unwrap();
+        let estimate = PageEstimate {
+            bytes: 0,
+            present: [false; 12],
+            pending_quality_bytes: 73,
+        }
+        .with_provider(&contribution)
+        .unwrap();
+        assert_eq!(
+            estimate.pending_quality_bytes, 0,
+            "{kind} must charge attribution"
+        );
+        assert_eq!(estimate.bytes, contribution.bytes + 73);
+        let twice = estimate.with_provider(&contribution).unwrap();
+        assert_eq!(
+            twice.bytes,
+            contribution.bytes * 2 + 74,
+            "the second provider adds its separator, not a second attribution"
+        );
+    }
 }

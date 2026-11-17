@@ -14,7 +14,7 @@ that keep them honest.
 | `speed-twins.json` | separately named speed servings of the same model, their wire ids and exact API proxy cards | at read time, current reads only; never stored |
 | `curated-models.json` | provider rows models.dev does not carry | at read time on current reads; written to `curated_model_era` at start, which point-in-time reads serve (§4) |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
-| store quality grades | operator-assigned ELO and EQ judgments for routing selection | at read time, current reads only (§11) |
+| store quality grades | operator-assigned ELO/EQ and per-kind media judgments for routing selection | at read time, current reads only (§11) |
 | `model-lineage.json` | curated routing diversity and cost-fallback groups | computed per row at read time, current reads only (§12) |
 | `wire-corrections.json` | sourced per-model endpoint corrections or withholding, and providers whose routed list is complete | at read time, current reads only (§9) |
 | `wire-families.json` | verified package-and-shape request protocols | at read time, current reads only (§13) |
@@ -1120,8 +1120,11 @@ historical, upstream-moved and upstream-published reads.
 
 These grades are the operator's judgments, not upstream facts or benchmark
 measurements. On chat rows, ELO describes general quality; EQ describes writing
-and judgment. A set, non-chat `model.type` instead uses one `quality.grade`,
-comparable only within that type, with higher values better.
+and judgment. Media grades use `quality.grade.transcription`,
+`quality.grade.speech`, `quality.grade.image`, `quality.grade.video` and
+`quality.grade.search`,
+comparable only within the same task, with higher values better. A row can
+carry several media grades alongside ELO/EQ, whatever its primary `model.type`.
 They guide routing selection, not request bytes. Grades live in the store's
 append-only `quality_grade_era` table and take effect immediately, without a
 build or restart. A binary upgrade never overwrites an operator judgment.
@@ -1132,13 +1135,14 @@ all original decimal tokens and the file's grading time are retained, with
 `graded_by: "operator"` and an import reason. Reopening a v8 store imports
 nothing, including when a model has subsequently been withdrawn.
 
-One grade belongs to the served `model.canonical_id`, shared across providers.
+Each catalog grade belongs to the served `model.canonical_id`, shared across providers.
 Only a row with no canonical id falls back to its own `provider/model` key
 (which can contain slashes inside the model id). An alias gets a grade only
 when its served canonical id matches; it does not borrow a target's own-key
 grade. Canonical links are applied before the join. Billing-plane reads use
 the same grades as plain reads. Read-pool queries select the newest row by
-insertion id; a withdrawal hides the grade. Point-in-time `at_ms` catalog
+insertion id per (key, kind); a withdrawal hides only that kind's grade.
+Point-in-time `at_ms` catalog
 reads still omit grades. Grade history is available separately.
 
 All scores must be finite positive JSON numbers. They travel as exact
@@ -1147,22 +1151,42 @@ TEXT, never SQLite REAL. The positivity/finite check does not rewrite the
 number: fractional trailing zeros survive storage and serving. A withdrawal
 stores null in every numeric column. Migration v10 preserves every v8 row while
 adding `grade`; a CHECK requires either the chat pair or the non-chat grade on
-an active era, and no numbers on a withdrawal. No non-chat values are seeded.
+an active era, and no numbers on a withdrawal. No media values are seeded.
+Migration v13 adds `kind` and requires one of the five task kinds for a task
+grade, and null for ELO/EQ. A legacy non-null `grade` refuses migration with
+its row count instead of inventing a kind; all old columns otherwise remain
+unchanged.
+
+Local engines use `local:<provider>/<model>` instead of catalog keys. Both
+parts must be nonempty, with no whitespace or control characters; extra slashes
+inside the model part are allowed. Local keys need no catalog row and never
+attach to one, even if its provider/model matches. Only media/search grades and their
+kind-scoped withdrawals are allowed; ELO/EQ and decommission marks are refused.
 
 Operator commands (preview by default; `--commit` appends one row):
 
 ```sh
 ck models grade <model> --elo N --eq N --reason TEXT [--commit]
-ck models grade <model> --grade N --reason TEXT [--commit]
-ck models withdraw-grade <model> --reason TEXT [--commit]
-ck models grades [--model <key>]
+ck models grade <key> --kind K --grade N --reason TEXT [--commit]
+ck models withdraw-grade <key> [--kind K] --reason TEXT [--commit]
+ck models grades [--model <key> | --prefix <prefix>]
 ```
 
-`quality.grade` validates that the key reaches a current served row and that
-the dimensions match its `model.type` (absent means chat). A preview
+`quality.grade` validates that a catalog key reaches a current served row.
+ELO/EQ requires chat rows (absent `model.type` means chat). A media/search `kind`
+requires at least one reached row whose modality list contains audio input
+(transcription), audio output (speech), image output (image), or video output
+(video). The lists are `capability.input_modalities` and
+`capability.output_modalities`, not the primary type. Search grades instead
+require `model.type=search` on at least one reached row, without a modality
+requirement. Local keys skip catalog
+lookup. A preview
 shows the current and proposed grade and the affected row count plus up to ten
 row ids. `quality.withdraw` refuses `no_coverage` without a current grade.
-`quality.grades` lists all current grades; with `model`, it returns that key's
+Omitted `kind` on withdrawal targets ELO/EQ, while a supplied kind targets only
+that media grade. `quality.grades` lists all current grades; with `prefix`,
+it lists current grades whose key starts with that literal string (routing
+uses `local:`). `prefix` and `model` are exclusive. With `model`, it returns that key's
 full history newest first, including times, reasons and withdrawals. A key with
 no history refuses `no_coverage`. The CLI calls those tools, never the database.
 
@@ -1172,7 +1196,7 @@ write nothing and do not advance it. This also invalidates cached page plans
 and oversized-response refusals. Consumers polling `catalog.status` therefore
 observe a live grade change without needing an upstream poll.
 
-`fact_prefixes` filters `quality.elo`, `quality.eq` and `quality.grade` normally,
+`fact_prefixes` filters `quality.elo`, `quality.eq` and `quality.grade.<kind>` normally,
 including `quality.`. A response containing any quality fact carries one `quality_scores`
 attribution object. Its `graded_at_ms` is the newest `recorded_at_ms` among the
 grades actually served in that response, not the date of an unrelated grade.

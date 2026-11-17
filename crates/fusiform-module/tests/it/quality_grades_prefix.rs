@@ -64,8 +64,8 @@ fn quality_grades_prefix_fixtures_match_real_serializer() {
     // This static sample records an older release's bytes (commit 39f97ac).
     // Current serving code cannot regenerate an older parser's refusal.
     const OLDER_SHA256: &str = "c6a66747e16f7548fda8da1d9f939abd119cabae672265526e116ee025a44185";
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("fixtures/quality-grades-prefix-v1");
+    let root =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/quality-grades-prefix-v1");
     let older = std::fs::read(root.join("prefix-unsupported-older.json")).unwrap();
     assert_eq!(format!("{:x}", Sha256::digest(&older)), OLDER_SHA256);
     let mut sums: String = files

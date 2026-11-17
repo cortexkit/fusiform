@@ -82,6 +82,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 12,
         statements: SCHEMA_V12,
     },
+    Migration {
+        version: 13,
+        statements: SCHEMA_V13,
+    },
 ];
 
 const SCHEMA_V1: &str = r#"
@@ -700,3 +704,28 @@ SELECT rule.value ->> 'provider_id', model.value,
 FROM doc, json_each(body, '$.rules') AS rule, json_each(rule.value, '$.model_ids') AS model;
 "#
 );
+
+// A task grade compares engines doing the same task, independently of the
+// catalog row's primary type. Preserve the original tokens and insertion ids.
+const SCHEMA_V13: &str = r#"
+CREATE TABLE quality_grade_era_v13 (
+    id             INTEGER PRIMARY KEY,
+    model          TEXT NOT NULL,
+    elo            TEXT,
+    eq             TEXT,
+    withdrawn      INTEGER NOT NULL CHECK (withdrawn IN (0, 1)),
+    graded_by      TEXT NOT NULL,
+    reason         TEXT NOT NULL,
+    recorded_at_ms INTEGER NOT NULL,
+    grade          TEXT,
+    kind           TEXT CHECK (kind IS NULL OR kind IN ('transcription', 'speech', 'image', 'video', 'search')),
+    CHECK ((withdrawn = 1 AND elo IS NULL AND eq IS NULL AND grade IS NULL)
+        OR (withdrawn = 0 AND elo IS NOT NULL AND eq IS NOT NULL AND grade IS NULL AND kind IS NULL)
+        OR (withdrawn = 0 AND elo IS NULL AND eq IS NULL AND grade IS NOT NULL AND kind IS NOT NULL))
+) STRICT;
+INSERT INTO quality_grade_era_v13 (id, model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms, grade)
+SELECT id, model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms, grade FROM quality_grade_era;
+DROP TABLE quality_grade_era;
+ALTER TABLE quality_grade_era_v13 RENAME TO quality_grade_era;
+CREATE INDEX quality_grade_era_key ON quality_grade_era(model, kind, id);
+"#;

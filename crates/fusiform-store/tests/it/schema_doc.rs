@@ -138,7 +138,7 @@ fn cache_lifetime_v12_backfills_populated_v11_and_reopen_preserves_history() {
         )
         .unwrap();
     assert!(outcome.store_ahead());
-    assert_eq!((outcome.recorded, outcome.chain_max), (12, 11));
+    assert_eq!((outcome.recorded, outcome.chain_max), (13, 11));
 }
 
 #[test]
@@ -163,8 +163,8 @@ fn decommission_v11_import_on_populated_v10_and_reopen() {
             INSERT INTO observation (source, observed_at_ms, outcome) VALUES ('models.dev', 1000, 'changed');
             INSERT INTO era (source, provider_id, model_id, fact_key, value_json, boundary_at_ms, boundary_kind)
                 VALUES ('models.dev','test','model','existence','"present"',1000,'seed');
-            INSERT INTO quality_grade_era (model, grade, withdrawn, graded_by, reason, recorded_at_ms)
-                VALUES ('test/model','87.500',0,'operator','evaluation',1000);
+            INSERT INTO quality_grade_era (model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms)
+                VALUES ('test/model','87.500','88.00',0,'operator','evaluation',1000);
         "#)).unwrap();
     }
     let watermark;
@@ -210,7 +210,7 @@ fn decommission_v11_import_on_populated_v10_and_reopen() {
         );
         assert_eq!(
             conn.query_row(
-                "SELECT grade FROM quality_grade_era WHERE model='test/model'",
+                "SELECT elo FROM quality_grade_era WHERE model='test/model'",
                 [],
                 |r| r.get::<_, String>(0)
             )
@@ -246,7 +246,7 @@ fn decommission_v11_import_on_populated_v10_and_reopen() {
         )
         .unwrap();
     assert!(outcome.store_ahead());
-    assert_eq!((outcome.recorded, outcome.chain_max), (12, 10));
+    assert_eq!((outcome.recorded, outcome.chain_max), (13, 10));
     let conn = rusqlite::Connection::open(dir.path().join("marks.db")).unwrap();
     for value in ["2", "-1", "'not-a-boolean'"] {
         assert!(conn.execute(&format!("INSERT INTO model_mark_era (model, decommissioned, marked_by, reason, recorded_at_ms) VALUES ('test/invalid', {value}, 'operator', 'invalid', 1)"), []).is_err());
@@ -354,6 +354,7 @@ fn quality_grade_v8_reopen_never_reimports_and_v7_reports_store_ahead() {
         store
             .append_quality_grade(
                 "openai/gpt-4",
+                None,
                 Some(&grade),
                 "operator",
                 "new evaluation",
@@ -362,7 +363,7 @@ fn quality_grade_v8_reopen_never_reimports_and_v7_reports_store_ahead() {
             .unwrap();
         assert_eq!(store.catalog_version().unwrap(), 5000);
         store
-            .append_quality_grade("openai/gpt-4", None, "operator", "withdrawn", 1)
+            .append_quality_grade("openai/gpt-4", None, None, "operator", "withdrawn", 1)
             .unwrap();
         assert_eq!(
             store.catalog_version().unwrap(),
@@ -403,7 +404,7 @@ fn quality_grade_v8_reopen_never_reimports_and_v7_reports_store_ahead() {
         outcome.store_ahead(),
         "the v7 binary's existing refusal guard must reject a newer store"
     );
-    assert_eq!(outcome.recorded, 12);
+    assert_eq!(outcome.recorded, 13);
     assert_eq!(outcome.chain_max, 7);
 }
 
@@ -490,7 +491,7 @@ fn fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it() {
         outcome.store_ahead(),
         "the existing v8 refusal guard must reject a newer store"
     );
-    assert_eq!((outcome.recorded, outcome.chain_max), (12, 8));
+    assert_eq!((outcome.recorded, outcome.chain_max), (13, 8));
     let outcome = old
         .migrate(
             fusiform_store::schema::NAMESPACE,
@@ -498,7 +499,7 @@ fn fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it() {
         )
         .unwrap();
     assert!(outcome.store_ahead(), "v9 must also refuse a newer store");
-    assert_eq!((outcome.recorded, outcome.chain_max), (12, 9));
+    assert_eq!((outcome.recorded, outcome.chain_max), (13, 9));
 }
 
 #[test]
@@ -515,7 +516,7 @@ fn quality_grade_v10_preserves_populated_v8_and_checks_exclusive_dimensions() {
             .collect::<Result<Vec<_>, _>>().unwrap()
     };
     let before = snapshot();
-    for migration in &fusiform_store::schema::MIGRATIONS[8..] {
+    for migration in &fusiform_store::schema::MIGRATIONS[8..10] {
         conn.execute_batch(migration.statements).unwrap();
     }
     assert_eq!(snapshot(), before);
@@ -633,7 +634,14 @@ fn quality_grade_and_version_commit_atomically() {
         eq: serde_json::from_str("2").unwrap(),
     };
     assert!(store
-        .append_quality_grade("test/model", Some(&grade), "operator", "evaluation", 5000)
+        .append_quality_grade(
+            "test/model",
+            None,
+            Some(&grade),
+            "operator",
+            "evaluation",
+            5000
+        )
         .is_err());
     assert!(store
         .quality_grade_history("test/model")

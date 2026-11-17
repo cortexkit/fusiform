@@ -65,6 +65,7 @@ fn grade(store: &CatalogStore, at: i64) {
     store
         .append_quality_grade(
             "synthetic/model",
+            None,
             Some(&QualityGrade::Chat {
                 elo: serde_json::from_str("1500").unwrap(),
                 eq: serde_json::from_str("1600.5").unwrap(),
@@ -105,6 +106,47 @@ async fn publishes_after_startup_advance_and_grade_commit() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn local_media_grade_and_withdrawal_wake_the_publisher() {
+    let (store, _dir) = store();
+    let fake = Arc::new(Fake::default());
+    let task = tokio::spawn(run_publisher(
+        store.clone(),
+        Arc::new(Signals::new()),
+        fake.clone(),
+    ));
+    settle().await;
+    store
+        .append_quality_grade(
+            "local:apple/phone-transcriber",
+            Some("transcription"),
+            Some(&QualityGrade::NonChat {
+                grade: serde_json::from_str("59").unwrap(),
+            }),
+            "operator",
+            "local evaluation",
+            200,
+        )
+        .unwrap();
+    settle().await;
+    assert_eq!(store.catalog_version().unwrap(), 200);
+    assert_eq!(fake.versions(), [0, 200]);
+    store
+        .append_quality_grade(
+            "local:apple/phone-transcriber",
+            Some("transcription"),
+            None,
+            "operator",
+            "withdrawal",
+            300,
+        )
+        .unwrap();
+    settle().await;
+    assert_eq!(store.catalog_version().unwrap(), 300);
+    assert_eq!(fake.versions(), [0, 200, 300]);
+    task.abort();
+}
+
+#[tokio::test(start_paused = true)]
 async fn every_version_advancing_write_wakes_the_publisher_after_commit() {
     let (store, _dir) = store();
     let fake = Arc::new(Fake::default());
@@ -129,7 +171,7 @@ async fn every_version_advancing_write_wakes_the_publisher_after_commit() {
         1
     );
     store
-        .append_quality_grade("synthetic/model", None, "operator", "withdrawal", 300)
+        .append_quality_grade("synthetic/model", None, None, "operator", "withdrawal", 300)
         .unwrap();
     settle().await;
     assert!(store

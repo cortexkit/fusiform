@@ -391,7 +391,11 @@ pub(crate) const ADDITION_ONLY: &[&str] = &[
 const QUALITY_ONLY: &[&str] = &[
     "quality.elo",
     "quality.eq",
-    "quality.grade",
+    "quality.grade.transcription",
+    "quality.grade.speech",
+    "quality.grade.image",
+    "quality.grade.video",
+    "quality.grade.search",
     "quality.decommissioned",
 ];
 

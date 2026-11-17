@@ -145,6 +145,11 @@ value would do to a consumer:
 | `provider.name` | advisory | the row's provider display name as a JSON string; otherwise no fact |
 | `quality.elo` | advisory | operator-assigned general quality score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
 | `quality.eq` | advisory | operator-assigned writing and judgment score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
+| `quality.grade.transcription` | advisory | operator-assigned transcription score, comparable only among transcription engines; current reads only (§5.9) |
+| `quality.grade.speech` | advisory | operator-assigned speech score, comparable only among speech engines; current reads only (§5.9) |
+| `quality.grade.image` | advisory | operator-assigned image score, comparable only among image engines; current reads only (§5.9) |
+| `quality.grade.video` | advisory | operator-assigned video score, comparable only among video engines; current reads only (§5.9) |
+| `quality.grade.search` | advisory | operator-assigned search score, comparable only among search engines; current reads only (§5.9) |
 | `limit.context` | byte-affecting | integer token count, or `null` |
 | `limit.output` | byte-affecting | integer token count, or `null`; a sourced current-read override is disclosed in `fact_overrides` (§5.8) |
 | `limit.audio_tokens_per_second` | advisory | integer audio tokens per second of input audio, curated from the provider's documentation; provider defaults join only current rows serving `rate.input_audio`; a model-specific curated row may store its own sourced figure, also available in that row's history; otherwise no fact |
@@ -900,10 +905,11 @@ id, never through a target's provider/model key. Billing-plane reads keep the
 plain read's grades for the same row.
 
 Chat rows (absent `model.type` or `chat`) receive `quality.elo` (general quality)
-and `quality.eq` (writing and judgment). Rows with a set non-chat `model.type`
-(image, speech, transcription, video, embedding, reranking, realtime) receive
-only `quality.grade`. Higher grades are better, and `quality.grade` is comparable
-only among rows with the same `model.type`. All three dimensions are
+and `quality.eq` (writing and judgment). Every current row can also receive
+`quality.grade.transcription`, `quality.grade.speech`, `quality.grade.image`
+`quality.grade.video` and `quality.grade.search` from its grade key, independently of its primary
+`model.type`. The bare `quality.grade` fact is retired. Higher media grades
+are better and compare only among engines doing the same task. All dimensions are
 advisory judgments for routing selection, not upstream measurements or
 instructions changing request bytes. Withdrawn grades are absent facts. Numbers
 retain their decimal representation without a binary-float conversion.
@@ -940,8 +946,8 @@ and `catalog.history` remains upstream fact history. See
 #### Operator grade tools
 
 `quality.grade {model, elo, eq, reason, dry_run?: true}` (chat) or
-`quality.grade {model, grade, reason, dry_run?: true}` (non-chat), and
-`quality.withdraw {model, reason, dry_run?: true}` are Mutating tools that preview
+`quality.grade {model, kind, grade, reason, dry_run?: true}` (media), and
+`quality.withdraw {model, kind?: task, reason, dry_run?: true}` are Mutating tools that preview
 by default. Only explicit `dry_run: false` appends a row. Each committed row
 advances `catalog_version` in the same transaction, using the poll-write rule
 `max(now_ms, current + 1)`; previews and the migration import do not advance it.
@@ -949,34 +955,53 @@ This version is also returned by `catalog.status`, so polling consumers and
 cached catalog page plans notice live grade changes.
 
 `model` names a canonical id carried by a current served row, or the row's own
-`provider/model` id when it has no canonical id. An unknown grade key refuses
-`bad_request`, naming the key and the unavailable `model.type`. The dimensions
-must match every affected row's served type: `grade` on chat, `elo` or `eq` on
-non-chat, mixed dimensions, and incomplete grades refuse `bad_request`, naming
-the row's `model.type` and required dimensions. All numbers must be finite and
+`provider/model` id when it has no canonical id. An unknown catalog grade key
+refuses `bad_request`. ELO/EQ still requires chat rows. Media grades require a
+`kind` from `transcription`, `speech`, `image`, `video`, `search`, and at least one reached
+row with the matching capability: `capability.input_modalities` contains
+`audio` for transcription; `capability.output_modalities` contains `audio`
+for speech, `image` for image, or `video` for video. Search instead requires
+`model.type=search` on at least one reached row, not a modality. Missing capabilities,
+mixed dimensions and incomplete grades refuse `bad_request`. All numbers must be finite and
 positive; invalid numbers and empty reasons refuse `bad_request`. Withdrawals
 without a current grade refuse `no_coverage`. Withdrawing a previously graded
-key remains possible after its last served row disappears.
+key remains possible after its last served row disappears. Omitted withdrawal
+`kind` targets ELO/EQ; a kind targets only that task's grade.
+
+`local:<provider>/<model>` identifies an independent local engine. Both parts
+are nonempty, without whitespace or control characters; nested model paths
+are allowed. Local keys are validated syntactically, never looked up in the
+catalog, and never attach to catalog rows. They permit media/search grades with kind
+and withdrawals of those grades only; ELO/EQ and decommission marks refuse
+`bad_request`. Local writes advance the catalog version and notify the bus
+publisher just like catalog-key writes.
 
 Both write responses have `dry_run`, `model`, `current` (the current grade, or
 null), `new` (the proposed or committed record), `affected_count`, and
 `affected_ids` (up to ten served row ids in lexical order). A grade record has
 `model`, `elo`, `eq`, `withdrawn`, `graded_by`, `reason`, and `recorded_at_ms`.
 Chat records carry numeric `elo` and `eq` and omit `grade`, retaining their
-existing wire shape. Non-chat records add numeric `grade` and set `elo` and `eq`
+existing wire shape. Media records add `kind` and numeric `grade`, and set `elo` and `eq`
 null. Withdrawal records set `withdrawn: true`, both chat numbers null, and omit
-`grade`.
+`grade`, retaining `kind` for a media withdrawal.
 
 CLI equivalents are `ck models grade <model> --elo N --eq N --reason TEXT`
-and `ck models grade <model> --grade N --reason TEXT`; both preview unless
+and `ck models grade <key> --kind K --grade N --reason TEXT`; both preview unless
 `--commit` is supplied. `ck models grades` and `withdraw-grade` handle either
-kind of judgment.
+kind of judgment; `withdraw-grade <key> [--kind K]` selects the judgment to withdraw.
 
-`quality.grades {model?: key}` is Pure. With no key it returns
-`{grades: [...]}` containing every current, non-withdrawn grade ordered by key.
+`quality.grades {model?: key, prefix?: string}` is Pure. `model` and `prefix`
+are exclusive. With neither it returns `{grades: [...]}` containing every
+current, non-withdrawn grade ordered by (key, kind). With `prefix`, it returns
+that current state only for keys starting with the literal prefix; `local:`
+is the local-engine refresh query. Empty results are `{grades: []}`.
 With a key it returns that key's full history newest first, withdrawals
 included; no history refuses `no_coverage`. Request and response types live in
 `fusiform-protocol`.
+
+Producer-generated samples and their SHA-256 manifest live in
+`crates/fusiform-module/fixtures/quality-grades-prefix-v1/`. Its older-release
+refusal sample is static; the current serializer regenerates the other three.
 
 #### Operator routing veto
 

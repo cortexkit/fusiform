@@ -1083,6 +1083,7 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
     store
         .append_quality_grade(
             "synthetic-lab/synthetic-model",
+            None,
             Some(&fusiform_store::QualityGrade::Chat {
                 elo: serde_json::from_str("1284").unwrap(),
                 eq: serde_json::from_str("1599.8").unwrap(),
@@ -1120,7 +1121,14 @@ pub(super) fn render_quality_tools() -> serde_json::Map<String, serde_json::Valu
     };
     let key = "synthetic/model";
     store
-        .append_quality_grade(key, Some(&grade), "operator", "initial evaluation", 123)
+        .append_quality_grade(
+            key,
+            None,
+            Some(&grade),
+            "operator",
+            "initial evaluation",
+            123,
+        )
         .unwrap();
     store
         .append_eras(&[fusiform_store::NewEra {
@@ -1238,8 +1246,9 @@ pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Valu
     .unwrap();
     let doc = serde_json::json!({"openai": {
         "id":"openai", "models": {
-            "gpt-transcribe":{"id":"gpt-transcribe", "type":"transcription"},
-            "synthetic-chat":{"id":"synthetic-chat"}
+            "gpt-transcribe":{"id":"gpt-transcribe", "type":"transcription", "modalities":{"input":["audio"],"output":["text"]}},
+            "synthetic-chat":{"id":"synthetic-chat"},
+            "synthetic-multimodal":{"id":"synthetic-multimodal", "type":"chat", "modalities":{"input":["audio"],"output":["text","audio","image","video"]}}
         }
     }});
     let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
@@ -1247,12 +1256,66 @@ pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Valu
         .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
+    store
+        .append_quality_grade(
+            "openai/synthetic-multimodal",
+            None,
+            Some(&fusiform_store::QualityGrade::Chat {
+                elo: serde_json::from_str("1500").unwrap(),
+                eq: serde_json::from_str("1600").unwrap(),
+            }),
+            "operator",
+            "synthetic chat evaluation",
+            123,
+        )
+        .unwrap();
+    for kind in ["transcription", "speech", "image", "video"] {
+        store
+            .append_quality_grade(
+                "openai/synthetic-multimodal",
+                Some(kind),
+                Some(&fusiform_store::QualityGrade::NonChat {
+                    grade: serde_json::from_str("95.00").unwrap(),
+                }),
+                "operator",
+                "synthetic media evaluation",
+                124,
+            )
+            .unwrap();
+    }
+    store
+        .append_quality_grade(
+            "local:apple/phone-transcriber",
+            Some("transcription"),
+            Some(&fusiform_store::QualityGrade::NonChat {
+                grade: serde_json::from_str("90.00").unwrap(),
+            }),
+            "operator",
+            "synthetic local evaluation",
+            125,
+        )
+        .unwrap();
+    store
+        .append_quality_grade(
+            "exa/search",
+            Some("search"),
+            Some(&fusiform_store::QualityGrade::NonChat {
+                grade: serde_json::from_str("85.00").unwrap(),
+            }),
+            "operator",
+            "synthetic search evaluation",
+            126,
+        )
+        .unwrap();
     let mut cases = serde_json::Map::new();
     for (label, name, arguments) in [
-        ("quality.grade — transcription commit", "quality.grade", serde_json::from_str::<serde_json::Value>(r#"{"model":"openai/gpt-transcribe","grade":87.500,"reason":"synthetic media evaluation","dry_run":false}"#).unwrap()),
+        ("quality.grade — transcription commit", "quality.grade", serde_json::from_str::<serde_json::Value>(r#"{"model":"openai/gpt-transcribe","kind":"transcription","grade":87.500,"reason":"synthetic media evaluation","dry_run":false}"#).unwrap()),
         ("catalog.get — operator transcription grade", "catalog.get", serde_json::json!({"provider_id":"openai","model_id":"gpt-transcribe","fact_prefixes":["model.type","quality."]})),
-        ("quality.grade — chat refuses single grade", "quality.grade", serde_json::json!({"model":"openai/synthetic-chat","grade":87,"reason":"wrong dimensions"})),
-        ("quality.grade — transcription refuses chat pair", "quality.grade", serde_json::json!({"model":"openai/gpt-transcribe","elo":87,"eq":88,"reason":"wrong dimensions"})),
+        ("quality.grade — refuses missing kind", "quality.grade", serde_json::json!({"model":"openai/synthetic-chat","grade":87,"reason":"missing kind"})),
+        ("quality.grade — refuses missing audio modality", "quality.grade", serde_json::json!({"model":"openai/synthetic-chat","kind":"transcription","grade":87,"reason":"missing audio"})),
+        ("catalog.get — chat and per-kind media grades", "catalog.get", serde_json::json!({"provider_id":"openai","model_id":"synthetic-multimodal","fact_prefixes":["model.type","quality."]})),
+        ("quality.grades — local prefix", "quality.grades", serde_json::json!({"prefix":"local:"})),
+        ("catalog.get — operator search grade", "catalog.get", serde_json::json!({"provider_id":"exa","model_id":"search","fact_prefixes":["model.type","quality."]})),
     ] {
         let request = serde_json::json!({"name":name,"arguments":arguments});
         let case = match serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()) {
@@ -1274,16 +1337,16 @@ pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Valu
     }
     assert_eq!(
         cases["catalog.get — operator transcription grade"]["response"]["models"]
-            ["openai/gpt-transcribe"]["quality.grade"]
+            ["openai/gpt-transcribe"]["quality.grade.transcription"]
             .to_string(),
         "87.500"
     );
     assert_eq!(
-        cases["quality.grade — chat refuses single grade"]["error"]["code"],
+        cases["quality.grade — refuses missing kind"]["error"]["code"],
         "bad_request"
     );
     assert_eq!(
-        cases["quality.grade — transcription refuses chat pair"]["error"]["code"],
+        cases["quality.grade — refuses missing audio modality"]["error"]["code"],
         "bad_request"
     );
     cases

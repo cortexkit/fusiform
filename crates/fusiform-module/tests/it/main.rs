@@ -26,6 +26,7 @@ mod manifest_probe;
 mod media_catalog;
 mod mode_rates;
 mod model_type;
+mod per_kind_quality;
 mod providers_vector;
 mod quality_grades_prefix;
 mod reasoning_options;

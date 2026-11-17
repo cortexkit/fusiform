@@ -4166,6 +4166,39 @@
       ]
     }
   },
+  "catalog.get — chat and per-kind media grades": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "model.type",
+          "quality."
+        ],
+        "model_id": "synthetic-multimodal",
+        "provider_id": "openai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": -1,
+      "models": {
+        "openai/synthetic-multimodal": {
+          "model.type": "chat",
+          "quality.elo": 1500,
+          "quality.eq": 1600,
+          "quality.grade.image": 95.00,
+          "quality.grade.speech": 95.00,
+          "quality.grade.transcription": 95.00,
+          "quality.grade.video": 95.00
+        }
+      },
+      "quality_scores": {
+        "graded_at_ms": -1,
+        "graded_by": "operator"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — curated search engines": {
     "request": [
       {
@@ -5242,6 +5275,44 @@
       ]
     }
   },
+  "catalog.get — operator search grade": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "model.type",
+          "quality."
+        ],
+        "model_id": "search",
+        "provider_id": "exa"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": -1,
+      "curated": [
+        {
+          "auth_methods": [
+            "apikey"
+          ],
+          "model": "exa/search",
+          "review_by_ms": 1799884800000,
+          "source_ref": "Read 2026-11-15. https://exa.ai/pricing: \"Each endpoint has a base price per request that includes up to 10 results.\" The `/search` (`auto`, `fast`) row states \"$7 / 1k requests\" as its base price and \"$1 / 1k results\" for each result above 10. Results above 10 incur that additional charge, which is not served as a rate. https://docs.exa.ai/reference/search, `type`: \"The search mode to use. Defaults to `auto`, a balanced mode recommended for most applications.\" Text and highlights inside `/search` have no separate published charge. https://exa.ai/docs/search/quickstart sets `type=\"auto\"` and `contents={\"highlights\": True}`; its example response itemises `\"costDollars\": { \"total\": 0.007, \"search\": { \"neural\": 0.007 } }`, the base $0.007. AI page summaries are separately priced, not included in this rate. No increment or minimum is stated, so both are unknown."
+        }
+      ],
+      "models": {
+        "exa/search": {
+          "model.type": "search",
+          "quality.grade.search": 85.00
+        }
+      },
+      "quality_scores": {
+        "graded_at_ms": -1,
+        "graded_by": "operator"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — operator transcription grade": {
     "request": {
       "arguments": {
@@ -5259,7 +5330,7 @@
       "models": {
         "openai/gpt-transcribe": {
           "model.type": "transcription",
-          "quality.grade": 87.500
+          "quality.grade.transcription": 87.500
         }
       },
       "quality_scores": {
@@ -8116,7 +8187,11 @@
         "quality.decommissioned",
         "quality.elo",
         "quality.eq",
-        "quality.grade",
+        "quality.grade.transcription",
+        "quality.grade.speech",
+        "quality.grade.image",
+        "quality.grade.video",
+        "quality.grade.search",
         "model.name",
         "model.lineage",
         "provider.name",
@@ -11568,20 +11643,6 @@
       }
     }
   },
-  "quality.grade — chat refuses single grade": {
-    "error": {
-      "code": "bad_request",
-      "message": "row \"openai/synthetic-chat\" has model.type=\"chat\"; quality.grade requires elo and eq only (no grade)"
-    },
-    "request": {
-      "arguments": {
-        "grade": 87,
-        "model": "openai/synthetic-chat",
-        "reason": "wrong dimensions"
-      },
-      "name": "quality.grade"
-    }
-  },
   "quality.grade — preview": {
     "request": {
       "arguments": {
@@ -11619,11 +11680,41 @@
       }
     }
   },
+  "quality.grade — refuses missing audio modality": {
+    "error": {
+      "code": "bad_request",
+      "message": "quality grade kind \"transcription\" requires capability.input_modalities containing \"audio\" on at least one current row reached by \"openai/synthetic-chat\""
+    },
+    "request": {
+      "arguments": {
+        "grade": 87,
+        "kind": "transcription",
+        "model": "openai/synthetic-chat",
+        "reason": "missing audio"
+      },
+      "name": "quality.grade"
+    }
+  },
+  "quality.grade — refuses missing kind": {
+    "error": {
+      "code": "bad_request",
+      "message": "quality.grade requires elo and eq without kind, or grade with a task kind"
+    },
+    "request": {
+      "arguments": {
+        "grade": 87,
+        "model": "openai/synthetic-chat",
+        "reason": "missing kind"
+      },
+      "name": "quality.grade"
+    }
+  },
   "quality.grade — transcription commit": {
     "request": {
       "arguments": {
         "dry_run": false,
         "grade": 87.500,
+        "kind": "transcription",
         "model": "openai/gpt-transcribe",
         "reason": "synthetic media evaluation"
       },
@@ -11642,26 +11733,12 @@
         "eq": null,
         "grade": 87.500,
         "graded_by": "operator",
+        "kind": "transcription",
         "model": "openai/gpt-transcribe",
         "reason": "synthetic media evaluation",
         "recorded_at_ms": -1,
         "withdrawn": false
       }
-    }
-  },
-  "quality.grade — transcription refuses chat pair": {
-    "error": {
-      "code": "bad_request",
-      "message": "row \"openai/gpt-transcribe\" has model.type=\"transcription\"; quality.grade requires grade only (no elo or eq)"
-    },
-    "request": {
-      "arguments": {
-        "elo": 87,
-        "eq": 88,
-        "model": "openai/gpt-transcribe",
-        "reason": "wrong dimensions"
-      },
-      "name": "quality.grade"
     }
   },
   "quality.grades — history": {
@@ -11689,6 +11766,29 @@
           "model": "synthetic/model",
           "reason": "initial evaluation",
           "recorded_at_ms": 123,
+          "withdrawn": false
+        }
+      ]
+    }
+  },
+  "quality.grades — local prefix": {
+    "request": {
+      "arguments": {
+        "prefix": "local:"
+      },
+      "name": "quality.grades"
+    },
+    "response": {
+      "grades": [
+        {
+          "elo": null,
+          "eq": null,
+          "grade": 90.00,
+          "graded_by": "operator",
+          "kind": "transcription",
+          "model": "local:apple/phone-transcriber",
+          "reason": "synthetic local evaluation",
+          "recorded_at_ms": 125,
           "withdrawn": false
         }
       ]

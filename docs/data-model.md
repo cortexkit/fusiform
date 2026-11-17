@@ -48,18 +48,20 @@ does not create.
 | 10 | `quality_grade_era.grade`, with an exclusive chat-pair or non-chat-number CHECK |
 | 11 | `model_mark_era`, with a one-time import of 107 operator decommissioned keys |
 | 12 | `cache_lifetime_era`, with a frozen first-served history of prompt-cache rules |
+| 13 | `quality_grade_era.kind`, separating media judgments and withdrawals by task |
 
 A store whose recorded schema version is newer than the running binary's chain
 is refused at open, and the error names the store's version
 (`schema_doc::a_store_written_by_a_newer_binary_is_refused`). Migrations 4, 6,
-7, 8, 9, 10, 11 and 12 are tested against stores that already hold rows
+7, 8, 9, 10, 11, 12 and 13 are tested against stores that already hold rows
 (`schema_doc::the_artifact_table_arrives_on_a_populated_store`,
 `schema_doc::the_plan_price_table_arrives_on_a_populated_store`,
 `schema_doc::the_curated_model_table_arrives_on_a_populated_store`,
 `schema_doc::quality_grade_v8_import_preserves_exact_rows_on_populated_v7`,
 `schema_doc::fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it`,
 `schema_doc::quality_grade_v10_preserves_populated_v8_and_checks_exclusive_dimensions`,
-`schema_doc::cache_lifetime_v12_backfills_populated_v11_and_reopen_preserves_history`).
+`schema_doc::cache_lifetime_v12_backfills_populated_v11_and_reopen_preserves_history`,
+`quality_kind_migration::v13_preserves_every_old_column_and_checks_kinds`).
 
 ## 2. Observations
 
@@ -336,26 +338,36 @@ serve the compiled file. The rules:
 ## 7b. Operator quality grades
 
 `quality_grade_era` is an append-only table separate from upstream fact eras.
-The newest insertion id for a model key is its current judgment, regardless
+The newest insertion id for a (model key, kind) is its current judgment, regardless
 of clock order. Columns:
 
 | Column | Meaning |
 | --- | --- |
 | `id` | integer primary key, insertion order |
-| `model` | served canonical id, or a provider/model row id with no canonical id |
+| `model` | served canonical id, a provider/model row id with no canonical id, or an independent `local:provider/model` engine key |
 | `elo`, `eq` | exact JSON number tokens stored as TEXT, both present for a chat judgment, otherwise both null |
-| `grade` | exact JSON number token stored as TEXT for a non-chat judgment, otherwise null |
+| `grade` | exact JSON number token stored as TEXT for a task judgment, otherwise null |
+| `kind` | `transcription`, `speech`, `image`, `video` or `search` for a task judgment or its withdrawal; null for ELO/EQ or its withdrawal |
 | `withdrawn` | 1 for a withdrawal with all numbers null, 0 for a complete judgment |
 | `graded_by` | operator attribution |
 | `reason` | why the grade was assigned or withdrawn |
 | `recorded_at_ms` | when the judgment was recorded, in epoch milliseconds |
 
 CHECK constraints require an active era to carry either `elo` and `eq` or
-`grade`, never both and never neither. Withdrawals carry no numbers; unknown
-withdrawal states are prohibited. Migration v10 rebuilds this same table to
+`grade`, never both and never neither. ELO/EQ requires null `kind`; a task
+grade requires a closed-set `kind`. Withdrawals carry no numbers and target
+only their own kind (null for ELO/EQ); unknown withdrawal states are prohibited.
+Migration v10 rebuilds this same table to
 replace the CHECK, copying every legacy column (including ids and exact TEXT
 tokens) unchanged and leaving `grade` null. One table retains a single insertion
 order for grades and withdrawals without merging histories across tables.
+Migration v13 rebuilds it again, copying every old column unchanged and adding
+null `kind`. Opening a pre-v13 store with any non-null legacy `grade` refuses
+with the row count rather than guessing a task; no legacy media grades were
+written to the live store. The ignored
+`quality_kind_migration::rehearse_v13_on_store_copy` test opens the copy named by
+`FUSIFORM_REHEARSAL_DB`, prints grade, mark and era table counts before and
+after migration, and runs `quick_check`.
 Migration v8 imports the frozen former grade file exactly
 once, retaining its original grading time; it never imports again on reopen.
 Live writes append through the writer fence and advance the catalog version
@@ -368,10 +380,15 @@ grades from current catalog reads but remain in `quality.grades` history.
 Catalog `at_ms` reads omit grades, as before; grade history is not upstream
 `catalog.history`. See [`curated-data.md`](curated-data.md) §11.
 
-Writes and serving select the dimensions by the row's served `model.type`:
-absent or `chat` uses the chat pair; a set non-chat type uses `grade`. All three
-numbers must be finite and positive. A non-chat grade is comparable only within
-the same `model.type`, with higher values better. No non-chat grades are seeded.
+ELO/EQ remains a chat judgment. Media writes require the kind's capability on
+at least one current row reached by the key: audio input for transcription,
+audio output for speech, image output for image, and video output for video.
+Search grades instead require `model.type=search` on at least one reached row.
+Serving attaches every live kind's grade independently of the row's primary
+`model.type`, so a chat row can carry ELO/EQ and transcription quality together.
+Local keys bypass catalog lookup, accept media/search grades and withdrawals only,
+and never attach to catalog rows. All numbers must be finite and positive;
+media grades compare only within a kind, with higher values better.
 
 ### Operator decommission marks
 

@@ -1009,9 +1009,17 @@ fn serve_catalog_get_prepared(
                 wide.push("capability.temperature".to_string());
                 wide.push("existence".to_string());
             }
-            if ["quality.elo", "quality.eq"]
-                .iter()
-                .any(|key| prefixes.iter().any(|p| key.starts_with(p)))
+            if [
+                "quality.elo",
+                "quality.eq",
+                "quality.grade.transcription",
+                "quality.grade.speech",
+                "quality.grade.image",
+                "quality.grade.video",
+                "quality.grade.search",
+            ]
+            .iter()
+            .any(|key| prefixes.iter().any(|p| key.starts_with(p)))
             {
                 // Keep the served identity until quality grades have been joined.
                 wide.push("model.canonical_id".to_string());
@@ -1814,10 +1822,11 @@ impl ProviderRows {
         // This serializes each provider's map entries and disclosure rows once,
         // including escaped keys, values, and separators within each collection.
         let bytes = compact_size(self)? - r#"{"models":{}}"#.len() - headers;
-        let has_quality = self
-            .models
-            .values()
-            .any(|facts| facts.contains_key("quality.elo") || facts.contains_key("quality.eq"));
+        let has_quality = self.models.values().any(|facts| {
+            facts.contains_key("quality.elo")
+                || facts.contains_key("quality.eq")
+                || facts.keys().any(|key| key.starts_with("quality.grade."))
+        });
         Ok(ProviderContribution {
             bytes,
             present,
@@ -2329,8 +2338,12 @@ fn apply_quality_scores(
         .quality_grades()
         .map_err(|e| store_error(&e))?
         .into_iter()
-        .map(|row| (row.model.clone(), row))
-        .collect();
+        .fold(BTreeMap::<String, Vec<_>>::new(), |mut scores, row| {
+            if !row.model.starts_with("local:") {
+                scores.entry(row.model.clone()).or_default().push(row);
+            }
+            scores
+        });
     let marks: BTreeMap<_, _> = store
         .model_marks()
         .map_err(|e| store_error(&e))?
@@ -2362,32 +2375,39 @@ fn apply_quality_scores(
             );
             newest = Some(newest.map_or(mark.recorded_at_ms, |n: i64| n.max(mark.recorded_at_ms)));
         }
-        let Some(row) = scores.get(&key) else {
+        let Some(rows) = scores.get(&key) else {
             continue;
         };
-        let grade = row
-            .grade
-            .as_ref()
-            .expect("current grades exclude withdrawals");
-        let non_chat = facts
-            .get("model.type")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|kind| kind != "chat");
-        let values = match grade {
-            fusiform_store::QualityGrade::Chat { elo, eq } if !non_chat => {
-                vec![("quality.elo", elo), ("quality.eq", eq)]
+        for row in rows {
+            let grade = row
+                .grade
+                .as_ref()
+                .expect("current grades exclude withdrawals");
+            let non_chat = facts
+                .get("model.type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|kind| kind != "chat");
+            let values = match grade {
+                fusiform_store::QualityGrade::Chat { elo, eq } if !non_chat => {
+                    vec![
+                        ("quality.elo".to_string(), elo),
+                        ("quality.eq".to_string(), eq),
+                    ]
+                }
+                fusiform_store::QualityGrade::NonChat { grade } => {
+                    let Some(kind) = &row.kind else { continue };
+                    vec![(format!("quality.grade.{kind}"), grade)]
+                }
+                _ => continue,
+            };
+            for (key, value) in values {
+                if !requested(&key) {
+                    continue;
+                }
+                facts.insert(key, serde_json::Value::Number(value.clone()));
+                newest =
+                    Some(newest.map_or(row.recorded_at_ms, |n: i64| n.max(row.recorded_at_ms)));
             }
-            fusiform_store::QualityGrade::NonChat { grade } if non_chat => {
-                vec![("quality.grade", grade)]
-            }
-            _ => continue,
-        };
-        for (key, value) in values {
-            if !requested(key) {
-                continue;
-            }
-            facts.insert(key.to_string(), serde_json::Value::Number(value.clone()));
-            newest = Some(newest.map_or(row.recorded_at_ms, |n: i64| n.max(row.recorded_at_ms)));
         }
     }
     response.quality_scores = newest.map(|graded_at_ms| fusiform_protocol::QualityScoresWire {
@@ -2402,7 +2422,7 @@ fn retain_quality_disclosure(response: &mut CatalogGetResponse) {
     if !response.models.values().any(|facts| {
         facts.contains_key("quality.elo")
             || facts.contains_key("quality.eq")
-            || facts.contains_key("quality.grade")
+            || facts.keys().any(|key| key.starts_with("quality.grade."))
             || facts.contains_key("quality.decommissioned")
     }) {
         response.quality_scores = None;

@@ -1142,9 +1142,29 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "operator-assigned writing and judgment score for routing selection, not request bytes; current reads only, disclosed in quality_scores.",
     },
     ServedFact {
-        key: "quality.grade",
+        key: "quality.grade.transcription",
         class: FactClass::Advisory,
-        note: "operator-assigned quality score for non-chat models, comparable only among rows with the same model.type; higher is better. Current reads only, disclosed in quality_scores.",
+        note: "operator-assigned transcription quality score, comparable only among transcription engines; higher is better. Current reads only, disclosed in quality_scores.",
+    },
+    ServedFact {
+        key: "quality.grade.speech",
+        class: FactClass::Advisory,
+        note: "operator-assigned speech quality score, comparable only among speech engines; higher is better. Current reads only, disclosed in quality_scores.",
+    },
+    ServedFact {
+        key: "quality.grade.image",
+        class: FactClass::Advisory,
+        note: "operator-assigned image quality score, comparable only among image engines; higher is better. Current reads only, disclosed in quality_scores.",
+    },
+    ServedFact {
+        key: "quality.grade.video",
+        class: FactClass::Advisory,
+        note: "operator-assigned video quality score, comparable only among video engines; higher is better. Current reads only, disclosed in quality_scores.",
+    },
+    ServedFact {
+        key: "quality.grade.search",
+        class: FactClass::Advisory,
+        note: "operator-assigned search quality score, comparable only among search engines; higher is better. Current reads only, disclosed in quality_scores.",
     },
     ServedFact {
         key: "model.name",
@@ -1866,11 +1886,13 @@ pub struct QualityScoresWire {
     pub graded_at_ms: i64,
 }
 
-/// Assign the chat pair or a non-chat grade. Previews unless dry_run is false.
+/// Assign the chat pair or a per-kind engine grade. Previews unless dry_run is false.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QualityGradeRequest {
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     #[serde(
         default,
         deserialize_with = "quality_number",
@@ -1905,6 +1927,8 @@ fn quality_number<'de, D: serde::Deserializer<'de>>(
 #[serde(deny_unknown_fields)]
 pub struct QualityWithdrawRequest {
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     pub reason: String,
     #[serde(default = "default_true")]
     pub dry_run: bool,
@@ -1915,12 +1939,16 @@ pub struct QualityWithdrawRequest {
 pub struct QualityGradesRequest {
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
 }
 
 /// An operator judgment, or a withdrawal with no numbers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QualityGradeWire {
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     pub elo: Option<serde_json::Number>,
     pub eq: Option<serde_json::Number>,
     #[serde(skip_serializing_if = "Option::is_none")]

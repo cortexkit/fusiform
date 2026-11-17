@@ -384,6 +384,30 @@ impl CatalogStore {
     /// alongside the real one.
     pub fn open(descriptor: &StorageDescriptor) -> Result<Self, CatalogError> {
         let inner = open_sqlite(descriptor)?;
+        // Older media judgments did not record a task. Refuse rather than
+        // inventing one while migrating their history to the per-kind schema.
+        let legacy_media_grades: i64 = inner.with_conn_fenced(|conn| {
+            let needs_kind: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('quality_grade_era') WHERE name = 'grade') \
+                 AND NOT EXISTS(SELECT 1 FROM pragma_table_info('quality_grade_era') WHERE name = 'kind')",
+                [],
+                |row| row.get(0),
+            )?;
+            if needs_kind {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM quality_grade_era WHERE grade IS NOT NULL",
+                    [],
+                    |row| row.get(0),
+                )
+            } else {
+                Ok(0)
+            }
+        })?;
+        if legacy_media_grades != 0 {
+            return Err(CatalogError::Invariant(format!(
+                "cannot migrate quality grades to schema v13: {legacy_media_grades} legacy media grade rows have no kind"
+            )));
+        }
         let outcome = inner.migrate(schema::NAMESPACE, schema::MIGRATIONS)?;
 
         // A store written by a NEWER binary is refused, rather than served from.

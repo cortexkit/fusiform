@@ -43,6 +43,7 @@ impl QualityGrade {
 pub struct QualityGradeEra {
     pub id: i64,
     pub model: String,
+    pub kind: Option<String>,
     pub grade: Option<QualityGrade>,
     pub graded_by: String,
     pub reason: String,
@@ -95,6 +96,7 @@ fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<QualityGradeEra> {
         graded_by: row.get(4)?,
         reason: row.get(5)?,
         recorded_at_ms: row.get(6)?,
+        kind: row.get(8)?,
     })
 }
 
@@ -156,6 +158,7 @@ impl CatalogStore {
     pub fn append_quality_grade(
         &self,
         model: &str,
+        kind: Option<&str>,
         grade: Option<&QualityGrade>,
         graded_by: &str,
         reason: &str,
@@ -164,8 +167,8 @@ impl CatalogStore {
         let id = self.inner.with_conn_fenced(|tx| {
             tx.execute(
                 "INSERT INTO quality_grade_era \
-                 (model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms, grade) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 (model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms, grade, kind) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     model,
                     grade.and_then(QualityGrade::elo).map(ToString::to_string),
@@ -174,7 +177,8 @@ impl CatalogStore {
                     graded_by,
                     reason,
                     recorded_at_ms,
-                    grade.and_then(QualityGrade::grade).map(ToString::to_string)
+                    grade.and_then(QualityGrade::grade).map(ToString::to_string),
+                    kind
                 ],
             )?;
             crate::advance_catalog_version_in(tx, None, fusiform_core::Timestamp(recorded_at_ms))?;
@@ -188,10 +192,10 @@ impl CatalogStore {
     pub fn quality_grades(&self) -> Result<Vec<QualityGradeEra>, CatalogError> {
         self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms, grade \
+                "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms, grade, kind \
                  FROM quality_grade_era q WHERE withdrawn = 0 \
-                 AND id = (SELECT MAX(id) FROM quality_grade_era WHERE model = q.model) \
-                 ORDER BY model",
+                 AND id = (SELECT MAX(id) FROM quality_grade_era WHERE model = q.model AND kind IS q.kind) \
+                 ORDER BY model, kind",
             )?;
             let rows = stmt.query_map([], decode)?.collect();
             rows
@@ -202,7 +206,7 @@ impl CatalogStore {
     pub fn quality_grade_history(&self, model: &str) -> Result<Vec<QualityGradeEra>, CatalogError> {
         self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms, grade \
+                "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms, grade, kind \
                  FROM quality_grade_era WHERE model = ?1 ORDER BY id",
             )?;
             let rows = stmt.query_map([model], decode)?.collect();
