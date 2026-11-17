@@ -1,0 +1,13 @@
+{
+  "error": {
+    "code": "bad_request",
+    "message": "model and prefix are exclusive"
+  },
+  "request": {
+    "arguments": {
+      "model": "local:apple/phone-transcriber",
+      "prefix": "local:"
+    },
+    "name": "quality.grades"
+  }
+}

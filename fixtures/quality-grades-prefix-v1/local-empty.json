@@ -1,0 +1,11 @@
+{
+  "request": {
+    "arguments": {
+      "prefix": "local:"
+    },
+    "name": "quality.grades"
+  },
+  "response": {
+    "grades": []
+  }
+}

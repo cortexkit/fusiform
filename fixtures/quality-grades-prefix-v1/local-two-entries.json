@@ -1,0 +1,34 @@
+{
+  "request": {
+    "arguments": {
+      "prefix": "local:"
+    },
+    "name": "quality.grades"
+  },
+  "response": {
+    "grades": [
+      {
+        "elo": null,
+        "eq": null,
+        "grade": 59,
+        "graded_by": "operator",
+        "kind": "transcription",
+        "model": "local:apple/phone-transcriber",
+        "reason": "Synthetic local engine evaluation",
+        "recorded_at_ms": 1000,
+        "withdrawn": false
+      },
+      {
+        "elo": null,
+        "eq": null,
+        "grade": 72.50,
+        "graded_by": "operator",
+        "kind": "speech",
+        "model": "local:example/offline-speaker",
+        "reason": "Synthetic local engine evaluation",
+        "recorded_at_ms": 1001,
+        "withdrawn": false
+      }
+    ]
+  }
+}

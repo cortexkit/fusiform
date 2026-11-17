@@ -27,6 +27,7 @@ mod media_catalog;
 mod mode_rates;
 mod model_type;
 mod providers_vector;
+mod quality_grades_prefix;
 mod reasoning_options;
 mod request_serving;
 mod restart_adoption;
