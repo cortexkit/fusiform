@@ -502,6 +502,7 @@ mod tests {
         ("deepseek", "search"),
         ("elevenlabs", "eleven_flash_v2_5"),
         ("exa", "search"),
+        ("google", "gemini-3.5-transcribe"),
         ("google", "gemini-3.5-transcribe-live"),
         ("google", "gemini-3.8-flash-tts"),
         ("google", "gemini-omni-1.2-flash"),

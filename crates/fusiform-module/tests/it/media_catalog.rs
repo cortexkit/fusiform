@@ -10,7 +10,7 @@ pub(crate) fn expected_curated_wire(model: &str) -> std::collections::BTreeMap<S
     // request-format token, so each declares an endpoint and no family.
     let endpoint_only = match model {
         "openai/gpt-transcribe" | "openai/gpt-live-transcribe" => Some("https://api.openai.com/v1"),
-        "google/gemini-3.5-transcribe-live" => {
+        "google/gemini-3.5-transcribe" | "google/gemini-3.5-transcribe-live" => {
             Some("https://generativelanguage.googleapis.com/v1beta")
         }
         _ => None,

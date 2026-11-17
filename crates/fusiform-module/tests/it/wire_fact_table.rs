@@ -234,6 +234,7 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             let expected = match identity.as_str() {
                 "google/gemini-3.8-flash"
                 | "google/antigravity-gemini-3.8-flash"
+                | "google/gemini-3.5-transcribe"
                 | "google/gemini-3.5-transcribe-live" => 25,
                 "google/gemini-4-hydrogen" | "google/antigravity-gemini-4-hydrogen" => 31,
                 _ => 32,

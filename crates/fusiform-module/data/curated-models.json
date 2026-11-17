@@ -166,6 +166,25 @@
       "review_by_ms": 1799712000000
     },
     {
+      "provider_id": "google",
+      "model_id": "gemini-3.5-transcribe",
+      "auth_methods": ["apikey"],
+      "facts": {
+        "existence": "present",
+        "model.name": "Gemini 3.5 Transcribe",
+        "model.type": "transcription",
+        "capability.input_modalities": ["audio"],
+        "capability.output_modalities": ["text"],
+        "rate.input_audio": {"state": "priced", "units": 2000000000, "exponent": 9, "currency": "USD", "unit_provenance": {"kind": "stated"}},
+        "rate.output": {"state": "priced", "units": 12000000000, "exponent": 9, "currency": "USD", "unit_provenance": {"kind": "stated"}},
+        "limit.audio_tokens_per_second": 25,
+        "wire.api": {"value": "https://generativelanguage.googleapis.com/v1beta", "from": "curated"}
+      },
+      "source_ref": "Read 2026-11-17. https://ai.google.dev/gemini-api/docs/pricing#gemini-3.5-transcribe: \"Gemini 3.5 Transcribe\", \"Our speech-to-text model with automatic language detection, speaker diarization, word-level timestamps, and custom vocabulary biasing.\"; \"Paid Tier, per 1M tokens in USD\"; Input price \"$2.00 or $0.003/min* (audio)\"; \"Output price (including thinking tokens)\" \"$12.00 or $0.002/min* (text)\". \"Estimated pricing is based on 25 audio tokens per second for input and 175 text tokens per minute for output, for an effective blended rate of ~$0.005 per min for Transcribe.\" A Free Tier is listed as \"Free of charge\" for input and output. Served rates are the paid per-million-token prices; the per-minute figures are Google's estimates, not the billing unit. https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe: model code \"gemini-3.5-transcribe\", \"Inputs Audio (up to 1 hour)\", \"Output Text, Word annotations\", versions \"gemini-3.5-transcribe (Unary)\" and \"gemini-3.5-transcribe-live (Live API)\". models.dev lists it only under a gateway, not under Google. The curated API base matches the Gemini API base served for google/gemini-3.5-transcribe-live; no unverified wire.family is served.",
+      "established_at_ms": 1794873600000,
+      "review_by_ms": 1800057600000
+    },
+    {
       "provider_id": "openai",
       "model_id": "gpt-image-2.6-flare",
       "auth_methods": ["apikey"],
