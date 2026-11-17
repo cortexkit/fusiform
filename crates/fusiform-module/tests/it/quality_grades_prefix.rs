@@ -61,13 +61,19 @@ fn quality_grades_prefix_fixtures_match_real_serializer() {
             json!({"prefix":"local:","model":"local:apple/phone-transcriber"}),
         ),
     );
-    let sums: String = files
+    // This static sample records an older release's bytes (commit 39f97ac).
+    // Current serving code cannot regenerate an older parser's refusal.
+    const OLDER_SHA256: &str = "c6a66747e16f7548fda8da1d9f939abd119cabae672265526e116ee025a44185";
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures/quality-grades-prefix-v1");
+    let older = std::fs::read(root.join("prefix-unsupported-older.json")).unwrap();
+    assert_eq!(format!("{:x}", Sha256::digest(&older)), OLDER_SHA256);
+    let mut sums: String = files
         .iter()
         .map(|(name, text)| format!("{:x}  {name}\n", Sha256::digest(text.as_bytes())))
         .collect();
+    sums.push_str(&format!("{OLDER_SHA256}  prefix-unsupported-older.json\n"));
     files.insert("SHA256SUMS", sums);
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("fixtures/quality-grades-prefix-v1");
     if std::env::var_os("UPDATE_QUALITY_PREFIX_FIXTURES").is_some() {
         std::fs::create_dir_all(&root).unwrap();
         for (name, text) in files {

@@ -1,0 +1,12 @@
+{
+  "request": {
+    "arguments": {
+      "prefix": "local:"
+    },
+    "name": "quality.grades"
+  },
+  "refusal": {
+    "code": "bad_request",
+    "message": "request did not parse: unknown field `prefix`, expected `model` at line 1 column 9"
+  }
+}
