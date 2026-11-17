@@ -64,7 +64,7 @@ fn a_named_preset_is_refused_and_an_absent_one_is_served() {
 #[test]
 fn a_scope_stamp_naming_a_flow_decodes() {
     let stamp = serde_json::json!({
-        "owner": {"kind": "reserved", "module_id": "prefrontal-core"},
+        "owner": {"kind": "reserved", "module_id": "prefrontal"},
         "ref": "session-1",
         "scope_epoch": 1,
         "kind": "worker",
