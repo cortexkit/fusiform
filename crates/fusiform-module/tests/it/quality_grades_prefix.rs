@@ -67,7 +67,7 @@ fn quality_grades_prefix_fixtures_match_real_serializer() {
         .collect();
     files.insert("SHA256SUMS", sums);
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures/quality-grades-prefix-v1");
+        .join("fixtures/quality-grades-prefix-v1");
     if std::env::var_os("UPDATE_QUALITY_PREFIX_FIXTURES").is_some() {
         std::fs::create_dir_all(&root).unwrap();
         for (name, text) in files {
