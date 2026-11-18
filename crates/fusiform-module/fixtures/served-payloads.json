@@ -175,6 +175,26 @@
         }
       ],
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794960000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.reasoning_default",
+          "model": "deepseek/deepseek-flash",
+          "model_id": "deepseek-flash",
+          "notes": "Your First API Call says the API model name deepseek-flash is now served by DeepSeek-V4.1-Flash-1017; the default-effort sentence covers the documented API models. Served only on this first-party row: resellers and alias routes reaching the model another way may apply a different default.",
+          "provider_id": "deepseek",
+          "quote": "Thinking Mode: \"Thinking mode is enabled by default, with the default effort being `high`.\"",
+          "reason": "models.dev publishes no default reasoning effort. DeepSeek documents that thinking mode is on by default with effort high, so a runner can send it explicitly.",
+          "replaces": null,
+          "review_by_ms": 1800144000000,
+          "source_ref": "https://api-docs.deepseek.com/guides/thinking_mode (accessed 2026-11-18); https://api-docs.deepseek.com/guides/reasoning_model (accessed 2026-11-18)",
+          "value": {
+            "type": "effort",
+            "value": "high"
+          }
+        }
+      ],
       "models": {
         "deepseek/deepseek-flash": {
           "capability.attachment": true,
@@ -186,6 +206,10 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_default": {
+            "type": "effort",
+            "value": "high"
+          },
           "capability.reasoning_options": [
             {
               "type": "toggle"
@@ -301,6 +325,26 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794960000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.reasoning_default",
+          "model": "openai/gpt-5.6-luna",
+          "model_id": "gpt-5.6-luna",
+          "notes": "Served only on this first-party row: resellers and alias routes reaching the model another way may apply a different default.",
+          "provider_id": "openai",
+          "quote": "Model page: \"Reasoning.effort supports: none, low, medium (default), high, xhigh, and max.\"",
+          "reason": "models.dev publishes no default reasoning effort. OpenAI documents the effort its API applies to this model when a request omits reasoning.effort, so a runner can send it explicitly.",
+          "replaces": null,
+          "review_by_ms": 1800144000000,
+          "source_ref": "https://developers.openai.com/api/docs/models/gpt-5.6-luna (accessed 2026-11-18)",
+          "value": {
+            "type": "effort",
+            "value": "medium"
+          }
+        }
+      ],
       "models": {
         "openai/gpt-5.6-luna": {
           "capability.attachment": true,
@@ -317,6 +361,10 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_default": {
+            "type": "effort",
+            "value": "medium"
+          },
           "capability.reasoning_options": [
             {
               "type": "effort",
@@ -750,6 +798,24 @@
           "value": true
         },
         {
+          "established_at_ms": 1794960000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.reasoning_default",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "claude-opus-5-5",
+          "notes": "Served only on this first-party row: resellers and alias routes reaching the model another way may apply a different default.",
+          "provider_id": "anthropic",
+          "quote": "\"Claude Opus 5.5 supports all five effort levels, and `medium` is the default.\" \"With no value, the model's default level applies.\"",
+          "reason": "models.dev publishes no default reasoning effort. Anthropic documents the effort level the Claude API applies to this model when a request omits output_config.effort, so a runner can send it explicitly.",
+          "replaces": null,
+          "review_by_ms": 1800144000000,
+          "source_ref": "https://docs.anthropic.com/en/docs/build-with-claude/effort (accessed 2026-11-18)",
+          "value": {
+            "type": "effort",
+            "value": "medium"
+          }
+        },
+        {
           "established_at_ms": 1792972800000,
           "established_by": "fusiform",
           "fact_key": "capability.server_side_fallback",
@@ -782,6 +848,10 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_default": {
+            "type": "effort",
+            "value": "medium"
+          },
           "capability.reasoning_options": [
             {
               "type": "effort",
@@ -3163,6 +3233,24 @@
           "value": true
         },
         {
+          "established_at_ms": 1794960000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.reasoning_default",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "claude-opus-5-5",
+          "notes": "Served only on this first-party row: resellers and alias routes reaching the model another way may apply a different default.",
+          "provider_id": "anthropic",
+          "quote": "\"Claude Opus 5.5 supports all five effort levels, and `medium` is the default.\" \"With no value, the model's default level applies.\"",
+          "reason": "models.dev publishes no default reasoning effort. Anthropic documents the effort level the Claude API applies to this model when a request omits output_config.effort, so a runner can send it explicitly.",
+          "replaces": null,
+          "review_by_ms": 1800144000000,
+          "source_ref": "https://docs.anthropic.com/en/docs/build-with-claude/effort (accessed 2026-11-18)",
+          "value": {
+            "type": "effort",
+            "value": "medium"
+          }
+        },
+        {
           "established_at_ms": 1792972800000,
           "established_by": "fusiform",
           "fact_key": "capability.server_side_fallback",
@@ -3195,6 +3283,10 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_default": {
+            "type": "effort",
+            "value": "medium"
+          },
           "capability.reasoning_options": [
             {
               "type": "effort",
@@ -3835,6 +3927,26 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794960000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.reasoning_default",
+          "model": "openai/gpt-6.1-sol",
+          "model_id": "gpt-6.1-sol",
+          "notes": "Served only on this first-party row: resellers and alias routes reaching the model another way may apply a different default.",
+          "provider_id": "openai",
+          "quote": "Reasoning guide: \"GPT-6.1 Sol, GPT-6 Sol, and GPT-6 Luna also default to `medium` reasoning effort.\"",
+          "reason": "models.dev publishes no default reasoning effort. OpenAI documents the effort its API applies to this model when a request omits reasoning.effort, so a runner can send it explicitly.",
+          "replaces": null,
+          "review_by_ms": 1800144000000,
+          "source_ref": "https://platform.openai.com/docs/guides/reasoning?api-mode=responses (accessed 2026-11-18)",
+          "value": {
+            "type": "effort",
+            "value": "medium"
+          }
+        }
+      ],
       "login_methods": [
         {
           "auth_methods": [
@@ -3862,6 +3974,10 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_default": {
+            "type": "effort",
+            "value": "medium"
+          },
           "capability.reasoning_options": [
             {
               "type": "effort",
@@ -5889,6 +6005,26 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794960000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.reasoning_default",
+          "model": "openai/gpt-6.1-sol",
+          "model_id": "gpt-6.1-sol",
+          "notes": "Served only on this first-party row: resellers and alias routes reaching the model another way may apply a different default.",
+          "provider_id": "openai",
+          "quote": "Reasoning guide: \"GPT-6.1 Sol, GPT-6 Sol, and GPT-6 Luna also default to `medium` reasoning effort.\"",
+          "reason": "models.dev publishes no default reasoning effort. OpenAI documents the effort its API applies to this model when a request omits reasoning.effort, so a runner can send it explicitly.",
+          "replaces": null,
+          "review_by_ms": 1800144000000,
+          "source_ref": "https://platform.openai.com/docs/guides/reasoning?api-mode=responses (accessed 2026-11-18)",
+          "value": {
+            "type": "effort",
+            "value": "medium"
+          }
+        }
+      ],
       "login_methods": [
         {
           "auth_methods": [
@@ -5916,6 +6052,10 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_default": {
+            "type": "effort",
+            "value": "medium"
+          },
           "capability.reasoning_options": [
             {
               "type": "effort",
@@ -6401,6 +6541,24 @@
           "value": true
         },
         {
+          "established_at_ms": 1794960000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.reasoning_default",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "claude-opus-5-5",
+          "notes": "Served only on this first-party row: resellers and alias routes reaching the model another way may apply a different default.",
+          "provider_id": "anthropic",
+          "quote": "\"Claude Opus 5.5 supports all five effort levels, and `medium` is the default.\" \"With no value, the model's default level applies.\"",
+          "reason": "models.dev publishes no default reasoning effort. Anthropic documents the effort level the Claude API applies to this model when a request omits output_config.effort, so a runner can send it explicitly.",
+          "replaces": null,
+          "review_by_ms": 1800144000000,
+          "source_ref": "https://docs.anthropic.com/en/docs/build-with-claude/effort (accessed 2026-11-18)",
+          "value": {
+            "type": "effort",
+            "value": "medium"
+          }
+        },
+        {
           "established_at_ms": 1792972800000,
           "established_by": "fusiform",
           "fact_key": "capability.server_side_fallback",
@@ -6433,6 +6591,10 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_default": {
+            "type": "effort",
+            "value": "medium"
+          },
           "capability.reasoning_options": [
             {
               "type": "effort",
@@ -8228,6 +8390,7 @@
         "capability.tool_call",
         "capability.server_side_fallback",
         "capability.mid_conversation_system",
+        "capability.reasoning_default",
         "capability.attachment",
         "capability.input_modalities",
         "capability.output_modalities",
@@ -8436,6 +8599,26 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794960000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.reasoning_default",
+          "model": "openai/gpt-5.6-luna",
+          "model_id": "gpt-5.6-luna",
+          "notes": "Served only on this first-party row: resellers and alias routes reaching the model another way may apply a different default.",
+          "provider_id": "openai",
+          "quote": "Model page: \"Reasoning.effort supports: none, low, medium (default), high, xhigh, and max.\"",
+          "reason": "models.dev publishes no default reasoning effort. OpenAI documents the effort its API applies to this model when a request omits reasoning.effort, so a runner can send it explicitly.",
+          "replaces": null,
+          "review_by_ms": 1800144000000,
+          "source_ref": "https://developers.openai.com/api/docs/models/gpt-5.6-luna (accessed 2026-11-18)",
+          "value": {
+            "type": "effort",
+            "value": "medium"
+          }
+        }
+      ],
       "models": {
         "openai/gpt-5.6-luna": {
           "capability.attachment": true,
@@ -8448,6 +8631,10 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_default": {
+            "type": "effort",
+            "value": "medium"
+          },
           "capability.reasoning_options": [
             {
               "type": "effort",
@@ -8697,6 +8884,26 @@
         }
       ],
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794960000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.reasoning_default",
+          "model": "openai/gpt-5.6-luna",
+          "model_id": "gpt-5.6-luna",
+          "notes": "Served only on this first-party row: resellers and alias routes reaching the model another way may apply a different default.",
+          "provider_id": "openai",
+          "quote": "Model page: \"Reasoning.effort supports: none, low, medium (default), high, xhigh, and max.\"",
+          "reason": "models.dev publishes no default reasoning effort. OpenAI documents the effort its API applies to this model when a request omits reasoning.effort, so a runner can send it explicitly.",
+          "replaces": null,
+          "review_by_ms": 1800144000000,
+          "source_ref": "https://developers.openai.com/api/docs/models/gpt-5.6-luna (accessed 2026-11-18)",
+          "value": {
+            "type": "effort",
+            "value": "medium"
+          }
+        }
+      ],
       "models": {
         "openai/gpt-5.6-luna": {
           "capability.attachment": true,
@@ -8709,6 +8916,10 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_default": {
+            "type": "effort",
+            "value": "medium"
+          },
           "capability.reasoning_options": [
             {
               "type": "effort",
@@ -9006,6 +9217,26 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794960000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.reasoning_default",
+          "model": "openai/gpt-5.6-luna",
+          "model_id": "gpt-5.6-luna",
+          "notes": "Served only on this first-party row: resellers and alias routes reaching the model another way may apply a different default.",
+          "provider_id": "openai",
+          "quote": "Model page: \"Reasoning.effort supports: none, low, medium (default), high, xhigh, and max.\"",
+          "reason": "models.dev publishes no default reasoning effort. OpenAI documents the effort its API applies to this model when a request omits reasoning.effort, so a runner can send it explicitly.",
+          "replaces": null,
+          "review_by_ms": 1800144000000,
+          "source_ref": "https://developers.openai.com/api/docs/models/gpt-5.6-luna (accessed 2026-11-18)",
+          "value": {
+            "type": "effort",
+            "value": "medium"
+          }
+        }
+      ],
       "models": {
         "openai/gpt-5.6-luna": {
           "capability.attachment": true,
@@ -9018,6 +9249,10 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_default": {
+            "type": "effort",
+            "value": "medium"
+          },
           "capability.reasoning_options": [
             {
               "type": "effort",
@@ -9229,6 +9464,26 @@
         }
       ],
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794960000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.reasoning_default",
+          "model": "openai/gpt-5.6-luna",
+          "model_id": "gpt-5.6-luna",
+          "notes": "Served only on this first-party row: resellers and alias routes reaching the model another way may apply a different default.",
+          "provider_id": "openai",
+          "quote": "Model page: \"Reasoning.effort supports: none, low, medium (default), high, xhigh, and max.\"",
+          "reason": "models.dev publishes no default reasoning effort. OpenAI documents the effort its API applies to this model when a request omits reasoning.effort, so a runner can send it explicitly.",
+          "replaces": null,
+          "review_by_ms": 1800144000000,
+          "source_ref": "https://developers.openai.com/api/docs/models/gpt-5.6-luna (accessed 2026-11-18)",
+          "value": {
+            "type": "effort",
+            "value": "medium"
+          }
+        }
+      ],
       "models": {
         "openai/gpt-5.6-luna": {
           "capability.attachment": true,
@@ -9241,6 +9496,10 @@
             "text"
           ],
           "capability.reasoning": true,
+          "capability.reasoning_default": {
+            "type": "effort",
+            "value": "medium"
+          },
           "capability.reasoning_options": [
             {
               "type": "effort",

@@ -630,13 +630,17 @@ fn current_cache_lifetime_models_keep_the_original_golden_bytes() {
     for (identity, digest) in [
         (
             "anthropic/claude-opus-5-5",
-            "811b864b3e96cf667c60d21dadf4acee706179ee4d50f42e370c4db7e8d75e38",
+            // Re-pinned when current reads began serving the sourced
+            // `capability.reasoning_default` addition and its disclosure.
+            "0298f6726782f2f0ad1030706d32aab899fe790f689060fb666265180e5ba862",
         ),
         (
             "openai/gpt-6.1-sol",
             // Re-pinned after the 2026-11-17 seed refresh: upstream added a
             // `flex` service mode to this model, which adds its own mode keys.
-            "970eee53cef22666f139e703aa1cd6654be13fec34f13db371cc8b7426b93588",
+            // Re-pinned again when current reads began serving the sourced
+            // `capability.reasoning_default` addition and its disclosure.
+            "7645f92e2b7702d3a468cc7d66186b2e7140fd03a05362929d9681524f99838d",
         ),
     ] {
         let label = format!("catalog.get — cache lifetimes {identity}");
