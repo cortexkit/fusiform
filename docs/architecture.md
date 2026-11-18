@@ -48,7 +48,7 @@ models.dev/api.json
          retract_artifact, plan.prices
 ```
 
-The module embeds and caches the reviewed documents. It resolves dated claims
+The module embeds and caches the curated data files (`crates/fusiform-module/data/*.json`). It resolves dated claims
 from SQLite before calling the relevant curation stages. A caller can use
 `fusiform_curate::curate` with raw upstream facts, parsed tables, current grades,
 and decommission marks to build the whole plain current view without a store.

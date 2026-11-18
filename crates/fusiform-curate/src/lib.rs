@@ -36,11 +36,12 @@ pub use project::*;
 pub use render::*;
 
 pub type Facts = BTreeMap<String, Value>;
-/// Keys and raw JSON values in the same representation as stored fact eras.
+/// Fact keys and their raw JSON values, exactly as the store records upstream facts.
 pub type RawFacts = BTreeMap<String, String>;
 
-/// Already parsed curation tables. None of these lookups loads a document or
-/// depends on a copy of the seed embedded in this crate.
+/// Already parsed curation tables. Nothing here reads a file or a built-in copy
+/// of the models.dev catalog: the caller supplies every table, so the same
+/// curation can run inside fusiform or inside a publisher with no store.
 pub struct CurationSet<'a> {
     pub aliases: &'a aliases::Aliases,
     pub retired_aliases: &'a BTreeMap<(String, String), aliases::RetiredAlias>,
