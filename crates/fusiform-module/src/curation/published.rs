@@ -470,7 +470,10 @@ mod tests {
         let at = 1_795_017_199_166;
         let mut rows = ImportedTables::new();
         // Model a curation change after bootstrap. On the first release the
-        // signed history backup supplies the existing dedicated table rows.
+        // dedicated tables (plan prices, curated rows, overrides) are already
+        // filled from the store's history base file, whose hash the snapshot
+        // attests, so this test passes no previous documents and only checks
+        // what a later curation change writes.
         document_rows(&mut rows, Some(&Documents::new()), &documents, at).unwrap();
         store
             .apply_store_releases(
