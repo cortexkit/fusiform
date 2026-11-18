@@ -5,10 +5,13 @@ use std::{collections::BTreeMap, io};
 use fusiform_core::ChargeUnitEvidence;
 use fusiform_publish::{FactIndex, publish_step};
 use fusiform_release::{
-    Head, ReleaseEnvelope, SignatureError, Signatures, SigningKey, Snapshot, upstream_state_hash,
-    verify_envelope, verify_head,
+    Head, Release, ReleaseEnvelope, SignatureError, Signatures, SigningKey, Snapshot,
+    upstream_state_hash, verify_envelope, verify_head, verify_history_attestation,
 };
 use serde::Deserialize;
+
+#[path = "../../fusiform-publish/tests/support/consumer.rs"]
+mod consumer;
 
 #[derive(Deserialize)]
 struct Observations {
@@ -20,6 +23,10 @@ struct Observations {
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("chain") {
+        check_signed_chain();
+        return;
+    }
     let result: Observations = serde_json::from_reader(io::stdin().lock()).unwrap();
     let snapshot: Snapshot = serde_json::from_slice(include_bytes!(
         "../../fusiform-release/fixtures/release-format-v1/snapshot.json"
@@ -48,4 +55,42 @@ fn main() {
         Err(SignatureError::BadSignature),
     );
     verify_head(&head.head, &result.head_signature, &keys).unwrap();
+}
+
+fn check_signed_chain() {
+    #[derive(Deserialize)]
+    struct Observations {
+        releases: [String; 3],
+        snapshot: String,
+        day: String,
+    }
+
+    let result: Observations = serde_json::from_reader(io::stdin().lock()).unwrap();
+    let releases: [Release; 3] = result
+        .releases
+        .each_ref()
+        .map(|wire| serde_json::from_str(wire).unwrap());
+    let key = SigningKey::from_bytes(&[42; 32]);
+    let keys = BTreeMap::from([("release-format-v1-test-key".into(), key.verifying_key())]);
+    let index = consumer::check_chain(&releases, &keys).unwrap();
+    let snapshot: Snapshot = serde_json::from_str(&result.snapshot).unwrap();
+    assert_eq!(snapshot.envelope, releases[1].envelope);
+    assert_eq!(
+        snapshot.envelope.curation_hash,
+        snapshot.state.curation_set.curation_hash()
+    );
+    assert_eq!(
+        index,
+        FactIndex::from_snapshot_upstream(&snapshot.state.upstream).unwrap()
+    );
+    verify_envelope(&snapshot.envelope, &snapshot.signatures, &keys).unwrap();
+    let attestation = snapshot.history_attestation.unwrap();
+    verify_history_attestation(&attestation, &snapshot.envelope, &keys).unwrap();
+    assert_eq!(attestation.body.history.len(), 2);
+    attestation.body.history[0]
+        .verify_bytes(result.releases[0].as_bytes())
+        .unwrap();
+    attestation.body.history[1]
+        .verify_bytes(result.day.as_bytes())
+        .unwrap();
 }

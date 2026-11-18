@@ -172,6 +172,9 @@ fn write_snapshot(path: &Path, upstream: Upstream) {
         &SigningKey::from_bytes(&[42; 32]),
     )
     .unwrap();
+    write_json(path, "snapshot-envelope.json", &snapshot.envelope);
+    write_json(path, "snapshot-curation.json", &snapshot.state.curation_set);
+    write_json(path, "snapshot-signatures.json", &snapshot.signatures);
     write_json(path, "snapshot.json", &snapshot);
 }
 

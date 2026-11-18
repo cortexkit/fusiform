@@ -4,18 +4,21 @@
 
 mod index;
 mod recovery;
+mod snapshot;
 mod snapshot_reader;
 
 use std::fmt;
 
+use fusiform_core::normalize::NormalizedModel;
 use fusiform_core::shrink_guard::implausible_shrink;
-use fusiform_core::upstream_facts::{Existence, FactConflict, FactKey, facts_of};
-use fusiform_core::{ChargeUnitEvidence, normalize_models_dev_with};
+use fusiform_core::upstream_facts::{Existence, FactConflict, FactKey, ModelFacts, facts_of};
+use fusiform_core::{ChargeUnitEvidence, NormalizedCatalog, normalize_models_dev_with};
 use fusiform_release::{ChangeOp, FactKeyRef, Hash, fact_hash};
 
 use index::IndexBuilder;
 pub use index::{FactIndex, IndexDecodeError};
 pub use recovery::{ReplayError, ReplayRefusal, SnapshotIndexError};
+pub use snapshot::{SnapshotInputs, snapshot_bytes};
 pub use snapshot_reader::SnapshotReadError;
 
 #[derive(Debug)]
@@ -62,9 +65,7 @@ pub fn publish_step(
     previous: &FactIndex,
     evidence: &ChargeUnitEvidence,
 ) -> Result<PublishStep, PublishRefusal> {
-    let catalog = normalize_models_dev_with(models_dev, evidence)
-        .map_err(|err| PublishRefusal::Parse(err.to_string()))?
-        .catalog;
+    let catalog = parse_catalog(models_dev, evidence)?;
     let model_count = catalog.model_count();
     if let Some(reason) = implausible_shrink(previous.model_count(), model_count) {
         return Err(PublishRefusal::Implausible(reason));
@@ -80,14 +81,10 @@ pub fn publish_step(
     for provider in catalog.providers {
         let provider_id = provider.provider_id;
         for model in provider.models {
-            let projected = facts_of(&model);
-            let mut facts = projected.values;
+            let projected = project_model(&model);
             conflicts.extend(projected.conflicts);
             let model_id = model.key.model_id;
-            let existence = FactKey::existence();
-            let at = facts.partition_point(|(key, _)| key < &existence);
-            facts.insert(at, (existence, Existence::Present.as_json().to_owned()));
-            for (fact, json) in facts {
+            for (fact, json) in projected.values {
                 let key = (provider_id.as_str(), Some(model_id.as_str()), fact.as_str());
                 let value = serde_json::from_str(&json).expect("upstream storage facts are JSON");
                 let hash = fact_hash(&value);
@@ -122,6 +119,27 @@ pub fn publish_step(
         model_count,
         conflicts,
     })
+}
+
+fn parse_catalog(
+    models_dev: &[u8],
+    evidence: &ChargeUnitEvidence,
+) -> Result<NormalizedCatalog, PublishRefusal> {
+    normalize_models_dev_with(models_dev, evidence)
+        .map(|outcome| outcome.catalog)
+        .map_err(|err| PublishRefusal::Parse(err.to_string()))
+}
+
+fn project_model(model: &NormalizedModel) -> ModelFacts {
+    let mut projected = facts_of(model);
+    let existence = FactKey::existence();
+    let at = projected
+        .values
+        .partition_point(|(key, _)| key < &existence);
+    projected
+        .values
+        .insert(at, (existence, Existence::Present.as_json().to_owned()));
+    projected
 }
 
 fn remove((provider, model, fact): FactKeyRef<'_>) -> ChangeOp {

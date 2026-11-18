@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt, num::NonZeroU64};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Number, Value};
 
-use crate::{FactKeyRef, Hash, Signatures, fact_hash};
+use crate::{FactKeyRef, Hash, HistoryAttestation, Signatures, fact_hash};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReleaseFormat {
@@ -165,6 +165,9 @@ pub struct Snapshot {
     pub state: State,
     /// Carried over from the release at this envelope.
     pub signatures: Signatures,
+    /// Legacy snapshots can recover an index but cannot authenticate history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_attestation: Option<HistoryAttestation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -8,6 +8,9 @@ use fusiform_release::{
 use serde::Serialize;
 use serde_json::json;
 
+#[path = "support/artifacts.rs"]
+mod artifacts;
+
 // Public, deterministic test key. Never trusted by a release reader.
 const TEST_SIGNING_KEY_BYTES: [u8; 32] = [42; 32];
 const TEST_KID: &str = "release-format-v1-test-key";
@@ -98,6 +101,7 @@ fn generate() -> BTreeMap<&'static str, Vec<u8>> {
             curation_set: curation,
         },
         signatures: signatures.clone(),
+        history_attestation: None,
     };
     let release = Release {
         envelope,
@@ -113,12 +117,14 @@ fn generate() -> BTreeMap<&'static str, Vec<u8>> {
         signatures: sign_head(&head, TEST_KID, &test_key),
         head,
     };
-    BTreeMap::from([
+    let mut files = BTreeMap::from([
         ("canonical.json", canonical_file(&vector)),
         ("change.json", canonical_file(&release)),
         ("head.json", canonical_file(&head)),
         ("snapshot.json", canonical_file(&snapshot)),
-    ])
+    ]);
+    files.extend(artifacts::fixtures());
+    files
 }
 
 #[test]
@@ -130,13 +136,15 @@ fn release_format_vectors_and_checksums_do_not_drift() {
         .collect::<String>();
     files.insert("SHA256SUMS", sums.into_bytes());
 
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/release-format-v1");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../fusiform-release/fixtures/release-format-v1");
     if std::env::var("UPDATE_RELEASE_FORMAT_FIXTURES").as_deref() == Ok("1") {
-        fs::create_dir_all(&root).unwrap();
         for (name, bytes) in files {
-            fs::write(root.join(name), bytes).unwrap();
+            let path = root.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
         }
-        eprintln!("regenerated canonical JSON, signed release, head and snapshot, and SHA256SUMS");
+        eprintln!("regenerated release-format v1 vectors and SHA256SUMS");
         return;
     }
 

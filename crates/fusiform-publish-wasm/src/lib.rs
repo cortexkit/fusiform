@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, value::RawValue};
 
 #[cfg(target_arch = "wasm32")]
+mod artifacts;
+#[cfg(target_arch = "wasm32")]
 mod web;
 
 #[derive(Debug, Serialize)]

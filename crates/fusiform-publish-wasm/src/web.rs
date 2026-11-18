@@ -1,7 +1,7 @@
 use js_sys::{Array, Uint8Array};
 use wasm_bindgen::prelude::*;
 
-use super::Failure;
+use super::{Failure, artifacts};
 
 fn js_error(failure: Failure) -> JsError {
     JsError::new(&serde_json::to_string(&failure).expect("failure fields are strings"))
@@ -44,4 +44,70 @@ pub fn envelope_signing_bytes(envelope_json: &[u8]) -> Result<Vec<u8>, JsError> 
 #[wasm_bindgen]
 pub fn head_signing_bytes(head_json: &[u8]) -> Result<Vec<u8>, JsError> {
     super::head_signing_bytes(head_json).map_err(js_error)
+}
+
+#[wasm_bindgen]
+pub fn build_release(
+    summary: &[u8],
+    curation_set_raw: &[u8],
+    parent_envelope_or_empty: &[u8],
+    release_number: u64,
+    published_at_ms: i64,
+    upstream_observed_at_ms: i64,
+) -> Vec<u8> {
+    artifacts::in_band(fusiform_release::build_release(
+        summary,
+        curation_set_raw,
+        parent_envelope_or_empty,
+        release_number,
+        published_at_ms,
+        upstream_observed_at_ms,
+    ))
+}
+
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)] // The host passes each stored document separately.
+pub fn snapshot_bytes(
+    models_dev: &[u8],
+    evidence: &[u8],
+    envelope: &[u8],
+    curation_set_raw: &[u8],
+    signatures: &[u8],
+    history_files: &[u8],
+    history_signatures: &[u8],
+    release_public_key: &[u8],
+) -> Vec<u8> {
+    artifacts::in_band(
+        super::decode_evidence(evidence)
+            .map_err(Into::into)
+            .and_then(|evidence| {
+                fusiform_publish::snapshot_bytes(fusiform_publish::SnapshotInputs {
+                    models_dev,
+                    evidence: &evidence,
+                    envelope,
+                    curation_set_raw,
+                    signatures,
+                    history_files,
+                    history_signatures,
+                    release_public_key,
+                })
+            }),
+    )
+}
+
+#[wasm_bindgen]
+pub fn history_day_bytes(day: &[u8], releases_jsonl: &[u8]) -> Vec<u8> {
+    let day = str::from_utf8(day)
+        .map_err(|err| fusiform_release::ArtifactRefusal::new("invalid_day", err));
+    artifacts::in_band(day.and_then(|day| fusiform_release::history_day_bytes(day, releases_jsonl)))
+}
+
+#[wasm_bindgen]
+pub fn canonical_json(bytes: &[u8]) -> Result<Vec<u8>, JsError> {
+    artifacts::canonical_json(bytes).map_err(js_error)
+}
+
+#[wasm_bindgen]
+pub fn history_attestation_signing_bytes(body_json: &[u8]) -> Result<Vec<u8>, JsError> {
+    artifacts::history_attestation_signing_bytes(body_json).map_err(js_error)
 }
