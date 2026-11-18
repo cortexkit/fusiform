@@ -412,6 +412,7 @@ const QUALITY_ONLY: &[&str] = &[
     "workload.lookup.effort_minimum",
     "workload.quick.effort_default",
     "workload.quick.effort_minimum",
+    "workload.<name>.excluded",
     "quality.grade.transcription",
     "quality.grade.speech",
     "quality.grade.image",
@@ -439,6 +440,27 @@ const ATTACHMENT_ONLY: &[&str] = fusiform_module::attachment_limits::KEYS;
 
 /// Provider sampling bounds are sourced on current reads, never normalized.
 const TEMPERATURE_ONLY: &[&str] = &["limit.temperature_min", "limit.temperature_max"];
+
+#[test]
+fn workload_exclusion_family_only_matches_supported_workloads() {
+    use fusiform_protocol::served_fact_key_matches;
+
+    let family = "workload.<name>.excluded";
+    for workload in ["reason", "code", "synthesize", "lookup", "quick"] {
+        assert!(served_fact_key_matches(
+            family,
+            &format!("workload.{workload}.excluded")
+        ));
+    }
+    for key in [
+        family,
+        "workload.unknown.excluded",
+        "workload.code.effort_default",
+        "workload.code.excluded.extra",
+    ] {
+        assert!(!served_fact_key_matches(family, key), "{key}");
+    }
+}
 
 fn attachment_fact_is_registered(key: &str, tabled: &[&str]) -> bool {
     (ATTACHMENT_ONLY.contains(&key)

@@ -7279,7 +7279,6 @@
           "quality.",
           "workload."
         ],
-        "model_id": "synthetic-model",
         "provider_id": "synthetic-quality-reseller"
       },
       "name": "catalog.get"
@@ -7287,6 +7286,9 @@
     "response": {
       "catalog_version": 123,
       "models": {
+        "synthetic-quality-reseller/synthetic-excluded": {
+          "workload.code.excluded": true
+        },
         "synthetic-quality-reseller/synthetic-model": {
           "quality.elo": 1284,
           "quality.elo.effort.low": 1200,
@@ -8430,6 +8432,7 @@
         "workload.lookup.effort_minimum",
         "workload.quick.effort_default",
         "workload.quick.effort_minimum",
+        "workload.<name>.excluded",
         "quality.grade.transcription",
         "quality.grade.speech",
         "quality.grade.image",
@@ -12219,6 +12222,34 @@
         "reason": "evaluation withdrawn",
         "recorded_at_ms": -1,
         "withdrawn": true
+      }
+    }
+  },
+  "quality.workload — exclusion preview": {
+    "request": {
+      "arguments": {
+        "exclude": true,
+        "model": "synthetic/model",
+        "reason": "coding exclusion",
+        "workload": "code"
+      },
+      "name": "quality.workload"
+    },
+    "response": {
+      "affected_count": 1,
+      "affected_ids": [
+        "synthetic/model"
+      ],
+      "current": null,
+      "dry_run": true,
+      "model": "synthetic/model",
+      "new": {
+        "excluded": true,
+        "model": "synthetic/model",
+        "reason": "coding exclusion",
+        "recorded_at_ms": -1,
+        "withdrawn": false,
+        "workload": "code"
       }
     }
   },

@@ -2159,14 +2159,13 @@ fn read_quality_at(store: &CatalogStore, at: Option<i64>) -> Result<curate::Qual
         .workload_efforts_at(at)
         .map_err(|e| store_error(&e))?
         .into_iter()
-        .filter_map(|row| {
-            Some(curate::RecordedWorkloadEffort {
-                model: row.model,
-                workload: row.workload,
-                effort_default: row.effort_default?,
-                effort_minimum: row.effort_minimum,
-                recorded_at_ms: row.recorded_at_ms,
-            })
+        .map(|row| curate::RecordedWorkloadEffort {
+            model: row.model,
+            workload: row.workload,
+            effort_default: row.effort_default,
+            effort_minimum: row.effort_minimum,
+            excluded: row.excluded,
+            recorded_at_ms: row.recorded_at_ms,
         })
         .collect();
     Ok(curate::Quality {

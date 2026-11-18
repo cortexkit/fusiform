@@ -81,13 +81,10 @@ pub(super) fn overlay<'a>(
         });
     }
     for row in &local.workloads {
-        let Some(effort_default) = row.effort_default.clone() else {
-            continue;
-        };
         quality
             .workloads
             .retain(|g| g.model != row.model || g.workload != row.workload);
-        for suffix in ["effort_default", "effort_minimum"] {
+        for suffix in ["effort_default", "effort_minimum", "excluded"] {
             record(
                 &row.model,
                 format!("workload.{}.{suffix}", row.workload),
@@ -98,8 +95,9 @@ pub(super) fn overlay<'a>(
         quality.workloads.push(curate::RecordedWorkloadEffort {
             model: row.model.clone(),
             workload: row.workload.clone(),
-            effort_default,
+            effort_default: row.effort_default.clone(),
             effort_minimum: row.effort_minimum.clone(),
+            excluded: row.excluded,
             recorded_at_ms: row.recorded_at_ms,
         });
     }

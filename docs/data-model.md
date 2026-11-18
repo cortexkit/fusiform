@@ -52,7 +52,7 @@ does not create.
 | 11 | `model_mark_era`, with a one-time import of 107 operator decommissioned keys |
 | 12 | `cache_lifetime_era`, with a frozen first-served history of prompt-cache rules |
 | 13 | `quality_grade_era.kind`, separating media judgments and withdrawals by task |
-| 14 | `quality_grade_era.graded_effort`, effort grade and workload judgment eras, local override eras, consumer cursors and document eras, and nullable plan metadata |
+| 14 | `quality_grade_era.graded_effort`, effort grade and workload judgment eras (including exclusion), local override eras, consumer cursors and document eras, and nullable plan metadata |
 
 A store whose recorded schema version is newer than the running binary's chain
 is refused at open, and the error names the store's version
@@ -388,9 +388,13 @@ their recording time. Grade history is not upstream `catalog.history`.
 See [`curated-data.md`](curated-data.md) §11.
 
 `effort_grade_era` keeps decimal ELO/EQ tokens per `(model, effort)`.
-`workload_effort_era` keeps a default and optional minimum per `(model, workload)`.
-Both are append-only; the latest eligible insertion wins and a withdrawal
-carries no scores or efforts. Writes advance the catalog version in the same
+`workload_effort_era` keeps a default and optional minimum, or a routing
+exclusion, per `(model, workload)`. Both it and `override_workload_effort_era`
+store `excluded` as `0` by default. An excluded row sets it to `1` and has
+neither effort; a withdrawal has neither effort and is not excluded. The
+tables are append-only: the latest insertion wins, and a dated read only
+considers rows recorded at or before the requested time. An effort-grade
+withdrawal carries no scores. Writes advance the catalog version in the same
 fenced transaction. The four `override_*_era` tables keep local judgments
 separate from published history.
 

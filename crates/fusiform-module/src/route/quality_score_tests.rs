@@ -61,6 +61,7 @@ fn effort_curation_is_row_gated_and_dated() {
                 workload: "code".into(),
                 effort_default: Some("high".into()),
                 effort_minimum: Some("low".into()),
+                excluded: false,
                 recorded_at_ms: 2200,
                 reason: "test".into(),
             },
@@ -158,6 +159,61 @@ fn effort_curation_tools_preview_commit_and_withdraw() {
     assert_eq!(withdrawn["new"]["withdrawn"], true);
     assert!(!get(&store, json!({})).models["reseller/shared"]
         .contains_key("workload.code.effort_default"));
+}
+
+#[test]
+fn workload_exclusion_reaches_shared_rows_without_reasoning_options_and_is_dated() {
+    let (store, _dir) = fixture(true);
+    let call = |action: Value| {
+        let mut args = json!({"model":"lab/shared", "workload":"code", "reason":"evaluation"});
+        args.as_object_mut()
+            .unwrap()
+            .extend(action.as_object().unwrap().clone());
+        serve_tool_call(
+            &store,
+            &serde_json::to_vec(&json!({"name":"quality.workload","arguments":args})).unwrap(),
+        )
+        .map(|reply| serde_json::to_value(reply).unwrap())
+    };
+    let key = "workload.code.excluded";
+    let query = json!({"fact_prefixes":[key,"existence"]});
+    let version = store.catalog_version().unwrap();
+    for action in [
+        json!({"exclude":true,"effort_default":"high"}),
+        json!({"exclude":true,"effort_minimum":"low"}),
+        json!({"exclude":true,"withdraw":true}),
+    ] {
+        assert_eq!(call(action).unwrap_err().code, "bad_request");
+    }
+    let preview = call(json!({"exclude":true})).unwrap();
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(preview["new"]["excluded"], true);
+    assert_eq!(preview["new"]["withdrawn"], false);
+    assert_eq!(store.catalog_version().unwrap(), version);
+    assert!(get(&store, query.clone()).quality_scores.is_none());
+
+    let committed = call(json!({"exclude":true,"dry_run":false})).unwrap();
+    let at = committed["new"]["recorded_at_ms"].as_i64().unwrap();
+    for args in [query.clone(), json!({"at_ms":at,"fact_prefixes":[key]})] {
+        let reply = get(&store, args);
+        for model in ["google/gemini-4-argon", "reseller/shared"] {
+            assert_eq!(reply.models[model][key], true);
+        }
+        assert_eq!(reply.quality_scores.unwrap().graded_at_ms, at);
+    }
+    assert!(!get(&store, query.clone()).models["reseller/own"].contains_key(key));
+    let before = get(
+        &store,
+        json!({"at_ms":at-1,"fact_prefixes":[key,"existence"]}),
+    );
+    assert!(!before.models["reseller/shared"].contains_key(key));
+    assert!(before.quality_scores.is_none());
+
+    let withdrawal = call(json!({"withdraw":true,"dry_run":false})).unwrap();
+    assert_eq!(withdrawal["current"]["excluded"], true);
+    assert_eq!(withdrawal["new"]["withdrawn"], true);
+    assert!(withdrawal["new"].get("excluded").is_none());
+    assert!(!get(&store, query).models["reseller/shared"].contains_key(key));
 }
 
 #[test]

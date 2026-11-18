@@ -81,8 +81,8 @@ impl CatalogStore {
         row: &WorkloadEffortEra,
     ) -> Result<(), CatalogError> {
         self.inner.with_conn_fenced(|tx| {
-            tx.execute("INSERT INTO override_workload_effort_era (model,workload,effort_default,effort_minimum,withdrawn,set_by,reason,recorded_at_ms) VALUES (?1,?2,?3,?4,?5,'user',?6,?7)",
-                params![row.model,row.workload,row.effort_default,row.effort_minimum,row.effort_default.is_none(),row.reason,row.recorded_at_ms])?;
+            tx.execute("INSERT INTO override_workload_effort_era (model,workload,effort_default,effort_minimum,excluded,withdrawn,set_by,reason,recorded_at_ms) VALUES (?1,?2,?3,?4,?5,?6,'user',?7,?8)",
+                params![row.model,row.workload,row.effort_default,row.effort_minimum,row.excluded,row.is_withdrawn(),row.reason,row.recorded_at_ms])?;
             advance_catalog_version_in(tx, None, Timestamp(row.recorded_at_ms))?;
             Ok(())
         })?;
@@ -104,9 +104,9 @@ impl CatalogStore {
             let efforts = read(conn, "SELECT model,effort,elo,eq,reason,recorded_at_ms FROM override_effort_grade_era e
                 WHERE withdrawn=0 AND id=(SELECT MAX(id) FROM override_effort_grade_era WHERE model=e.model AND effort=e.effort AND recorded_at_ms<=?1)", at,
                 |r| Ok(EffortGradeEra { model:r.get(0)?, effort:r.get(1)?, elo:quality_efforts::number(r,2)?, eq:quality_efforts::number(r,3)?, reason:r.get(4)?, recorded_at_ms:r.get(5)? }))?;
-            let workloads = read(conn, "SELECT model,workload,effort_default,effort_minimum,reason,recorded_at_ms FROM override_workload_effort_era e
+            let workloads = read(conn, "SELECT model,workload,effort_default,effort_minimum,excluded,reason,recorded_at_ms FROM override_workload_effort_era e
                 WHERE withdrawn=0 AND id=(SELECT MAX(id) FROM override_workload_effort_era WHERE model=e.model AND workload=e.workload AND recorded_at_ms<=?1)", at,
-                |r| Ok(WorkloadEffortEra { model:r.get(0)?, workload:r.get(1)?, effort_default:r.get(2)?, effort_minimum:r.get(3)?, reason:r.get(4)?, recorded_at_ms:r.get(5)? }))?;
+                quality_efforts::workload_row)?;
             let marks = read(conn, "SELECT model,decommissioned,reason,recorded_at_ms FROM override_mark_era e
                 WHERE decommissioned IS NOT NULL AND id=(SELECT MAX(id) FROM override_mark_era WHERE model=e.model AND recorded_at_ms<=?1)", at,
                 |r| Ok(LocalMark { model:r.get(0)?, decommissioned:r.get(1)?,reason:r.get(2)?,recorded_at_ms:r.get(3)? }))?;

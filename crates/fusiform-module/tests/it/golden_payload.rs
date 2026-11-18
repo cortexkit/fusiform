@@ -1075,10 +1075,15 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
     .unwrap();
     let doc = serde_json::json!({"synthetic-quality-reseller": {
         "id":"synthetic-quality-reseller", "name":"Synthetic Quality Reseller",
-        "models":{"synthetic-model": {
-            "id":"synthetic-model", "canonical_model_id":"synthetic-lab/synthetic-model",
-            "reasoning_options":[{"type":"effort","values":["low","high"]}]
-        }}
+        "models":{
+            "synthetic-model": {
+                "id":"synthetic-model", "canonical_model_id":"synthetic-lab/synthetic-model",
+                "reasoning_options":[{"type":"effort","values":["low","high"]}]
+            },
+            "synthetic-excluded": {
+                "id":"synthetic-excluded", "canonical_model_id":"synthetic-lab/synthetic-excluded"
+            }
+        }
     }});
     let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
@@ -1086,7 +1091,7 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     let request = serde_json::json!({"name":"catalog.get","arguments":{
-        "provider_id":"synthetic-quality-reseller", "model_id":"synthetic-model",
+        "provider_id":"synthetic-quality-reseller",
         "fact_prefixes":["quality.","workload."]
     }});
     store
@@ -1110,6 +1115,7 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
                     workload: (*workload).into(),
                     effort_default: Some("high".into()),
                     effort_minimum: Some("low".into()),
+                    excluded: false,
                     reason: "synthetic routing effort".into(),
                     recorded_at_ms: 100,
                 },
@@ -1117,6 +1123,20 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
             )
             .unwrap();
     }
+    store
+        .append_workload_effort(
+            &fusiform_store::WorkloadEffortEra {
+                model: "synthetic-lab/synthetic-excluded".into(),
+                workload: "code".into(),
+                effort_default: None,
+                effort_minimum: None,
+                excluded: true,
+                reason: "synthetic routing exclusion".into(),
+                recorded_at_ms: 100,
+            },
+            "operator",
+        )
+        .unwrap();
     store
         .append_quality_grade_with_effort(
             "synthetic-lab/synthetic-model",
@@ -1311,6 +1331,11 @@ pub(super) fn render_quality_tools() -> serde_json::Map<String, serde_json::Valu
             "quality.workload — preview",
             "quality.workload",
             serde_json::json!({"model":key,"workload":"code","effort_default":"high","effort_minimum":"low","reason":"coding evaluation"}),
+        ),
+        (
+            "quality.workload — exclusion preview",
+            "quality.workload",
+            serde_json::json!({"model":key,"workload":"code","exclude":true,"reason":"coding exclusion"}),
         ),
         (
             "quality.withdraw — commit",

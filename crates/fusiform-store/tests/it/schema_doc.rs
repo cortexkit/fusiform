@@ -25,6 +25,61 @@ use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_store::CatalogStore;
 
 #[test]
+fn workload_exclusion_schema_keeps_exclusion_efforts_and_withdrawal_disjoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workloads.db");
+    let _store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: path.to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    let conn = rusqlite::Connection::open(path).unwrap();
+    for table in ["workload_effort_era", "override_workload_effort_era"] {
+        let default_exclusion: i64 = conn.query_row(&format!(
+            "INSERT INTO {table} (model,workload,effort_default,withdrawn,set_by,reason,recorded_at_ms)
+             VALUES ('test/model','reason','high',0,'operator','test',1) RETURNING excluded"
+        ), [], |row| row.get(0)).unwrap();
+        assert_eq!(default_exclusion, 0, "{table}");
+        let insert = format!(
+            "INSERT INTO {table} (model,workload,effort_default,effort_minimum,excluded,withdrawn,set_by,reason,recorded_at_ms)
+             VALUES ('test/model','reason',?1,?2,?3,?4,'operator','test',2)"
+        );
+        for (default, minimum, excluded, withdrawn) in
+            [(None::<&str>, None::<&str>, 1, 0), (None, None, 0, 1)]
+        {
+            conn.execute(
+                &insert,
+                rusqlite::params![default, minimum, excluded, withdrawn],
+            )
+            .unwrap();
+        }
+        for (default, minimum, excluded, withdrawn) in [
+            (Some("high"), None, 1, 0),
+            (None, Some("low"), 1, 0),
+            (None, None, 1, 1),
+            (None, None, 2, 0),
+            (None, None, 0, 0),
+        ] {
+            let error = conn
+                .execute(
+                    &insert,
+                    rusqlite::params![default, minimum, excluded, withdrawn],
+                )
+                .unwrap_err();
+            assert_eq!(
+                error.sqlite_error_code(),
+                Some(rusqlite::ErrorCode::ConstraintViolation),
+                "{table}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
 fn cache_lifetime_v12_backfills_populated_v11_and_reopen_preserves_history() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("lifetimes.db");

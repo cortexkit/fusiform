@@ -20,8 +20,27 @@ pub struct WorkloadEffortEra {
     pub workload: String,
     pub effort_default: Option<String>,
     pub effort_minimum: Option<String>,
+    pub excluded: bool,
     pub reason: String,
     pub recorded_at_ms: i64,
+}
+
+impl WorkloadEffortEra {
+    pub fn is_withdrawn(&self) -> bool {
+        !self.excluded && self.effort_default.is_none()
+    }
+}
+
+pub(super) fn workload_row(r: &Row<'_>) -> rusqlite::Result<WorkloadEffortEra> {
+    Ok(WorkloadEffortEra {
+        model: r.get(0)?,
+        workload: r.get(1)?,
+        effort_default: r.get(2)?,
+        effort_minimum: r.get(3)?,
+        excluded: r.get(4)?,
+        reason: r.get(5)?,
+        recorded_at_ms: r.get(6)?,
+    })
 }
 
 pub(super) fn number(row: &Row<'_>, index: usize) -> rusqlite::Result<Option<Number>> {
@@ -72,10 +91,10 @@ impl CatalogStore {
         }
         self.inner.with_conn_fenced(|tx| {
             tx.execute(
-                "INSERT INTO workload_effort_era (model, workload, effort_default, effort_minimum, withdrawn, set_by, reason, recorded_at_ms) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO workload_effort_era (model, workload, effort_default, effort_minimum, excluded, withdrawn, set_by, reason, recorded_at_ms) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![value.model, value.workload, value.effort_default, value.effort_minimum,
-                    value.effort_default.is_none(), set_by, value.reason, value.recorded_at_ms],
+                    value.excluded, value.is_withdrawn(), set_by, value.reason, value.recorded_at_ms],
             )?;
             advance_catalog_version_in(tx, None, Timestamp(value.recorded_at_ms))?;
             Ok(())
@@ -114,17 +133,12 @@ impl CatalogStore {
     ) -> Result<Vec<WorkloadEffortEra>, CatalogError> {
         self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT model, workload, effort_default, effort_minimum, reason, recorded_at_ms \
+                "SELECT model, workload, effort_default, effort_minimum, excluded, reason, recorded_at_ms \
                  FROM workload_effort_era e WHERE withdrawn = 0 AND id = ( \
                    SELECT MAX(id) FROM workload_effort_era WHERE model = e.model AND workload = e.workload \
                    AND recorded_at_ms <= ?1) ORDER BY model, workload",
             )?;
-            let rows = stmt.query_map([at.unwrap_or(i64::MAX)], |r| {
-                Ok(WorkloadEffortEra {
-                    model: r.get(0)?, workload: r.get(1)?, effort_default: r.get(2)?, effort_minimum: r.get(3)?,
-                    reason: r.get(4)?, recorded_at_ms: r.get(5)?,
-                })
-            })?.collect();
+            let rows = stmt.query_map([at.unwrap_or(i64::MAX)], workload_row)?.collect();
             rows
         })
     }

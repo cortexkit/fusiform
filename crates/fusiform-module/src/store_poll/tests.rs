@@ -146,6 +146,20 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     let at_release_two = snapshot.envelope.upstream_observed_at_ms;
     assert_eq!(model_name_at(&store, at_release_two), "Mini 2");
 
+    let mut curation_set = snapshot.state.curation_set.clone();
+    curation_set.version += 1;
+    curation_set.workload_efforts.insert(
+        "zeta/mini".into(),
+        BTreeMap::from([(
+            "code".into(),
+            fusiform_release::WorkloadEffort {
+                default: None,
+                minimum: None,
+                excluded: true,
+            },
+        )]),
+    );
+    snapshot.state.curation_set = curation_set.clone();
     let change = fusiform_release::Change {
         upstream: vec![fusiform_release::ChangeOp::Set {
             provider: "zeta".into(),
@@ -153,7 +167,7 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
             fact: "model.name".into(),
             value: json!("Mini 3"),
         }],
-        curation_set: None,
+        curation_set: Some(curation_set),
     };
     snapshot
         .state
@@ -170,6 +184,8 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     envelope.published_at_ms += 20_000;
     envelope.upstream_observed_at_ms += 20_000;
     envelope.upstream_hash = fusiform_release::upstream_state_hash(&snapshot.state.upstream);
+    envelope.curation_version = snapshot.state.curation_set.version;
+    envelope.curation_hash = snapshot.state.curation_set.curation_hash();
     envelope.state_hash =
         fusiform_release::state_hash(envelope.curation_hash, envelope.upstream_hash);
     envelope.change_hash = change.change_hash();
@@ -193,6 +209,20 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
         "Mini 3"
     );
     assert_eq!(model_name_at(&store, at_release_two), "Mini 2");
+    let get = |at_ms| {
+        let args = json!({"provider_id":"zeta","model_id":"mini","fact_prefixes":["workload.","existence"],"at_ms":at_ms});
+        crate::route::serve_catalog_get(&store, &serde_json::to_vec(&args).unwrap()).unwrap()
+    };
+    let published_at = third.envelope.published_at_ms;
+    let before = get(published_at - 1);
+    assert!(!before.models["zeta/mini"].contains_key("workload.code.excluded"));
+    assert!(before.quality_scores.is_none());
+    let published = get(published_at);
+    assert_eq!(
+        published.models["zeta/mini"]["workload.code.excluded"],
+        true
+    );
+    assert_eq!(published.quality_scores.unwrap().graded_at_ms, published_at);
 
     let mut head: Value = serde_json::from_slice(&signed_head(&snapshot, 2, &key)).unwrap();
     head["head"]["published_at_ms"] = json!(0);
@@ -203,4 +233,29 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     assert!(poller.poll(&store).await.unwrap_err().contains("signature"));
     assert_eq!(store.catalog_version().unwrap(), version);
     assert_eq!(store.latest_store_release().unwrap().unwrap().release, 3);
+
+    let mut row = fusiform_store::WorkloadEffortEra {
+        model: "zeta/mini".into(),
+        workload: "quick".into(),
+        effort_default: None,
+        effort_minimum: None,
+        excluded: true,
+        reason: "local evaluation".into(),
+        recorded_at_ms: published_at + 1,
+    };
+    store.append_workload_effort(&row, "user").unwrap();
+    let local = get(row.recorded_at_ms);
+    assert_eq!(local.models["zeta/mini"]["workload.quick.excluded"], true);
+    assert!(local
+        .overrides
+        .iter()
+        .any(|row| row.fact == "workload.quick.excluded"
+            && row.published.is_none()
+            && row.local == Some(json!(true))));
+    row.excluded = false;
+    row.recorded_at_ms += 1;
+    store.append_workload_effort(&row, "user").unwrap();
+    let after = get(row.recorded_at_ms);
+    assert!(!after.models["zeta/mini"].contains_key("workload.quick.excluded"));
+    assert_eq!(after.models["zeta/mini"]["workload.code.excluded"], true);
 }

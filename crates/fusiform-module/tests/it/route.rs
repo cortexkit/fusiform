@@ -680,6 +680,16 @@ fn every_tool_schema_names_exactly_its_request_fields() {
             declared, fields,
             "{tool}: the manifest schema and {request} disagree about which arguments exist"
         );
+        if tool == "quality.workload" {
+            assert_eq!(
+                schema["properties"]["exclude"],
+                serde_json::json!({"type":"boolean","default":false})
+            );
+            assert!(!schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("exclude")));
+        }
     }
 }
 

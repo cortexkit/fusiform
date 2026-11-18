@@ -27,12 +27,14 @@ CREATE TABLE workload_effort_era (
     workload       TEXT NOT NULL CHECK (workload IN ('reason', 'code', 'synthesize', 'lookup', 'quick')),
     effort_default TEXT CHECK (effort_default <> ''),
     effort_minimum TEXT CHECK (effort_minimum <> ''),
+    excluded       INTEGER NOT NULL DEFAULT 0 CHECK (excluded IN (0, 1)),
     withdrawn      INTEGER NOT NULL CHECK (withdrawn IN (0, 1)),
     set_by         TEXT NOT NULL,
     reason         TEXT NOT NULL,
     recorded_at_ms INTEGER NOT NULL,
-    CHECK ((withdrawn = 1 AND effort_default IS NULL AND effort_minimum IS NULL)
-        OR (withdrawn = 0 AND effort_default IS NOT NULL))
+    CHECK ((withdrawn = 1 AND excluded = 0 AND effort_default IS NULL AND effort_minimum IS NULL)
+        OR (withdrawn = 0 AND excluded = 0 AND effort_default IS NOT NULL)
+        OR (withdrawn = 0 AND excluded = 1 AND effort_default IS NULL AND effort_minimum IS NULL))
 ) STRICT;
 CREATE INDEX workload_effort_era_key ON workload_effort_era(model, workload, recorded_at_ms, id);
 
@@ -76,12 +78,14 @@ CREATE TABLE override_workload_effort_era (
     workload       TEXT NOT NULL CHECK (workload IN ('reason', 'code', 'synthesize', 'lookup', 'quick')),
     effort_default TEXT CHECK (effort_default <> ''),
     effort_minimum TEXT CHECK (effort_minimum <> ''),
+    excluded       INTEGER NOT NULL DEFAULT 0 CHECK (excluded IN (0, 1)),
     withdrawn      INTEGER NOT NULL CHECK (withdrawn IN (0, 1)),
     set_by         TEXT NOT NULL,
     reason         TEXT NOT NULL,
     recorded_at_ms INTEGER NOT NULL,
-    CHECK ((withdrawn = 1 AND effort_default IS NULL AND effort_minimum IS NULL)
-        OR (withdrawn = 0 AND effort_default IS NOT NULL))
+    CHECK ((withdrawn = 1 AND excluded = 0 AND effort_default IS NULL AND effort_minimum IS NULL)
+        OR (withdrawn = 0 AND excluded = 0 AND effort_default IS NOT NULL)
+        OR (withdrawn = 0 AND excluded = 1 AND effort_default IS NULL AND effort_minimum IS NULL))
 ) STRICT;
 CREATE INDEX override_workload_effort_era_key ON override_workload_effort_era(model, workload, recorded_at_ms, id);
 

@@ -212,7 +212,10 @@ fn validate_judgments(set: &CurationSet) -> Result<(), String> {
     for (model, workloads) in &set.workload_efforts {
         if workloads.iter().any(|(name, effort)| {
             !fusiform_protocol::WORKLOADS.contains(&name.as_str())
-                || effort.default.trim().is_empty()
+                || effort
+                    .default
+                    .as_deref()
+                    .is_some_and(|effort| effort.trim().is_empty())
                 || effort
                     .minimum
                     .as_deref()

@@ -538,19 +538,26 @@ pub fn manifest() -> ModuleManifest {
             },
             Tool {
                 name: fusiform_protocol::TOOL_QUALITY_WORKLOAD.to_string(),
-                description: Some("Set a workload's default and optional minimum effort, or withdraw the judgment. Previews unless dry_run is false.".into()),
+                description: Some("Set a workload's default and optional minimum effort, exclude the model from the workload, or withdraw the judgment. Previews unless dry_run is false.".into()),
                 execution_mode: ExecutionMode::Mutating,
                 schema: serde_json::json!({
                     "type":"object",
                     "properties":{
                         "model":{"type":"string"}, "workload":{"type":"string", "enum":fusiform_protocol::WORKLOADS},
                         "effort_default":{"type":"string", "minLength":1}, "effort_minimum":{"type":"string", "minLength":1},
+                        "exclude":{"type":"boolean", "default":false},
                         "withdraw":{"type":"boolean", "default":false}, "reason":{"type":"string"},
                         "dry_run":{"type":"boolean", "default":true}
                     },
                     "required":["model","workload","reason"], "additionalProperties":false,
-                    "if":{"required":["withdraw"],"properties":{"withdraw":{"const":true}}},
-                    "then":{"not":{"anyOf":[{"required":["effort_default"]},{"required":["effort_minimum"]}]}},
+                    "if":{"anyOf":[
+                        {"required":["withdraw"],"properties":{"withdraw":{"const":true}}},
+                        {"required":["exclude"],"properties":{"exclude":{"const":true}}}
+                    ]},
+                    "then":{"not":{"anyOf":[
+                        {"required":["effort_default"]}, {"required":["effort_minimum"]},
+                        {"required":["exclude","withdraw"],"properties":{"exclude":{"const":true},"withdraw":{"const":true}}}
+                    ]}},
                     "else":{"required":["effort_default"]}
                 }),
             },

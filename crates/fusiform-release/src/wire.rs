@@ -301,15 +301,44 @@ pub struct EffortGrade {
     pub eq: Number,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkloadEffort {
-    pub default: String,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "nonempty_effort"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub minimum: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub excluded: bool,
+}
+
+impl<'de> Deserialize<'de> for WorkloadEffort {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Fields {
+            #[serde(default, deserialize_with = "nonempty_effort")]
+            default: Option<String>,
+            #[serde(default, deserialize_with = "nonempty_effort")]
+            minimum: Option<String>,
+            #[serde(default)]
+            excluded: bool,
+        }
+
+        let Fields {
+            default,
+            minimum,
+            excluded,
+        } = Fields::deserialize(deserializer)?;
+        if excluded && (default.is_some() || minimum.is_some()) || !excluded && default.is_none() {
+            return Err(serde::de::Error::custom(
+                "a workload must either specify a default effort or be excluded without any effort",
+            ));
+        }
+        Ok(Self {
+            default,
+            minimum,
+            excluded,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

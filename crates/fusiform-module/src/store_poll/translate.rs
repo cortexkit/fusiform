@@ -152,8 +152,9 @@ fn quality_rows(rows: &mut ImportedTables, old: &CurationSet, new: &CurationSet,
         add(
             rows,
             "workload_effort_era",
-            json!({"model":model,"workload":workload,"effort_default":value.map(|g| &g.default),
-            "effort_minimum":value.and_then(|g| g.minimum.as_deref()),"withdrawn":value.is_none(),"set_by":"operator",
+            json!({"model":model,"workload":workload,"effort_default":value.and_then(|g| g.default.as_deref()),
+            "effort_minimum":value.and_then(|g| g.minimum.as_deref()),"excluded":value.is_some_and(|g| g.excluded),
+            "withdrawn":value.is_none(),"set_by":"operator",
             "reason":reason,"recorded_at_ms":at}),
         );
     }

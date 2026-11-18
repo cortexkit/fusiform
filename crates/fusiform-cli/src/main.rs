@@ -81,7 +81,7 @@ commands:
   grade <key> --kind K --grade N --reason TEXT [--commit]
                             grade transcription, speech, image, video or search engines
   withdraw-grade <key> [--kind K | --effort-grade E] --reason TEXT [--commit]
-  workload <model> <workload> (--default E [--minimum E] | --withdraw) --reason TEXT [--commit]
+  workload <model> <workload> (--default E [--minimum E] | --exclude | --withdraw) --reason TEXT [--commit]
                             withdraw that kind (or ELO/EQ), retaining history
   grades [--model <key> | --prefix <prefix>]
                             current grades (e.g. --prefix local:), or key history
@@ -238,6 +238,7 @@ struct Args {
     workload: Option<String>,
     effort_default: Option<String>,
     effort_minimum: Option<String>,
+    exclude: bool,
     withdraw: bool,
     prefix: Option<String>,
     fact: Option<String>,
@@ -297,10 +298,10 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
             "--effort applies to grade; --effort-grade applies to grade and withdraw-grade".into(),
         );
     }
-    if (args.effort_default.is_some() || args.effort_minimum.is_some())
+    if (args.effort_default.is_some() || args.effort_minimum.is_some() || args.exclude)
         && args.command != "workload"
     {
-        return Err("--default and --minimum apply to workload only".into());
+        return Err("--default, --minimum and --exclude apply to workload only".into());
     }
     if args.withdraw
         && !matches!(
@@ -369,18 +370,22 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
                     .filter(|w| fusiform_protocol::WORKLOADS.contains(w))
                     .ok_or("workload must be reason, code, synthesize, lookup or quick")?;
                 body["workload"] = serde_json::json!(workload);
-                if args.withdraw {
+                if args.exclude && args.withdraw {
+                    return Err("--exclude cannot be combined with --withdraw".into());
+                }
+                if args.exclude || args.withdraw {
                     if args.effort_default.is_some() || args.effort_minimum.is_some() {
                         return Err(
-                            "--withdraw cannot be combined with --default or --minimum".into()
+                            "--exclude and --withdraw cannot be combined with --default or --minimum".into(),
                         );
                     }
-                    body["withdraw"] = serde_json::json!(true);
+                    body[if args.exclude { "exclude" } else { "withdraw" }] =
+                        serde_json::json!(true);
                 } else {
                     body["effort_default"] = serde_json::json!(args
                         .effort_default
                         .as_deref()
-                        .ok_or("workload requires --default or --withdraw")?);
+                        .ok_or("workload requires --default, --exclude or --withdraw")?);
                     if let Some(effort) = &args.effort_minimum {
                         body["effort_minimum"] = serde_json::json!(effort);
                     }
@@ -1881,6 +1886,7 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         workload: None,
         effort_default: None,
         effort_minimum: None,
+        exclude: false,
         withdraw: false,
         prefix: None,
         fact: None,
@@ -1916,6 +1922,7 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
             "--effort-grade" => args.effort_grade = Some(value()?),
             "--default" => args.effort_default = Some(value()?),
             "--minimum" => args.effort_minimum = Some(value()?),
+            "--exclude" => args.exclude = true,
             "--withdraw" => args.withdraw = true,
             "--prefix" => args.prefix = Some(value()?),
             "--elo" | "--eq" | "--grade" => {
@@ -2561,6 +2568,50 @@ mod tests {
             "invalid"
         ])
         .is_err());
+    }
+    #[test]
+    fn workload_exclude_previews_unless_committed_and_refuses_other_actions() {
+        use super::*;
+
+        let request = |flags: &[&str]| {
+            request_for(
+                &parse_args(
+                    [
+                        "ck-models",
+                        "workload",
+                        "lab/model",
+                        "reason",
+                        "--reason",
+                        "evaluation",
+                    ]
+                    .into_iter()
+                    .chain(flags.iter().copied())
+                    .map(OsString::from),
+                )
+                .unwrap(),
+            )
+        };
+        for (flags, dry_run) in [
+            (&["--exclude"][..], true),
+            (&["--exclude", "--commit"][..], false),
+        ] {
+            let (tool, body) = request(flags).unwrap();
+            assert_eq!(tool, "quality.workload");
+            assert_eq!(
+                body,
+                serde_json::json!({"model":"lab/model","workload":"reason","exclude":true,"dry_run":dry_run,"reason":"evaluation"})
+            );
+        }
+        for conflict in [
+            &["--default", "high"][..],
+            &["--minimum", "low"][..],
+            &["--withdraw"][..],
+        ] {
+            let flags: Vec<_> = std::iter::once("--exclude")
+                .chain(conflict.iter().copied())
+                .collect();
+            assert!(request(&flags).is_err(), "{flags:?}");
+        }
     }
     #[test]
     fn decommission_cli_preview_commit_and_listing() {

@@ -1175,6 +1175,7 @@ pub const SERVED_FACTS: &[ServedFact] = &[
     ServedFact { key: "workload.lookup.effort_minimum", class: FactClass::Advisory, note: "Curated minimum effort for automatic lookup choices." },
     ServedFact { key: "workload.quick.effort_default", class: FactClass::Advisory, note: "Curated default effort for quick tasks." },
     ServedFact { key: "workload.quick.effort_minimum", class: FactClass::Advisory, note: "Curated minimum effort for automatic quick-task choices." },
+    ServedFact { key: "workload.<name>.excluded", class: FactClass::Advisory, note: "Routing must not select this model for the named workload. True only; current and dated, disclosed in quality_scores." },
     ServedFact {
         key: "quality.grade.transcription",
         class: FactClass::Advisory,
@@ -1729,6 +1730,10 @@ pub fn served_fact_key_matches(registered: &str, key: &str) -> bool {
     } else if let Some(prefix) = registered.strip_suffix("<effort>") {
         key.strip_prefix(prefix)
             .is_some_and(|effort| !effort.is_empty() && effort != "<effort>")
+    } else if registered == "workload.<name>.excluded" {
+        key.strip_prefix("workload.")
+            .and_then(|rest| rest.strip_suffix(".excluded"))
+            .is_some_and(|name| WORKLOADS.contains(&name))
     } else {
         registered == key
     }
@@ -2052,7 +2057,8 @@ pub struct QualityGradesResponse {
     pub grades: Vec<QualityGradeWire>,
 }
 
-/// Set or withdraw the recommended effort for one workload. Previews by default.
+/// Set the recommended effort, exclude the model, or withdraw the judgment for one workload.
+/// Previews by default.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkloadEffortRequest {
@@ -2062,6 +2068,8 @@ pub struct WorkloadEffortRequest {
     pub effort_default: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort_minimum: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exclude: bool,
     #[serde(default)]
     pub withdraw: bool,
     pub reason: String,
@@ -2077,6 +2085,8 @@ pub struct WorkloadEffortWire {
     pub effort_default: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort_minimum: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub excluded: bool,
     pub withdrawn: bool,
     pub reason: String,
     pub recorded_at_ms: i64,

@@ -207,6 +207,33 @@ fn workload_without_minimum_omits_it_and_empty_minimum_is_refused() {
 }
 
 #[test]
+fn workload_exclusion_requires_the_effort_fields_to_be_absent() {
+    use fusiform_release::WorkloadEffort;
+
+    round_trip::<WorkloadEffort>(json!({"excluded":true}));
+    let not_excluded: WorkloadEffort =
+        serde_json::from_value(json!({"default":"high","excluded":false})).unwrap();
+    assert_eq!(
+        serde_json::to_value(not_excluded).unwrap(),
+        json!({"default":"high"})
+    );
+    for invalid in [
+        json!({"excluded":true,"default":"high"}),
+        json!({"excluded":true,"default":null}),
+        json!({"excluded":true,"minimum":"low"}),
+        json!({"excluded":true,"minimum":null}),
+        json!({"excluded":false}),
+        json!({"minimum":"low"}),
+        json!({}),
+    ] {
+        assert!(
+            serde_json::from_value::<WorkloadEffort>(invalid.clone()).is_err(),
+            "{invalid}"
+        );
+    }
+}
+
+#[test]
 fn head_only_accepts_an_existing_snapshot_number() {
     use fusiform_release::{HeadBody, head_signing_bytes};
 

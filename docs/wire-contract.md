@@ -156,6 +156,7 @@ value would do to a consumer:
 | `workload.lookup.effort_minimum` | advisory | curated floor for automatic lookup selections, if the row lists it; current and dated |
 | `workload.quick.effort_default` | advisory | curated default effort for quick, if the row lists it; current and dated |
 | `workload.quick.effort_minimum` | advisory | curated floor for automatic quick selections, if the row lists it; current and dated |
+| `workload.<name>.excluded` | advisory | `true` means never select the model for this workload; otherwise absent; current and dated |
 | `quality.elo` | advisory | operator-assigned general quality score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
 | `quality.eq` | advisory | operator-assigned writing and judgment score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
 | `quality.grade.transcription` | advisory | operator-assigned transcription score, comparable only among transcription engines; current reads only (§5.9) |
@@ -939,8 +940,17 @@ instructions changing request bytes. Withdrawn grades are absent facts. Numbers
 retain their decimal representation without a binary-float conversion.
 `fact_prefixes` applies normally (`["quality."]` selects all quality dimensions).
 
+Workload judgments use the same canonical key as grades and resolve on both
+current and dated reads, from their recorded time. A default or minimum effort
+is served only where the row lists that effort. `workload.<name>.excluded`
+applies to every row sharing the key, even if the row has no reasoning options.
+The supported workload names are `reason`, `code`, `synthesize`, `lookup` and
+`quick`. An exclusion has no default or minimum for that workload. An absent
+exclusion fact means no exclusion is recorded, not that the model is recommended.
+
 When at least one quality fact survives in the response, `quality_scores`
-appears once at response level:
+appears once at response level. Workload facts, including exclusions, count
+towards this disclosure; use the `workload.` prefix to select them.
 
 ```json
 {
@@ -955,9 +965,9 @@ appears once at response level:
 ```
 
 The example uses synthetic grades. `graded_at_ms` is the newest `recorded_at_ms`
-among grades actually served in this response, in epoch milliseconds. On a
+among judgments actually served in this response, in epoch milliseconds. On a
 paged read each page is its own response: its `quality_scores` describes only
-that page's grades, so pages of one snapshot can differ (or one can omit it).
+that page's judgments, so pages of one snapshot can differ (or one can omit it).
 A reader merging pages takes the newest `graded_at_ms` across them. An
 unrelated grade write does not redate another model's grade. There is no
 per-model attribution duplication. The object

@@ -129,12 +129,14 @@ pub(super) fn grade(
 }
 
 fn workload_wire(row: WorkloadEffortEra) -> WorkloadEffortWire {
+    let withdrawn = row.is_withdrawn();
     WorkloadEffortWire {
         model: row.model,
         workload: row.workload,
-        withdrawn: row.effort_default.is_none(),
+        withdrawn,
         effort_default: row.effort_default,
         effort_minimum: row.effort_minimum,
+        excluded: row.excluded,
         reason: row.reason,
         recorded_at_ms: row.recorded_at_ms,
     }
@@ -151,14 +153,24 @@ pub(super) fn workload(
             "workload must be reason, code, synthesize, lookup or quick",
         ));
     }
-    if request.withdraw && (request.effort_default.is_some() || request.effort_minimum.is_some())
-        || !request.withdraw && request.effort_default.is_none()
-    {
+    let valid = match (request.exclude, request.withdraw) {
+        (false, false) => request.effort_default.is_some(),
+        (true, false) | (false, true) => {
+            request.effort_default.is_none() && request.effort_minimum.is_none()
+        }
+        (true, true) => false,
+    };
+    if !valid {
         return Err(RouteError::bad_request(
-            "specify a default effort (and optionally minimum), or withdraw without either effort",
+            "specify a default effort (and optionally minimum), exclude, or withdraw; exclude and withdraw take no effort",
         ));
     }
     let (catalog, affected) = target(store, &request.model, &request.reason)?;
+    if request.exclude && affected.is_empty() {
+        return Err(RouteError::bad_request(
+            "no current row reached by this key",
+        ));
+    }
     let local = store
         .local_overrides_at(None)
         .map_err(|e| store_error(&e))?
@@ -189,6 +201,7 @@ pub(super) fn workload(
         workload: request.workload,
         effort_default: request.effort_default,
         effort_minimum: request.effort_minimum,
+        excluded: request.exclude,
         reason: request.reason,
         recorded_at_ms: now_ms(),
     };

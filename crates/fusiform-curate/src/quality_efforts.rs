@@ -22,8 +22,9 @@ pub struct RecordedEffortGrade {
 pub struct RecordedWorkloadEffort {
     pub model: String,
     pub workload: String,
-    pub effort_default: String,
+    pub effort_default: Option<String>,
     pub effort_minimum: Option<String>,
+    pub excluded: bool,
     pub recorded_at_ms: i64,
 }
 
@@ -34,7 +35,9 @@ pub fn is_effort_fact(key: &str) -> bool {
         || WORKLOADS.iter().any(|name| {
             key.strip_prefix("workload.")
                 .and_then(|rest| rest.strip_prefix(name))
-                .is_some_and(|rest| matches!(rest, ".effort_default" | ".effort_minimum"))
+                .is_some_and(|rest| {
+                    matches!(rest, ".effort_default" | ".effort_minimum" | ".excluded")
+                })
         })
 }
 
@@ -44,7 +47,7 @@ pub fn selects_effort_facts(prefix: &str) -> bool {
             .iter()
             .any(|base| base.starts_with(prefix) || prefix.starts_with(base))
         || WORKLOADS.iter().any(|name| {
-            ["effort_default", "effort_minimum"]
+            ["effort_default", "effort_minimum", "excluded"]
                 .iter()
                 .any(|field| format!("workload.{name}.{field}").starts_with(prefix))
         })
@@ -92,9 +95,9 @@ pub fn apply_effort_facts(
         let model = canonical.unwrap_or(identity);
         let options = facts.get("capability.reasoning_options");
         let mut additions = Vec::new();
-        let mut add = |fact: String, value: Value, effort: &str, at: i64| {
+        let mut add = |fact: String, value: Value, effort: Option<&str>, at: i64| {
             if prefixes.is_none_or(|prefixes| prefixes.iter().any(|p| fact.starts_with(p)))
-                && options_list_effort(options, effort)
+                && effort.is_none_or(|effort| options_list_effort(options, effort))
             {
                 additions.push((fact, value));
                 newest = Some(newest.map_or(at, |old| old.max(at)));
@@ -105,7 +108,7 @@ pub fn apply_effort_facts(
             add(
                 GRADED_EFFORT.into(),
                 Value::String(effort.into()),
-                effort,
+                Some(effort),
                 at,
             );
         }
@@ -117,21 +120,30 @@ pub fn apply_effort_facts(
                 add(
                     format!("{base}{}", row.effort),
                     Value::Number(value.clone()),
-                    &row.effort,
+                    Some(&row.effort),
                     row.recorded_at_ms,
                 );
             }
         }
         for row in workloads.get(model).into_iter().flatten() {
+            if row.excluded {
+                add(
+                    format!("workload.{}.excluded", row.workload),
+                    Value::Bool(true),
+                    None,
+                    row.recorded_at_ms,
+                );
+                continue;
+            }
             for (suffix, effort) in [
-                ("effort_default", Some(row.effort_default.as_str())),
+                ("effort_default", row.effort_default.as_deref()),
                 ("effort_minimum", row.effort_minimum.as_deref()),
             ] {
                 if let Some(effort) = effort {
                     add(
                         format!("workload.{}.{suffix}", row.workload),
                         Value::String(effort.into()),
-                        effort,
+                        Some(effort),
                         row.recorded_at_ms,
                     );
                 }

@@ -35,7 +35,7 @@ Tools, as served: `catalog.get`, `catalog.history`, `catalog.status`,
 | `quality.decommission` | mutating | preview or commit an operator routing veto |
 | `quality.restore` | mutating | preview or commit removal of a routing veto, retaining history |
 | `quality.marks` | pure | current decommissioned keys, or one key's mark history newest first |
-| `quality.workload` | mutating | preview or commit a workload's default and optional minimum effort, or withdraw them |
+| `quality.workload` | mutating | preview or commit a workload's default and optional minimum effort, exclude the model from the workload, or withdraw the judgment |
 
 ### Catalog source and local judgments
 
@@ -59,6 +59,11 @@ to return to the published judgment. The `catalog.get` reply lists overridden
 facts with the published and local values, recording time and reason. Local
 judgments are never sent to the store. Store-mode `plan.prices` accepts `at_ms`
 and reads plan metadata from the era in force.
+
+Use `ck models workload <model> <workload> --exclude --reason TEXT` to preview
+an exclusion. Add `--commit` to record it, or use `--withdraw` instead of
+`--exclude` to clear the current judgment. `--exclude` cannot be combined with
+`--default`, `--minimum`, or `--withdraw`.
 
 Tests check that the list above names exactly the tools in the protocol
 crate's `TOOLS` constant
