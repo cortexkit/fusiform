@@ -24,6 +24,8 @@
 
 pub mod money;
 pub mod normalize;
+pub mod shrink_guard;
+pub mod upstream_facts;
 
 use serde::{Deserialize, Serialize};
 

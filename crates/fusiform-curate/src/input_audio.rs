@@ -271,6 +271,23 @@ pub fn evidence_from(rows: &InputAudioSources) -> ChargeUnitEvidence {
     )
 }
 
+/// Add output evidence independently of which rows establish input token units.
+pub fn add_output_evidence(
+    evidence: ChargeUnitEvidence,
+    rows: &InputAudioSources,
+) -> ChargeUnitEvidence {
+    rows.values().fold(
+        evidence.with_output_audio_per_token(rows.keys().cloned()),
+        |evidence, row| {
+            row.excluded_models
+                .iter()
+                .fold(evidence, |evidence, model| {
+                    evidence.excluding_output_audio_of(&row.provider_id, &model.model_id)
+                })
+        },
+    )
+}
+
 /// Listed providers the embedded seed does not carry, or carries with no
 /// `cost.input_audio` on any row, included or excluded models the seed does not
 /// carry with `cost.input_audio`, and audio token overrides naming models

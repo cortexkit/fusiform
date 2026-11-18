@@ -28,6 +28,7 @@ mod mode_rates;
 mod model_type;
 mod per_kind_quality;
 mod providers_vector;
+mod publish_seed;
 mod quality_grades_prefix;
 mod reasoning_options;
 mod request_serving;

@@ -243,7 +243,7 @@ pub enum RateValue {
         ///
         /// The cause is that this was a DOMAIN type promoted to a wire type
         /// without checking that it described the wire. The server never
-        /// serializes through it — `json_rate` in fusiform-store hand-writes
+        /// serializes through it — `json_rate` in fusiform-core hand-writes
         /// the stored string, and the serve path passes those bytes through —
         /// so the two shapes were free to disagree and nothing compared them.
         ///

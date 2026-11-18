@@ -37,27 +37,8 @@ use fusiform_core::{BoundaryKind, RateValue, SourceId, Timestamp};
 
 use crate::{CatalogError, CatalogStore, FactKey, NewEra};
 
-/// Whether a model is present in the source.
-///
-/// A closed two-state value under the existence key, serialized into the era's
-/// value column like any other fact. Presence is history, not a row's absence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Existence {
-    Present,
-    /// The source stopped describing this model. Not "deleted" and not
-    /// "unavailable" — those are claims about the provider, and fusiform only
-    /// observed that a row stopped appearing.
-    Absent,
-}
-
-impl Existence {
-    fn as_json(self) -> &'static str {
-        match self {
-            Existence::Present => "\"present\"",
-            Existence::Absent => "\"absent\"",
-        }
-    }
-}
+pub use fusiform_core::upstream_facts::Existence;
+use fusiform_core::upstream_facts::{facts_of, json_rate, FactConflict};
 
 /// What one ingest would write.
 ///
@@ -107,7 +88,7 @@ pub fn plan_ingest(
         let identity = (model.key.provider_id.clone(), model.key.model_id.clone());
         seen.insert(identity.clone());
 
-        let facts = facts_of(model);
+        let facts = facts_of(model).values;
         let published: BTreeSet<FactKey> = facts.iter().map(|(k, _)| k.clone()).collect();
         let known = current.get(&identity);
 
@@ -253,6 +234,11 @@ pub fn plan_ingest(
 /// Fed in sorted order, so the digest depends on the fact set rather than on
 /// the order the normalizer happened to emit providers in.
 pub fn catalog_digest(catalog: &NormalizedCatalog) -> String {
+    catalog_digest_with_conflicts(catalog).0
+}
+
+/// Hash the upstream facts and return the conflicting keys the projection omitted.
+pub fn catalog_digest_with_conflicts(catalog: &NormalizedCatalog) -> (String, Vec<FactConflict>) {
     // Sort only model references. Fact tuples live for one model identity at a
     // time instead of retaining a second copy of the entire catalog.
     let mut models: Vec<_> = catalog.models().collect();
@@ -260,13 +246,21 @@ pub fn catalog_digest(catalog: &NormalizedCatalog) -> String {
         (&a.key.provider_id, &a.key.model_id).cmp(&(&b.key.provider_id, &b.key.model_id))
     });
     let mut hasher = blake3::Hasher::new();
+    let mut conflicts = Vec::new();
     for group in models
         .chunk_by(|a, b| a.key.provider_id == b.key.provider_id && a.key.model_id == b.key.model_id)
     {
         let model = group[0];
         // Sort duplicate identities' facts together too, even for a catalog
         // constructed outside the normalizer.
-        let mut facts: Vec<_> = group.iter().flat_map(|model| facts_of(model)).collect();
+        let mut facts: Vec<_> = group
+            .iter()
+            .flat_map(|model| {
+                let projected = facts_of(model);
+                conflicts.extend(projected.conflicts);
+                projected.values
+            })
+            .collect();
         facts.sort();
         for (key, value) in facts {
             // Length-prefixed rather than delimiter-separated: a provider id
@@ -283,7 +277,7 @@ pub fn catalog_digest(catalog: &NormalizedCatalog) -> String {
             }
         }
     }
-    hasher.finalize().to_hex().to_string()
+    (hasher.finalize().to_hex().to_string(), conflicts)
 }
 
 /// Every fact a model publishes, as `(key, value)` pairs.
@@ -306,7 +300,7 @@ pub fn catalog_digest(catalog: &NormalizedCatalog) -> String {
 /// presence logic rather than from a model's fields. Callers wanting every
 /// served fact want [`SERVED_FACT_NAMESPACE`] plus this.
 pub fn fact_keys_of(model: &NormalizedModel) -> Vec<FactKey> {
-    facts_of(model).into_iter().map(|(k, _)| k).collect()
+    facts_of(model).values.into_iter().map(|(k, _)| k).collect()
 }
 
 /// Every fact key fusiform serves, as a closed set.
@@ -366,148 +360,7 @@ pub const SERVED_FACT_NAMESPACE: &[&str] = &[
 /// survived in the domain type while the storage boundary flattened it, and no
 /// test could see that because none could reach the stored value.
 pub fn facts_with_values(model: &NormalizedModel) -> Vec<(FactKey, String)> {
-    facts_of(model)
-}
-
-fn facts_of(model: &NormalizedModel) -> Vec<(FactKey, String)> {
-    let mut facts = vec![
-        // What the model IS, as the upstream states it, independent of who
-        // serves it. Stored rather than derived because these are upstream's
-        // own claims — the same test every other fact here passes.
-        //
-        // They exist as facts so a RELATION between providers can be computed
-        // at serve time: `family` is published identically by every provider
-        // serving the same weights, and `open_weights` marks the population
-        // where one provider's list price says something about another's row.
-        // The relation itself is fusiform's derivation and stays out of
-        // storage; these two are not.
-        (
-            FactKey::model("family"),
-            json_opt_str(model.family.as_deref()),
-        ),
-        (
-            FactKey::model("open_weights"),
-            json_opt_bool(model.open_weights),
-        ),
-        (
-            FactKey::model("canonical_id"),
-            json_opt_str(model.canonical_id.as_deref()),
-        ),
-        (
-            FactKey::model("status"),
-            json_opt_str(model.status.as_deref()),
-        ),
-        // Limits. `null` is a real value here: a limit that stops being
-        // published is a change, and encoding it as absence would make the era
-        // disappear rather than record that the upstream stopped saying.
-        (
-            FactKey::limit("context"),
-            json_opt_u64(model.limits.context_tokens),
-        ),
-        (
-            FactKey::limit("output"),
-            json_opt_u64(model.limits.output_tokens),
-        ),
-        // Capability facts. An absent structured_output is not a false claim.
-        (
-            FactKey::capability("reasoning"),
-            json_opt_bool(model.capabilities.reasoning),
-        ),
-        // The reasoning settings the model accepts, stored as the upstream
-        // published them. Unlike the modality lists below this is NOT sorted:
-        // effort levels are listed in order and a consumer relies on that
-        // order, so a reordering upstream is a real change and must open an
-        // era. `null` when the key was absent, `[]` when the upstream stated
-        // the model takes no options.
-        (
-            FactKey::capability("reasoning_options"),
-            json_opt_value(model.capabilities.reasoning_options.as_ref()),
-        ),
-        (
-            FactKey::capability("tool_call"),
-            json_opt_bool(model.capabilities.tool_call),
-        ),
-        (
-            FactKey::capability("attachment"),
-            json_opt_bool(model.capabilities.attachment),
-        ),
-        (
-            FactKey::capability("input_modalities"),
-            json_modalities(&model.capabilities.input_modalities),
-        ),
-        (
-            FactKey::capability("output_modalities"),
-            json_modalities(&model.capabilities.output_modalities),
-        ),
-    ];
-
-    // Missing or empty labels make no display claim. A later withdrawal is
-    // stored as a null era, so point-in-time reads still return prior names.
-    for (key, name) in [
-        (FactKey::model("name"), model.display_name.as_deref()),
-        (FactKey::provider("name"), model.provider_name.as_deref()),
-    ] {
-        if let Some(name) = name {
-            facts.push((key, json_opt_str(Some(name))));
-        }
-    }
-
-    // The upstream's sparse label makes no claim when absent, not even chat.
-    if let Some(model_type) = model.model_type.as_deref() {
-        facts.push((FactKey::model("type"), json_opt_str(Some(model_type))));
-    }
-
-    // Whether models.dev says the model supports structured output.
-    // No fact is written when the source omits the key; silence is unknown.
-    if let Some(supported) = model.capabilities.structured_output {
-        facts.push((
-            FactKey::capability("structured_output"),
-            json_opt_bool(Some(supported)),
-        ));
-    }
-
-    // An unpublished acceptance flag is unknown, not a negative claim.
-    if let Some(supported) = model.capabilities.temperature {
-        facts.push((
-            FactKey::capability("temperature"),
-            json_opt_bool(Some(supported)),
-        ));
-    }
-
-    // Total destructuring keeps a new domain connection field from silently
-    // disappearing at the storage boundary. Unpublished values create no fact.
-    let fusiform_core::normalize::WireFacts { npm, api, shape } = &model.wire;
-    for (name, claim) in [("npm", npm), ("api", api), ("shape", shape)] {
-        if let Some(claim) = claim {
-            facts.push((
-                FactKey::wire(name),
-                serde_json::to_string(claim).expect("a wire claim is JSON strings"),
-            ));
-        }
-    }
-
-    // Rates, keyed per token class and condition. A rate row's key carries
-    // every discriminator needed to select it, so a consumer never joins
-    // capability rows to price rows.
-    for rate in &model.rates {
-        if let fusiform_core::ChargeBasis::PerMillionTokens { class } = rate.basis {
-            let key = match rate.condition {
-                fusiform_core::RateCondition::Always => FactKey::rate(class),
-                fusiform_core::RateCondition::MinContextTokens { tokens } => {
-                    FactKey::rate_above_context(class, tokens)
-                }
-                // A mode's price, under the upstream's mode name. Only the
-                // rate schedule reaches here; the request bytes that select
-                // the mode were dropped when the document was parsed.
-                fusiform_core::RateCondition::Mode { ref name } => {
-                    FactKey::rate_in_mode(class, name)
-                }
-            };
-            facts.push((key, json_rate(&rate.value)));
-        }
-    }
-
-    facts
+    facts_of(model).values
 }
 
 /// What it means for a fact of this kind to stop being published.
@@ -527,72 +380,6 @@ fn withdrawal_value(key: &FactKey) -> String {
         })
     } else {
         "null".to_string()
-    }
-}
-
-fn json_opt_u64(v: Option<u64>) -> String {
-    match v {
-        Some(n) => n.to_string(),
-        None => "null".to_string(),
-    }
-}
-
-/// A string fact, or `null` when the upstream published none.
-///
-/// Serialized through serde rather than quoted by hand: a family name is
-/// upstream text and could contain a quote or a backslash, and a hand-built
-/// literal would produce a value that fails to parse on the way out. The
-/// numeric helpers beside this one are safe to format directly; text is not.
-fn json_opt_str(v: Option<&str>) -> String {
-    match v {
-        Some(s) => serde_json::Value::String(s.to_string()).to_string(),
-        None => "null".to_string(),
-    }
-}
-
-/// An upstream JSON value stored as-is, or `null` when the upstream published
-/// none. Serialized through serde, so array order and every element (including
-/// `null`s) survive exactly as parsed.
-fn json_opt_value(v: Option<&serde_json::Value>) -> String {
-    match v {
-        Some(value) => value.to_string(),
-        None => "null".to_string(),
-    }
-}
-
-fn json_opt_bool(v: Option<bool>) -> String {
-    match v {
-        Some(b) => b.to_string(),
-        None => "null".to_string(),
-    }
-}
-
-fn json_modalities(mods: &Option<Vec<fusiform_core::Modality>>) -> String {
-    // `null` when the upstream published no modality block, distinct from `[]`
-    // when it published an empty one. The same absent-vs-zero split the rest of
-    // this file uses: an empty list claims the model accepts nothing, which is
-    // a statement about the model rather than about the document.
-    let Some(mods) = mods else {
-        return "null".to_string();
-    };
-
-    // Sorted so a reordering upstream does not read as a capability change. The
-    // upstream's array order is not information — it carries no ranking — and
-    // treating it as information would manufacture change events.
-    let mut names: Vec<String> = mods.iter().map(modality_name).collect();
-    names.sort();
-    serde_json::to_string(&names).expect("a list of strings always serializes")
-}
-
-fn modality_name(m: &fusiform_core::Modality) -> String {
-    use fusiform_core::Modality::*;
-    match m {
-        Text => "text".to_string(),
-        Image => "image".to_string(),
-        Audio => "audio".to_string(),
-        Video => "video".to_string(),
-        Pdf => "pdf".to_string(),
-        Other(s) => s.clone(),
     }
 }
 
@@ -670,126 +457,6 @@ fn upstream_claim_of(mut value: serde_json::Value) -> serde_json::Value {
 /// rates. Storage no longer carries it — the serve path attaches it — so this
 /// list guards against the next one rather than the last one.
 const PRODUCER_ANNOTATIONS: &[&str] = &["unit_provenance"];
-
-/// Render a rate for storage, keeping the three value states distinct.
-///
-/// A priced amount, a stated zero, and an unpriced reason must render
-/// differently, because the whole point of the three-state design is that a
-/// consumer can tell them apart. Rendering a stated zero as `0` would make it
-/// indistinguishable from a priced zero, which the money boundary refuses to
-/// produce precisely so this distinction survives.
-///
-/// # The currency carries HOW IT WAS ESTABLISHED, not just what it is
-///
-/// `models.dev` states no currency anywhere. Fusiform serves USD by a named
-/// policy, and `UnitProvenance` exists so that "why does the catalog say USD"
-/// resolves to an auditable rule rather than a habit — its own doc says
-/// serving USD without saying why would launder a convention into a fact.
-///
-/// This function used to do exactly that. It rendered `"currency":"USD"` and
-/// dropped the provenance, so the domain distinguished stated-by-source from
-/// assumed-by-policy, `fusiform-core` tested the distinction, and it died one
-/// layer down: a consumer received a currency indistinguishable from one the
-/// upstream published.
-///
-/// That matters at a seam more than inside a process. A producer's inference
-/// becomes a consumer's fact unless the marker crosses with the value, and the
-/// consumer has no way to discover the inference was made — they price against
-/// it and are correct until a non-USD provider arrives, at which point every
-/// historical row is silently ambiguous about whether USD was read or assumed.
-fn json_rate(value: &RateValue) -> String {
-    match value {
-        // NO `unit_provenance` HERE, and its absence is the fix rather than an
-        // omission.
-        //
-        // Storage holds what the UPSTREAM said. Provenance is fusiform's own
-        // annotation — models.dev publishes no currency at all, so "USD by
-        // policy models-dev-usd-v1" is a statement about this code — and the
-        // serve path already attaches it to every priced rate that lacks it.
-        //
-        // It was written here too for one day. That second path bought nothing
-        // and cost 17,455 false eras: the diff compared serialized strings, so
-        // every stored rate differed from every newly normalized one and the
-        // first poll after placement recorded a price change for every priced
-        // model. A second path to the same outcome is not redundancy, it is a
-        // second thing that can be wrong, and this one failed in a way the
-        // serve path could not observe.
-        // `floor` is deliberately NOT stored, by the same rule that keeps
-        // `unit_provenance` out of this string.
-        //
-        // No source publishes minimum-charge data, so the floor is `Unknown` on
-        // every row — which is fusiform stating what nobody has established,
-        // not a claim the upstream made. Storage holds the upstream's claim.
-        //
-        // Writing a constant field into every stored rate is also precisely the
-        // reserialization described above: it would differ from every existing
-        // row and record a price change for every priced model on the first
-        // poll after placement. The dimension stays serve-side until a SOURCE
-        // publishes a floor, at which point it is an upstream claim and belongs
-        // here.
-        // `inherited_from` is dropped here for the same reason as `floor`, and
-        // the reason is stronger rather than merely analogous.
-        //
-        // A floor is a dimension nobody has established. An inherited marker is
-        // a claim about a DIFFERENT PROVIDER'S ROW — zai's price attached to a
-        // reseller's model — and storage records what THIS source said about
-        // THIS row. Writing it would put one provider's price into another
-        // provider's history, where a point-in-time read would later serve it
-        // back as something the upstream published.
-        //
-        // The destructuring is what forced this decision rather than letting
-        // the field arrive by default: `RateValue` gaining a variant field
-        // fails to compile here until someone says whether it is an upstream
-        // claim. That fence exists because a serve-time annotation reached
-        // storage once and the ingest diff read every priced row as changed,
-        // writing 17,455 false price eras in a single poll.
-        RateValue::Priced {
-            amount,
-            floor: _,
-            // Unit-billed claims belong to curated_model_era, never to
-            // models.dev's upstream observation history.
-            per: _,
-            increment: _,
-            minimum_quantity: _,
-            inherited_from: _,
-        } => format!(
-            r#"{{"state":"priced","units":{},"exponent":{},"currency":"{}"}}"#,
-            amount.units,
-            amount.exponent,
-            amount.currency.as_str()
-        ),
-        // The marker is dropped on every state, for the reason given above.
-        RateValue::StatedZero { inherited_from: _ } => r#"{"state":"stated_zero"}"#.to_string(),
-        RateValue::Unpriced {
-            reason,
-            inherited_from: _,
-        } => format!(
-            r#"{{"state":"unpriced","reason":"{}"}}"#,
-            unpriced_reason_str(*reason)
-        ),
-        RateValue::BilledAs { .. } => unreachable!(
-            "billed_as is serve-only: normalization never constructs billing rules, \
-             and plan_ingest receives only normalized values"
-        ),
-    }
-}
-
-fn unpriced_reason_str(r: fusiform_core::UnpricedReason) -> &'static str {
-    use fusiform_core::UnpricedReason::*;
-    match r {
-        MissingRate => "missing_rate",
-        NoCatalogCoverage => "no_catalog_coverage",
-        UnknownChargeBasis => "unknown_charge_basis",
-        NotEstablished => unreachable!(
-            "not_established is serve-only: normalization never constructs billing rules, \
-             and plan_ingest receives only normalized values"
-        ),
-        NoApiCard => unreachable!(
-            "no_api_card is serve-only: normalization never constructs quota proxies, \
-             and plan_ingest receives only normalized values"
-        ),
-    }
-}
 
 /// Every fact's current value, keyed by model identity then fact.
 ///

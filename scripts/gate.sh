@@ -100,7 +100,7 @@ step wire-crate-version wire_version
 if [ "$fast_only" -eq 0 ]; then
     # Print each exit code so a later success cannot mask a failed check.
     compile_steps='
-        (rustup target add wasm32-unknown-unknown && cargo build --locked -p fusiform-curate --target wasm32-unknown-unknown); w=$?
+        (rustup target add wasm32-unknown-unknown && cargo build --locked -p fusiform-curate -p fusiform-release -p fusiform-publish --target wasm32-unknown-unknown); w=$?
         cargo clippy --locked --workspace --all-targets -- -D warnings; c=$?
         cargo test --locked --workspace --all-targets; t=$?
         echo "wasm=$w clippy=$c test=$t"

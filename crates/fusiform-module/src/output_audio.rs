@@ -16,16 +16,7 @@ pub fn sources() -> &'static crate::input_audio::InputAudioSources {
 }
 
 pub fn add_evidence(evidence: ChargeUnitEvidence) -> ChargeUnitEvidence {
-    sources().values().fold(
-        evidence.with_output_audio_per_token(sources().keys().cloned()),
-        |evidence, row| {
-            row.excluded_models
-                .iter()
-                .fold(evidence, |evidence, model| {
-                    evidence.excluding_output_audio_of(&row.provider_id, &model.model_id)
-                })
-        },
-    )
+    fusiform_curate::input_audio::add_output_evidence(evidence, sources())
 }
 
 #[cfg(test)]

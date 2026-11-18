@@ -339,6 +339,7 @@ dependencies = [
  "fiat-crypto",
  "rustc_version",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -420,6 +421,7 @@ dependencies = [
  "sha2",
  "signature",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -529,6 +531,8 @@ dependencies = [
  "fusiform-core",
  "fusiform-curate",
  "fusiform-protocol",
+ "fusiform-publish",
+ "fusiform-release",
  "fusiform-store",
  "fusiform-testkit",
  "reqwest",
@@ -548,6 +552,28 @@ version = "0.74.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "fusiform-publish"
+version = "0.1.0"
+dependencies = [
+ "fusiform-core",
+ "fusiform-curate",
+ "fusiform-release",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fusiform-release"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "ed25519-dalek",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

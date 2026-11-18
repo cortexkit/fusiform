@@ -33,6 +33,8 @@ serde_json = { workspace = true, features = ["arbitrary_precision"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sync"] }
 
 [dev-dependencies]
+fusiform-publish = { path = "../fusiform-publish" }
+fusiform-release = { path = "../fusiform-release" }
 tokio = { workspace = true, features = ["test-util"] }
 fusiform-testkit = { workspace = true }
 # Only to POISON a store in a test: dropping the table an adoption read queries

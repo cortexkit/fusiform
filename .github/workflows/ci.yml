@@ -193,7 +193,7 @@ jobs:
       - name: Build curation for WebAssembly
         run: |
           rustup target add wasm32-unknown-unknown &&
-            cargo build --locked -p fusiform-curate --target wasm32-unknown-unknown
+            cargo build --locked -p fusiform-curate -p fusiform-release -p fusiform-publish --target wasm32-unknown-unknown
 
       # `--all-targets` so the integration tests run, which is where every
       # guard in this repository lives.

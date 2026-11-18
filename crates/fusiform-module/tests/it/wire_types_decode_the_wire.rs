@@ -9,7 +9,7 @@
 //!
 //! The type was a DOMAIN type promoted to a wire type without anyone checking
 //! that it described the wire, and nothing in this repository could notice. The
-//! server never serializes through it: `json_rate` in fusiform-store hand-writes
+//! server never serializes through it: `json_rate` in fusiform-core hand-writes
 //! the stored string and the serve path passes those bytes through. Two paths
 //! answering "what is a rate on the wire", and no test compared them.
 //!
@@ -329,7 +329,7 @@ fn collect_priced<'a>(node: &'a serde_json::Value, out: &mut Vec<&'a serde_json:
 /// runtime list would simply not mention it.
 #[test]
 fn every_variant_the_producer_writes_decodes() {
-    // Stored rate literals come from json_rate in fusiform-store/src/ingest.rs.
+    // Stored rate literals come from json_rate in fusiform_core::upstream_facts.
     // billed_as and not_established are never stored, since they belong to a
     // plane read, so they come from the serve path instead:
     // route::serve_tool_call -> finish_plane_view -> apply_billing_plane.
