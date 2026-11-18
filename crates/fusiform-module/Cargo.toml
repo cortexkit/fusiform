@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 fusiform-core = { path = "../fusiform-core" }
+fusiform-curate = { path = "../fusiform-curate" }
 fusiform-protocol = { path = "../fusiform-protocol" }
 fusiform-store = { path = "../fusiform-store" }
 

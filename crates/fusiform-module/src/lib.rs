@@ -16,6 +16,7 @@ pub mod canonical_links;
 pub mod catalog_bus;
 pub mod creators;
 pub mod curated_models;
+pub mod curation;
 pub mod enrollment;
 pub mod fact_overrides;
 pub mod fetch;

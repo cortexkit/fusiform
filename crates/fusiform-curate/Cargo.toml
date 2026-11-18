@@ -1,0 +1,14 @@
+[package]
+name = "fusiform-curate"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Pure in-memory curation of the Fusiform model catalog."
+license = "MIT"
+
+[dependencies]
+fusiform-core = { path = "../fusiform-core" }
+fusiform-protocol = { path = "../fusiform-protocol" }
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["arbitrary_precision"] }
+url = "2"

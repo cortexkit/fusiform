@@ -1,25 +1,8 @@
-//! Sourced login allowlists for upstream rows, applied only on current reads.
-//! These restrictions are not upstream facts and never enter stored history.
+//! The embedded login methods document and its local adapter.
 
-use std::collections::BTreeMap;
+pub use fusiform_curate::login_methods::*;
 
 const DOCUMENT: &str = include_str!("../data/login-methods.json");
-const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LoginMethods {
-    pub provider_id: String,
-    pub model_id: String,
-    pub auth_methods: Vec<String>,
-    pub source_ref: String,
-    pub quote: String,
-    pub established_at_ms: i64,
-    pub review_by_ms: i64,
-}
-
-pub type Rows = BTreeMap<(String, String), LoginMethods>;
-
 /// Count every malformed, duplicate, non-upstream or already-curated claim.
 pub fn load_reporting_rejects(doc: &str) -> (Rows, Vec<String>) {
     let seed = serde_json::from_str(include_str!("../data/models-dev-seed.json"))
@@ -27,78 +10,9 @@ pub fn load_reporting_rejects(doc: &str) -> (Rows, Vec<String>) {
     load_with(doc, &seed, crate::curated_models::models())
 }
 
-fn load_with(
-    doc: &str,
-    seed: &serde_json::Value,
-    curated: &crate::curated_models::CuratedModels,
-) -> (Rows, Vec<String>) {
-    #[derive(serde::Deserialize)]
-    struct Doc {
-        models: Vec<serde_json::Value>,
-    }
-    let doc: Doc = match serde_json::from_str(doc) {
-        Ok(doc) => doc,
-        Err(error) => {
-            return (
-                Rows::new(),
-                vec![format!("login methods unreadable: {error}")],
-            )
-        }
-    };
-    let mut rows = Rows::new();
-    let mut rejects = Vec::new();
-    for raw in doc.models {
-        let row: LoginMethods = match serde_json::from_value(raw) {
-            Ok(row) => row,
-            Err(error) => {
-                rejects.push(format!("login methods row did not parse: {error}"));
-                continue;
-            }
-        };
-        let key = (row.provider_id.clone(), row.model_id.clone());
-        let invalid = if [&row.provider_id, &row.model_id, &row.source_ref, &row.quote]
-            .iter()
-            .any(|field| field.trim().is_empty())
-        {
-            Some("empty identity, source or quote")
-        } else if row.auth_methods.is_empty()
-            || row.auth_methods.iter().enumerate().any(|(i, method)| {
-                !crate::billing_planes::AUTH_METHODS.contains(&method.as_str())
-                    || row.auth_methods[..i].contains(method)
-            })
-        {
-            Some("auth_methods must be a nonempty list of distinct billing-plane methods")
-        } else if row.established_at_ms <= 0
-            || row.review_by_ms.checked_sub(row.established_at_ms) != Some(REVIEW_INTERVAL_MS)
-        {
-            Some("review_by_ms must be 60 days after established_at_ms")
-        } else if curated.contains_key(&key) {
-            Some("row is already curated; keep its login methods in curated-models.json")
-        } else if !seed[&row.provider_id]["models"][&row.model_id].is_object() {
-            Some("row is missing from the embedded seed; correct or remove the login allowlist")
-        } else if rows.contains_key(&key) {
-            Some("duplicate login methods identity")
-        } else {
-            None
-        };
-        if let Some(reason) = invalid {
-            rejects.push(format!("login methods {}/{}: {reason}", key.0, key.1));
-        } else {
-            rows.insert(key, row);
-        }
-    }
-    (rows, rejects)
-}
-
 pub fn rows() -> &'static Rows {
     static ROWS: std::sync::OnceLock<Rows> = std::sync::OnceLock::new();
     ROWS.get_or_init(|| load_reporting_rejects(DOCUMENT).0)
-}
-
-pub fn overdue_at(rows: &Rows, now_ms: i64) -> Vec<String> {
-    rows.values().filter(|row| row.review_by_ms < now_ms)
-        .map(|row| format!("{}/{}: re-verify {} and re-date established_at_ms and review_by_ms (60 days later), or remove the login allowlist", row.provider_id, row.model_id, row.source_ref))
-        .collect()
 }
 
 #[cfg(test)]

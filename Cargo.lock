@@ -507,6 +507,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fusiform-curate"
+version = "0.1.0"
+dependencies = [
+ "fusiform-core",
+ "fusiform-protocol",
+ "serde",
+ "serde_json",
+ "url",
+]
+
+[[package]]
 name = "fusiform-module"
 version = "0.1.0"
 dependencies = [
@@ -516,6 +527,7 @@ dependencies = [
  "cortexkit-bus-client",
  "cortexkit-store-types",
  "fusiform-core",
+ "fusiform-curate",
  "fusiform-protocol",
  "fusiform-store",
  "fusiform-testkit",

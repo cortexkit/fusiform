@@ -33,6 +33,7 @@
 
 use fusiform_core::normalize::{normalize_models_dev_with, NormalizedCatalog};
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
+use fusiform_curate::UpstreamState;
 use fusiform_store::ingest::{catalog_digest, plan_ingest};
 use fusiform_store::{CatalogError, CatalogStore, NewObservation};
 use serde::Deserialize;
@@ -118,6 +119,47 @@ pub fn catalog() -> Result<NormalizedCatalog, SeedError> {
     normalize_models_dev_with(SNAPSHOT, &crate::input_audio::evidence())
         .map(|outcome| outcome.catalog)
         .map_err(|e| SeedError::Snapshot(e.to_string()))
+}
+
+/// Prepare the embedded seed for the publisher's in-memory merge without
+/// opening a store. Use ingest's fact encoding so seed and store agree about
+/// explicit nulls, absent keys, and exact decimal values.
+pub fn upstream_state() -> Result<UpstreamState, SeedError> {
+    let fetched_at_ms = meta()?.fetched_at_ms;
+    let mut upstream = UpstreamState {
+        source: SourceId::ModelsDev,
+        catalog_version: fetched_at_ms,
+        resolved_at_ms: fetched_at_ms,
+        models: Default::default(),
+        provider_names: Default::default(),
+        withheld: Vec::new(),
+        uncertain: Vec::new(),
+    };
+    for model in catalog()?
+        .providers
+        .into_iter()
+        .flat_map(|provider| provider.models)
+    {
+        let provider = &model.key.provider_id;
+        let mut facts: fusiform_curate::RawFacts =
+            fusiform_store::ingest::facts_with_values(&model)
+                .into_iter()
+                .map(|(key, raw)| (key.as_str().to_owned(), raw))
+                .collect();
+        facts.insert("existence".into(), "\"present\"".into());
+        if let Some(name) = &model.provider_name {
+            upstream
+                .provider_names
+                .entry(provider.clone())
+                .or_insert_with(|| name.clone());
+        }
+        upstream
+            .models
+            .entry(provider.clone())
+            .or_default()
+            .insert(model.key.model_id.clone(), facts);
+    }
+    Ok(upstream)
 }
 
 /// Load the snapshot into an empty store.
