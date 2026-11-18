@@ -61,6 +61,10 @@ fn ingest(store: &CatalogStore, bytes: &[u8], at: i64) {
 }
 
 fn store_publishing(output: Value) -> (CatalogStore, tempfile::TempDir) {
+    store_document(&upstream(output))
+}
+
+fn store_document(document: &[u8]) -> (CatalogStore, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -71,7 +75,7 @@ fn store_publishing(output: Value) -> (CatalogStore, tempfile::TempDir) {
         },
     })
     .unwrap();
-    ingest(&store, &upstream(output), 1_000);
+    ingest(&store, document, 1_000);
     (store, dir)
 }
 
@@ -282,10 +286,91 @@ fn flash_overrides() -> fusiform_module::fact_overrides::FactOverrides {
         .collect()
 }
 
+// Preserve the retired text claim as a fixture: historical reads must still
+// reproduce the split that was served before upstream corrected its text rate.
+fn historical_flash_overrides() -> fusiform_module::fact_overrides::FactOverrides {
+    let mut rows = flash_overrides();
+    let mut text = rows[&(
+        "google".into(),
+        FLASH_MODEL.into(),
+        "rate.output_image".into(),
+    )]
+        .clone();
+    text.fact_key = "rate.output".into();
+    text.value["units"] = json!(3_000_000_000i64);
+    text.replaces = json!({"state":"priced", "units":60_000_000_000i64,
+        "exponent":9, "currency":"USD"});
+    text.reason = "The upstream output rate is the image price. Text and thinking output have a separate $3 per million token price, so using $60 for text overstates its cost.".into();
+    text.notes = Some("Only replaces the exact recorded $60/M upstream value. The Antigravity alias inherits the target's split rates; the Vertex row is untouched.".into());
+    rows.insert(
+        ("google".into(), FLASH_MODEL.into(), "rate.output".into()),
+        text,
+    );
+    rows
+}
+
+pub(super) fn historical_flash_store() -> (CatalogStore, tempfile::TempDir) {
+    let (store, dir) = store_document(&flash_document(60));
+    let rows = historical_flash_overrides();
+    let boundary = rows.values().map(|r| r.established_at_ms).max().unwrap();
+    fusiform_module::fact_overrides::apply_to_store(&store, &rows, boundary).unwrap();
+    (store, dir)
+}
+
+#[test]
+fn retired_flash_text_override_stays_historical_after_upstream_correction() {
+    let (store, _dir) = historical_flash_store();
+    let historical = historical_flash_overrides();
+    let boundary = historical
+        .values()
+        .map(|r| r.established_at_ms)
+        .max()
+        .unwrap();
+    let current = flash_overrides();
+    assert_eq!(current.len(), 1);
+    assert_eq!(
+        current.values().next().unwrap().fact_key,
+        "rate.output_image"
+    );
+    let corrected_at = boundary + 100;
+    ingest(&store, &flash_document(3), corrected_at);
+    assert_eq!(
+        fusiform_module::fact_overrides::apply_to_store(&store, &current, corrected_at).unwrap(),
+        1
+    );
+    for (at, disclosures) in [(corrected_at - 1, 2), (corrected_at, 1)] {
+        let response = get(
+            &store,
+            json!({"provider_id":"google", "model_id":FLASH_MODEL, "at_ms":at}),
+        );
+        assert_eq!(
+            response.models[FLASH]["rate.output"]["units"],
+            3_000_000_000i64
+        );
+        assert_eq!(
+            response.models[FLASH]["rate.output_image"]["units"],
+            60_000_000_000i64
+        );
+        assert_eq!(disclosed(&response, FLASH).len(), disclosures);
+    }
+    ingest(&store, &flash_document(60), corrected_at + 100);
+    for args in [
+        json!({"provider_id":"google", "model_id":FLASH_MODEL}),
+        json!({"provider_id":"google", "model_id":FLASH_MODEL, "at_ms":corrected_at + 100}),
+    ] {
+        let response = get(&store, args);
+        assert_eq!(
+            response.models[FLASH]["rate.output"]["units"],
+            60_000_000_000i64
+        );
+        assert_eq!(disclosed(&response, FLASH).len(), 1);
+    }
+}
+
 #[test]
 fn dated_flash_image_overrides_split_text_and_image_after_establishment() {
     let (store, _dir) = flash_store();
-    let rows = flash_overrides();
+    let rows = historical_flash_overrides();
     assert_eq!(rows.len(), 2);
     let boundary = rows.values().map(|r| r.established_at_ms).max().unwrap();
     assert_eq!(
@@ -338,7 +423,7 @@ fn override_era_count(store: &CatalogStore) -> i64 {
 #[test]
 fn dated_overrides_diff_claims_not_provenance_and_tombstone_removals() {
     let (store, _dir) = flash_store();
-    let mut rows = flash_overrides();
+    let mut rows = historical_flash_overrides();
     let boundary = rows.values().map(|r| r.established_at_ms).max().unwrap();
     let apply =
         |rows: &_| fusiform_module::fact_overrides::apply_to_store(&store, rows, boundary + 100);
@@ -405,15 +490,15 @@ fn dated_overrides_diff_claims_not_provenance_and_tombstone_removals() {
     );
     assert_eq!(
         current.models[FLASH]["rate.output"]["units"],
-        3_000_000_000i64
+        60_000_000_000i64
     );
-    assert_eq!(disclosed(&current, FLASH).len(), 2);
+    assert_eq!(disclosed(&current, FLASH).len(), 1);
 }
 
 #[test]
 fn dated_override_guards_use_upstream_at_the_requested_instant() {
     let (store, _dir) = flash_store();
-    let rows = flash_overrides();
+    let rows = historical_flash_overrides();
     let boundary = rows.values().map(|r| r.established_at_ms).max().unwrap();
     fusiform_module::fact_overrides::apply_to_store(&store, &rows, boundary).unwrap();
     ingest(&store, &flash_document(70), boundary + 100);
@@ -462,7 +547,7 @@ fn dated_override_guards_use_upstream_at_the_requested_instant() {
 #[test]
 fn dated_override_reappearance_and_clock_rollback_use_latest_boundary() {
     let (store, _dir) = flash_store();
-    let mut rows = flash_overrides();
+    let mut rows = historical_flash_overrides();
     let boundary = rows.values().map(|r| r.established_at_ms).max().unwrap();
     fusiform_module::fact_overrides::apply_to_store(&store, &rows, boundary).unwrap();
     fusiform_module::fact_overrides::apply_to_store(&store, &Default::default(), boundary + 100)

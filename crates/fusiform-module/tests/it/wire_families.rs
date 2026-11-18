@@ -10,11 +10,7 @@ const CASES: &[(&str, &str, &str)] = &[
     ("openai", "gpt-6.1-sol", "openai.responses"),
     ("infer", "infer/gpt-6-astra:official", "openai.responses"),
     ("xai", "grok-4.20-multi-agent-0309", "openai.responses"),
-    (
-        "zenifra",
-        "alibaba/qwen3.6-35b-a3b",
-        "openai.chat_completions",
-    ),
+    ("zenifra", "zenifra/qwen3.7-max", "openai.chat_completions"),
     ("sakana", "fugu-ultra-20260615", "openai.responses"),
     ("amazon-bedrock", "openai.gpt-5.5", "openai.responses"),
     ("anthropic", "claude-sonnet-5-5", "anthropic.messages"),
@@ -36,6 +32,7 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
     let extras = [
         ("perplexity", "sonar", ""),
         ("opencode-go", "minimax-m2.7", ""),
+        ("opencode-go", "qwen4-max", ""),
         ("opencode-go", "gpt-6-luna", ""),
         ("google", "gemini-4-argon", ""),
         ("google", "gemini-4-carbon", ""),
@@ -109,8 +106,11 @@ fn withheld_go_endpoint_has_no_protocol_but_routed_go_does() {
         json!({"provider_id":"opencode-go","fact_prefixes":["wire.family"]}),
     ] {
         let response = get(&store, args);
-        if let Some(facts) = response.models.get("opencode-go/minimax-m2.7") {
-            assert!(!facts.contains_key("wire.family"));
+        for model in ["minimax-m2.7", "qwen4-max"] {
+            if let Some(facts) = response.models.get(&format!("opencode-go/{model}")) {
+                assert!(!facts.contains_key("wire.family"));
+                assert!(!facts.contains_key("wire.api"));
+            }
         }
         assert_eq!(
             response.models["opencode-go/gpt-6-luna"]["wire.family"],
@@ -131,6 +131,18 @@ fn withheld_go_endpoint_has_no_protocol_but_routed_go_does() {
         .wire_corrections
         .iter()
         .any(|row| row.model == "minimax-m2.7" && row.withheld));
+    let unrouted = get(
+        &store,
+        json!({"provider_id":"opencode-go","model_id":"qwen4-max"}),
+    );
+    assert!(!unrouted.models["opencode-go/qwen4-max"].contains_key("wire.api"));
+    assert!(!unrouted.models["opencode-go/qwen4-max"].contains_key("wire.family"));
+    assert!(unrouted
+        .wire_corrections
+        .iter()
+        .any(|row| row.model == "qwen4-max"
+            && row.withheld
+            && row.notes.as_deref() == Some("not routed by pi at 74f46864")));
 }
 
 #[test]

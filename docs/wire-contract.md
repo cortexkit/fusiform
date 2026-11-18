@@ -852,8 +852,10 @@ additions use the same dated-history and upstream-wins rules.
     untouched before the first era and after a tombstone. `catalog.history`
     still lists upstream eras only. For example, the golden case
     `catalog.get — dated Flash Image split rates` serves $3/M text output and
-    $60/M image output at 2026-11-11 23:36:33Z from the dated override history
-    (`fact_overrides::dated_flash_image_overrides_split_text_and_image_after_establishment`).
+    $60/M image output at 2026-11-11 23:36:33Z: the refreshed seed supplies the
+    text rate and the dated override history supplies the image addition.
+    Historical claims from before the text replacement was retired are tested
+    by `fact_overrides::retired_flash_text_override_stays_historical_after_upstream_correction`.
 2. **Only while upstream publishes `replaces`.** When the stored upstream
    value is anything else, including the override's own value, or the fact is
    absent or withheld by a correction, the upstream value is served and

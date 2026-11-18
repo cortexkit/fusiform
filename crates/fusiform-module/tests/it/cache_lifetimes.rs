@@ -93,6 +93,15 @@ fn exact_cache_lifetime_prices_and_context_tiers() {
         price(sol, key, units);
     }
     let haiku = &response["models"]["anthropic/claude-haiku-5-5"];
+    for (model, short, long) in [
+        ("gpt-6.2-sol", 2_500_000_000, 5_000_000_000),
+        ("gpt-6.2-astra", 10_000_000_000, 20_000_000_000),
+    ] {
+        let facts = &response["models"][format!("openai/{model}")];
+        assert_eq!(facts["capability.cache_lifetimes"], json!(["30m", "12h"]));
+        price(facts, "rate.cache_write.ttl.30m", short);
+        price(facts, "rate.cache_write.ttl.12h", long);
+    }
     price(
         haiku,
         "rate.cache_write.above_context.100000.ttl.5m",
@@ -282,10 +291,43 @@ fn cache_lifetime_boot_diff_records_changes_removals_and_new_rules_once() {
     use fusiform_module::cache_lifetimes::{rules, stored_rules};
     let (store, dir) = store(None);
     let original = stored_rules(rules());
+    // Schema v12 backfilled 34 per-model rules before GPT-6.2 was added.
+    // Each stored rule includes its group's model_ids list, so adding two ids
+    // changes the JSON for nine existing GPT rules and introduces two new ones.
     assert_eq!(
         store.append_cache_lifetimes(&original, DATED_READ).unwrap(),
+        11
+    );
+    assert_eq!(
+        store
+            .append_cache_lifetimes(&original, DATED_READ + 1)
+            .unwrap(),
         0
     );
+    for model in ["gpt-6.2-astra", "gpt-6.2-sol"] {
+        for (at, present) in [(DATED_READ - 1, false), (DATED_READ, true)] {
+            assert_eq!(
+                store
+                    .cache_lifetimes_at(at, Some("openai"))
+                    .unwrap()
+                    .iter()
+                    .any(|row| row.model_id == model),
+                present,
+                "{model} at {at}"
+            );
+            let response = get(
+                &store,
+                json!({"provider_id":"openai", "model_id":model, "at_ms":at}),
+            );
+            assert_eq!(
+                response["models"][format!("openai/{model}")]
+                    .get("capability.cache_lifetimes")
+                    .is_some(),
+                present,
+                "{model} at {at}"
+            );
+        }
+    }
     let mut rows = original.clone();
     let opus = rows
         .iter_mut()
@@ -365,7 +407,7 @@ fn cache_lifetime_boot_diff_records_changes_removals_and_new_rules_once() {
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM cache_lifetime_era", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(count, 37);
+    assert_eq!(count, 48);
     // Current reads still use the compiled rule after stored changes and removal.
     let current = get(
         &store,

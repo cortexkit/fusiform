@@ -183,7 +183,7 @@ mod tests {
     fn shipped_classifications_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.families.len(), 67);
+        assert_eq!(rows.families.len(), 68);
         assert_eq!(rows.providers.len(), 12);
     }
 

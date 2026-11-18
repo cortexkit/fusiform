@@ -590,7 +590,7 @@ mod tests {
     fn shipped_overrides_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 28);
+        assert_eq!(rows.len(), 27);
         let row = argon();
         assert_eq!(row.value, json!(65_536));
         assert_eq!(row.replaces, json!(32_768));
@@ -627,17 +627,18 @@ mod tests {
     #[test]
     fn image_rate_rows_validate_shape_and_yield_to_upstream_or_withholding() {
         let rows = overrides();
-        let output = &rows[&(
+        assert!(!rows.contains_key(&(
             "google".into(),
             "gemini-3.1-flash-image".into(),
             "rate.output".into(),
-        )];
+        )));
         let image = &rows[&(
             "google".into(),
             "gemini-3.1-flash-image".into(),
             "rate.output_image".into(),
         )];
-        for row in [output, image] {
+        {
+            let row = image;
             let mut raw = document()["overrides"]
                 .as_array()
                 .unwrap()
@@ -654,7 +655,11 @@ mod tests {
             );
         }
         let mut facts = BTreeMap::from([
-            ("rate.output".into(), output.replaces.clone()),
+            (
+                "rate.output".into(),
+                json!({"state":"priced", "units":3_000_000_000i64,
+                "exponent":9, "currency":"USD"}),
+            ),
             ("rate.output_image".into(), json!(null)),
         ]);
         let applied = apply_rows(
@@ -665,8 +670,8 @@ mod tests {
             None,
             &[],
         );
-        assert_eq!(applied.len(), 1);
-        assert_eq!(applied[0].fact_key, "rate.output");
+        assert!(applied.is_empty());
+        assert_eq!(facts["rate.output"]["units"], 3_000_000_000i64);
         assert!(facts["rate.output_image"].is_null());
         facts.remove("rate.output_image");
         let applied = apply_rows(

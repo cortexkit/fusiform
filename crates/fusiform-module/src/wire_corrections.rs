@@ -531,7 +531,8 @@ mod tests {
                 "minimax-m3",
                 "qwen3.7-plus",
                 "qwen3.8-flash",
-                "qwen3.8-max"
+                "qwen3.8-max",
+                "qwen4-max"
             ]
         );
         assert!(unversioned_anthropic_bases(corrections()).is_empty());

@@ -613,6 +613,7 @@ fn served_history_parity_for_every_golden_store_model_and_rate_key() {
         super::golden_payload::store(),
         super::cache_lifetimes::store(None),
         super::curated_wire::store(),
+        super::fact_overrides::historical_flash_store(),
     ];
     let mut models = 0;
     let mut pairs = 0;
@@ -844,8 +845,8 @@ fn served_history_tracks_upstream_guards_existence_and_removed_ttl_keys() {
     use fusiform_store::{FactKey, NewEra};
     let (store, _dir) = super::curated_wire::store();
     overlays(&store);
-    let key = "rate.output";
-    let replacement = history(&store, "google", "gemini-3.1-flash-image", key);
+    let key = "limit.output";
+    let replacement = history(&store, "google", "gemini-4-argon", key);
     assert_eq!(
         replacement.last().unwrap().source,
         Some(fusiform_protocol::HistorySource::Override)
@@ -889,12 +890,7 @@ fn served_history_tracks_upstream_guards_existence_and_removed_ttl_keys() {
     );
     store
         .append_eras(&[
-            era(
-                "google",
-                "gemini-3.1-flash-image",
-                key,
-                json!({"state":"priced", "currency":"USD", "exponent":9, "units":4_000_000_000i64}),
-            ),
+            era("google", "gemini-4-argon", key, json!(65_535)),
             era("typesafe", "jev-1.13.0", "existence", json!("present")),
             era(
                 "typesafe",
@@ -904,14 +900,14 @@ fn served_history_tracks_upstream_guards_existence_and_removed_ttl_keys() {
             ),
         ])
         .unwrap();
-    let replacement = history(&store, "google", "gemini-3.1-flash-image", key);
+    let replacement = history(&store, "google", "gemini-4-argon", key);
     let last = replacement.last().unwrap();
     assert_eq!(last.from_ms, changed_at);
     assert_eq!(
         last.source,
         Some(fusiform_protocol::HistorySource::Upstream)
     );
-    assert_eq!(last.value.as_ref().unwrap()["units"], 4_000_000_000i64);
+    assert_eq!(last.value.as_ref().unwrap(), &json!(65_535));
     // Existence, rather than an era for the requested key, ends the curated value.
     let curated = history(&store, "typesafe", "jev-1.13.0", "rate.output");
     assert_eq!(curated.last().unwrap().from_ms, changed_at);

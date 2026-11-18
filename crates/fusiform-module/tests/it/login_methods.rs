@@ -35,6 +35,32 @@ fn get(store: &CatalogStore, args: Value) -> Value {
 }
 
 #[test]
+fn gpt_6_2_models_are_reachable_on_verified_chatgpt_and_apikey_routes() {
+    let (store, _dir) = super::cache_lifetimes::store(None);
+    for model in ["gpt-6.2-astra", "gpt-6.2-sol"] {
+        for (auth, family) in [
+            ("apikey", "openai.responses"),
+            ("chatgpt", "openai.chatgpt_responses"),
+        ] {
+            let response = get(
+                &store,
+                json!({"provider_id":"openai", "model_id":model, "auth_method":auth}),
+            );
+            let id = format!("openai/{model}");
+            assert_eq!(
+                response["models"][&id]["wire.family"], family,
+                "{id} {auth}"
+            );
+            assert_eq!(response["login_methods"][0]["model"], id);
+            assert_eq!(
+                response["login_methods"][0]["auth_methods"],
+                json!(["apikey", "chatgpt"])
+            );
+        }
+    }
+}
+
+#[test]
 fn chatgpt_login_allowlist_discloses_and_refuses_only_established_rows() {
     let (store, _dir) = store();
     let version = store.catalog_version().unwrap();

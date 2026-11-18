@@ -1043,10 +1043,13 @@ another way. Curated model rows (§4) are
 fusiform's own data and are never overridden.
 
 Gemini 3.1 Flash Image splits its published $60/M image-output price from
-$3/M text/thinking output. The `rate.output` replacement matches only the exact
-upstream $60/M object; `rate.output_image` is an addition and yields if upstream
-records that key. Both flow through its Antigravity alias, with borrowed-rate
-markers retained in the disclosed served values. Vertex is not overridden.
+$3/M text/thinking output. The embedded seed now publishes the correct $3/M
+`rate.output` itself, so the former text-rate replacement is retired.
+`rate.output_image` remains an addition and yields if upstream records that
+key. The split flows through its Antigravity alias, with borrowed-rate markers
+retained in the disclosed served values. Vertex is not overridden. Stored
+`fact_override_era` claims retain the former replacement for historical reads
+while it was in force; a removal recorded at boot ends that claim.
 The [Google pricing page](https://ai.google.dev/gemini-api/docs/pricing)
 also quotes image output token counts (747 at 0.5K, 1120 at 1K,
 1680 at 2K, 2520 at 4K). They are quoted in the override's source text as

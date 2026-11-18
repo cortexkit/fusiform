@@ -281,7 +281,7 @@ fn image_store(output: i64) -> (CatalogStore, tempfile::TempDir) {
 
 #[test]
 fn flash_image_split_is_guarded_inherited_and_current_only() {
-    let (store, _dir) = image_store(60);
+    let (store, _dir) = image_store(3);
     for model in [
         "gemini-3.1-flash-image",
         "antigravity-gemini-3.1-flash-image",
@@ -293,15 +293,13 @@ fn flash_image_split_is_guarded_inherited_and_current_only() {
         assert_eq!(facts["rate.output_image"]["units"], 60_000_000_000i64);
         assert_eq!(
             response.fact_overrides.len(),
-            2,
-            "{model}: both split prices must be disclosed"
+            1,
+            "{model}: only the image addition is curated; text is upstream"
         );
         for row in &response.fact_overrides {
             assert_eq!(row.value, facts[&row.fact_key]);
-            if row.fact_key == "rate.output" {
-                serde_json::from_value::<fusiform_protocol::RateValue>(row.replaces.clone())
-                    .unwrap();
-            }
+            assert_eq!(row.fact_key, "rate.output_image");
+            assert!(row.replaces.is_null());
         }
     }
     let historical = super::curated_wire::get(
@@ -309,7 +307,7 @@ fn flash_image_split_is_guarded_inherited_and_current_only() {
         json!({"provider_id":"google","model_id":"gemini-3.1-flash-image","at_ms":1000}),
     );
     let old = &historical.models["google/gemini-3.1-flash-image"];
-    assert_eq!(old["rate.output"]["units"], 60_000_000_000i64);
+    assert_eq!(old["rate.output"]["units"], 3_000_000_000i64);
     assert!(!old.contains_key("rate.output_image"));
     assert!(historical.fact_overrides.is_empty());
     let vertex = super::curated_wire::get(
@@ -318,7 +316,7 @@ fn flash_image_split_is_guarded_inherited_and_current_only() {
     );
     assert_eq!(
         vertex.models["google-vertex/gemini-3.1-flash-image"]["rate.output"]["units"],
-        60_000_000_000i64
+        3_000_000_000i64
     );
     assert!(
         !vertex.models["google-vertex/gemini-3.1-flash-image"].contains_key("rate.output_image")
