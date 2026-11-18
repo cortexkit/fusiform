@@ -165,7 +165,9 @@ pub struct Snapshot {
     pub state: State,
     /// Carried over from the release at this envelope.
     pub signatures: Signatures,
-    /// Legacy snapshots can recover an index but cannot authenticate history.
+    /// Optional only so the first format samples, written before history was
+    /// attested, still decode for index recovery. A consumer that loads
+    /// history from a snapshot must refuse one without an attestation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history_attestation: Option<HistoryAttestation>,
 }
