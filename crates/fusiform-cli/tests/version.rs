@@ -15,6 +15,7 @@
 use std::io::Read;
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 fn read_pipe(pipe: impl Read + Send + 'static) -> Receiver<std::io::Result<Vec<u8>>> {
@@ -30,13 +31,26 @@ fn read_pipe(pipe: impl Read + Send + 'static) -> Receiver<std::io::Result<Vec<u
     receive
 }
 
+/// Held while a test copies an executable and while any test here spawns a
+/// process. On Linux a fork inherits every open descriptor until the child
+/// execs, so a fork during the copy leaves the copy's write descriptor open in
+/// that child for a moment. Executing the copy in that moment fails with
+/// "Text file busy". Tests in this file run on parallel threads, so the copy
+/// and every spawn must not overlap.
+static SPAWN_LOCK: Mutex<()> = Mutex::new(());
+
 fn bounded_output(command: &mut Command, budget: Duration, label: &str) -> Output {
     let deadline = Instant::now() + budget;
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap_or_else(|error| panic!("{label} must run: {error}"));
+    let spawned = {
+        let _guard = SPAWN_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    };
+    let mut child = spawned.unwrap_or_else(|error| panic!("{label} must run: {error}"));
     // Drain both pipes concurrently so a full stderr cannot block stdout (or
     // vice versa). Receiving the captured bytes has the same overall deadline.
     let stdout = read_pipe(child.stdout.take().unwrap());
@@ -87,6 +101,9 @@ fn ckdev_link(built: &std::path::Path, scratch: &std::path::Path) -> std::path::
         .expect("binary file name");
     let suffix = name.strip_prefix("ck-").expect("a ck- binary");
     let link = scratch.join(format!("ckdev-{suffix}"));
+    let _guard = SPAWN_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if std::fs::hard_link(built, &link).is_err() {
         std::fs::copy(built, &link)
             .unwrap_or_else(|error| panic!("{} -> {}: {error}", built.display(), link.display()));
