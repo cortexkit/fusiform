@@ -78,6 +78,7 @@
       "qwen3.6": "qwen",
       "qwen3.7-plus": "qwen",
       "qwen3.8-max": "qwen",
+      "qwen4-max": "qwen",
       "voxtral": "mistral"
     }
   },

@@ -1,6 +1,6 @@
 {
   "format": "providers-v1",
-  "snapshot_fetched_at": "2026-11-14T16:28:52Z",
+  "snapshot_fetched_at": "2026-11-17T23:55:49Z",
   "providers": [
     {
       "id": "302ai",
@@ -29,6 +29,18 @@
       ]
     },
     {
+      "id": "abliteratedllm",
+      "name": "AbliteratedLLM",
+      "doc": "https://abliteratedllm.dev/docs/models",
+      "source": "models.dev",
+      "env": [
+        "ABLITERATEDLLM_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "abliteration-ai",
       "name": "abliteration.ai",
       "doc": "https://docs.abliteration.ai/models",
@@ -47,6 +59,30 @@
       "source": "models.dev",
       "env": [
         "ABOVE_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "adaption",
+      "name": "Adaption",
+      "doc": "https://docs.adaptionlabs.ai",
+      "source": "models.dev",
+      "env": [
+        "ADAPTION_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "adzuki",
+      "name": "Adzuki AI",
+      "doc": "https://adzukiai.com/docs",
+      "source": "models.dev",
+      "env": [
+        "ADZUKI_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -113,6 +149,18 @@
       ]
     },
     {
+      "id": "aigrow",
+      "name": "AIGROW",
+      "doc": "https://aigrow.gg/ai-api/guide",
+      "source": "models.dev",
+      "env": [
+        "AIGROW_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "aihubmix",
       "name": "AIHubMix",
       "doc": "https://docs.aihubmix.com",
@@ -145,6 +193,30 @@
       "source": "models.dev",
       "env": [
         "AINETCAFE_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "aipg",
+      "name": "AI Power Grid",
+      "doc": "https://aipowergrid.io/docs/integrations",
+      "source": "models.dev",
+      "env": [
+        "AIPG_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "aistupidlevel",
+      "name": "AI Stupid Level",
+      "doc": "https://aistupidlevel.info/router/docs",
+      "source": "models.dev",
+      "env": [
+        "AISTUPIDLEVEL_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -292,6 +364,18 @@
       ]
     },
     {
+      "id": "anonrouter",
+      "name": "AnonRouter",
+      "doc": "https://docs.anonrouter.ai/models",
+      "source": "models.dev",
+      "env": [
+        "ANONROUTER_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "anthropic",
       "name": "Anthropic",
       "doc": "https://docs.anthropic.com/en/docs/about-claude/models",
@@ -310,6 +394,18 @@
       "source": "models.dev",
       "env": [
         "ANYAPI_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "apiko",
+      "name": "APIKO",
+      "doc": "https://apiko.app/docs/introduction",
+      "source": "models.dev",
+      "env": [
+        "APIKO_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -340,12 +436,36 @@
       ]
     },
     {
+      "id": "augure",
+      "name": "Augure",
+      "doc": "https://augureai.ca/docs/api",
+      "source": "models.dev",
+      "env": [
+        "AUGURE_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "auriko",
       "name": "Auriko",
       "doc": "https://docs.auriko.ai",
       "source": "models.dev",
       "env": [
         "AURIKO_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "autarcho",
+      "name": "Autarcho",
+      "doc": "https://autarcho.com/use/",
+      "source": "models.dev",
+      "env": [
+        "AUTARCHO_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -384,7 +504,7 @@
     {
       "id": "bailing",
       "name": "Bailing",
-      "doc": "https://alipaytbox.yuque.com/sxs0ba/ling/intro",
+      "doc": "https://developer.ant-ling.com/zh-CN/docs",
       "source": "models.dev",
       "env": [
         "BAILING_API_TOKEN"
@@ -475,6 +595,18 @@
       "output_modalities": []
     },
     {
+      "id": "bumo",
+      "name": "Bumo Router",
+      "doc": "https://bumo.ai/docs/api",
+      "source": "models.dev",
+      "env": [
+        "BUMO_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "byteplus",
       "name": "BytePlus ModelArk",
       "doc": "https://docs.byteplus.com/en/docs/ModelArk/1529329",
@@ -487,12 +619,60 @@
       ]
     },
     {
+      "id": "cedarllm",
+      "name": "CedarLLM",
+      "doc": "https://cedarllm.com/docs",
+      "source": "models.dev",
+      "env": [
+        "CEDARLLM_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "cerebras",
       "name": "Cerebras",
       "doc": "https://inference-docs.cerebras.ai/models/overview",
       "source": "models.dev",
       "env": [
         "CEREBRAS_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "cheapaimodel",
+      "name": "cheapaimodel",
+      "doc": "https://cheapaimodel.ai/docs",
+      "source": "models.dev",
+      "env": [
+        "CHEAPAIMODEL_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "cheapest-token",
+      "name": "CheapestToken",
+      "doc": "https://cheapest-token.com/docs/opencode",
+      "source": "models.dev",
+      "env": [
+        "CHEAPEST_TOKEN_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "cheapllm",
+      "name": "cheapllm.shop",
+      "doc": "https://cheapllm.shop/docs",
+      "source": "models.dev",
+      "env": [
+        "CHEAPLLM_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -541,6 +721,18 @@
       "source": "models.dev",
       "env": [
         "CLINE_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "cloudcode",
+      "name": "CloudCode.ONE",
+      "doc": "https://cloudcode.one",
+      "source": "models.dev",
+      "env": [
+        "CLOUDCODE_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -604,6 +796,18 @@
       "source": "models.dev",
       "env": [
         "CMD_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "confidential-ai",
+      "name": "Confidential AI",
+      "doc": "https://confidential.ai/docs/inference-api/get-started",
+      "source": "models.dev",
+      "env": [
+        "CONFIDENTIAL_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -735,6 +939,31 @@
       ]
     },
     {
+      "id": "dothoosh",
+      "name": "DotHoosh",
+      "doc": "https://gateway.dothoosh.com/docs",
+      "source": "models.dev",
+      "env": [
+        "DOTHOOSH_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "doubleword",
+      "name": "Doubleword",
+      "doc": "https://docs.doubleword.ai/inference-api/models",
+      "source": "models.dev",
+      "env": [
+        "DOUBLEWORD_API_KEY"
+      ],
+      "output_modalities": [
+        "embedding",
+        "text"
+      ]
+    },
+    {
       "id": "drun",
       "name": "D.Run (China)",
       "doc": "https://www.d.run",
@@ -818,6 +1047,18 @@
       ]
     },
     {
+      "id": "entrim",
+      "name": "Entrim",
+      "doc": "https://docs.entrim.ai/model-api/",
+      "source": "models.dev",
+      "env": [
+        "ENTRIM_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "evroc",
       "name": "evroc",
       "doc": "https://docs.evroc.com/products/think/overview.html",
@@ -840,6 +1081,18 @@
       "output_modalities": []
     },
     {
+      "id": "ezkielyna",
+      "name": "Ezkielyna",
+      "doc": "https://ezkielyna.store/models",
+      "source": "models.dev",
+      "env": [
+        "EZKIELYNA_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "fastrouter",
       "name": "FastRouter",
       "doc": "https://fastrouter.ai/models",
@@ -851,6 +1104,18 @@
         "image",
         "text",
         "video"
+      ]
+    },
+    {
+      "id": "fiftyx",
+      "name": "50X",
+      "doc": "https://ai.50x.energy/docs",
+      "source": "models.dev",
+      "env": [
+        "FIFTYX_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
       ]
     },
     {
@@ -883,12 +1148,36 @@
       "output_modalities": []
     },
     {
+      "id": "fortytwo",
+      "name": "Fortytwo",
+      "doc": "https://docs.fortytwo.network/docs/models",
+      "source": "models.dev",
+      "env": [
+        "FORTYTWO_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "freemodel",
       "name": "FreeModel",
       "doc": "https://freemodel.dev",
       "source": "models.dev",
       "env": [
         "FREEMODEL_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "frequency",
+      "name": "Frequency",
+      "doc": "https://docs.miraiminds.co/v2/llm",
+      "source": "models.dev",
+      "env": [
+        "FREQUENCY_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -913,6 +1202,18 @@
       "source": "models.dev",
       "env": [
         "FROGBOT_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gisoo",
+      "name": "Gisoo",
+      "doc": "https://gisoo.pro/docs/models",
+      "source": "models.dev",
+      "env": [
+        "GISOO_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -968,7 +1269,8 @@
         "audio",
         "embedding",
         "image",
-        "text"
+        "text",
+        "video"
       ]
     },
     {
@@ -997,6 +1299,18 @@
         "GOOGLE_VERTEX_PROJECT",
         "GOOGLE_VERTEX_LOCATION",
         "GOOGLE_APPLICATION_CREDENTIALS"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "graphn",
+      "name": "GraphN",
+      "doc": "https://graphn.ai/docs/getting-started",
+      "source": "models.dev",
+      "env": [
+        "GRAPHN_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -1064,12 +1378,48 @@
       ]
     },
     {
+      "id": "hostinger-router",
+      "name": "Hostinger Router",
+      "doc": "https://www.hostinger.com/ai-router",
+      "source": "models.dev",
+      "env": [
+        "HOSTINGER_ROUTER_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "hpc-ai",
       "name": "HPC-AI",
       "doc": "https://www.hpc-ai.com/doc/docs/quickstart/",
       "source": "models.dev",
       "env": [
         "HPC_AI_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "huawei-maas",
+      "name": "Huawei Cloud MAAS",
+      "doc": "https://support.huaweicloud.com/model-call-maas/model-call-021.html",
+      "source": "models.dev",
+      "env": [
+        "MAAS_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "hubris",
+      "name": "Hubris",
+      "doc": "https://hubris.pw/models",
+      "source": "models.dev",
+      "env": [
+        "HUBRIS_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -1085,6 +1435,18 @@
       ],
       "output_modalities": [
         "embedding",
+        "text"
+      ]
+    },
+    {
+      "id": "humain",
+      "name": "HUMAIN",
+      "doc": "https://platform.node.humain.com",
+      "source": "models.dev",
+      "env": [
+        "HUMAIN_API_KEY"
+      ],
+      "output_modalities": [
         "text"
       ]
     },
@@ -1161,6 +1523,18 @@
       ]
     },
     {
+      "id": "inferall",
+      "name": "InferAll",
+      "doc": "https://inferall.ai/docs",
+      "source": "models.dev",
+      "env": [
+        "INFERALL_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "inference",
       "name": "Inference",
       "doc": "https://inference.net/models",
@@ -1170,6 +1544,54 @@
       ],
       "output_modalities": [
         "embedding",
+        "text"
+      ]
+    },
+    {
+      "id": "inference-coop",
+      "name": "Inference Cooperative",
+      "doc": "https://inference.coop",
+      "source": "models.dev",
+      "env": [
+        "INFERENCE_COOP_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "inferenceapis",
+      "name": "Inference APIs",
+      "doc": "https://inferenceapis.com/models",
+      "source": "models.dev",
+      "env": [
+        "INFERENCEAPIS_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "inferris",
+      "name": "Inferris",
+      "doc": "https://inferris.ai/developers.md",
+      "source": "models.dev",
+      "env": [
+        "INFERRIS_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "infersia",
+      "name": "Infersia",
+      "doc": "https://infersia.com/models",
+      "source": "models.dev",
+      "env": [
+        "INFERSIA_API_KEY"
+      ],
+      "output_modalities": [
         "text"
       ]
     },
@@ -1213,12 +1635,36 @@
       ]
     },
     {
+      "id": "isoquant",
+      "name": "Isoquant",
+      "doc": "https://isoquant.ai/docs",
+      "source": "models.dev",
+      "env": [
+        "ISOQUANT_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "iteracompute",
       "name": "IteraCompute",
       "doc": "https://iteracompute.com/docs.html",
       "source": "models.dev",
       "env": [
         "ITERACOMPUTE_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "jad-ai",
+      "name": "Jad AI",
+      "doc": "https://jadai.freesrv.com/docs",
+      "source": "models.dev",
+      "env": [
+        "JAD_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -1258,6 +1704,30 @@
       "output_modalities": []
     },
     {
+      "id": "joingonka",
+      "name": "JoinGonka",
+      "doc": "https://gate.joingonka.ai/docs/models",
+      "source": "models.dev",
+      "env": [
+        "JOINGONKA_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "jzstoken",
+      "name": "JZSTOKEN",
+      "doc": "https://jzstoken.com",
+      "source": "models.dev",
+      "env": [
+        "JZSTOKEN_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "kagi",
       "name": "Kagi",
       "doc": "https://kagi.com/api/docs",
@@ -1265,6 +1735,18 @@
       "kind": "web_search",
       "env": [],
       "output_modalities": []
+    },
+    {
+      "id": "keln",
+      "name": "Keln",
+      "doc": "https://docs.keln.ai/models-pricing/",
+      "source": "models.dev",
+      "env": [
+        "KELN_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
     },
     {
       "id": "kenari",
@@ -1337,12 +1819,48 @@
       "output_modalities": []
     },
     {
+      "id": "kitani",
+      "name": "Kitani",
+      "doc": "https://kitani.ai/docs",
+      "source": "models.dev",
+      "env": [
+        "KITANI_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "klavo",
+      "name": "Klavo AI",
+      "doc": "https://ai.klavo.ru/docs",
+      "source": "models.dev",
+      "env": [
+        "KLAVO_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "klokintegration",
       "name": "klokintegration.se",
       "doc": "https://klokintegration.se/docs/ai-api",
       "source": "models.dev",
       "env": [
         "KLOKINTEGRATION_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "korouter",
+      "name": "KoRouter",
+      "doc": "https://korouter.ai/docs",
+      "source": "models.dev",
+      "env": [
+        "KOROUTER_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -1373,12 +1891,12 @@
       ]
     },
     {
-      "id": "lilac",
-      "name": "Lilac",
-      "doc": "https://docs.getlilac.com/inference/models",
+      "id": "kunavo",
+      "name": "Kunavo",
+      "doc": "https://kunavo.com/docs/quickstart?utm_source=models.dev&utm_medium=directory",
       "source": "models.dev",
       "env": [
-        "LILAC_API_KEY"
+        "KUNAVO_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -1391,6 +1909,18 @@
       "source": "models.dev",
       "env": [
         "LIQUID_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "lithosai",
+      "name": "LithosAI",
+      "doc": "https://docs.lithosai.com",
+      "source": "models.dev",
+      "env": [
+        "LITHOSAI_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -1457,6 +1987,18 @@
       ]
     },
     {
+      "id": "logits",
+      "name": "Logits",
+      "doc": "https://logits.com/docs",
+      "source": "models.dev",
+      "env": [
+        "LOGITS_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "longcat",
       "name": "LongCat",
       "doc": "https://longcat.chat/platform/docs/",
@@ -1493,12 +2035,36 @@
       ]
     },
     {
+      "id": "lyceum",
+      "name": "Lyceum",
+      "doc": "https://docs.lyceum.technology/docs/inference/serverless",
+      "source": "models.dev",
+      "env": [
+        "LYCEUM_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "lynkr",
       "name": "Lynkr",
       "doc": "https://github.com/Fast-Editor/Lynkr",
       "source": "models.dev",
       "env": [
         "LYNKR_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "mallard",
+      "name": "Mallard AI",
+      "doc": "https://mallardai.co.uk/docs/",
+      "source": "models.dev",
+      "env": [
+        "MALLARD_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -1523,6 +2089,18 @@
       "source": "models.dev",
       "env": [
         "MELIOUS_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "meragpt",
+      "name": "meraGPT",
+      "doc": "https://meragpt.com/docs/models",
+      "source": "models.dev",
+      "env": [
+        "MERAGPT_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -1701,6 +2279,18 @@
       ]
     },
     {
+      "id": "moneo",
+      "name": "Moneo",
+      "doc": "https://moneo.one/api.html",
+      "source": "models.dev",
+      "env": [
+        "MONEO_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "moonshotai",
       "name": "Moonshot AI",
       "doc": "https://platform.moonshot.ai/docs/api/chat",
@@ -1769,7 +2359,6 @@
         "NAN_API_KEY"
       ],
       "output_modalities": [
-        "image",
         "text"
       ]
     },
@@ -1850,6 +2439,30 @@
       ]
     },
     {
+      "id": "nodecode",
+      "name": "Nodecode",
+      "doc": "https://nodecode.ai/docs/models",
+      "source": "models.dev",
+      "env": [
+        "NODECODE_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "nokeep",
+      "name": "nokeep",
+      "doc": "https://nokeep.ai/docs",
+      "source": "models.dev",
+      "env": [
+        "NOKEEP_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "nova",
       "name": "Nova",
       "doc": "https://nova.amazon.com/dev/documentation",
@@ -1888,6 +2501,30 @@
         "image",
         "text",
         "video"
+      ]
+    },
+    {
+      "id": "oathbreaker",
+      "name": "Oathbreaker AI",
+      "doc": "https://oathbreaker.ai/docs",
+      "source": "models.dev",
+      "env": [
+        "OATHBREAKER_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "obscurify",
+      "name": "Obscurify.ai",
+      "doc": "https://obscurify.ai/api-docs",
+      "source": "models.dev",
+      "env": [
+        "OBSCURIFY_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
       ]
     },
     {
@@ -2017,6 +2654,18 @@
       ]
     },
     {
+      "id": "outerlabs",
+      "name": "Outer Labs",
+      "doc": "https://outerlabs.ai/docs",
+      "source": "models.dev",
+      "env": [
+        "OUTERLABS_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "ovhcloud",
       "name": "OVHcloud AI Endpoints",
       "doc": "https://www.ovhcloud.com/en/public-cloud/ai-endpoints/catalog//",
@@ -2036,6 +2685,18 @@
       "kind": "web_search",
       "env": [],
       "output_modalities": []
+    },
+    {
+      "id": "paraloncloud",
+      "name": "ParalonCloud",
+      "doc": "https://paraloncloud.com/docs/inference-api",
+      "source": "models.dev",
+      "env": [
+        "PARALONCLOUD_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
     },
     {
       "id": "pareto",
@@ -2086,6 +2747,30 @@
       ]
     },
     {
+      "id": "phala",
+      "name": "Phala",
+      "doc": "https://docs.phala.com/phala-cloud/confidential-ai/confidential-model/confidential-ai-api",
+      "source": "models.dev",
+      "env": [
+        "PHALA_AI_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "phase",
+      "name": "Phase Router",
+      "doc": "https://router.phase.xyz/models",
+      "source": "models.dev",
+      "env": [
+        "PHASE_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "pioneer",
       "name": "Pioneer",
       "doc": "https://agent.pioneer.ai/llms.txt",
@@ -2125,6 +2810,18 @@
       ]
     },
     {
+      "id": "powerspring",
+      "name": "Powerspring",
+      "doc": "https://powerspring.eu/models",
+      "source": "models.dev",
+      "env": [
+        "POWERSPRING_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "prime",
       "name": "Prime Inference",
       "doc": "https://docs.primeintellect.ai/inference/overview",
@@ -2146,6 +2843,18 @@
       ],
       "output_modalities": [
         "embedding",
+        "text"
+      ]
+    },
+    {
+      "id": "proxystacks",
+      "name": "ProxyStacks Relay",
+      "doc": "https://proxystacks.com/en/docs/opencode",
+      "source": "models.dev",
+      "env": [
+        "RELAY_API_KEY"
+      ],
+      "output_modalities": [
         "text"
       ]
     },
@@ -2204,12 +2913,36 @@
       "output_modalities": []
     },
     {
+      "id": "rayline",
+      "name": "Rayline",
+      "doc": "https://docs.rayline.ai/tools/opencode",
+      "source": "models.dev",
+      "env": [
+        "RAYLINE_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "reflection",
       "name": "Reflection",
       "doc": "https://developers.reflection.ai/models",
       "source": "models.dev",
       "env": [
         "REFLECTION_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "refuseless",
+      "name": "Refuseless",
+      "doc": "https://docs.refuseless.com/models",
+      "source": "models.dev",
+      "env": [
+        "REFUSELESS_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -2255,12 +2988,48 @@
       ]
     },
     {
+      "id": "ruapi",
+      "name": "RuAPI",
+      "doc": "https://www.ruapi.ai/pricing?lng=en",
+      "source": "models.dev",
+      "env": [
+        "RUAPI_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "runcrate",
+      "name": "Runcrate",
+      "doc": "https://www.runcrate.ai/docs/models/overview",
+      "source": "models.dev",
+      "env": [
+        "RUNCRATE_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "runinfra",
       "name": "RunInfra",
       "doc": "https://runinfra.ai/docs",
       "source": "models.dev",
       "env": [
         "RUNINFRA_GATEWAY_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "sagg",
+      "name": "SAGG",
+      "doc": "https://api.privatedeskai.com/docs",
+      "source": "models.dev",
+      "env": [
+        "SAGG_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -2297,6 +3066,18 @@
       "source": "models.dev",
       "env": [
         "SAMBANOVA_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "sandbase",
+      "name": "SandBase",
+      "doc": "https://www.sandbase.ai/docs/model-api-reference/llm-models",
+      "source": "models.dev",
+      "env": [
+        "SANDBASE_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -2439,6 +3220,30 @@
       ]
     },
     {
+      "id": "sokkan",
+      "name": "SOKKAN Router",
+      "doc": "https://router.sokkan.ch/docs",
+      "source": "models.dev",
+      "env": [
+        "SOKKAN_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "sparrowcodes",
+      "name": "SparrowCodes",
+      "doc": "https://sparrowcodes.com/models",
+      "source": "models.dev",
+      "env": [
+        "SPARROWCODES_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "stackit",
       "name": "STACKIT",
       "doc": "https://docs.stackit.cloud/products/data-and-ai/ai-model-serving/basics/available-shared-models",
@@ -2460,6 +3265,19 @@
         "STANDARDCOMPUTE_API_KEY"
       ],
       "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "steadyrouter",
+      "name": "SteadyRouter",
+      "doc": "https://www.steadyrouter.com/site/docs.html",
+      "source": "models.dev",
+      "env": [
+        "STEADYROUTER_API_KEY"
+      ],
+      "output_modalities": [
+        "image",
         "text"
       ]
     },
@@ -2514,6 +3332,19 @@
       ]
     },
     {
+      "id": "stepping-stone",
+      "name": "stepping stone AG",
+      "doc": "https://www.stepping-stone.ch/en/products/artificial-intelligence",
+      "source": "models.dev",
+      "env": [
+        "STONEY_API_KEY"
+      ],
+      "output_modalities": [
+        "embedding",
+        "text"
+      ]
+    },
+    {
       "id": "subconscious",
       "name": "Subconscious",
       "doc": "https://docs.subconscious.dev",
@@ -2538,12 +3369,36 @@
       ]
     },
     {
+      "id": "superbot-gg",
+      "name": "superbot",
+      "doc": "https://superbot.gg/api",
+      "source": "models.dev",
+      "env": [
+        "SUPERBOT_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "synthetic",
       "name": "Synthetic",
       "doc": "https://synthetic.new/pricing",
       "source": "models.dev",
       "env": [
         "SYNTHETIC_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "synthorai",
+      "name": "Synthorai",
+      "doc": "https://synthorai.io/docs/",
+      "source": "models.dev",
+      "env": [
+        "SYNTHORAI_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -2559,15 +3414,26 @@
       "output_modalities": []
     },
     {
-      "id": "tempr",
-      "name": "Tempr Gateway",
-      "doc": "https://temprhq.io/docs/gateway-reference.html",
+      "id": "teamorouter",
+      "name": "TeamoRouter",
+      "doc": "https://teamorouter.com/docs/api-integration",
       "source": "models.dev",
       "env": [
-        "TEMPR_API_KEY"
+        "TEAMOROUTER_API_KEY"
       ],
       "output_modalities": [
-        "embedding",
+        "text"
+      ]
+    },
+    {
+      "id": "teapot-router",
+      "name": "Teapot Router",
+      "doc": "https://teapotrouter.com/docs",
+      "source": "models.dev",
+      "env": [
+        "TEAPOT_ROUTER_API_KEY"
+      ],
+      "output_modalities": [
         "text"
       ]
     },
@@ -2620,12 +3486,36 @@
       ]
     },
     {
+      "id": "tenstorrent",
+      "name": "Tenstorrent",
+      "doc": "https://console.tenstorrent.com",
+      "source": "models.dev",
+      "env": [
+        "TENSTORRENT_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "the-grid-ai",
       "name": "The Grid AI",
       "doc": "https://thegrid.ai/docs",
       "source": "models.dev",
       "env": [
         "THEGRID_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "therouter",
+      "name": "TheRouter",
+      "doc": "https://therouter.ai/docs/quickstart/",
+      "source": "models.dev",
+      "env": [
+        "THEROUTER_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -2665,6 +3555,18 @@
       "output_modalities": []
     },
     {
+      "id": "toapis",
+      "name": "ToAPIs",
+      "doc": "https://docs.toapis.com",
+      "source": "models.dev",
+      "env": [
+        "TOAPIS_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "togetherai",
       "name": "Together AI",
       "doc": "https://docs.together.ai/docs/serverless-models",
@@ -2689,6 +3591,30 @@
       ]
     },
     {
+      "id": "tokenify",
+      "name": "Tokenify",
+      "doc": "https://www.tokenify.dev/docs/",
+      "source": "models.dev",
+      "env": [
+        "TOKENIFY_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "tokenlab",
+      "name": "TokenLab",
+      "doc": "https://tokenlab.sh/docs",
+      "source": "models.dev",
+      "env": [
+        "TOKENLAB_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "tokenrouter",
       "name": "TokenRouter",
       "doc": "https://www.tokenrouter.com/docs/tokenrouter-feature-guide/",
@@ -2701,12 +3627,36 @@
       ]
     },
     {
+      "id": "tokenwatt",
+      "name": "TokenWatt",
+      "doc": "https://www.tokenwatt.io/api.html",
+      "source": "models.dev",
+      "env": [
+        "TOKENWATT_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "trustedrouter",
       "name": "TrustedRouter",
       "doc": "https://trustedrouter.com/docs",
       "source": "models.dev",
       "env": [
         "TRUSTEDROUTER_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "trustedtokens",
+      "name": "TrustedTokens",
+      "doc": "https://trustedtokens.eu/docs",
+      "source": "models.dev",
+      "env": [
+        "TRUSTEDTOKENS_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -2745,12 +3695,60 @@
       ]
     },
     {
+      "id": "unbiased",
+      "name": "Pareto by Unbiased",
+      "doc": "https://unbiased.ai/developers/",
+      "source": "models.dev",
+      "env": [
+        "UNBIASED_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "uncensuredai",
+      "name": "UncensuredAI",
+      "doc": "https://uncensuredai.com/en/api/reference",
+      "source": "models.dev",
+      "env": [
+        "UNCENSURED_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "unorouter",
       "name": "UnoRouter",
       "doc": "https://unorouter.com/models",
       "source": "models.dev",
       "env": [
         "UNOROUTER_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "unrestricted",
+      "name": "Unrestricted",
+      "doc": "https://unrestricted.sh/reference",
+      "source": "models.dev",
+      "env": [
+        "UNRESTRICTED_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "uplinkswitch",
+      "name": "UplinkSwitch",
+      "doc": "https://uplinkswitch.ai/models",
+      "source": "models.dev",
+      "env": [
+        "UPLINKSWITCH_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -2806,6 +3804,18 @@
         "image",
         "text",
         "video"
+      ]
+    },
+    {
+      "id": "verda",
+      "name": "Verda",
+      "doc": "https://docs.verda.com/inference/quickstart/",
+      "source": "models.dev",
+      "env": [
+        "VERDA_INFERENCE_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
       ]
     },
     {
@@ -2871,7 +3881,7 @@
     {
       "id": "wafer.ai",
       "name": "Wafer",
-      "doc": "https://docs.wafer.ai/wafer-pass",
+      "doc": "https://docs.wafer.ai/serverless/models",
       "source": "models.dev",
       "env": [
         "WAFER_API_KEY"
@@ -2924,6 +3934,18 @@
       "env": [
         "WATSONX_AI_APIKEY",
         "WATSONX_AI_PROJECT_ID"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "watt",
+      "name": "Watt Cloud",
+      "doc": "https://www.watt-cloud.com/docs/",
+      "source": "models.dev",
+      "env": [
+        "WATT_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -3007,6 +4029,18 @@
       ]
     },
     {
+      "id": "xxapi",
+      "name": "xxapi",
+      "doc": "https://docs.xxapi.ai/opencode",
+      "source": "models.dev",
+      "env": [
+        "XXAPI_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "yolo-auto",
       "name": "Yolo-Auto",
       "doc": "https://yolo-auto.com/docs",
@@ -3056,6 +4090,7 @@
       "doc": "https://docs.zenifra.com",
       "source": "models.dev",
       "env": [
+        "ZENIFRA_AI_API_KEY",
         "ZENIFRA_AI_KEY"
       ],
       "output_modalities": [
@@ -3073,6 +4108,18 @@
       "output_modalities": [
         "audio",
         "image",
+        "text"
+      ]
+    },
+    {
+      "id": "zerogpu",
+      "name": "ZeroGPU",
+      "doc": "https://docs.zerogpu.ai/docs/model-catalog",
+      "source": "models.dev",
+      "env": [
+        "ZEROGPU_API_KEY"
+      ],
+      "output_modalities": [
         "text"
       ]
     },
@@ -3095,6 +4142,18 @@
       "source": "models.dev",
       "env": [
         "ZHIPU_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "zro",
+      "name": "Zro",
+      "doc": "https://zro.moonmath.ai/",
+      "source": "models.dev",
+      "env": [
+        "ZRO_API_KEY"
       ],
       "output_modalities": [
         "text"

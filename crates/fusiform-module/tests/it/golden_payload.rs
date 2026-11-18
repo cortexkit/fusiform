@@ -634,7 +634,9 @@ fn current_cache_lifetime_models_keep_the_original_golden_bytes() {
         ),
         (
             "openai/gpt-6.1-sol",
-            "46e5f80e345c39fd1ac0ed233367abe839872a7805923d5caac83e1ccc9456b8",
+            // Re-pinned after the 2026-11-17 seed refresh: upstream added a
+            // `flex` service mode to this model, which adds its own mode keys.
+            "970eee53cef22666f139e703aa1cd6654be13fec34f13db371cc8b7426b93588",
         ),
     ] {
         let label = format!("catalog.get — cache lifetimes {identity}");
@@ -972,7 +974,9 @@ fn render_fact_override_history() -> serde_json::Value {
         response["models"]["google/gemini-3.1-flash-image"]["rate.output_image"]["units"],
         60_000_000_000i64
     );
-    assert_eq!(response["fact_overrides"].as_array().unwrap().len(), 2);
+    // Upstream now publishes the $3/M text output itself (seed of 2026-11-17),
+    // so the text override no longer applies and only the image split does.
+    assert_eq!(response["fact_overrides"].as_array().unwrap().len(), 1);
     serde_json::json!({"request":request, "response":response})
 }
 

@@ -1240,44 +1240,6 @@
         {
           "established_at_ms": 1794268800000,
           "established_by": "fusiform",
-          "fact_key": "rate.output",
-          "model": "google/antigravity-gemini-3.1-flash-image",
-          "model_id": "gemini-3.1-flash-image",
-          "notes": "Only replaces the exact recorded $60/M upstream value. The Antigravity alias inherits the target's split rates; the Vertex row is untouched.",
-          "provider_id": "google",
-          "quote": "Gemini 3.1 Flash Image, Paid Tier, per 1M tokens in USD: output \"$3 (text and thinking)\", \"$60.00 (images)\". Image output token counts: 747 at 0.5K, 1120 at 1K, 1680 at 2K, 2520 at 4K.",
-          "reason": "The upstream output rate is the image price. Text and thinking output have a separate $3 per million token price, so using $60 for text overstates its cost.",
-          "replaces": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 60000000000
-          },
-          "review_by_ms": 1799452800000,
-          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)",
-          "value": {
-            "currency": "USD",
-            "exponent": 9,
-            "inherited_from": {
-              "basis": "alias",
-              "family": "gemini-flash",
-              "model_id": "gemini-3.1-flash-image",
-              "provider_id": "google"
-            },
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 3000000000
-          }
-        },
-        {
-          "established_at_ms": 1794268800000,
-          "established_by": "fusiform",
           "fact_key": "rate.output_image",
           "model": "google/antigravity-gemini-3.1-flash-image",
           "model_id": "gemini-3.1-flash-image",
@@ -1334,7 +1296,8 @@
             },
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
             "units": 3000000000
           },
@@ -1376,38 +1339,6 @@
         {
           "established_at_ms": 1794268800000,
           "established_by": "fusiform",
-          "fact_key": "rate.output",
-          "model": "google/gemini-3.1-flash-image",
-          "model_id": "gemini-3.1-flash-image",
-          "notes": "Only replaces the exact recorded $60/M upstream value. The Antigravity alias inherits the target's split rates; the Vertex row is untouched.",
-          "provider_id": "google",
-          "quote": "Gemini 3.1 Flash Image, Paid Tier, per 1M tokens in USD: output \"$3 (text and thinking)\", \"$60.00 (images)\". Image output token counts: 747 at 0.5K, 1120 at 1K, 1680 at 2K, 2520 at 4K.",
-          "reason": "The upstream output rate is the image price. Text and thinking output have a separate $3 per million token price, so using $60 for text overstates its cost.",
-          "replaces": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 60000000000
-          },
-          "review_by_ms": 1799452800000,
-          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)",
-          "value": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 3000000000
-          }
-        },
-        {
-          "established_at_ms": 1794268800000,
-          "established_by": "fusiform",
           "fact_key": "rate.output_image",
           "model": "google/gemini-3.1-flash-image",
           "model_id": "gemini-3.1-flash-image",
@@ -1446,7 +1377,8 @@
             "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
             "units": 3000000000
           },
@@ -3673,6 +3605,16 @@
             },
             "units": 200000000
           },
+          "rate.cache_read.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 50000000
+          },
           "rate.cache_read.mode.ultrafast": {
             "currency": "USD",
             "exponent": 9,
@@ -3732,6 +3674,16 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 5000000000
+          },
+          "rate.cache_write.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1250000000
           },
           "rate.cache_write.mode.ultrafast": {
             "currency": "USD",
@@ -3793,6 +3745,16 @@
             },
             "units": 4000000000
           },
+          "rate.input.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1000000000
+          },
           "rate.input.mode.ultrafast": {
             "currency": "USD",
             "exponent": 9,
@@ -3832,6 +3794,16 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 20000000000
+          },
+          "rate.output.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 5000000000
           },
           "rate.output.mode.ultrafast": {
             "currency": "USD",
@@ -3949,6 +3921,16 @@
             },
             "units": 200000000
           },
+          "rate.cache_read.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 50000000
+          },
           "rate.cache_read.mode.ultrafast": {
             "currency": "USD",
             "exponent": 9,
@@ -4008,6 +3990,16 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 5000000000
+          },
+          "rate.cache_write.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1250000000
           },
           "rate.cache_write.mode.ultrafast": {
             "currency": "USD",
@@ -4069,6 +4061,16 @@
             },
             "units": 4000000000
           },
+          "rate.input.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1000000000
+          },
           "rate.input.mode.ultrafast": {
             "currency": "USD",
             "exponent": 9,
@@ -4108,6 +4110,16 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 20000000000
+          },
+          "rate.output.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 5000000000
           },
           "rate.output.mode.ultrafast": {
             "currency": "USD",
@@ -4481,38 +4493,6 @@
         {
           "established_at_ms": 1794268800000,
           "established_by": "fusiform",
-          "fact_key": "rate.output",
-          "model": "google/gemini-3.1-flash-image",
-          "model_id": "gemini-3.1-flash-image",
-          "notes": "Only replaces the exact recorded $60/M upstream value. The Antigravity alias inherits the target's split rates; the Vertex row is untouched.",
-          "provider_id": "google",
-          "quote": "Gemini 3.1 Flash Image, Paid Tier, per 1M tokens in USD: output \"$3 (text and thinking)\", \"$60.00 (images)\". Image output token counts: 747 at 0.5K, 1120 at 1K, 1680 at 2K, 2520 at 4K.",
-          "reason": "The upstream output rate is the image price. Text and thinking output have a separate $3 per million token price, so using $60 for text overstates its cost.",
-          "replaces": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 60000000000
-          },
-          "review_by_ms": 1799452800000,
-          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)",
-          "value": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 3000000000
-          }
-        },
-        {
-          "established_at_ms": 1794268800000,
-          "established_by": "fusiform",
           "fact_key": "rate.output_image",
           "model": "google/gemini-3.1-flash-image",
           "model_id": "gemini-3.1-flash-image",
@@ -4551,7 +4531,8 @@
             "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
             "units": 3000000000
           },
@@ -5630,7 +5611,7 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
-          "limit.output": 131072,
+          "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3",
           "model.family": "kimi-k3",
           "model.lineage": "kimi",
@@ -5923,6 +5904,16 @@
             },
             "units": 200000000
           },
+          "rate.cache_read.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 50000000
+          },
           "rate.cache_read.mode.ultrafast": {
             "currency": "USD",
             "exponent": 9,
@@ -5982,6 +5973,16 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 5000000000
+          },
+          "rate.cache_write.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1250000000
           },
           "rate.cache_write.mode.ultrafast": {
             "currency": "USD",
@@ -6043,6 +6044,16 @@
             },
             "units": 4000000000
           },
+          "rate.input.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1000000000
+          },
           "rate.input.mode.ultrafast": {
             "currency": "USD",
             "exponent": 9,
@@ -6082,6 +6093,16 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 20000000000
+          },
+          "rate.output.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 5000000000
           },
           "rate.output.mode.ultrafast": {
             "currency": "USD",
@@ -6401,7 +6422,7 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
-          "limit.output": 131072,
+          "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3.1-pro",
           "model.family": "kimi-k3",
           "model.lineage": "kimi",
@@ -6618,7 +6639,7 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
-          "limit.output": 131072,
+          "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3.1-pro",
           "model.family": "kimi-k3",
           "model.lineage": "kimi",
@@ -6725,7 +6746,7 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
-          "limit.output": 131072,
+          "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3.1-pro",
           "model.family": "kimi-k3",
           "model.lineage": "kimi",
@@ -6876,7 +6897,7 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
-          "limit.output": 131072,
+          "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3.1-pro",
           "model.family": "kimi-k3",
           "model.lineage": "kimi",
@@ -7242,6 +7263,16 @@
             },
             "units": 1250000000
           },
+          "rate.cache_read.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 250000000
+          },
           "rate.input": {
             "currency": "USD",
             "exponent": 9,
@@ -7272,6 +7303,16 @@
             },
             "units": 12500000000
           },
+          "rate.input.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2500000000
+          },
           "rate.output": {
             "currency": "USD",
             "exponent": 9,
@@ -7301,6 +7342,16 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 75000000000
+          },
+          "rate.output.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 15000000000
           }
         }
       },
@@ -7364,6 +7415,16 @@
             },
             "units": 200000000
           },
+          "rate.cache_read.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 50000000
+          },
           "rate.cache_read.mode.ultrafast": {
             "currency": "USD",
             "exponent": 9,
@@ -7423,6 +7484,16 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 5000000000
+          },
+          "rate.cache_write.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1250000000
           },
           "rate.cache_write.mode.ultrafast": {
             "currency": "USD",
@@ -7484,6 +7555,16 @@
             },
             "units": 4000000000
           },
+          "rate.input.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1000000000
+          },
           "rate.input.mode.ultrafast": {
             "currency": "USD",
             "exponent": 9,
@@ -7523,6 +7604,16 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 20000000000
+          },
+          "rate.output.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 5000000000
           },
           "rate.output.mode.ultrafast": {
             "currency": "USD",
@@ -9599,7 +9690,7 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
-          "limit.output": 131072,
+          "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3",
           "model.family": "kimi-k3",
           "model.lineage": "kimi",
@@ -9710,7 +9801,7 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 262144,
-          "limit.output": 131072,
+          "limit.output": 262144,
           "model.canonical_id": "moonshotai/kimi-k3",
           "model.family": "kimi-k3",
           "model.lineage": "kimi",
@@ -10308,7 +10399,7 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 1048576,
-          "limit.output": 131072,
+          "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3",
           "model.family": "kimi-k3",
           "model.lineage": "kimi",
@@ -10367,7 +10458,7 @@
           "capability.tool_call": true,
           "existence": "present",
           "limit.context": 262144,
-          "limit.output": 131072,
+          "limit.output": 262144,
           "model.canonical_id": "moonshotai/kimi-k3",
           "model.family": "kimi-k3",
           "model.lineage": "kimi",

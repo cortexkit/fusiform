@@ -5,6 +5,24 @@
   "models": [
     {
       "provider_id": "openai",
+      "model_id": "gpt-6.2-astra",
+      "auth_methods": ["apikey", "chatgpt"],
+      "source_ref": "https://developers.openai.com/codex/models",
+      "quote": "GPT-6.2 Astra and GPT-6.2 Sol are now available in ChatGPT Work and Codex on supported plans and clients. ... codex -m gpt-6.2-astra",
+      "established_at_ms": 1794960000000,
+      "review_by_ms": 1800144000000
+    },
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-6.2-sol",
+      "auth_methods": ["apikey", "chatgpt"],
+      "source_ref": "https://developers.openai.com/codex/models",
+      "quote": "GPT-6.2 Astra and GPT-6.2 Sol are now available in ChatGPT Work and Codex on supported plans and clients. ... codex -m gpt-6.2-sol",
+      "established_at_ms": 1794960000000,
+      "review_by_ms": 1800144000000
+    },
+    {
+      "provider_id": "openai",
       "model_id": "gpt-6.1-sol",
       "auth_methods": ["apikey", "chatgpt"],
       "source_ref": "https://developers.openai.com/codex/models",
