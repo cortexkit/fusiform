@@ -62,19 +62,46 @@ The signed head's `latest_snapshot` must be between `1` and `release`
 
 ## Release 1 import
 
-Run the native importer against a SQLite backup-API copy, not the live store:
+Use a fresh `backup.db` and output directory. Set `LIVE_DB` to the live SQLite
+store path and `PUBLISHED_AT_MS` to the release's publication time in Unix
+milliseconds, no earlier than the latest observation or curation approval.
+SQLite's `.backup` uses the online backup API; do not copy the live file with
+`cp` or point the importer at it.
 
 ```sh
+sqlite3 -readonly "$LIVE_DB" '.backup backup.db'
 cargo run --locked -p fusiform-publish --example import-release -- \
-    backup.db new-output-dir <published-at-ms>
+    backup.db new-output-dir "$PUBLISHED_AT_MS"
 ```
 
-It writes canonical unsigned `release-1.json`, `state.json` and
-`history/base.json`. The host signs the release envelope and the history
-attestation over the hash of the exact `history/base.json` bytes, and passes
-the unmodified `state.json` to `snapshot_bytes_from_state` to build snapshot 1.
-The importer does not take a signing key. Imported legacy grades omit
-`graded_effort`, which was not recorded in the SQLite store.
+The importer writes canonical unsigned `release-1.json`, `state.json` and
+`history/base.json`. Imported legacy grades omit `graded_effort`, which was not
+recorded in the SQLite store.
+
+Set `IMPORT_BASE_URL` to the store's HTTPS import base. Have your secret proxy
+inject `MODELS_IMPORT_TOKEN` into the upload process's environment when it runs
+the command below. Do not pass the token as an argument or type it into a shell.
+
+```sh
+cargo run --locked -p fusiform-publish --example import-upload -- \
+    new-output-dir "$IMPORT_BASE_URL"
+```
+
+The uploader checks the store's receipt for each raw file before committing.
+The store signs the release envelope and the history attestation over the hash
+of the exact `history/base.json` bytes, and passes the unmodified `state.json`
+to `snapshot_bytes_from_state` to build snapshot 1. Neither example takes a
+signing key. A successful upload prints the store's commit reply, including the
+signed head.
+
+Set `STORE_BASE_URL` to the published store base URL and fetch the head:
+
+```sh
+curl --fail --silent --show-error "${STORE_BASE_URL%/}/head.json"
+```
+
+Check that `head.release` and `head.latest_snapshot` are both `1` and that the
+published signed head matches the commit reply.
 
 ## History attestation
 
