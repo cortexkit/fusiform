@@ -244,16 +244,23 @@ fn build_plan(
         .map_err(|e| store_error(&e))?
         .into_iter()
         .collect();
-    for (provider, _) in crate::aliases::aliases()
+    let published = crate::curation::PublishedCuration::load(store, request.at_ms)
+        .map_err(RouteError::unavailable)?;
+    let tables = published
+        .as_ref()
+        .map(|data| data.tables())
+        .unwrap_or_else(|| crate::curation::embedded());
+    for (provider, _) in tables
+        .aliases
         .keys()
-        .chain(crate::curated_models::models().keys())
+        .chain(tables.curated_models.models.keys())
     {
         identities.insert(provider.clone());
     }
-    for row in crate::aliases::retired_aliases().values() {
+    for row in tables.retired_aliases.values() {
         identities.insert(row.provider_id.clone());
     }
-    for row in crate::curated_models::held().values() {
+    for row in tables.curated_models.held.values() {
         identities.insert(row.provider_id.clone());
     }
     let mut providers = Vec::new();
@@ -286,7 +293,14 @@ fn build_plan(
             }
         }
         for (provider, rows) in partition_providers(&mut response) {
-            providers.push((provider, rows.contribution()?));
+            let mut contribution = rows.contribution()?;
+            if !response.overrides.is_empty() {
+                // Each priced range here is one provider. Charge for its local
+                // disclosures; a multi-provider reply may coalesce duplicates.
+                contribution.bytes +=
+                    compact_size(&response.overrides)? + r#",\"overrides\":"#.len();
+            }
+            providers.push((provider, contribution));
         }
         previous = Some(provider);
     }
@@ -302,6 +316,7 @@ fn build_plan(
         source,
         snapshot,
         request.at_ms.map(Timestamp),
+        None,
         None,
         None,
         None,

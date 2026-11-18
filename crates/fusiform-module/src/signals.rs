@@ -72,6 +72,7 @@ const fn decode_class(value: u64) -> Option<FailureClass> {
 /// `new()`, so the sentinel under test was never the sentinel that ships.
 #[derive(Debug)]
 pub struct Signals {
+    store_poll_error: arc_swap::ArcSwapOption<String>,
     /// Advances once per poll that reached a VERDICT — an observation row, or
     /// a recorded failure.
     ///
@@ -187,6 +188,7 @@ impl Default for Signals {
 impl Signals {
     pub fn new() -> Self {
         Self {
+            store_poll_error: arc_swap::ArcSwapOption::empty(),
             polls_recorded: AtomicU64::new(0),
             attempts: AtomicU64::new(0),
             last_attempt_ms: AtomicI64::new(NEVER),
@@ -206,6 +208,14 @@ impl Signals {
             bus_publish_failures: AtomicU64::new(0),
             bus_last_error: arc_swap::ArcSwapOption::empty(),
         }
+    }
+
+    pub fn store_poll_result(&self, error: Option<String>) {
+        self.store_poll_error.store(error.map(std::sync::Arc::new));
+    }
+
+    pub fn store_poll_error(&self) -> Option<std::sync::Arc<String>> {
+        self.store_poll_error.load_full()
     }
 
     /// Stamp only acknowledged publications, never queued attempts.

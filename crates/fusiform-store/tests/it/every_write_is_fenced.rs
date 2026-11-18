@@ -43,6 +43,8 @@ const STORE_SOURCES: &[&str] = &[
     "cache_lifetimes.rs",
     "quality.rs",
     "quality_efforts.rs",
+    "store_consumer.rs",
+    "local_overrides.rs",
 ];
 const VERSION_HELPER: &str = "advance_catalog_version_in";
 
@@ -254,6 +256,11 @@ fn version_helper_callers_are_all_named_and_fenced() {
             "quality.rs:append_model_mark".into(),
             "quality_efforts.rs:append_effort_grade".into(),
             "quality_efforts.rs:append_workload_effort".into(),
+            "store_consumer.rs:apply_store_releases".into(),
+            "local_overrides.rs:append_override_grade".into(),
+            "local_overrides.rs:append_override_mark".into(),
+            "local_overrides.rs:append_override_effort".into(),
+            "local_overrides.rs:append_override_workload".into(),
         ])
     );
 }
@@ -268,9 +275,9 @@ fn missing_fence_calls(text: &str) -> Vec<&str> {
 
 fn migration_handle_violations(text: &str) -> Vec<&str> {
     let open_body = text
-        .split("pub fn open(descriptor: &StorageDescriptor)")
+        .split("fn open_mode(descriptor: &StorageDescriptor, store_mode: bool)")
         .nth(1)
-        .expect("open() exists")
+        .expect("open_mode() exists")
         .split("\n    }")
         .next()
         .expect("open() has a body");
@@ -310,7 +317,7 @@ fn planted_missing_fence_calls_are_reported() {
 
 #[test]
 fn planted_reopened_migration_handle_is_reported() {
-    let text = "pub fn open(descriptor: &StorageDescriptor) {\n open_sqlite();\n inner.migrate();\n open_sqlite();\n    }";
+    let text = "fn open_mode(descriptor: &StorageDescriptor, store_mode: bool) {\n open_sqlite();\n inner.migrate();\n open_sqlite();\n    }";
     assert_eq!(migration_handle_violations(text), ["connection count"]);
 }
 
@@ -378,6 +385,12 @@ fn no_write_escapes_the_fence() {
     //   INSERT INTO quality_grade_era          (quality.rs: grade or withdrawal)
     //   INSERT INTO effort_grade_era           (quality_efforts.rs: effort grade or withdrawal)
     //   INSERT INTO workload_effort_era        (quality_efforts.rs: workload effort or withdrawal)
+    //   INSERT INTO {table}                   (store_consumer.rs: allowlisted history or release data)
+    //   INSERT INTO store_release             (store_consumer.rs: verified release cursor)
+    //   INSERT INTO override_grade_era       (local_overrides.rs: grade or withdrawal)
+    //   INSERT INTO override_mark_era        (local_overrides.rs: mark, restore or withdrawal)
+    //   INSERT INTO override_effort_grade_era (local_overrides.rs: effort grade or withdrawal)
+    //   INSERT INTO override_workload_effort_era (local_overrides.rs: workload or withdrawal)
     //   INSERT INTO model_mark_era             (quality.rs: decommission or restore)
     //   INSERT INTO fact_override_era          (fact_overrides.rs: claim or tombstone)
     //   INSERT INTO cache_lifetime_era         (cache_lifetimes.rs: rule or tombstone)
@@ -403,8 +416,8 @@ fn no_write_escapes_the_fence() {
     // list that quietly became wrong, which is worse than no list — a reader
     // checking the guard against three sites concludes it is complete.
     assert_eq!(
-        writes_seen, 14,
-        "the write detector found {writes_seen} write sites; fourteen are enumerated \
+        writes_seen, 20,
+        "the write detector found {writes_seen} write sites; twenty are enumerated \
          above. If you ADDED a write, add it to that list and update this number \
          — the list is how the next reader checks this guard, and a stale list \
          is worse than none. If you added nothing, either WRITE_KEYWORDS has \

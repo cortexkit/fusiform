@@ -17,6 +17,7 @@ Tables, as shipped: `observation`, `era`, `catalog_version`,
 `quality_grade_era`, `model_mark_era`, `fact_override_era`, `cache_lifetime_era`,
 `effort_grade_era`, `workload_effort_era`, `override_grade_era`,
 `override_effort_grade_era`, `override_workload_effort_era`, `override_mark_era`,
+`store_release`, `store_document_era`,
 `cortexkit_schema_version`, `cortexkit_fence`.
 
 - `observation`, `era`, `catalog_version`, `observation_artifact_event`,
@@ -51,7 +52,7 @@ does not create.
 | 11 | `model_mark_era`, with a one-time import of 107 operator decommissioned keys |
 | 12 | `cache_lifetime_era`, with a frozen first-served history of prompt-cache rules |
 | 13 | `quality_grade_era.kind`, separating media judgments and withdrawals by task |
-| 14 | `quality_grade_era.graded_effort`, effort grade and workload judgment eras, and separate local override eras |
+| 14 | `quality_grade_era.graded_effort`, effort grade and workload judgment eras, local override eras, consumer cursors and document eras, and nullable plan metadata |
 
 A store whose recorded schema version is newer than the running binary's chain
 is refused at open, and the error names the store's version
@@ -392,6 +393,23 @@ Both are append-only; the latest eligible insertion wins and a withdrawal
 carries no scores or efforts. Writes advance the catalog version in the same
 fenced transaction. The four `override_*_era` tables keep local judgments
 separate from published history.
+
+### Published store
+
+`store_release` is an append-only cursor: each applied release keeps its
+number, signed state and curation hashes, and local application time. It is
+updated in the same writer transaction as the release's era rows and the local
+catalog version. The first transaction checks that every catalog data table
+is empty and preserves row IDs and foreign keys from `history/base.json`.
+The snapshot's signed history attestation covers the hash of that file.
+Store-mode migrations create the same tables without the three embedded
+history imports. In `models_dev` mode the consumer tables stay empty.
+
+`store_document_era` stores revisions of vendor documents without their own
+era table. The consumer writes plan prices, curated models, fact overrides
+and cache lifetimes into their dedicated era tables instead. Published plan
+rows store quota value, service tiers and concurrency as nullable JSON; the
+models.dev boot writer leaves these columns null.
 
 ELO/EQ remains a chat judgment. Media writes require the kind's capability on
 at least one current row reached by the key: audio input for transcription,

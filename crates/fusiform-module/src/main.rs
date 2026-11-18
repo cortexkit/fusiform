@@ -20,6 +20,9 @@
 
 use std::sync::{Arc, Mutex};
 
+mod seed_fallback;
+use seed_fallback::SeedFallback;
+
 use subc_client_rs::{async_trait, HandlerOutcome, ModuleHandler, RequestCtx};
 use subc_protocol::session::HealthReport;
 use subc_protocol::ModuleHelloAckBody;
@@ -34,7 +37,9 @@ use fusiform_module::loop_::{tick, PollContext, POLL_INTERVAL_MS};
 use fusiform_module::plan_prices;
 use fusiform_module::seed;
 use fusiform_module::serve_request;
+use fusiform_module::settings::{Settings, Source};
 use fusiform_module::signals::Signals;
+use fusiform_module::store_poll::StorePoller;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -69,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Ok(());
     }
 
-    let handler = Fusiform::new();
+    let handler = Fusiform::with_settings(Settings::load()?);
     subc_client_rs::serve(fusiform_module::manifest(), handler).await?;
     Ok(())
 }
@@ -82,13 +87,17 @@ struct Fusiform {
     /// store exists and must never block: it checks an atomic in `Signals`, not
     /// this. Nothing on the health path touches this lock.
     store: Mutex<Option<Arc<CatalogStore>>>,
+    fallback: Arc<Mutex<Option<Arc<SeedFallback>>>>,
+    settings: Settings,
 }
 
 impl Fusiform {
-    fn new() -> Self {
+    fn with_settings(settings: Settings) -> Self {
         Self {
             signals: Arc::new(Signals::new()),
             store: Mutex::new(None),
+            fallback: Arc::new(Mutex::new(None)),
+            settings,
         }
     }
 }
@@ -117,6 +126,33 @@ impl ModuleHandler for Fusiform {
             };
         };
 
+        let fallback = self
+            .fallback
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        if let Some(fallback) = fallback {
+            if let Some(tool) = seed_fallback::mutating_tool(&body) {
+                return HandlerOutcome::Error { code: "refused".into(), message: format!("{tool} is unavailable on the built-in snapshot; wait for a verified store release") };
+            }
+            return fusiform_module::serve_catalog_request(
+                Arc::clone(&fallback.store),
+                Arc::clone(&self.signals),
+                body,
+                true,
+            )
+            .await;
+        }
+        if store.is_store_mode() && self.signals.store_poll_error().is_some() {
+            if let Some(tool) = seed_fallback::mutating_tool(&body) {
+                if !matches!(store.latest_store_release(), Ok(Some(_))) {
+                    return HandlerOutcome::Error {
+                        code: "refused".into(),
+                        message: format!("{tool} requires a verified store release"),
+                    };
+                }
+            }
+        }
         serve_request(store, Arc::clone(&self.signals), body).await
     }
 
@@ -139,10 +175,16 @@ impl ModuleHandler for Fusiform {
                 }
             };
 
-        let store = match CatalogStore::open(&descriptor) {
+        let open_result = match &self.settings.source {
+            Source::ModelsDev => CatalogStore::open(&descriptor),
+            Source::Store { .. } => CatalogStore::open_for_store(&descriptor),
+        };
+        let store = match open_result {
             Ok(store) => Arc::new(store),
             Err(e) => {
                 eprintln!("fusiform: store did not open: {e}");
+                self.signals
+                    .store_poll_result(Some(format!("store did not open: {e}")));
                 return;
             }
         };
@@ -169,6 +211,74 @@ impl ModuleHandler for Fusiform {
         // A failure is logged and makes health Degraded but does not stop the
         // module: a backup gap is not a reason to stop answering reads.
         enrollment::write_beside_store(store.path(), &self.signals);
+
+        if let Source::Store { url, keys } = &self.settings.source {
+            let poller =
+                fusiform_module::settings::validate_store(url, keys).and_then(|(url, keys)| {
+                    StorePoller::new(url, keys).map_err(|error| error.to_string())
+                });
+            let bootstrap = match store.latest_store_release() {
+                Ok(cursor) => cursor.is_none(),
+                Err(error) => {
+                    self.signals.store_poll_result(Some(error.to_string()));
+                    return;
+                }
+            };
+            match SeedFallback::prepare(&descriptor, bootstrap) {
+                Ok(fallback) => {
+                    *self.fallback.lock().unwrap_or_else(|p| p.into_inner()) =
+                        fallback.map(Arc::new);
+                }
+                Err(error) => {
+                    eprintln!("fusiform: built-in snapshot fallback unavailable: {error}")
+                }
+            }
+            *self.store.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&store));
+            if !bootstrap {
+                tokio::spawn(fusiform_module::catalog_bus::run_publisher(
+                    Arc::clone(&store),
+                    Arc::clone(&self.signals),
+                    fusiform_module::catalog_bus::CatalogBus::default(),
+                ));
+            }
+            match poller {
+                Ok(poller) => {
+                    let fallback = Arc::clone(&self.fallback);
+                    let publisher =
+                        bootstrap.then(|| (Arc::clone(&store), Arc::clone(&self.signals)));
+                    let uses_seed = fallback.lock().unwrap_or_else(|p| p.into_inner()).is_some();
+                    self.signals.store_poll_result(Some(
+                        if uses_seed {
+                            seed_fallback::OFFLINE_REASON
+                        } else {
+                            "waiting for verified head.json"
+                        }
+                        .into(),
+                    ));
+                    tokio::spawn(poller.run(
+                        store,
+                        Arc::clone(&self.signals),
+                        move || {
+                            fallback.lock().unwrap_or_else(|p| p.into_inner()).take();
+                            if let Some((store, signals)) = publisher {
+                                tokio::spawn(fusiform_module::catalog_bus::run_publisher(
+                                    store,
+                                    signals,
+                                    fusiform_module::catalog_bus::CatalogBus::default(),
+                                ));
+                            }
+                        },
+                        uses_seed,
+                    ));
+                }
+                Err(error) => self.signals.store_poll_result(Some(if bootstrap {
+                    format!("{}: {error}", seed_fallback::OFFLINE_REASON)
+                } else {
+                    error
+                })),
+            }
+            return;
+        }
 
         // Seed an empty store before anything reads it. A fresh install with no
         // network must be able to answer, and an empty catalog is a wrong

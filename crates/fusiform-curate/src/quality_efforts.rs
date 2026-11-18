@@ -9,6 +9,7 @@ pub const GRADED_EFFORT: &str = "quality.graded_effort";
 pub const ELO_EFFORT: &str = "quality.elo.effort.";
 pub const EQ_EFFORT: &str = "quality.eq.effort.";
 
+#[derive(Clone)]
 pub struct RecordedEffortGrade {
     pub model: String,
     pub effort: String,
@@ -17,6 +18,7 @@ pub struct RecordedEffortGrade {
     pub recorded_at_ms: i64,
 }
 
+#[derive(Clone)]
 pub struct RecordedWorkloadEffort {
     pub model: String,
     pub workload: String,

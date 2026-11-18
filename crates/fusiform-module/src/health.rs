@@ -81,6 +81,12 @@ pub const CATALOG_WRITE_FAILED_DETAIL: &str =
 /// clock itself can only be tested by sleeping.
 pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
     let mut report = serving_report(signals, now_ms);
+    if let Some(error) = signals.store_poll_error() {
+        if report.status != HealthStatus::Failing {
+            report.status = HealthStatus::Degraded;
+        }
+        report.detail = Some(format!("published store: {error}"));
+    }
 
     // A failed enrollment write is checked AFTER everything about serving, and
     // can only lower Ok to Degraded, never raise anything to Failing.

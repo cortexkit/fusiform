@@ -41,6 +41,7 @@ mod release_import_tests;
 
 mod dated_model;
 mod history;
+mod local_overrides;
 mod page_plan;
 mod quality;
 mod quality_efforts;
@@ -276,15 +277,25 @@ fn upstream_history(
     // Reached only when the read found nothing, so the ordinary path pays no
     // extra query.
     if rows.is_empty() {
+        let published = crate::curation::PublishedCuration::load(store, None)
+            .map_err(RouteError::unavailable)?;
+        let tables = published
+            .as_ref()
+            .map(|data| data.tables())
+            .unwrap_or_else(|| crate::curation::embedded());
         // Same rule as `catalog.get`: a curated row is in effect when upstream
         // does not currently publish the model, including after upstream
         // withdrew it. A fact the withdrawn upstream row recorded still has
         // eras and is answered with them below, unchanged; this branch is
         // reached only for a fact with no eras, such as `model.kind`, which
         // `catalog.get` serves from the curated row.
-        if let Some(row) =
-            curated_in_effect(store, source, &request.provider_id, &request.model_id)?
-        {
+        if let Some(row) = curated_in_effect(
+            store,
+            source,
+            &request.provider_id,
+            &request.model_id,
+            tables.curated_models,
+        )? {
             if row.facts.contains_key(&fact_key) {
                 return Ok(HistoryResponse {
                     source: source.as_str().to_string(),
@@ -306,7 +317,7 @@ fn upstream_history(
         if let Some(alias) = alias_in_effect(
             store,
             source,
-            crate::aliases::aliases(),
+            tables.aliases,
             &request.provider_id,
             &request.model_id,
         )? {
@@ -833,7 +844,35 @@ fn serve_catalog_get_with_cache(
             .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?
     };
 
-    serve_catalog_get_request(store, request, page_budget, frame_limit, oversized, None)
+    if !store.is_store_mode() {
+        return serve_catalog_get_request(
+            store,
+            request,
+            page_budget,
+            frame_limit,
+            oversized,
+            None,
+        );
+    }
+    // Store releases update upstream and curation together, but rendering uses
+    // several connections. Never return a view that straddled a commit.
+    for _ in 0..2 {
+        let before = store.catalog_version().map_err(|e| store_error(&e))?;
+        let result = serve_catalog_get_request(
+            store,
+            request.clone(),
+            page_budget,
+            frame_limit,
+            oversized,
+            None,
+        );
+        if store.catalog_version().map_err(|e| store_error(&e))? == before {
+            return result;
+        }
+    }
+    Err(RouteError::unavailable(
+        "published catalog changed during the read; retry",
+    ))
 }
 
 fn serve_catalog_get_request(
@@ -909,7 +948,13 @@ fn serve_catalog_get_prepared(
     // Select the plane before reading rows. A subscription with no declared
     // billing claim must never receive the API card, even if its provider or
     // model would otherwise produce a different no-coverage refusal.
-    let plane = select_billing_plane(&request)?;
+    let published = crate::curation::PublishedCuration::load(store, request.at_ms)
+        .map_err(RouteError::unavailable)?;
+    let tables = published
+        .as_ref()
+        .map(|data| data.tables())
+        .unwrap_or_else(|| crate::curation::embedded());
+    let plane = select_billing_plane(&request, tables.billing_planes)?;
     let requested_prefixes = request.fact_prefixes.clone();
     request.fact_prefixes = request.fact_prefixes.as_ref().map(|prefixes| {
         let mut wide = prefixes.clone();
@@ -1078,12 +1123,11 @@ fn serve_catalog_get_prepared(
         }
     }
 
-    let aliases = crate::aliases::aliases();
+    let aliases = tables.aliases;
     let named = request.provider_id.is_some() && request.model_id.is_some();
     // Borrowed from the compiled file on a current read; owned when read from
     // the store's history for a point-in-time one.
-    let mut curated: Vec<std::borrow::Cow<'static, crate::curated_models::CuratedModel>> =
-        Vec::new();
+    let mut curated: Vec<std::borrow::Cow<'_, crate::curated_models::CuratedModel>> = Vec::new();
     if let Some(at) = at {
         // The claim in force at the instant, from the store's history of the
         // curated file. The upstream-wins rule is asked at the same instant:
@@ -1130,7 +1174,7 @@ fn serve_catalog_get_prepared(
             )));
         }
     } else {
-        for (provider, model) in crate::curated_models::models().keys() {
+        for ((provider, model), row) in &tables.curated_models.models {
             if range.is_some_and(|r| !r.contains(provider)) {
                 continue;
             }
@@ -1145,7 +1189,7 @@ fn serve_catalog_get_prepared(
             // Upstream wins only while it currently publishes the model; a
             // withdrawn upstream row gives way. Check the store, not the
             // filtered response.
-            if let Some(row) = curated_in_effect(store, source, provider, model)? {
+            if curated_in_effect(store, source, provider, model, tables.curated_models)?.is_some() {
                 curated.push(std::borrow::Cow::Borrowed(row));
             }
         }
@@ -1159,7 +1203,7 @@ fn serve_catalog_get_prepared(
     // how a login is billed.
     let mut retired_ids = Vec::new();
     if at.is_none() && plane.is_none() {
-        let retired_alias_ids = crate::aliases::retired_aliases().values().map(|row| {
+        let retired_alias_ids = tables.retired_aliases.values().map(|row| {
             (
                 &row.provider_id,
                 &row.model_id,
@@ -1167,7 +1211,9 @@ fn serve_catalog_get_prepared(
                 row.successor.as_ref(),
             )
         });
-        let held_ids = crate::curated_models::held()
+        let held_ids = tables
+            .curated_models
+            .held
             .values()
             .map(|row| (&row.provider_id, &row.model_id, row.held_since_ms, None));
         for (provider, model, retired_at_ms, successor) in retired_alias_ids.chain(held_ids) {
@@ -1208,6 +1254,7 @@ fn serve_catalog_get_prepared(
                 alias,
                 at,
                 request.fact_prefixes.as_ref(),
+                &tables,
             )?;
             return finish_plane_view(
                 store,
@@ -1217,6 +1264,7 @@ fn serve_catalog_get_prepared(
                 requested_prefixes.as_ref(),
                 at,
                 prepared,
+                &tables,
             );
         }
     }
@@ -1324,9 +1372,10 @@ fn serve_catalog_get_prepared(
         source,
         snapshot,
         at,
-        Some((store, crate::creators::creators())),
+        Some((store, tables.creators)),
         request.fact_prefixes.as_ref(),
         historical_overrides.as_ref(),
+        (at.is_none() || store.is_store_mode()).then_some(&tables),
     );
     if !named {
         // Widening for an absent identity can fetch only existence. Preserve the
@@ -1339,7 +1388,7 @@ fn serve_catalog_get_prepared(
     response.retired = retired;
     // Aliases on a bulk read, current view only for the same reason as the
     // named read: fusiform never observed an alias id, so it has no past.
-    if !named && at.is_none() {
+    if !named && (at.is_none() || store.is_store_mode()) {
         add_aliases_to_bulk(
             store,
             source,
@@ -1348,6 +1397,8 @@ fn serve_catalog_get_prepared(
             request.provider_id.as_deref(),
             request.fact_prefixes.as_ref(),
             range,
+            &tables,
+            at,
         )?;
     }
     if let Some(range) = range {
@@ -1376,9 +1427,9 @@ fn serve_catalog_get_prepared(
             named,
         );
     }
-    if at.is_none() {
+    if at.is_none() || store.is_store_mode() {
         curate::apply_login_methods(
-            crate::login_methods::rows(),
+            tables.login_methods,
             &mut response,
             request.auth_method.as_deref(),
         );
@@ -1391,6 +1442,7 @@ fn serve_catalog_get_prepared(
         requested_prefixes.as_ref(),
         at,
         prepared,
+        &tables,
     )?;
     // Observed plane rows keep their envelope when billing rules remove all
     // selected rates. Curated rows and plain bulk rows require a selected fact.
@@ -1889,12 +1941,15 @@ fn partition_providers(response: &mut CatalogGetResponse) -> BTreeMap<String, Pr
     providers
 }
 
-struct SelectedPlane {
+struct SelectedPlane<'a> {
     wire: PlaneWire,
-    declared: Option<&'static Plane>,
+    declared: Option<&'a Plane>,
 }
 
-fn select_billing_plane(request: &CatalogGetRequest) -> Result<Option<SelectedPlane>, RouteError> {
+fn select_billing_plane<'a>(
+    request: &CatalogGetRequest,
+    planes: &'a curate::billing_planes::Planes,
+) -> Result<Option<SelectedPlane<'a>>, RouteError> {
     let Some(auth_method) = request.auth_method.as_deref() else {
         return Ok(None);
     };
@@ -1915,8 +1970,7 @@ fn select_billing_plane(request: &CatalogGetRequest) -> Result<Option<SelectedPl
             "billing plane views are current-only: auth_method cannot be used with at_ms",
         ));
     }
-    let declared =
-        billing_planes::planes().get(&(provider_id.to_string(), auth_method.to_string()));
+    let declared = planes.get(&(provider_id.to_string(), auth_method.to_string()));
     if declared.is_none() && auth_method != "apikey" {
         return Err(RouteError::no_coverage(format!(
             "no billing plane declared for ({provider_id}, {auth_method}); only an apikey read is served the API price card without one"
@@ -1939,14 +1993,16 @@ fn select_billing_plane(request: &CatalogGetRequest) -> Result<Option<SelectedPl
 
 /// Gather the additional reads needed by the selected view. The transformations
 /// stay in the curation crate; historically resolved rules are passed as data.
+#[allow(clippy::too_many_arguments)]
 fn finish_plane_view(
     store: &CatalogStore,
     source: SourceId,
     mut response: CatalogGetResponse,
-    plane: Option<SelectedPlane>,
+    plane: Option<SelectedPlane<'_>>,
     requested_prefixes: Option<&Vec<String>>,
     at: Option<Timestamp>,
     prepared: Option<&dated_model::DatedModel>,
+    tables: &curate::CurationSet<'_>,
 ) -> Result<CatalogGetResponse, RouteError> {
     let historical_rules = at
         .map(|at| match prepared {
@@ -1955,24 +2011,45 @@ fn finish_plane_view(
         })
         .transpose()
         .map_err(|e| store_error(&e))?;
-    let lifetimes = historical_rules
-        .as_ref()
-        .unwrap_or_else(|| crate::cache_lifetimes::rules());
-    let current = at.is_none().then(crate::curation::embedded);
-    let quality = if current.is_some() {
+    let lifetimes = historical_rules.as_ref().unwrap_or(tables.cache_lifetimes);
+    let current = (at.is_none() || store.is_store_mode()).then_some(tables);
+    let published_quality = if at.is_none() {
         read_quality(store)?
     } else {
         read_quality_at(store, at.map(|time| time.0))?
     };
-    curate::derive_row_facts(
-        &mut response,
-        current.as_ref(),
-        lifetimes,
-        &quality,
-        requested_prefixes,
-    );
+    let local = store
+        .local_overrides_at(at.map(|time| time.0))
+        .map_err(|e| store_error(&e))?;
+    let (quality, metadata) = local_overrides::overlay(&published_quality, &local);
+    if metadata.is_empty() {
+        curate::derive_row_facts(
+            &mut response,
+            current,
+            lifetimes,
+            &published_quality,
+            requested_prefixes,
+        );
+    } else {
+        let mut published = response.clone();
+        curate::derive_row_facts(
+            &mut published,
+            current,
+            lifetimes,
+            &published_quality,
+            requested_prefixes,
+        );
+        curate::derive_row_facts(
+            &mut response,
+            current,
+            lifetimes,
+            &quality,
+            requested_prefixes,
+        );
+        local_overrides::disclose(&published, &mut response, &metadata);
+    }
     if let Some(plane) = plane {
-        let speed_twins = crate::speed_twins::rows();
+        let speed_twins = tables.speed_twins;
         let mut cards = BTreeMap::new();
         if let Some(provider) = plane.declared.and_then(Plane::borrows_rates_from) {
             for (identity, facts) in &response.models {
@@ -2009,16 +2086,22 @@ fn finish_plane_view(
             &cards,
         );
     }
-    if current.is_some() {
+    if at.is_none() {
         let method = response
             .plane
             .as_ref()
             .map(|plane| plane.auth_method.clone());
-        read_speed_twin_cards(store, source, &mut response, method.as_deref())?;
+        read_speed_twin_cards(
+            store,
+            source,
+            &mut response,
+            method.as_deref(),
+            tables.speed_twins,
+        )?;
     }
     curate::finish_view(
         &mut response,
-        current.as_ref().map(|tables| tables.speed_twins),
+        current.map(|tables| tables.speed_twins),
         requested_prefixes,
     );
     Ok(response)
@@ -2030,7 +2113,7 @@ fn read_quality(store: &CatalogStore) -> Result<curate::Quality, RouteError> {
 
 fn read_quality_at(store: &CatalogStore, at: Option<i64>) -> Result<curate::Quality, RouteError> {
     let grades = match at {
-        Some(at) => store.chat_grades_at(at),
+        Some(at) => store.quality_grades_at(at, !store.is_store_mode()),
         None => store.quality_grades(),
     }
     .map_err(|e| store_error(&e))?
@@ -2046,13 +2129,15 @@ fn read_quality_at(store: &CatalogStore, at: Option<i64>) -> Result<curate::Qual
         recorded_at_ms: row.recorded_at_ms,
     })
     .collect();
-    let marks = if at.is_none() {
-        store
-            .model_marks()
-            .map_err(|e| store_error(&e))?
-            .into_iter()
-            .map(|row| (row.model, row.recorded_at_ms))
-            .collect()
+    let marks = if at.is_none() || store.is_store_mode() {
+        match at {
+            Some(at) => store.model_marks_at(at),
+            None => store.model_marks(),
+        }
+        .map_err(|e| store_error(&e))?
+        .into_iter()
+        .map(|row| (row.model, row.recorded_at_ms))
+        .collect()
     } else {
         BTreeMap::new()
     };
@@ -2097,8 +2182,9 @@ fn read_speed_twin_cards(
     source: SourceId,
     response: &mut CatalogGetResponse,
     auth_method: Option<&str>,
+    twins: &curate::speed_twins::SpeedTwins,
 ) -> Result<(), RouteError> {
-    for row in crate::speed_twins::rows().values() {
+    for row in twins.values() {
         let base = format!("{}/{}", row.provider_id, row.base_model_id);
         let twin = format!("{}/{}", row.provider_id, row.twin_model_id);
         curate::annotate_speed_twin(row, response);
@@ -2389,6 +2475,7 @@ fn render(
     inherit: Option<(&CatalogStore, &crate::creators::Creators)>,
     requested_prefixes: Option<&Vec<String>>,
     historical_overrides: Option<&crate::fact_overrides::FactOverrides>,
+    current: Option<&curate::CurationSet<'_>>,
 ) -> CatalogGetResponse {
     let withheld = snapshot
         .withheld
@@ -2429,7 +2516,6 @@ fn render(
         withheld,
         uncertain,
     );
-    let current = at.is_none().then(crate::curation::embedded);
     for model in snapshot.models {
         let provider = model.provider_id.as_str();
         let model_id = model.model_id.as_str();
@@ -2450,7 +2536,7 @@ fn render(
             &withheld,
             requested_prefixes,
             historical_overrides,
-            current.as_ref(),
+            current,
         );
         if let (Some((store, creators)), None) = (inherit, at) {
             inherit_rate_for(store, source, creators, &mut facts, model_id);
@@ -2493,7 +2579,15 @@ fn provider_is_served(
     source: SourceId,
     provider_id: &str,
 ) -> Result<bool, RouteError> {
-    if crate::curated_models::models()
+    if store.is_store_mode() {
+        if !store
+            .curated_models_at(i64::MAX, Some(provider_id))
+            .map_err(|e| store_error(&e))?
+            .is_empty()
+        {
+            return Ok(true);
+        }
+    } else if crate::curated_models::models()
         .keys()
         .any(|(provider, _)| provider == provider_id)
     {
@@ -2546,19 +2640,20 @@ fn upstream_publishes_at(
 ///
 /// Every route that decides whether a curated row applies asks here, so the
 /// rule has one statement.
-fn curated_in_effect(
+fn curated_in_effect<'a>(
     store: &CatalogStore,
     source: SourceId,
     provider_id: &str,
     model_id: &str,
-) -> Result<Option<&'static crate::curated_models::CuratedModel>, RouteError> {
+    curated: &'a curate::curated_models::Table,
+) -> Result<Option<&'a crate::curated_models::CuratedModel>, RouteError> {
     let key = (provider_id.to_string(), model_id.to_string());
-    let Some(row) = crate::curated_models::models().get(&key) else {
+    let Some(row) = curated.models.get(&key) else {
         return Ok(None);
     };
     // A held row is never served as curated. When the store has no row for
     // the id, current reads report it as retired instead.
-    if crate::curated_models::held().contains_key(&key) {
+    if curated.held.contains_key(&key) {
         return Ok(None);
     }
     let present = upstream_publishes_at(store, source, provider_id, model_id, None)?;
@@ -2649,15 +2744,16 @@ fn unknown_model(provider_id: &str, model_id: &str) -> RouteError {
 
 /// Serve the curated subscription prices.
 ///
-/// Reads at NOW rather than taking an instant, deliberately. A point-in-time
-/// read of this plane would be a different contract — "what did we believe on
-/// day X" rather than "what is in force" — and nobody has asked for it. Adding
-/// it later is additive; guessing at its semantics now is not.
 fn serve_plan_prices(store: &CatalogStore, args: &[u8]) -> Result<PlanPricesResponse, RouteError> {
     let request: PlanPricesRequest = serde_json::from_slice(args)
         .map_err(|e| RouteError::bad_request(format!("malformed plan.prices request: {e}")))?;
 
-    let now = now_ms();
+    if request.at_ms.is_some() && !store.is_store_mode() {
+        return Err(RouteError::bad_request(
+            "dated plan.prices requires store mode",
+        ));
+    }
+    let now = request.at_ms.unwrap_or_else(now_ms);
     let rows = store
         .plan_prices_at(now, request.provider_id.as_deref())
         .map_err(|e| store_error(&e))?;
@@ -2682,57 +2778,80 @@ fn serve_plan_prices(store: &CatalogStore, args: &[u8]) -> Result<PlanPricesResp
     Ok(PlanPricesResponse {
         prices: rows
             .into_iter()
-            .map(|r| PlanPriceWire {
-                quota_value: crate::plan_prices::rows()
-                    .iter()
-                    .find(|curated| curated.provider_id == r.provider_id && curated.tier == r.tier)
-                    .filter(|_| r.minor_units.is_some())
-                    .and_then(|curated| curated.quota_value.clone()),
-                service_tiers: crate::plan_prices::rows()
-                    .iter()
-                    .find(|curated| curated.provider_id == r.provider_id && curated.tier == r.tier)
-                    .filter(|_| r.minor_units.is_some())
-                    .and_then(|curated| curated.service_tiers.clone()),
-                concurrency: crate::plan_prices::rows()
-                    .iter()
-                    .find(|curated| curated.provider_id == r.provider_id && curated.tier == r.tier)
-                    .filter(|_| r.minor_units.is_some())
-                    .and_then(|curated| curated.concurrency.clone()),
-                provider_id: r.provider_id,
-                tier: r.tier,
-                price: match (r.minor_units, r.exponent, r.currency, r.period) {
-                    (Some(minor_units), Some(exponent), Some(currency), Some(period)) => {
-                        Some(PlanAmount {
-                            minor_units,
-                            exponent,
-                            currency,
-                            period,
+            .map(|r| {
+                let (quota_value, service_tiers, concurrency) = if store.is_store_mode() {
+                    let (quota, tiers, caps) = store
+                        .published_plan_metadata(&r.provider_id, &r.tier, now)
+                        .map_err(|e| store_error(&e))?;
+                    (
+                        parse_plan_meta(quota)?,
+                        parse_plan_meta(tiers)?,
+                        parse_plan_meta(caps)?,
+                    )
+                } else {
+                    let row = crate::plan_prices::rows()
+                        .iter()
+                        .find(|curated| {
+                            curated.provider_id == r.provider_id && curated.tier == r.tier
                         })
-                    }
-                    // Any other shape is a refusal row. The store's CHECK makes
-                    // partial amounts unrepresentable, so this arm is reached
-                    // only by rows that genuinely carry no price.
-                    _ => None,
-                },
-                refusal_reason: r.refusal_reason,
-                boundary_at_ms: r.boundary_at_ms,
-                established_by: r.established_by,
-                established_at_ms: r.established_at_ms,
-                review_by_ms: r.review_by_ms,
-                source_ref: r.source_ref,
+                        .filter(|_| r.minor_units.is_some());
+                    (
+                        row.and_then(|r| r.quota_value.clone()),
+                        row.and_then(|r| r.service_tiers.clone()),
+                        row.and_then(|r| r.concurrency.clone()),
+                    )
+                };
+                Ok(PlanPriceWire {
+                    quota_value,
+                    service_tiers,
+                    concurrency,
+                    provider_id: r.provider_id,
+                    tier: r.tier,
+                    price: match (r.minor_units, r.exponent, r.currency, r.period) {
+                        (Some(minor_units), Some(exponent), Some(currency), Some(period)) => {
+                            Some(PlanAmount {
+                                minor_units,
+                                exponent,
+                                currency,
+                                period,
+                            })
+                        }
+                        // Any other shape is a refusal row. The store's CHECK makes
+                        // partial amounts unrepresentable, so this arm is reached
+                        // only by rows that genuinely carry no price.
+                        _ => None,
+                    },
+                    refusal_reason: r.refusal_reason,
+                    boundary_at_ms: r.boundary_at_ms,
+                    established_by: r.established_by,
+                    established_at_ms: r.established_at_ms,
+                    review_by_ms: r.review_by_ms,
+                    source_ref: r.source_ref,
+                })
             })
-            .collect(),
+            .collect::<Result<Vec<_>, RouteError>>()?,
         resolved_at_ms: now,
         tier_vocabulary: crate::plan_prices::TIER_VOCABULARY.to_string(),
         unit_policy: crate::plan_prices::UNIT_POLICY.to_string(),
     })
 }
 
+fn parse_plan_meta<T: serde::de::DeserializeOwned>(
+    raw: Option<String>,
+) -> Result<Option<T>, RouteError> {
+    raw.map(|value| {
+        serde_json::from_str(&value).map_err(|err| {
+            RouteError::unavailable(format!("stored plan metadata is malformed: {err}"))
+        })
+    })
+    .transpose()
+}
+
 fn store_error(e: &CatalogError) -> RouteError {
     RouteError::unavailable(format!("catalog read failed: {e}"))
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -3083,6 +3202,7 @@ fn alias_in_effect<'a>(
 ///
 /// Refuses rather than answering empty in both cases it cannot serve, and says
 /// which target it would have served, so the caller can ask for that row.
+#[allow(clippy::too_many_arguments)]
 fn serve_named_alias(
     store: &CatalogStore,
     source: SourceId,
@@ -3091,9 +3211,10 @@ fn serve_named_alias(
     alias: &crate::aliases::Alias,
     at: Option<Timestamp>,
     prefixes: Option<&Vec<String>>,
+    tables: &curate::CurationSet<'_>,
 ) -> Result<CatalogGetResponse, RouteError> {
     let target = format!("{}/{}", alias.target_provider_id, alias.target_model_id);
-    if at.is_some() {
+    if at.is_some() && !store.is_store_mode() {
         // An alias is today's reading of a route's code, and fusiform never
         // observed the alias id, so there is no past to report under it.
         // Serving the target's past under the alias would claim the route
@@ -3104,7 +3225,17 @@ fn serve_named_alias(
              so it has no past. Read {target} at that instant instead"
         )));
     }
-    aliased_response(store, source, provider_id, model_id, alias, prefixes)?.ok_or_else(|| {
+    aliased_response(
+        store,
+        source,
+        provider_id,
+        model_id,
+        alias,
+        prefixes,
+        tables,
+        at,
+    )?
+    .ok_or_else(|| {
         RouteError::no_coverage(format!(
             "{provider_id}/{model_id} is a curated alias of {target}, which is \
              absent or retired in the current catalog, so the alias serves \
@@ -3124,6 +3255,7 @@ fn serve_named_alias(
 /// the rate markers name the target's `model.family`, and a `--rates` read
 /// would otherwise filter that input away and mark every rate with an empty
 /// family. The widening is dropped again before the entry is returned.
+#[allow(clippy::too_many_arguments)]
 fn aliased_response(
     store: &CatalogStore,
     source: SourceId,
@@ -3131,11 +3263,14 @@ fn aliased_response(
     model_id: &str,
     alias: &crate::aliases::Alias,
     prefixes: Option<&Vec<String>>,
+    tables: &curate::CurationSet<'_>,
+    at: Option<Timestamp>,
 ) -> Result<Option<CatalogGetResponse>, RouteError> {
     let target_request = CatalogGetRequest {
         provider_id: Some(alias.target_provider_id.clone()),
         model_id: Some(alias.target_model_id.clone()),
         fact_prefixes: prefixes.cloned(),
+        at_ms: at.map(|time| time.0),
         ..CatalogGetRequest::default()
     };
     // If the store has never recorded the target model, the alias has nothing
@@ -3143,9 +3278,17 @@ fn aliased_response(
     // from the refusal code `single_model_snapshot` returns (`no_coverage`):
     // that code is reported to callers, and changing how an unknown model is
     // reported must not change whether an alias is served.
-    if !store
-        .model_is_known(source, &alias.target_provider_id, &alias.target_model_id)
-        .map_err(|e| store_error(&e))?
+    if (at.is_some()
+        && !upstream_publishes_at(
+            store,
+            source,
+            &alias.target_provider_id,
+            &alias.target_model_id,
+            at,
+        )?)
+        || !store
+            .model_is_known(source, &alias.target_provider_id, &alias.target_model_id)
+            .map_err(|e| store_error(&e))?
     {
         return Ok(None);
     }
@@ -3156,7 +3299,7 @@ fn aliased_response(
         source,
         &alias.target_provider_id,
         &alias.target_model_id,
-        None,
+        at,
         &target_request,
         None,
     )?;
@@ -3168,15 +3311,16 @@ fn aliased_response(
     let response = render(
         source,
         snapshot,
-        None,
-        Some((store, crate::creators::creators())),
+        at,
+        Some((store, tables.creators)),
         wide.as_ref(),
         None,
+        Some(tables),
     );
     if response.models.is_empty() {
         return Ok(None);
     }
-    let name = read_provider_name(store, source, provider_id, None)?;
+    let name = read_provider_name(store, source, provider_id, at)?;
     Ok(curate::project_alias(
         response,
         provider_id,
@@ -3198,6 +3342,7 @@ fn aliased_response(
 /// merged once each, since the bulk read may already carry them for the
 /// target's own entry. Fact-override disclosures already name the alias entry,
 /// so they are added as they are.
+#[allow(clippy::too_many_arguments)]
 fn add_aliases_to_bulk(
     store: &CatalogStore,
     source: SourceId,
@@ -3206,6 +3351,8 @@ fn add_aliases_to_bulk(
     provider_filter: Option<&str>,
     prefixes: Option<&Vec<String>>,
     range: Option<&ProviderRange>,
+    tables: &curate::CurationSet<'_>,
+    at: Option<Timestamp>,
 ) -> Result<(), RouteError> {
     for (provider_id, model_id) in aliases.keys() {
         if provider_filter.is_some_and(|p| p != provider_id)
@@ -3216,7 +3363,16 @@ fn add_aliases_to_bulk(
         let Some(alias) = alias_in_effect(store, source, aliases, provider_id, model_id)? else {
             continue;
         };
-        let Some(entry) = aliased_response(store, source, provider_id, model_id, alias, prefixes)?
+        let Some(entry) = aliased_response(
+            store,
+            source,
+            provider_id,
+            model_id,
+            alias,
+            prefixes,
+            tables,
+            at,
+        )?
         else {
             continue;
         };

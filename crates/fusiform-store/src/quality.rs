@@ -72,7 +72,7 @@ fn decode_mark(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelMarkEra> {
     })
 }
 
-fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<QualityGradeEra> {
+pub(super) fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<QualityGradeEra> {
     let elo: Option<String> = row.get(2)?;
     let eq: Option<String> = row.get(3)?;
     let grade: Option<String> = row.get(7)?;
@@ -112,6 +112,9 @@ impl CatalogStore {
         reason: &str,
         recorded_at_ms: i64,
     ) -> Result<i64, CatalogError> {
+        if self.is_store_mode() {
+            return self.append_override_mark(model, Some(decommissioned), reason, recorded_at_ms);
+        }
         let id = self.inner.with_conn_fenced(|tx| {
             tx.execute(
                 "INSERT INTO model_mark_era (model, decommissioned, marked_by, reason, recorded_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -188,6 +191,16 @@ impl CatalogStore {
         recorded_at_ms: i64,
         graded_effort: Option<&str>,
     ) -> Result<i64, CatalogError> {
+        if self.is_store_mode() {
+            return self.append_override_grade(
+                model,
+                kind,
+                grade,
+                reason,
+                recorded_at_ms,
+                graded_effort,
+            );
+        }
         let id = self.inner.with_conn_fenced(|tx| {
             tx.execute(
                 "INSERT INTO quality_grade_era \
@@ -239,15 +252,28 @@ impl CatalogStore {
         })
     }
 
-    pub fn chat_grades_at(&self, at: i64) -> Result<Vec<QualityGradeEra>, CatalogError> {
+    pub fn quality_grades_at(
+        &self,
+        at: i64,
+        chat_only: bool,
+    ) -> Result<Vec<QualityGradeEra>, CatalogError> {
         self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms, grade, kind, graded_effort \
-                 FROM quality_grade_era q WHERE withdrawn = 0 AND kind IS NULL \
+                 FROM quality_grade_era q WHERE withdrawn = 0 AND (?2 = 0 OR kind IS NULL) \
                  AND id = (SELECT MAX(id) FROM quality_grade_era WHERE model = q.model \
-                           AND kind IS NULL AND recorded_at_ms <= ?1) ORDER BY model",
+                           AND kind IS q.kind AND recorded_at_ms <= ?1) ORDER BY model, kind",
             )?;
-            let rows = stmt.query_map([at], decode)?.collect();
+            let rows = stmt.query_map(params![at, chat_only], decode)?.collect();
+            rows
+        })
+    }
+
+    pub fn model_marks_at(&self, at: i64) -> Result<Vec<ModelMarkEra>, CatalogError> {
+        self.raw_conn(|conn| {
+            let mut stmt = conn.prepare("SELECT id, model, decommissioned, marked_by, reason, recorded_at_ms FROM model_mark_era m
+                WHERE decommissioned = 1 AND id = (SELECT MAX(id) FROM model_mark_era WHERE model = m.model AND recorded_at_ms <= ?1) ORDER BY model")?;
+            let rows = stmt.query_map([at], decode_mark)?.collect();
             rows
         })
     }

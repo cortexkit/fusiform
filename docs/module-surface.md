@@ -37,6 +37,29 @@ Tools, as served: `catalog.get`, `catalog.history`, `catalog.status`,
 | `quality.marks` | pure | current decommissioned keys, or one key's mark history newest first |
 | `quality.workload` | mutating | preview or commit a workload's default and optional minimum effort, or withdraw them |
 
+### Catalog source and local judgments
+
+The daemon reads `~/.config/cortexkit/fusiform.jsonc` on macOS,
+`${XDG_CONFIG_HOME:-$HOME/.config}/cortexkit/fusiform.jsonc` on Linux, and
+`%APPDATA%\cortexkit\fusiform.jsonc` on Windows. A missing file selects
+`{"source":{"mode":"models_dev"}}`; an invalid file prevents startup.
+
+For a signed catalog, set `source` to
+`{"mode":"store","url":"https://example.com/catalog/","keys":[{"kid":"release-key","public_key":"…"}]}`.
+Pin your store's unpadded base64url Ed25519 public key. Use a fresh fusiform data
+folder when switching modes: the daemon refuses to import into a database that
+already holds local catalog history. It checks the signed head every minute.
+Before the first verified release, the daemon can serve the built-in snapshot
+read-only and reports Degraded; a later fetch failure leaves the last verified
+release in force.
+
+In store mode, `grade`, `workload`, `decommission`, and `restore` record local
+judgments. They preview by default; add `--commit` to write and `--withdraw`
+to return to the published judgment. The `catalog.get` reply lists overridden
+facts with the published and local values, recording time and reason. Local
+judgments are never sent to the store. Store-mode `plan.prices` accepts `at_ms`
+and reads plan metadata from the era in force.
+
 Tests check that the list above names exactly the tools in the protocol
 crate's `TOOLS` constant
 (`wire_fact_table::the_module_surface_doc_lists_exactly_the_served_tools`),

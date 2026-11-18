@@ -229,6 +229,8 @@ fn an_alias_without_a_sourced_name_never_inherits_the_target_name() {
         "antigravity-gemini-3.8-flash",
         &alias,
         None,
+        &crate::curation::embedded(),
+        None,
     )
     .unwrap()
     .unwrap();

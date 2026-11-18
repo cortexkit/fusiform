@@ -302,7 +302,12 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
     {
         return Err("--default and --minimum apply to workload only".into());
     }
-    if args.withdraw && !matches!(args.command.as_str(), "grade" | "workload") {
+    if args.withdraw
+        && !matches!(
+            args.command.as_str(),
+            "grade" | "workload" | "decommission" | "restore"
+        )
+    {
         return Err("--withdraw applies to grade and workload only".into());
     }
     if args.prefix.is_some() && args.command != "grades" {
@@ -437,6 +442,9 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
                     "restore" => fusiform_protocol::TOOL_QUALITY_RESTORE,
                     _ => fusiform_protocol::TOOL_QUALITY_WITHDRAW,
                 };
+                if args.withdraw && matches!(args.command.as_str(), "decommission" | "restore") {
+                    body["withdraw"] = serde_json::json!(true);
+                }
                 Ok((tool, body))
             }
         }
@@ -725,6 +733,7 @@ where
                     curated,
                     login_methods,
                     quality_scores,
+                    overrides,
                     withheld,
                     retired,
                     uncertain,
@@ -741,6 +750,11 @@ where
                 merged.login_methods.extend(login_methods);
                 if quality_scores.is_some() {
                     merged.quality_scores = quality_scores;
+                }
+                for entry in overrides {
+                    if !merged.overrides.contains(&entry) {
+                        merged.overrides.push(entry);
+                    }
                 }
                 merged.withheld.extend(withheld);
                 merged.retired.extend(retired);

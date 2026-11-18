@@ -145,6 +145,8 @@ pub struct PlanPricesRequest {
     /// caller holding `codex` or `claude` has to map them first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at_ms: Option<i64>,
 }
 
 /// What one `(provider, tier)` costs, or why fusiform cannot say.
@@ -640,6 +642,9 @@ pub struct CatalogGetResponse {
     /// point-in-time reads omit both the facts and this disclosure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quality_scores: Option<QualityScoresWire>,
+    /// Local judgments that replace published values on this computer.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overrides: Vec<LocalOverrideWire>,
 
     /// Facts this read withheld because their record is known bad.
     ///
@@ -1937,6 +1942,16 @@ pub struct QualityScoresWire {
     pub graded_at_ms: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LocalOverrideWire {
+    pub key: String,
+    pub fact: String,
+    pub published: Option<serde_json::Value>,
+    pub local: Option<serde_json::Value>,
+    pub set_at_ms: i64,
+    pub reason: String,
+}
+
 /// Assign the chat pair or a per-kind engine grade. Previews unless dry_run is false.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -2082,6 +2097,8 @@ pub struct WorkloadEffortWriteResponse {
 #[serde(deny_unknown_fields)]
 pub struct QualityMarkRequest {
     pub model: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub withdraw: bool,
     pub reason: String,
     #[serde(default = "default_true")]
     pub dry_run: bool,

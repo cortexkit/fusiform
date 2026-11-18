@@ -10,7 +10,7 @@ use crate::{
 };
 use fusiform_protocol::{BillingRuleWire, CatalogGetResponse, PlaneWire};
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Quality {
     pub grades: Vec<RecordedGrade>,
     pub efforts: Vec<RecordedEffortGrade>,
@@ -19,6 +19,7 @@ pub struct Quality {
     pub marks: BTreeMap<String, i64>,
 }
 
+#[derive(Clone)]
 pub struct RecordedGrade {
     pub model: String,
     pub kind: Option<String>,
@@ -27,6 +28,7 @@ pub struct RecordedGrade {
     pub recorded_at_ms: i64,
 }
 
+#[derive(Clone)]
 pub enum Grade {
     Chat {
         elo: serde_json::Number,

@@ -247,6 +247,7 @@ fn every_response_type_round_trips() {
     use std::collections::BTreeMap;
 
     let catalog = CatalogGetResponse {
+        overrides: Vec::new(),
         quality_scores: Some(QualityScoresWire {
             graded_by: "operator".into(),
             graded_at_ms: 123,

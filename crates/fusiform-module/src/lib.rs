@@ -29,8 +29,10 @@ pub mod output_audio;
 pub mod plan_prices;
 pub mod route;
 pub mod seed;
+pub mod settings;
 pub mod signals;
 pub mod speed_twins;
+pub mod store_poll;
 pub mod temperature_ranges;
 pub mod wire_corrections;
 pub mod wire_families;
@@ -71,9 +73,21 @@ pub async fn serve_request(
     signals: Arc<signals::Signals>,
     body: Vec<u8>,
 ) -> HandlerOutcome {
+    serve_catalog_request(store, signals, body, false).await
+}
+
+pub async fn serve_catalog_request(
+    store: Arc<CatalogStore>,
+    signals: Arc<signals::Signals>,
+    body: Vec<u8>,
+    built_in_snapshot: bool,
+) -> HandlerOutcome {
     let bulk = route::needs_catalog_permit(&body);
     let work = move || match route::serve_tool_call(&store, &body).map(|mut response| {
         if let fusiform_protocol::ToolResponse::Status(status) = &mut response {
+            if built_in_snapshot {
+                status.source = "built_in_snapshot".into();
+            }
             status.bus_published_version = signals.bus_published_version();
             status.bus_publish_failures = signals.bus_publish_failures();
             status.bus_last_error = signals.bus_last_error();
@@ -438,7 +452,8 @@ pub fn manifest() -> ModuleManifest {
                 schema: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "provider_id": {"type": "string"}
+                        "provider_id": {"type": "string"},
+                        "at_ms": {"type": "integer"}
                     },
                     "additionalProperties": false
                 }),
@@ -497,7 +512,7 @@ pub fn manifest() -> ModuleManifest {
                 execution_mode: ExecutionMode::Mutating,
                 schema: serde_json::json!({
                     "type":"object", "properties": {
-                        "model":{"type":"string"}, "reason":{"type":"string"},
+                        "model":{"type":"string"}, "reason":{"type":"string"}, "withdraw":{"type":"boolean", "default":false},
                         "dry_run":{"type":"boolean", "default":true}
                     }, "required":["model","reason"], "additionalProperties":false
                 }),
@@ -508,7 +523,7 @@ pub fn manifest() -> ModuleManifest {
                 execution_mode: ExecutionMode::Mutating,
                 schema: serde_json::json!({
                     "type":"object", "properties": {
-                        "model":{"type":"string"}, "reason":{"type":"string"},
+                        "model":{"type":"string"}, "reason":{"type":"string"}, "withdraw":{"type":"boolean", "default":false},
                         "dry_run":{"type":"boolean", "default":true}
                     }, "required":["model","reason"], "additionalProperties":false
                 }),

@@ -4926,6 +4926,60 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — local grade override": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "quality."
+        ],
+        "model_id": "model",
+        "provider_id": "lab"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": -1,
+      "models": {
+        "lab/model": {
+          "quality.elo": 1400,
+          "quality.eq": 1100,
+          "quality.graded_effort": "low"
+        }
+      },
+      "overrides": [
+        {
+          "fact": "quality.elo",
+          "key": "lab/model",
+          "local": 1400,
+          "published": 1200,
+          "reason": "local measurement",
+          "set_at_ms": -1
+        },
+        {
+          "fact": "quality.eq",
+          "key": "lab/model",
+          "local": 1100,
+          "published": 1000,
+          "reason": "local measurement",
+          "set_at_ms": -1
+        },
+        {
+          "fact": "quality.graded_effort",
+          "key": "lab/model",
+          "local": "low",
+          "published": "high",
+          "reason": "local measurement",
+          "set_at_ms": -1
+        }
+      ],
+      "quality_scores": {
+        "graded_at_ms": -1,
+        "graded_by": "operator"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — marked and unmarked rows": {
     "request": {
       "arguments": {

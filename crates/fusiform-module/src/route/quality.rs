@@ -62,6 +62,11 @@ pub(super) fn mark(
 ) -> Result<QualityMarkWriteResponse, RouteError> {
     let request: QualityMarkRequest = serde_json::from_slice(body)
         .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?;
+    if request.withdraw && !store.is_store_mode() {
+        return Err(RouteError::bad_request(
+            "withdrawing a local mark requires store mode",
+        ));
+    }
     if request.model.starts_with("local:") {
         return Err(RouteError::bad_request(
             "local engine keys cannot carry decommission marks; their declaring module owns their availability",
@@ -88,28 +93,67 @@ pub(super) fn mark(
     if affected.is_empty() {
         return Err(RouteError::bad_request(format!("unknown model mark key {:?}; use a canonical model id carried by a current served row, or the provider/model row id when it has no canonical id", request.model)));
     }
-    let current = store
-        .model_mark_history(&request.model)
+    let published = || {
+        store
+            .model_mark_history(&request.model)
+            .map(|mut history| history.pop().map(mark_wire))
+            .map_err(|e| store_error(&e))
+    };
+    let local_override = store
+        .local_overrides_at(None)
         .map_err(|e| store_error(&e))?
-        .pop()
-        .map(mark_wire);
+        .marks
+        .into_iter()
+        .find(|row| row.model == request.model)
+        .map(|row| ModelMarkWire {
+            model: row.model,
+            decommissioned: row.decommissioned,
+            marked_by: "user".into(),
+            reason: row.reason,
+            recorded_at_ms: row.recorded_at_ms,
+        });
+    if request.withdraw && local_override.is_none() {
+        return Err(RouteError::no_coverage(
+            "no current local override to withdraw",
+        ));
+    }
+    let current = match local_override {
+        Some(row) => Some(row),
+        None => published()?,
+    };
+    let restored = if request.withdraw {
+        published()?.is_some_and(|row| row.decommissioned)
+    } else {
+        decommissioned
+    };
     let new = ModelMarkWire {
         model: request.model.clone(),
-        decommissioned,
-        marked_by: "operator".into(),
+        decommissioned: restored,
+        marked_by: if store.is_store_mode() {
+            "user"
+        } else {
+            "operator"
+        }
+        .into(),
         reason: request.reason.clone(),
         recorded_at_ms: now_ms(),
     };
     if !request.dry_run {
-        store
-            .append_model_mark(
-                &request.model,
-                decommissioned,
-                "operator",
-                &request.reason,
-                new.recorded_at_ms,
-            )
-            .map_err(|e| store_error(&e))?;
+        if request.withdraw {
+            store
+                .append_override_mark(&request.model, None, &request.reason, new.recorded_at_ms)
+                .map_err(|e| store_error(&e))?;
+        } else {
+            store
+                .append_model_mark(
+                    &request.model,
+                    decommissioned,
+                    "operator",
+                    &request.reason,
+                    new.recorded_at_ms,
+                )
+                .map_err(|e| store_error(&e))?;
+        }
     }
     Ok(QualityMarkWriteResponse {
         dry_run: request.dry_run,
@@ -315,14 +359,31 @@ fn write(
             "quality.grade requires elo and eq without kind, or grade with a task kind",
         ));
     }
-    let current = store
-        .quality_grade_history(&model)
+    let published = || {
+        store
+            .quality_grade_history(&model)
+            .map(|history| {
+                history
+                    .into_iter()
+                    .rev()
+                    .find(|row| row.kind == kind)
+                    .filter(|row| row.grade.is_some())
+                    .map(wire)
+            })
+            .map_err(|e| store_error(&e))
+    };
+    let local_override = store
+        .local_overrides_at(None)
         .map_err(|e| store_error(&e))?
+        .grades
         .into_iter()
-        .rev()
-        .find(|row| row.kind == kind)
-        .filter(|row| row.grade.is_some())
+        .find(|row| row.model == model && row.kind == kind)
         .map(wire);
+    let current = match local_override {
+        None if withdraw && store.is_store_mode() => None,
+        Some(local) => Some(local),
+        None => published()?,
+    };
     if withdraw && current.is_none() {
         return Err(RouteError {
             code: "no_coverage",
@@ -407,7 +468,12 @@ fn write(
         eq: grade.as_ref().and_then(QualityGrade::eq).cloned(),
         grade: grade.as_ref().and_then(QualityGrade::grade).cloned(),
         withdrawn: grade.is_none(),
-        graded_by: "operator".into(),
+        graded_by: if store.is_store_mode() {
+            "user"
+        } else {
+            "operator"
+        }
+        .into(),
         reason: reason.clone(),
         recorded_at_ms: now_ms(),
     };

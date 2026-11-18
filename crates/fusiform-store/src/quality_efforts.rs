@@ -24,7 +24,7 @@ pub struct WorkloadEffortEra {
     pub recorded_at_ms: i64,
 }
 
-fn number(row: &Row<'_>, index: usize) -> rusqlite::Result<Option<Number>> {
+pub(super) fn number(row: &Row<'_>, index: usize) -> rusqlite::Result<Option<Number>> {
     row.get::<_, Option<String>>(index)?
         .map(|text| {
             serde_json::from_str(&text).map_err(|e| {
@@ -44,6 +44,9 @@ impl CatalogStore {
         value: &EffortGradeEra,
         graded_by: &str,
     ) -> Result<(), CatalogError> {
+        if self.is_store_mode() {
+            return self.append_override_effort(value);
+        }
         self.inner.with_conn_fenced(|tx| {
             tx.execute(
                 "INSERT INTO effort_grade_era (model, effort, elo, eq, withdrawn, graded_by, reason, recorded_at_ms) \
@@ -64,6 +67,9 @@ impl CatalogStore {
         value: &WorkloadEffortEra,
         set_by: &str,
     ) -> Result<(), CatalogError> {
+        if self.is_store_mode() {
+            return self.append_override_workload(value);
+        }
         self.inner.with_conn_fenced(|tx| {
             tx.execute(
                 "INSERT INTO workload_effort_era (model, workload, effort_default, effort_minimum, withdrawn, set_by, reason, recorded_at_ms) \

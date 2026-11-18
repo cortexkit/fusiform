@@ -35,6 +35,7 @@ pub fn response_envelope(
         curated: Vec::new(),
         login_methods: Vec::new(),
         quality_scores: None,
+        overrides: Vec::new(),
         canonical_links: Vec::new(),
         speed_twins: Vec::new(),
         wire_corrections: Vec::new(),

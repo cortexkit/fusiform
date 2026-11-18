@@ -19,12 +19,16 @@ mod curated;
 mod fact_overrides;
 mod history;
 pub mod ingest;
+mod local_overrides;
+pub use local_overrides::{LocalMark, LocalOverrides};
 mod quality;
 mod quality_efforts;
 pub use quality_efforts::{EffortGradeEra, WorkloadEffortEra};
 mod readers;
 pub mod schema;
 pub mod serve;
+mod store_consumer;
+pub use store_consumer::{ImportedTables, ReleaseArrival, StoreRelease, STORE_HISTORY_TABLES};
 
 #[cfg(test)]
 #[path = "tests/read_connections.rs"]
@@ -59,6 +63,7 @@ pub struct CatalogStore {
     path: std::path::PathBuf,
     instance_id: u64,
     catalog_changes: tokio::sync::Notify,
+    store_mode: bool,
 }
 
 static NEXT_STORE_INSTANCE: AtomicU64 = AtomicU64::new(1);
@@ -171,6 +176,18 @@ impl CatalogStore {
     /// fleet module shipped: a nested `astrocyte/cortexkit/astrocyte/store.db`
     /// alongside the real one.
     pub fn open(descriptor: &StorageDescriptor) -> Result<Self, CatalogError> {
+        Self::open_mode(descriptor, false)
+    }
+
+    pub fn open_for_store(descriptor: &StorageDescriptor) -> Result<Self, CatalogError> {
+        Self::open_mode(descriptor, true)
+    }
+
+    pub fn is_store_mode(&self) -> bool {
+        self.store_mode
+    }
+
+    fn open_mode(descriptor: &StorageDescriptor, store_mode: bool) -> Result<Self, CatalogError> {
         let inner = open_sqlite(descriptor)?;
         // Older media judgments did not record a task. Refuse rather than
         // inventing one while migrating their history to the per-kind schema.
@@ -196,7 +213,14 @@ impl CatalogStore {
                 "cannot migrate quality grades to schema v13: {legacy_media_grades} legacy media grade rows have no kind"
             )));
         }
-        let outcome = inner.migrate(schema::NAMESPACE, schema::MIGRATIONS)?;
+        let outcome = if store_mode {
+            inner.migrate(
+                schema::NAMESPACE,
+                &schema::migrations_without_embedded_data(),
+            )?
+        } else {
+            inner.migrate(schema::NAMESPACE, schema::MIGRATIONS)?
+        };
 
         // A store written by a NEWER binary is refused, rather than served from.
         //
@@ -235,13 +259,18 @@ impl CatalogStore {
             other => return Err(StoreError::UnsupportedBackend(other.label().to_string()).into()),
         };
         let readers = readers::ReadPool::open(path)?;
-        Ok(Self {
+        let store = Self {
             inner,
             readers,
             path: std::path::PathBuf::from(path),
             instance_id: NEXT_STORE_INSTANCE.fetch_add(1, Ordering::Relaxed),
             catalog_changes: tokio::sync::Notify::new(),
-        })
+            store_mode,
+        };
+        if store_mode && store.latest_store_release()?.is_none() {
+            store.raw_conn(store_consumer::require_empty_history)?;
+        }
+        Ok(store)
     }
 
     /// The database file this store opened.

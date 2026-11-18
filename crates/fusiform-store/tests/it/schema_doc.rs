@@ -448,10 +448,10 @@ fn fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it() {
         "quality_grade_era",
     ];
     let snapshot = |table: &&str| {
-        let columns = if *table == "quality_grade_era" {
-            "id, model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms"
-        } else {
-            "*"
+        let columns = match *table {
+            "quality_grade_era" => "id, model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms",
+            "plan_price_era" => "id, provider_id, tier, minor_units, exponent, currency, period, boundary_kind, boundary_at_ms, established_by, established_at_ms, review_by_ms, source_ref, refusal_reason",
+            _ => "*",
         };
         let mut stmt = conn
             .prepare(&format!("SELECT {columns} FROM {table} ORDER BY id"))

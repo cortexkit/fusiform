@@ -65,6 +65,21 @@ pub struct Fetcher {
 }
 
 impl Fetcher {
+    pub(crate) async fn fetch_store_file(
+        &self,
+        url: reqwest::Url,
+    ) -> Result<Vec<u8>, reqwest::Error> {
+        Ok(self
+            .client
+            .get(url)
+            .send()
+            .await?
+            .error_for_status()?
+            .bytes()
+            .await?
+            .to_vec())
+    }
+
     /// Build a fetcher.
     ///
     /// The timeout is a whole-request budget rather than a connect timeout: a

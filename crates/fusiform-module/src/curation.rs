@@ -3,6 +3,10 @@
 
 use fusiform_curate::CurationSet;
 
+mod published;
+pub(crate) use published::PublishedCuration;
+pub(crate) use published::{document_rows, validate_published};
+
 pub fn embedded() -> CurationSet<'static> {
     CurationSet {
         aliases: crate::aliases::aliases(),

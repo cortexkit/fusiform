@@ -92,6 +92,28 @@ pub const MIGRATIONS: &[Migration] = &[
     },
 ];
 
+pub(crate) fn migrations_without_embedded_data() -> Vec<Migration> {
+    MIGRATIONS
+        .iter()
+        .map(|migration| Migration {
+            version: migration.version,
+            // These three migrations end with an import from a frozen document.
+            // Store mode imports these histories from history/base.json,
+            // whose hash is signed with the snapshot.
+            statements: match migration.version {
+                8 | 11 | 12 => {
+                    migration
+                        .statements
+                        .split_once("WITH doc(body) AS")
+                        .expect("frozen import follows DDL")
+                        .0
+                }
+                _ => migration.statements,
+            },
+        })
+        .collect()
+}
+
 const SCHEMA_V1: &str = r#"
 -- One row per poll. Every poll, including failures and 304s.
 --

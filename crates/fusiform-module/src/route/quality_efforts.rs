@@ -81,12 +81,22 @@ pub(super) fn grade(
     dry_run: bool,
 ) -> Result<QualityWriteResponse, RouteError> {
     let (catalog, affected) = target(store, &model, &reason)?;
-    let current = store
-        .effort_grades_at(None)
+    let local = store
+        .local_overrides_at(None)
         .map_err(|e| store_error(&e))?
+        .efforts
         .into_iter()
-        .find(|row| row.model == model && row.effort == effort)
-        .map(grade_wire);
+        .find(|row| row.model == model && row.effort == effort);
+    let current = if local.is_some() || store.is_store_mode() && pair.is_none() {
+        local.map(grade_wire)
+    } else {
+        store
+            .effort_grades_at(None)
+            .map_err(|e| store_error(&e))?
+            .into_iter()
+            .find(|row| row.model == model && row.effort == effort)
+            .map(grade_wire)
+    };
     if pair.is_some() {
         require_effort(&catalog, &affected, &effort)?;
     } else if current.is_none() {
@@ -149,12 +159,22 @@ pub(super) fn workload(
         ));
     }
     let (catalog, affected) = target(store, &request.model, &request.reason)?;
-    let current = store
-        .workload_efforts_at(None)
+    let local = store
+        .local_overrides_at(None)
         .map_err(|e| store_error(&e))?
+        .workloads
         .into_iter()
-        .find(|row| row.model == request.model && row.workload == request.workload)
-        .map(workload_wire);
+        .find(|row| row.model == request.model && row.workload == request.workload);
+    let current = if local.is_some() || store.is_store_mode() && request.withdraw {
+        local.map(workload_wire)
+    } else {
+        store
+            .workload_efforts_at(None)
+            .map_err(|e| store_error(&e))?
+            .into_iter()
+            .find(|row| row.model == request.model && row.workload == request.workload)
+            .map(workload_wire)
+    };
     if request.withdraw && current.is_none() {
         return Err(missing());
     }

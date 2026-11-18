@@ -495,6 +495,10 @@ fn render_all() -> String {
         render_synthetic_quality_scores(),
     );
     ordinary.as_object_mut().unwrap().insert(
+        "catalog.get — local grade override".into(),
+        render_local_override(),
+    );
+    ordinary.as_object_mut().unwrap().insert(
         "plan.prices — synthetic concurrency scopes".into(),
         render_plan_concurrency(),
     );
@@ -1138,6 +1142,97 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
     serde_json::json!({"request":request, "response":response})
 }
 
+fn render_local_override() -> serde_json::Value {
+    use fusiform_store::{ImportedTables, ReleaseArrival, StoreRelease};
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open_for_store(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir
+                .path()
+                .join("published.db")
+                .to_string_lossy()
+                .into_owned(),
+        },
+    })
+    .unwrap();
+    let rows = [
+        ("era", vec![
+            json!({"id":111,"source":"models.dev","provider_id":"lab","model_id":"model","fact_key":"existence",
+                "value_json":"\"present\"","boundary_kind":"seed","boundary_at_ms":1000}),
+            json!({"id":112,"source":"models.dev","provider_id":"lab","model_id":"model","fact_key":"capability.reasoning_options",
+                "value_json":"[{\"type\":\"effort\",\"values\":[\"low\",\"high\"]}]","boundary_kind":"seed","boundary_at_ms":1000}),
+        ]),
+        ("quality_grade_era", vec![json!({"id":9,"model":"lab/model","elo":"1200","eq":"1000","withdrawn":false,
+            "reason":"published evaluation","graded_by":"operator","graded_effort":"high","recorded_at_ms":1500})]),
+    ].into_iter().map(|(table, rows)| (table.to_string(), rows.into_iter().map(|v| v.as_object().unwrap().clone()).collect())).collect();
+    store
+        .apply_store_releases(
+            Some(&rows),
+            &[ReleaseArrival {
+                release: StoreRelease {
+                    release: 1,
+                    state_hash: "a".repeat(64),
+                    curation_hash: "b".repeat(64),
+                    applied_at_ms: 2000,
+                },
+                rows: ImportedTables::new(),
+            }],
+        )
+        .unwrap();
+    let write = |name: &str, arguments: serde_json::Value| {
+        serve_tool_call(
+            &store,
+            &serde_json::to_vec(&json!({"name":name,"arguments":arguments})).unwrap(),
+        )
+        .unwrap()
+    };
+    let request = json!({"name":"catalog.get","arguments":{"provider_id":"lab","model_id":"model","fact_prefixes":["quality."]}});
+    let read = || {
+        serde_json::to_value(
+            serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap(),
+        )
+        .unwrap()
+    };
+    let published = read();
+    write(
+        "quality.grade",
+        json!({"model":"lab/model","elo":1400,"eq":1100,"graded_effort":"low","reason":"local measurement","dry_run":false}),
+    );
+    assert_eq!(
+        store.quality_grades().unwrap()[0]
+            .grade
+            .as_ref()
+            .unwrap()
+            .elo()
+            .unwrap()
+            .to_string(),
+        "1200"
+    );
+    let mut response = read();
+    assert_eq!(response["models"]["lab/model"]["quality.elo"], 1400);
+    let overrides = response["overrides"].as_array_mut().unwrap();
+    assert_eq!(overrides.len(), 3);
+    for row in overrides {
+        row["set_at_ms"] = json!(NOW_PLACEHOLDER);
+    }
+    response["quality_scores"]["graded_at_ms"] = json!(NOW_PLACEHOLDER);
+    response["resolved_at_ms"] = json!(NOW_PLACEHOLDER);
+    response["catalog_version"] = json!(NOW_PLACEHOLDER);
+    write(
+        "quality.withdraw",
+        json!({"model":"lab/model","reason":"use published evaluation","dry_run":false}),
+    );
+    let after = read();
+    assert_eq!(after["models"], published["models"]);
+    assert!(after.get("overrides").is_none());
+    json!({"request":request,"response":response})
+}
+
 pub(super) fn render_quality_tools() -> serde_json::Map<String, serde_json::Value> {
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
@@ -1584,13 +1679,14 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
     // The ten cases rendered outside `cases()`: the first provider page,
     // the seed and synthetic identities, synthetic grades, curated history,
     // dated fact overrides, Realtime audio input, synthetic plan concurrency,
-    // the Hydrogen alias output limit, and the grouped search-engine reads.
+    // the Hydrogen alias output limit, the grouped search-engine reads, and a
+    // store-mode local override.
     for (text, expected) in [
         (
             GOLDEN.to_string(),
             cases().len()
                 + plain_plane_cases
-                + 10
+                + 11
                 + curated_wire.len()
                 + quality_tools.len()
                 + media_quality.len()
@@ -1661,6 +1757,10 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         ),
         (
             serde_json::json!({"synthetic_quality":render_synthetic_quality_scores()}).to_string(),
+            1,
+        ),
+        (
+            serde_json::json!({"local_override":render_local_override()}).to_string(),
             1,
         ),
     ] {
@@ -2949,6 +3049,7 @@ fn every_read_response_field_reaches_the_fixture() {
         &present,
         &[
             "CatalogGetResponse",
+            "LocalOverrideWire",
             "CuratedModelWire",
             "QualityScoresWire",
             "QualityGradeWire",

@@ -14,6 +14,7 @@ path = "src/main.rs"
 fusiform-core = { path = "../fusiform-core" }
 fusiform-curate = { path = "../fusiform-curate" }
 fusiform-protocol = { path = "../fusiform-protocol" }
+fusiform-release = { path = "../fusiform-release" }
 fusiform-store = { path = "../fusiform-store" }
 
 subc-client-rs = { workspace = true }
@@ -34,7 +35,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sy
 
 [dev-dependencies]
 fusiform-publish = { path = "../fusiform-publish" }
-fusiform-release = { path = "../fusiform-release" }
 tokio = { workspace = true, features = ["test-util"] }
 fusiform-testkit = { workspace = true }
 # Only to POISON a store in a test: dropping the table an adoption read queries
