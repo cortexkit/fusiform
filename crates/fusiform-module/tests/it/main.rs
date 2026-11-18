@@ -11,6 +11,7 @@ mod cache_lifetimes;
 mod conditional_get;
 mod correct_route;
 mod creator_table;
+mod curated_document_size;
 mod curated_wire;
 mod display_names;
 mod enrollment;
