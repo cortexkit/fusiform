@@ -99,6 +99,9 @@ async fn main() -> Result<ExitCode> {
 
     println!("Masks:");
     println!("  /catalog_version (catalog.get, catalog.status): local database revision");
+    println!(
+        "  /rates_version (catalog.status): local revision issued for the last relevant change"
+    );
     println!("  /source (catalog.get, catalog.history, catalog.status): data-source label");
     println!("  /next_page_token catalog_version component: repeats the local database revision");
     println!("  /resolved_at_ms (current catalog.get and plan.prices) and /next_page_token resolved_at_ms component (current catalog.get): each side is read at a different instant");
@@ -172,6 +175,9 @@ fn mask(reply: &mut Reply, tool: &str, current: bool) -> Result<()> {
     if let Some(fields) = reply.body.as_object_mut().filter(|_| !reply.is_error) {
         if matches!(tool, TOOL_GET | TOOL_STATUS) {
             fields.remove("catalog_version");
+        }
+        if tool == TOOL_STATUS {
+            fields.remove("rates_version");
         }
         if matches!(tool, TOOL_GET | TOOL_HISTORY | TOOL_STATUS) {
             fields.remove("source");

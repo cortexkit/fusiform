@@ -2413,12 +2413,13 @@ pub struct StatusResponse {
     /// identity. It is derived, not stored separately: it takes the newly issued
     /// `catalog_version` (milliseconds) at each process start and on polls that
     /// write or withdraw a `rate.*`, `existence`, `model.canonical_id`,
-    /// `model.family`, or `model.open_weights` era, and otherwise stays put.
+    /// `model.family`, or `model.open_weights` era. Applying a signed release
+    /// moves it when the release touches one of those facts or changes the
+    /// published curation hash.
     /// Grade, effort grade, workload, decommission, local overrides, corrections,
-    /// and artifact marks or retractions do not move it. In store mode, applying
-    /// a published release does not move it; compare `catalog_version` instead.
+    /// and artifact marks or retractions do not move it when written locally.
     /// An older producer may omit this field, which decodes as zero; use
-    /// `catalog_version` for invalidation in that case too.
+    /// `catalog_version` for invalidation in that case.
     #[serde(default)]
     pub rates_version: u64,
     /// Stored upstream models only. Curated rows and aliases are computed at

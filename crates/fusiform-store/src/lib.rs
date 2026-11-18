@@ -169,6 +169,14 @@ pub struct NewEra {
 
 pub use fusiform_core::upstream_facts::{prefix, rate_key, FactKey};
 
+fn is_rate_relevant_fact(key: &str) -> bool {
+    key.starts_with(prefix::RATE)
+        || matches!(
+            key,
+            "existence" | "model.canonical_id" | "model.family" | "model.open_weights"
+        )
+}
+
 impl CatalogStore {
     /// Open the store from the descriptor delivered over the handshake.
     ///
@@ -454,14 +462,10 @@ impl CatalogStore {
     ) -> Result<(usize, i64), CatalogError> {
         let (count, issued) = self.append_eras_inner(eras, Some((observation_id, now)))?;
         let issued = issued.expect("appending poll eras always issues a catalog version");
-        if eras.iter().any(|era| {
-            let key = era.fact_key.as_str();
-            key.starts_with(prefix::RATE)
-                || matches!(
-                    key,
-                    "existence" | "model.canonical_id" | "model.family" | "model.open_weights"
-                )
-        }) {
+        if eras
+            .iter()
+            .any(|era| is_rate_relevant_fact(era.fact_key.as_str()))
+        {
             self.record_rates_version(issued);
         }
         self.signal_catalog_changed();
@@ -1310,7 +1314,8 @@ impl CatalogStore {
         Ok(v)
     }
 
-    /// The catalog version issued at startup or at the last rate-changing poll.
+    /// The catalog version issued at startup or for the last rate-relevant
+    /// poll or signed release.
     /// Read this before `catalog_version` when serving the pair so a concurrent
     /// commit cannot make the rates version appear newer than the catalog.
     pub fn rates_version(&self) -> u64 {

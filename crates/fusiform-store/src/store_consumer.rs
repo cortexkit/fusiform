@@ -8,7 +8,7 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde_json::{Map, Value};
 
 use crate::history_base::{self, Tables};
-use crate::{advance_catalog_version_in, CatalogError, CatalogStore};
+use crate::{advance_catalog_version_in, is_rate_relevant_fact, CatalogError, CatalogStore};
 
 /// Dependency order matters: eras and artifact events refer to observations.
 pub const STORE_HISTORY_TABLES: &[&str] = &[
@@ -328,7 +328,7 @@ impl CatalogStore {
                 "published releases require store mode".into(),
             ));
         }
-        self.inner.with_conn_fenced(|tx| {
+        let rates_version = self.inner.with_conn_fenced(|tx| {
             let current = cursor(tx)?;
             if current.is_none() != write_base.is_some() || arrivals.is_empty() {
                 return Err(invalid("store bootstrap needs a base and releases; incremental apply needs an existing cursor"));
@@ -337,7 +337,9 @@ impl CatalogStore {
                 require_empty_history(tx)?;
                 write_base(tx)?;
             }
-            let mut previous = current.map_or(0, |r| r.release);
+            let mut previous = current.as_ref().map_or(0, |r| r.release);
+            let mut previous_curation = current.as_ref().map(|r| r.curation_hash.as_str());
+            let mut rates_version = None;
             for arrival in arrivals {
                 let release = &arrival.release;
                 if previous.checked_add(1) != Some(release.release) {
@@ -346,11 +348,24 @@ impl CatalogStore {
                 write_tables(tx, &arrival.rows, Some(arrival))?;
                 tx.execute("INSERT INTO store_release (release, state_hash, curation_hash, applied_at_ms) VALUES (?1, ?2, ?3, ?4)",
                     params![release.release, release.state_hash, release.curation_hash, release.applied_at_ms])?;
-                advance_catalog_version_in(tx, None, Timestamp(release.applied_at_ms))?;
+                let issued = advance_catalog_version_in(tx, None, Timestamp(release.applied_at_ms))?;
+                // Translation emits one upstream era for each set or removal.
+                // Release one has no prior curation hash and installs the base.
+                if previous_curation != Some(release.curation_hash.as_str())
+                    || arrival.rows.get("era").into_iter().flatten().any(|row| {
+                        row.get("fact_key").and_then(Value::as_str).is_some_and(is_rate_relevant_fact)
+                    })
+                {
+                    rates_version = Some(issued);
+                }
                 previous = release.release;
+                previous_curation = Some(&release.curation_hash);
             }
-            Ok(())
+            Ok(rates_version)
         })?;
+        if let Some(issued) = rates_version {
+            self.record_rates_version(issued);
+        }
         self.signal_catalog_changed();
         Ok(())
     }
@@ -384,6 +399,74 @@ mod tests {
                 path: path.to_string_lossy().into_owned(),
             },
         }
+    }
+
+    #[test]
+    fn store_rates_version_tracks_last_relevant_release_after_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let store =
+            CatalogStore::open_for_store(&descriptor(&dir.path().join("rates.db"))).unwrap();
+        let arrival = |release, curation: char, fact: Option<&str>| {
+            let mut rows = ImportedTables::new();
+            if let Some(fact) = fact {
+                let row = json!({"source":"models.dev","provider_id":"example","model_id":"m",
+                    "fact_key":fact,"value_json":"null","boundary_at_ms":1000,"boundary_kind":"asserted"});
+                rows.insert("era".into(), vec![row.as_object().unwrap().clone()]);
+            }
+            ReleaseArrival {
+                published_at_ms: 2000,
+                release: StoreRelease {
+                    release,
+                    state_hash: "a".repeat(64),
+                    curation_hash: curation.to_string().repeat(64),
+                    applied_at_ms: 2000,
+                },
+                rows,
+            }
+        };
+        store
+            .apply_store_releases(Some(&ImportedTables::new()), &[arrival(1, 'a', None)])
+            .unwrap();
+        assert_eq!(
+            store.rates_version(),
+            2000,
+            "the initial curation is rate-relevant"
+        );
+
+        store
+            .apply_store_releases(
+                None,
+                &[
+                    arrival(2, 'a', Some("rate.input")),
+                    arrival(3, 'a', Some("model.name")),
+                ],
+            )
+            .unwrap();
+        assert_eq!(store.catalog_version().unwrap(), 2002);
+        assert_eq!(store.rates_version(), 2001);
+
+        store
+            .apply_store_releases(None, &[arrival(4, 'b', None), arrival(5, 'b', None)])
+            .unwrap();
+        assert_eq!(store.catalog_version().unwrap(), 2004);
+        assert_eq!(
+            store.rates_version(),
+            2003,
+            "the curation change advances only its own version"
+        );
+
+        assert!(store
+            .apply_store_releases(
+                None,
+                &[arrival(6, 'b', Some("model.family")), arrival(8, 'b', None),]
+            )
+            .is_err());
+        assert_eq!(store.catalog_version().unwrap(), 2004);
+        assert_eq!(
+            store.rates_version(),
+            2003,
+            "a rejected batch publishes no version"
+        );
     }
 
     #[test]

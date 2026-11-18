@@ -1184,12 +1184,13 @@ from an older module's response still decode
 `rates_version` takes the newly issued `catalog_version` (`max(now_ms, current + 1)`)
 at each process start, so changes to compiled-in prices and curation are visible,
 and on polls that write or withdraw an era for `rate.*`, `existence`,
-`model.canonical_id`, `model.family`, or `model.open_weights`. It is derived, not
-stored separately, and never exceeds `catalog_version`. Grade, effort grade,
-workload, decommission, local overrides, corrections, and artifact marks or
-retractions do not advance it. In store mode, applying a published release
-advances `catalog_version` but not `rates_version`; compare `catalog_version`
-instead. Also use `catalog_version` when an older producer does not report
+`model.canonical_id`, `model.family`, or `model.open_weights`. A signed release
+also advances it when it touches one of those facts or changes the published
+curation hash. A batch leaves it at the version of the last such release.
+It is derived, not stored separately, and never exceeds `catalog_version`.
+Local writes of grades, effort grades, workload, decommission, overrides,
+corrections, and artifact marks or retractions do not advance it. Use
+`catalog_version` when an older producer does not report
 `rates_version` (decoded as zero).
 
 The three bus fields are also health metrics and never make health Degraded.
