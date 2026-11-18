@@ -609,6 +609,12 @@ Every field is optional; `{}` reads the current catalog.
 `model_id` without `provider_id` is `bad_request`
 (`route::a_model_id_without_a_provider_is_refused`).
 
+An explicit `at_ms` is a dated read in both models.dev and store mode. Neither
+mode applies current layers such as aliases, inherited rates, canonical links,
+wire corrections, or derived lineage and protocol facts to dated reads.
+Curated rows, fact overrides, cache-lifetime rules and judgments still resolve
+from the records in force at the requested instant.
+
 ### 5.2 Response
 
 | Field | Present | Meaning |
@@ -625,7 +631,7 @@ Every field is optional; `{}` reads the current catalog.
 | `curated` | when non-empty | §5.6 |
 | `login_methods` | on current reads, when non-empty | upstream-row login allowlists, same member shape as `curated` (§5.6) |
 | `wire_corrections` | when non-empty | sourced current-read corrections/withholding of `wire.api` (§4.1) |
-| `fact_overrides` | when non-empty | sourced current-read values served in place of the upstream's (§5.8) |
+| `fact_overrides` | when non-empty | sourced additions or replacements applied on this read (§5.8) |
 | `plane` | on a billing-plane read | [`billing-planes.md`](billing-planes.md) |
 | `billing_rules` | on a billing-plane read, when non-empty | [`billing-planes.md`](billing-planes.md) |
 
@@ -667,7 +673,7 @@ without matching message text. Retrying the same token cannot repair it.
 Discard partial pages and begin a new read from page one. An unchanged version means unchanged stored content,
 so subsequent pages truthfully report the first page's instant. Current reads
 remain current reads internally: converting them into `at_ms` reads would skip
-serve-time inheritance, aliases, and curated rows and change their values.
+serve-time inheritance and aliases, and use recorded eras for curated rows.
 Historical paging is supported by repeating the explicit `at_ms` on every page.
 
 **Unpaged whole-catalog reads:** an unpaged read with no `provider_id` whose

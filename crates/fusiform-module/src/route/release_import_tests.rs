@@ -8,7 +8,10 @@ use fusiform_release::{
     verify_history_attestation, HistoryAttestationBody, HistoryFile, ReleaseEnvelope, SigningKey,
     Snapshot,
 };
-use fusiform_store::{ingest::plan_ingest, NewEra, NewObservation, QualityGrade};
+use fusiform_store::{
+    ingest::plan_ingest, ImportedTables, NewEra, NewObservation, QualityGrade, ReleaseArrival,
+    StoreRelease,
+};
 use rusqlite::{params_from_iter, types::Value as SqlValue, Connection, OpenFlags};
 use serde_json::{json, Value};
 
@@ -245,6 +248,142 @@ fn load_and_compare(
     assert_eq!(loaded_state, snapshot.state);
     assert_catalog_bytes(source, &destination, instants, current);
     (rows, snapshot)
+}
+
+#[test]
+fn dated_store_release_keeps_era_facts_but_not_current_layers() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("source.db");
+    let source = open(&path);
+    let published_at = 1_795_000_000_000_i64;
+    const CARBON: &str = "google/gemini-4-carbon";
+    const ALIAS: &str = "google/antigravity-gemini-4-carbon";
+    const SONNET: &str = "anthropic/claude-sonnet-5-5";
+    observe(
+        &source,
+        &wire(json!({
+            "google": {"name": "Google", "npm": "@ai-sdk/google", "models": {
+                "gemini-4-carbon": {"name": "Gemini 4 Carbon", "family": "gemini",
+                    "limit": {"output": 32768}, "cost": {"input": 2, "output": 8}}
+            }},
+            "anthropic": {"name": "Anthropic", "npm": "@ai-sdk/anthropic", "models": {
+                "claude-sonnet-5-5": {"name": "Claude Sonnet 5.5", "family": "claude-sonnet",
+                    "cost": {"input": 3, "output": 15, "cache_write": 3.75}}
+            }}
+        })),
+        published_at - 10,
+        true,
+    );
+    let tables = crate::curation::embedded();
+    crate::curated_models::apply_to_store(&source, tables.curated_models, published_at).unwrap();
+    crate::fact_overrides::apply_to_store(&source, tables.fact_overrides, published_at).unwrap();
+    source
+        .append_cache_lifetimes(
+            &crate::cache_lifetimes::stored_rules(tables.cache_lifetimes),
+            published_at,
+        )
+        .unwrap();
+    source
+        .append_quality_grade(
+            CARBON,
+            None,
+            Some(&QualityGrade::Chat {
+                elo: 1012.into(),
+                eq: 780.into(),
+            }),
+            "operator",
+            "fixture chat grade",
+            published_at - 1,
+        )
+        .unwrap();
+
+    let copy = dir.path().join("backup.db");
+    backup(&path, &copy);
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+    let out = dir.path().join("import");
+    build::import(&copy, &data, &out, published_at).unwrap();
+    let base: Value =
+        serde_json::from_slice(&fs::read(out.join("history/base.json")).unwrap()).unwrap();
+    let base: ImportedTables = serde_json::from_value(base["tables"].clone()).unwrap();
+    let documents = ["model-aliases", "model-lineage", "wire-families"]
+        .into_iter()
+        .map(|name| {
+            let bytes = fs::read(data.join(format!("{name}.json"))).unwrap();
+            (name.to_owned(), serde_json::from_slice(&bytes).unwrap())
+        })
+        .collect();
+    let mut rows = ImportedTables::new();
+    crate::curation::document_rows(&mut rows, None, &documents, published_at).unwrap();
+    let consumer = CatalogStore::open_for_store(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "consumer".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir
+                .path()
+                .join("consumer.db")
+                .to_string_lossy()
+                .into_owned(),
+        },
+    })
+    .unwrap();
+    consumer
+        .apply_store_releases(
+            Some(&base),
+            &[ReleaseArrival {
+                published_at_ms: published_at,
+                release: StoreRelease {
+                    release: 1,
+                    state_hash: "a".repeat(64),
+                    curation_hash: "b".repeat(64),
+                    applied_at_ms: published_at,
+                },
+                rows,
+            }],
+        )
+        .unwrap();
+
+    let read = |store, args| {
+        serve_catalog_get_with_limits(store, &wire(args), usize::MAX, usize::MAX).unwrap()
+    };
+    let current = read(&consumer, json!({}));
+    assert!(current.models.contains_key(ALIAS));
+    assert_eq!(current.models[CARBON]["model.lineage"], "gemini");
+    assert_eq!(
+        current.models[CARBON]["wire.family"],
+        "google.generate_content"
+    );
+
+    let at = published_at + 1;
+    let args = json!({"at_ms": at});
+    let dated = read(&consumer, args.clone());
+    let expected = read(&source, args);
+    assert!(
+        !dated.models.contains_key(ALIAS),
+        "dated catalog has an alias row"
+    );
+    assert!(dated.aliased.is_empty());
+    assert!(!dated.models[CARBON].contains_key("model.lineage"));
+    assert!(!dated.models[CARBON].contains_key("wire.family"));
+    assert_eq!(dated.models[CARBON]["quality.elo"], 1012);
+    assert_eq!(dated.models[CARBON]["limit.output"], 65536);
+    assert!(!dated.fact_overrides.is_empty());
+    assert_eq!(
+        dated.models[SONNET]["rate.cache_write.ttl.1h"]["units"],
+        6_000_000_000_i64
+    );
+    assert!(!dated.curated.is_empty());
+    assert_eq!(dated.models, expected.models);
+    assert_eq!(dated.curated, expected.curated);
+    assert_eq!(dated.fact_overrides, expected.fact_overrides);
+
+    let alias_at = wire(
+        json!({"provider_id":"google", "model_id":"antigravity-gemini-4-carbon", "at_ms": at}),
+    );
+    let refusal =
+        serve_catalog_get_with_limits(&consumer, &alias_at, usize::MAX, usize::MAX).unwrap_err();
+    assert_eq!(refusal.code, "no_coverage");
+    assert!(refusal.message.contains("current reads only"));
 }
 
 #[test]

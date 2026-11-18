@@ -1377,7 +1377,7 @@ fn serve_catalog_get_prepared(
         Some((store, tables.creators)),
         request.fact_prefixes.as_ref(),
         historical_overrides.as_ref(),
-        (at.is_none() || store.is_store_mode()).then_some(&tables),
+        at.is_none().then_some(&tables),
     );
     if !named {
         // Widening for an absent identity can fetch only existence. Preserve the
@@ -1390,7 +1390,7 @@ fn serve_catalog_get_prepared(
     response.retired = retired;
     // Aliases on a bulk read, current view only for the same reason as the
     // named read: fusiform never observed an alias id, so it has no past.
-    if !named && (at.is_none() || store.is_store_mode()) {
+    if !named && at.is_none() {
         add_aliases_to_bulk(
             store,
             source,
@@ -1400,7 +1400,6 @@ fn serve_catalog_get_prepared(
             request.fact_prefixes.as_ref(),
             range,
             &tables,
-            at,
         )?;
     }
     if let Some(range) = range {
@@ -1429,7 +1428,7 @@ fn serve_catalog_get_prepared(
             named,
         );
     }
-    if at.is_none() || store.is_store_mode() {
+    if at.is_none() {
         curate::apply_login_methods(
             tables.login_methods,
             &mut response,
@@ -2014,7 +2013,7 @@ fn finish_plane_view(
         .transpose()
         .map_err(|e| store_error(&e))?;
     let lifetimes = historical_rules.as_ref().unwrap_or(tables.cache_lifetimes);
-    let current = (at.is_none() || store.is_store_mode()).then_some(tables);
+    let current = at.is_none().then_some(tables);
     let published_quality = if at.is_none() {
         read_quality(store)?
     } else {
@@ -3211,7 +3210,7 @@ fn serve_named_alias(
     tables: &curate::CurationSet<'_>,
 ) -> Result<CatalogGetResponse, RouteError> {
     let target = format!("{}/{}", alias.target_provider_id, alias.target_model_id);
-    if at.is_some() && !store.is_store_mode() {
+    if at.is_some() {
         // An alias is today's reading of a route's code, and fusiform never
         // observed the alias id, so there is no past to report under it.
         // Serving the target's past under the alias would claim the route
@@ -3230,7 +3229,6 @@ fn serve_named_alias(
         alias,
         prefixes,
         tables,
-        at,
     )?
     .ok_or_else(|| {
         RouteError::no_coverage(format!(
@@ -3252,7 +3250,6 @@ fn serve_named_alias(
 /// the rate markers name the target's `model.family`, and a `--rates` read
 /// would otherwise filter that input away and mark every rate with an empty
 /// family. The widening is dropped again before the entry is returned.
-#[allow(clippy::too_many_arguments)]
 fn aliased_response(
     store: &CatalogStore,
     source: SourceId,
@@ -3261,13 +3258,11 @@ fn aliased_response(
     alias: &crate::aliases::Alias,
     prefixes: Option<&Vec<String>>,
     tables: &curate::CurationSet<'_>,
-    at: Option<Timestamp>,
 ) -> Result<Option<CatalogGetResponse>, RouteError> {
     let target_request = CatalogGetRequest {
         provider_id: Some(alias.target_provider_id.clone()),
         model_id: Some(alias.target_model_id.clone()),
         fact_prefixes: prefixes.cloned(),
-        at_ms: at.map(|time| time.0),
         ..CatalogGetRequest::default()
     };
     // If the store has never recorded the target model, the alias has nothing
@@ -3275,17 +3270,9 @@ fn aliased_response(
     // from the refusal code `single_model_snapshot` returns (`no_coverage`):
     // that code is reported to callers, and changing how an unknown model is
     // reported must not change whether an alias is served.
-    if (at.is_some()
-        && !upstream_publishes_at(
-            store,
-            source,
-            &alias.target_provider_id,
-            &alias.target_model_id,
-            at,
-        )?)
-        || !store
-            .model_is_known(source, &alias.target_provider_id, &alias.target_model_id)
-            .map_err(|e| store_error(&e))?
+    if !store
+        .model_is_known(source, &alias.target_provider_id, &alias.target_model_id)
+        .map_err(|e| store_error(&e))?
     {
         return Ok(None);
     }
@@ -3296,7 +3283,7 @@ fn aliased_response(
         source,
         &alias.target_provider_id,
         &alias.target_model_id,
-        at,
+        None,
         &target_request,
         None,
     )?;
@@ -3308,7 +3295,7 @@ fn aliased_response(
     let response = render(
         source,
         snapshot,
-        at,
+        None,
         Some((store, tables.creators)),
         wide.as_ref(),
         None,
@@ -3317,7 +3304,7 @@ fn aliased_response(
     if response.models.is_empty() {
         return Ok(None);
     }
-    let name = read_provider_name(store, source, provider_id, at)?;
+    let name = read_provider_name(store, source, provider_id, None)?;
     Ok(curate::project_alias(
         response,
         provider_id,
@@ -3349,7 +3336,6 @@ fn add_aliases_to_bulk(
     prefixes: Option<&Vec<String>>,
     range: Option<&ProviderRange>,
     tables: &curate::CurationSet<'_>,
-    at: Option<Timestamp>,
 ) -> Result<(), RouteError> {
     for (provider_id, model_id) in aliases.keys() {
         if provider_filter.is_some_and(|p| p != provider_id)
@@ -3368,7 +3354,6 @@ fn add_aliases_to_bulk(
             alias,
             prefixes,
             tables,
-            at,
         )?
         else {
             continue;

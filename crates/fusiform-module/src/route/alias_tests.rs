@@ -230,7 +230,6 @@ fn an_alias_without_a_sourced_name_never_inherits_the_target_name() {
         &alias,
         None,
         &crate::curation::embedded(),
-        None,
     )
     .unwrap()
     .unwrap();
