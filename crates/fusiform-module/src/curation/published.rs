@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fusiform_curate as curate;
-use fusiform_release::Upstream;
+use fusiform_release::{Upstream, VendorDocument};
 use fusiform_store::ImportedTables;
 use serde_json::{json, Value};
 
@@ -170,6 +170,8 @@ impl PublishedCuration {
 }
 
 pub(crate) fn validate_published(documents: &Documents, upstream: &Upstream) -> Result<(), String> {
+    use VendorDocument::*;
+
     let models = Value::Object(
         upstream
             .iter()
@@ -183,24 +185,34 @@ pub(crate) fn validate_published(documents: &Documents, upstream: &Upstream) -> 
         .unwrap_or_default();
     for (name, raw) in documents {
         let doc = raw.to_string();
-        let rejects = match name.as_str() {
-            "model-aliases" => curate::aliases::load_reporting_rejects(&doc).1,
-            "attachment-limits" => curate::attachment_limits::load(&doc).1,
-            "billing-planes" => curate::billing_planes::load_reporting_rejects(&doc).1,
-            "cache-lifetimes" => curate::cache_lifetimes::load_reporting_rejects(&doc).1,
-            "canonical-links" => curate::canonical_links::load_reporting_rejects(&doc).1,
-            "model-creators" => curate::creators::parse_document(&doc).1,
-            "curated-models" => continue,
-            "fact-overrides" => curate::fact_overrides::load_reporting_rejects(&doc).1,
-            "input-audio-per-token" => curate::input_audio::load_reporting_rejects(&doc).1,
-            "output-audio-per-token" => {
+        let rejects = match document_kind(name)? {
+            ModelAliases => curate::aliases::load_reporting_rejects(&doc).1,
+            AttachmentLimits => curate::attachment_limits::load(&doc).1,
+            BillingPlanes => curate::billing_planes::load_reporting_rejects(&doc).1,
+            CacheLifetimes => curate::cache_lifetimes::load_reporting_rejects(&doc).1,
+            CanonicalLinks => curate::canonical_links::load_reporting_rejects(&doc).1,
+            ModelCreators => curate::creators::parse_document(&doc).1,
+            CuratedModels => continue,
+            CuratedProviders => {
+                // The provider vector uses this document; no serve route does.
+                // Retain it intact in the signed curation history.
+                if raw["schema"] != "curated-providers/v1" || !raw["providers"].is_array() {
+                    return Err(format!(
+                        "{name}: expected curated-providers/v1 and a providers array"
+                    ));
+                }
+                continue;
+            }
+            FactOverrides => curate::fact_overrides::load_reporting_rejects(&doc).1,
+            InputAudioPerToken => curate::input_audio::load_reporting_rejects(&doc).1,
+            OutputAudioPerToken => {
                 curate::input_audio::load_for_schema(&doc, "output-audio-per-token/v1").1
             }
-            "login-methods" => curate::login_methods::load_with(&doc, &models, &curated.models).1,
-            "model-lineage" => curate::model_lineage::load_reporting_rejects(&doc).1,
-            "speed-twins" => curate::speed_twins::load_reporting_rejects(&doc).1,
-            "temperature-ranges" => curate::temperature_ranges::load_reporting_rejects(&doc).1,
-            "wire-corrections" => {
+            LoginMethods => curate::login_methods::load_with(&doc, &models, &curated.models).1,
+            ModelLineage => curate::model_lineage::load_reporting_rejects(&doc).1,
+            SpeedTwins => curate::speed_twins::load_reporting_rejects(&doc).1,
+            TemperatureRanges => curate::temperature_ranges::load_reporting_rejects(&doc).1,
+            WireCorrections => {
                 let (corrections, mut rejects) =
                     curate::wire_corrections::load_reporting_rejects(&doc);
                 rejects.extend(
@@ -212,13 +224,17 @@ pub(crate) fn validate_published(documents: &Documents, upstream: &Upstream) -> 
                 );
                 rejects
             }
-            "wire-families" => curate::wire_families::load_reporting_rejects(&doc).1,
-            "plan-prices" => crate::plan_prices::load_reporting_rejects(&doc).1,
-            _ => return Err(format!("unrecognized published vendor document {name:?}")),
+            WireFamilies => curate::wire_families::load_reporting_rejects(&doc).1,
+            PlanPrices => crate::plan_prices::load_reporting_rejects(&doc).1,
         };
         accepted(name, ((), rejects))?;
     }
     Ok(())
+}
+
+fn document_kind(name: &str) -> Result<VendorDocument, String> {
+    VendorDocument::from_name(name)
+        .ok_or_else(|| format!("unrecognized published vendor document {name:?}"))
 }
 
 fn accepted<T>(document: &str, (rows, rejects): (T, Vec<String>)) -> Result<T, String> {
@@ -236,12 +252,15 @@ fn curated(value: &Value) -> Result<curate::curated_models::Table, String> {
     )
 }
 
-const DEDICATED: &[(&str, &str)] = &[
-    ("curated-models", "curated_model_era"),
-    ("fact-overrides", "fact_override_era"),
-    ("plan-prices", "plan_price_era"),
-    ("cache-lifetimes", "cache_lifetime_era"),
-];
+fn dedicated_table(document: VendorDocument) -> Option<&'static str> {
+    match document {
+        VendorDocument::CuratedModels => Some("curated_model_era"),
+        VendorDocument::FactOverrides => Some("fact_override_era"),
+        VendorDocument::PlanPrices => Some("plan_price_era"),
+        VendorDocument::CacheLifetimes => Some("cache_lifetime_era"),
+        _ => None,
+    }
+}
 
 pub(crate) fn document_rows(
     out: &mut ImportedTables,
@@ -260,7 +279,7 @@ pub(crate) fn document_rows(
         if previous == next {
             continue;
         }
-        if let Some((_, table)) = DEDICATED.iter().find(|(doc, _)| *doc == name) {
+        if let Some(table) = dedicated_table(document_kind(name)?) {
             // The imported base already contains the original dedicated eras.
             let previous_rows = changeable_claims(name, previous)?;
             let next_rows = changeable_claims(name, next)?;
@@ -277,7 +296,7 @@ pub(crate) fn document_rows(
                     tombstone(table, previous.unwrap())
                 };
                 if old.is_none() {
-                    if *table != "plan_price_era" {
+                    if table != "plan_price_era" {
                         continue;
                     }
                     if ["quota_value_json", "service_tiers_json", "concurrency_json"]
@@ -288,10 +307,10 @@ pub(crate) fn document_rows(
                     }
                 }
                 row["boundary_at_ms"] = json!(at);
-                if *table == "cache_lifetime_era" {
+                if table == "cache_lifetime_era" {
                     row["recorded_at_ms"] = json!(at);
                 }
-                out.entry((*table).to_owned())
+                out.entry(table.to_owned())
                     .or_default()
                     .push(row.as_object().unwrap().clone());
             }
@@ -395,6 +414,138 @@ mod tests {
     use super::*;
     use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
     use fusiform_store::{CatalogStore, ReleaseArrival, StoreRelease};
+
+    #[test]
+    fn published_provider_vector_is_accepted_but_unknown_document_refused() {
+        let document =
+            serde_json::from_str(include_str!("../../data/curated-providers.json")).unwrap();
+        let documents = BTreeMap::from([("curated-providers".into(), document)]);
+        validate_published(&documents, &Upstream::new()).unwrap();
+
+        let unknown = BTreeMap::from([("unknown-document".into(), json!({}))]);
+        assert!(validate_published(&unknown, &Upstream::new())
+            .unwrap_err()
+            .contains("unrecognized published vendor document"));
+    }
+
+    #[test]
+    fn every_published_document_is_applied_and_loaded_for_its_role() {
+        use VendorDocument::*;
+
+        let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+        let mut documents: Documents = VendorDocument::ALL
+            .iter()
+            .map(|&(_, name)| {
+                let bytes = std::fs::read(data.join(format!("{name}.json"))).unwrap();
+                (name.to_owned(), serde_json::from_slice(&bytes).unwrap())
+            })
+            .collect();
+        // The committed canonical-link document is allowed to be empty. A
+        // synthetic claim makes a missing load visible even in that case.
+        let links = documents.get_mut("canonical-links").unwrap();
+        links["links"].as_array_mut().unwrap().push(json!({
+            "provider_id": "test-proxy", "model_id": "sample", "canonical_id": "test-lab/sample",
+            "source_ref": "https://example.test/proxy", "quote": "Synthetic proxy listing",
+            "lab_source_ref": "https://example.test/lab", "lab_quote": "Synthetic lab listing",
+            "established_by": "fusiform", "established_at_ms": 1,
+            "review_by_ms": 1 + 60 * 86_400_000_i64,
+        }));
+        let mut upstream = Upstream::new();
+        for row in documents["login-methods"]["models"].as_array().unwrap() {
+            upstream
+                .entry(row["provider_id"].as_str().unwrap().into())
+                .or_insert_with(|| fusiform_release::ProviderFacts {
+                    provider: BTreeMap::new(),
+                    models: BTreeMap::new(),
+                })
+                .models
+                .insert(row["model_id"].as_str().unwrap().into(), BTreeMap::new());
+        }
+        validate_published(&documents, &upstream).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open_for_store(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_str().unwrap().into(),
+            },
+        })
+        .unwrap();
+        let at = 1_795_017_199_166;
+        let mut rows = ImportedTables::new();
+        // Model a curation change after bootstrap. On the first release the
+        // signed history backup supplies the existing dedicated table rows.
+        document_rows(&mut rows, Some(&Documents::new()), &documents, at).unwrap();
+        store
+            .apply_store_releases(
+                Some(&ImportedTables::new()),
+                &[ReleaseArrival {
+                    release: StoreRelease {
+                        release: 1,
+                        state_hash: "a".repeat(64),
+                        curation_hash: "b".repeat(64),
+                        applied_at_ms: at,
+                    },
+                    rows,
+                }],
+            )
+            .unwrap();
+        let persisted = store.store_documents_at(Some(at)).unwrap();
+        let served = PublishedCuration::load(&store, Some(at)).unwrap().unwrap();
+        for &(kind, name) in VendorDocument::ALL {
+            if dedicated_table(kind).is_some() {
+                assert!(
+                    !persisted.contains_key(name),
+                    "{name} belongs in its dedicated era"
+                );
+            } else {
+                let raw: Value = serde_json::from_str(&persisted[name]).unwrap();
+                assert_eq!(raw, documents[name], "{name} must round-trip intact");
+            }
+            let loaded = match kind {
+                AttachmentLimits => !served.attachment_limits.is_empty(),
+                BillingPlanes => !served.billing_planes.is_empty(),
+                CacheLifetimes => !served.cache_lifetimes.is_empty(),
+                CanonicalLinks => served
+                    .canonical_links
+                    .get(&("test-proxy".into(), "sample".into()))
+                    .is_some_and(|link| link.canonical_id == "test-lab/sample"),
+                CuratedModels => !served.curated_models.models.is_empty(),
+                FactOverrides => !served.fact_overrides.is_empty(),
+                InputAudioPerToken => !served.input_audio.is_empty(),
+                LoginMethods => !served.login_methods.is_empty(),
+                ModelAliases => !served.aliases.is_empty(),
+                ModelCreators => !served.creators.is_empty(),
+                ModelLineage => {
+                    let (model, lineage) = documents[name]["models"]["entries"]
+                        .as_object()
+                        .unwrap()
+                        .iter()
+                        .next()
+                        .unwrap();
+                    served.model_lineage.lookup(model, None, None, false) == lineage.as_str()
+                }
+                PlanPrices => {
+                    let body =
+                        serde_json::to_vec(&json!({"name":"plan.prices","arguments":{"at_ms":at}}))
+                            .unwrap();
+                    let response = crate::route::serve_tool_call(&store, &body).unwrap();
+                    let response = serde_json::to_value(response).unwrap();
+                    !response["prices"].as_array().unwrap().is_empty()
+                }
+                SpeedTwins => !served.speed_twins.is_empty(),
+                TemperatureRanges => !served.temperature_ranges.is_empty(),
+                WireCorrections => !served.wire_corrections.is_empty(),
+                WireFamilies => !served.wire_families.is_empty(),
+                // Test-vector and upstream-ingest inputs, respectively. The
+                // consumer retains the signed documents without serving them.
+                CuratedProviders | OutputAudioPerToken => continue,
+            };
+            assert!(loaded, "{name} did not reach its serving input");
+        }
+    }
 
     #[test]
     fn store_mode_plan_metadata_changes_open_dated_eras_but_boot_is_idempotent() {

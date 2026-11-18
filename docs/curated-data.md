@@ -23,10 +23,10 @@ that keep them honest.
 | `cache-lifetimes.json` | first-party OpenAI and Anthropic prompt-cache lifetimes and exact write-price multipliers | compiled file on current reads; stored `cache_lifetime_era` rules on point-in-time reads |
 | `temperature-ranges.json` | documented provider-level sampling temperature bounds | current reads of the provider's own rows only, never aliases or rows with `capability.temperature: false` |
 | `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models, and optional documented audio tokens per second | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio`; at read time: joins `limit.audio_tokens_per_second` onto current rows serving that rate (§8) |
-| `output-audio-per-token.json` | providers with separately sourced output-audio token units and optional excluded models | at ingest: lets eligible unconditional `cost.output_audio` become `rate.output_audio`; conditional audio remains unpriced |
+| `output-audio-per-token.json` | providers with separately sourced output-audio token units and optional excluded models | at ingest: lets eligible unconditional `cost.output_audio` become `rate.output_audio`; conditional audio remains unpriced. In store mode the signed rate facts are served; the unit document is retained for curation history, not read by the serving path. |
 | `plan-prices.json` | subscription list prices, quota values and service-tier entitlements | prices written to `plan_price_era` at start; quota values and service tiers joined only on current reads |
 | `models-dev-seed.json` | a copy of the upstream catalog for offline first boot | written as seed eras into an empty store |
-| `curated-providers.json` | sourced provider identities models.dev does not list | test-side provider vector generation only; never joined into served model rows |
+| `curated-providers.json` | sourced provider identities models.dev does not list | test-side provider vector generation only; published and retained for completeness of the signed curation set, but never joined into served model rows |
 | `engram-catalog.json` | the backup enrollment descriptor | written beside `store.db` at start; not otherwise read |
 
 Billing planes and plan prices have their own documents,

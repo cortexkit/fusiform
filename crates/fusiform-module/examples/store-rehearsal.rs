@@ -52,11 +52,21 @@ async fn main() -> Result<ExitCode> {
     let (url, keys) = settings::validate_store(base, &keys)?;
     let mut poller = StorePoller::new(url, keys)?;
     fs::create_dir_all(&work_dir)?;
-    let run_dir = tempfile::tempdir_in(work_dir)?;
+    let run_dir = tempfile::Builder::new()
+        .prefix("rehearsal-")
+        .tempdir_in(work_dir)?;
+    let run_name = run_dir
+        .path()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("temporary store directory name must be UTF-8")?;
 
     println!("Store rehearsal: base={base}, pinned kid={kid}");
     let started = Instant::now();
-    let rebuilt = CatalogStore::open_for_store(&descriptor(&run_dir.path().join("rebuilt.db"))?)?;
+    let rebuilt = CatalogStore::open_for_store(&descriptor(
+        &run_dir.path().join("rebuilt.db"),
+        format!("{run_name}-rebuilt"),
+    )?)?;
     let bootstrap = poller.poll(&rebuilt).await;
     let elapsed = started.elapsed();
     let peak = peak_rss_kib().map_or_else(|| "unavailable".into(), |n| format!("{n} KiB"));
@@ -84,7 +94,8 @@ async fn main() -> Result<ExitCode> {
     drop(original);
     // Only the disposable copy is opened by the migrator; the comparison then
     // calls only read routes on both stores.
-    let source = CatalogStore::open(&descriptor(&source_copy)?)?;
+    // The store's writer lease is keyed by namespace, not by database path.
+    let source = CatalogStore::open(&descriptor(&source_copy, format!("{run_name}-source"))?)?;
 
     println!("Masks (top-level fields only):");
     println!("  /catalog_version (catalog.get, catalog.status): local database revision");
@@ -122,10 +133,10 @@ async fn main() -> Result<ExitCode> {
     })
 }
 
-fn descriptor(path: &Path) -> Result<StorageDescriptor> {
+fn descriptor(path: &Path, storage_namespace: String) -> Result<StorageDescriptor> {
     Ok(StorageDescriptor {
         module_id: "fusiform".into(),
-        storage_namespace: "default".into(),
+        storage_namespace,
         isolation: Isolation::Module,
         backend: StorageBackend::Sqlite {
             path: path.to_str().ok_or("store path must be UTF-8")?.into(),

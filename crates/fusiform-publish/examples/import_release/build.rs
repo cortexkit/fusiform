@@ -10,7 +10,7 @@ use fusiform_core::{normalize_models_dev, upstream_facts::facts_of};
 use fusiform_publish::FactIndex;
 use fusiform_release as release;
 use fusiform_release::{
-    ChangeOp, CurationSet, Decommissioned, Grade, ProviderFacts, State, Upstream,
+    ChangeOp, CurationSet, Decommissioned, Grade, ProviderFacts, State, Upstream, VendorDocument,
 };
 use fusiform_store::{ingest::upstream_claim_of, serve::POINT_IN_TIME_SQL};
 use rusqlite::params;
@@ -237,6 +237,15 @@ fn curation(conn: &Connection, data: &Path) -> ImportResult<CurationSet> {
     Ok(set)
 }
 
+const EXCLUDED_DOCUMENTS: &[(&str, &str)] = &[
+    ("engram-catalog", "local backup enrollment descriptor"),
+    ("models-dev-seed", "upstream rows for offline first boot"),
+    (
+        "models-dev-seed.meta",
+        "capture metadata for the offline seed",
+    ),
+];
+
 fn vendor_facts(data: &Path) -> ImportResult<BTreeMap<String, Value>> {
     let mut docs = BTreeMap::new();
     for entry in fs::read_dir(data)? {
@@ -248,8 +257,14 @@ fn vendor_facts(data: &Path) -> ImportResult<BTreeMap<String, Value>> {
             .file_stem()
             .and_then(|s| s.to_str())
             .ok_or("non-UTF-8 document name")?;
-        if name.starts_with("models-dev-seed") || name == "engram-catalog" {
-            continue;
+        if VendorDocument::from_name(name).is_none() {
+            if EXCLUDED_DOCUMENTS
+                .iter()
+                .any(|&(excluded, _)| excluded == name)
+            {
+                continue;
+            }
+            return Err(format!("unclassified vendor data file {name}.json").into());
         }
         let raw = fs::read(&path)?;
         if raw.len() > DOCUMENT_LIMIT {
@@ -362,4 +377,44 @@ fn contains_home_path(text: &str) -> bool {
         return serde_json::from_str::<Value>(text).is_ok_and(|value| nested(&value));
     }
     false
+}
+
+#[cfg(test)]
+mod vendor_document_tests {
+    use super::*;
+
+    #[test]
+    fn published_vendor_document_inventory_is_exhaustive() {
+        // This file is also included by the module's importer integration tests.
+        let krate = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let data = krate.join("../fusiform-module/data");
+        let selected = vendor_facts(&data).unwrap();
+        let published: BTreeSet<_> = VendorDocument::ALL.iter().map(|&(_, name)| name).collect();
+        assert_eq!(
+            published.len(),
+            VendorDocument::ALL.len(),
+            "duplicate published name"
+        );
+        assert_eq!(
+            selected.keys().map(String::as_str).collect::<BTreeSet<_>>(),
+            published
+        );
+
+        let mut exclusions = BTreeSet::new();
+        for &(name, reason) in EXCLUDED_DOCUMENTS {
+            assert!(
+                !reason.trim().is_empty(),
+                "{name} needs an exclusion reason"
+            );
+            assert!(exclusions.insert(name), "duplicate exclusion: {name}");
+            assert!(
+                !published.contains(name),
+                "{name} is both published and excluded"
+            );
+            assert!(
+                data.join(format!("{name}.json")).is_file(),
+                "stale exclusion: {name}"
+            );
+        }
+    }
 }
