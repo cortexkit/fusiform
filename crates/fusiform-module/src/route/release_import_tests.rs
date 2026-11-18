@@ -192,8 +192,10 @@ fn load_and_compare(
     let destination = CatalogStore::open_for_store(&descriptor(&path)).unwrap();
     let mut documents = ImportedTables::new();
     let envelope = &snapshot.envelope;
-    // Release 1 takes upstream and judgment eras from the base and installs
-    // the snapshot's vendor documents through the same writer as store polling.
+    // The store's first release (the one-time import of an existing
+    // computer's history) takes its upstream and judgment eras from the history
+    // base file, and installs the snapshot's vendor documents through the same
+    // writer store polling uses.
     crate::curation::document_rows(
         &mut documents,
         None,
