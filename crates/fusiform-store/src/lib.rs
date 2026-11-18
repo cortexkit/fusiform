@@ -439,6 +439,12 @@ impl CatalogStore {
 
     /// Commit a changed poll's eras and catalog version together. Publish the
     /// derived rates version only after the transaction succeeds.
+    ///
+    /// One transaction, so a version is never visible ahead of its eras: a
+    /// consumer that read a version whose content was missing would hold a
+    /// high-water mark for a catalog it never received, and refuse the read
+    /// that carried it. The store derives the version (`max(now_ms,
+    /// current + 1)`) so a restore cannot rewind it.
     pub fn append_poll_eras(
         &self,
         eras: &[NewEra],
