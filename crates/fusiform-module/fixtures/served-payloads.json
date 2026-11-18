@@ -7317,6 +7317,15 @@
           "workload.reason.effort_minimum": "low",
           "workload.synthesize.effort_default": "high",
           "workload.synthesize.effort_minimum": "low"
+        },
+        "synthetic-quality-reseller/synthetic-model-no-effort": {
+          "quality.elo": 1284,
+          "quality.eq": 1599.8,
+          "workload.code.effort_minimum": "low",
+          "workload.lookup.effort_minimum": "low",
+          "workload.quick.effort_minimum": "low",
+          "workload.reason.effort_minimum": "low",
+          "workload.synthesize.effort_minimum": "low"
         }
       },
       "quality_scores": {

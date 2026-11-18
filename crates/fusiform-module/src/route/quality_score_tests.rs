@@ -91,7 +91,7 @@ fn effort_curation_is_row_gated_and_dated() {
         assert_eq!(google["quality.graded_effort"], "high");
         assert!(!google.contains_key("quality.elo.effort.low"));
         assert_eq!(google["workload.code.effort_default"], "high");
-        assert!(!google.contains_key("workload.code.effort_minimum"));
+        assert_eq!(google["workload.code.effort_minimum"], "low");
         assert_eq!(reply.quality_scores.unwrap().graded_at_ms, 2200);
     }
     let before = get(&store, json!({"at_ms":1999}));
@@ -100,20 +100,84 @@ fn effort_curation_is_row_gated_and_dated() {
 }
 
 #[test]
-fn effort_curation_tools_preview_commit_and_withdraw() {
-    let (store, _dir) = fixture(true);
+fn workload_minimum_is_served_without_an_offered_effort() {
+    for store_mode in [false, true] {
+        assert_workload_minimum_serving(store_mode);
+    }
+}
+
+fn assert_workload_minimum_serving(store_mode: bool) {
+    let (store, _dir) = fixture_in_mode(true, store_mode);
     store
         .append_eras(&[NewEra {
             source: SourceId::ModelsDev,
             provider_id: "reseller".into(),
             model_id: "shared".into(),
             fact_key: FactKey::from_stored("capability.reasoning_options".into()),
-            value_json: json!([{"type":"effort","values":["high","low"]}]).to_string(),
+            value_json: json!([{"type":"effort","values":["low","medium"]}]).to_string(),
             boundary_at: Timestamp(1000),
             boundary_kind: BoundaryKind::Seed,
             observation_id: None,
         }])
         .unwrap();
+    store
+        .append_workload_effort(
+            &fusiform_store::WorkloadEffortEra {
+                model: "lab/shared".into(),
+                workload: "code".into(),
+                effort_default: Some("high".into()),
+                effort_minimum: Some("high".into()),
+                excluded: false,
+                recorded_at_ms: 2200,
+                reason: "test".into(),
+            },
+            "operator",
+        )
+        .unwrap();
+
+    let minimum = "workload.code.effort_minimum";
+    for args in [json!({}), json!({"at_ms":2200})] {
+        let reply = get(&store, args);
+        let reseller = &reply.models["reseller/shared"];
+        let google = &reply.models["google/gemini-4-argon"];
+        assert!(!google.contains_key("capability.reasoning_options"));
+        assert!(!reseller.contains_key("workload.code.effort_default"));
+        assert!(!google.contains_key("workload.code.effort_default"));
+        assert_eq!(
+            [reseller.get(minimum), google.get(minimum)],
+            [Some(&json!("high")), Some(&json!("high"))],
+        );
+        assert!(!reply.models["reseller/own"].contains_key(minimum));
+        assert_eq!(reply.quality_scores.unwrap().graded_at_ms, 2200);
+        assert_eq!(
+            reply.overrides.iter().any(|entry| entry.fact == minimum
+                && entry.local == Some(json!("high"))
+                && entry.published.is_none()),
+            store_mode,
+        );
+    }
+}
+
+#[test]
+fn effort_curation_tools_preview_commit_and_withdraw() {
+    let (store, _dir) = fixture(true);
+    for (model_id, efforts) in [
+        ("shared", json!(["high", "low"])),
+        ("own", json!(["xhigh"])),
+    ] {
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "reseller".into(),
+                model_id: model_id.into(),
+                fact_key: FactKey::from_stored("capability.reasoning_options".into()),
+                value_json: json!([{"type":"effort","values":efforts}]).to_string(),
+                boundary_at: Timestamp(1000),
+                boundary_kind: BoundaryKind::Seed,
+                observation_id: None,
+            }])
+            .unwrap();
+    }
     let call = |name: &str, arguments: Value| {
         serve_tool_call(
             &store,
@@ -135,7 +199,7 @@ fn effort_curation_tools_preview_commit_and_withdraw() {
         ),
         (
             "quality.workload",
-            json!({"workload":"code","effort_default":"high"}),
+            json!({"workload":"code","effort_default":"high","effort_minimum":"xhigh"}),
             "workload.code.effort_default",
         ),
     ] {
@@ -149,6 +213,19 @@ fn effort_curation_tools_preview_commit_and_withdraw() {
         assert!(next > version);
         version = next;
         assert!(get(&store, json!({})).models["reseller/shared"].contains_key(served));
+    }
+    assert_eq!(
+        get(&store, json!({})).models["reseller/shared"]["workload.code.effort_minimum"],
+        "xhigh",
+    );
+    for minimum in ["", "XHIGH", "not-an-effort"] {
+        let error = call(
+            "quality.workload",
+            json!({"model":"lab/shared","workload":"code","effort_default":"high","effort_minimum":minimum,"reason":"invalid"}),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "bad_request");
+        assert!(error.message.contains("minimum effort"));
     }
     assert!(call(
         "quality.workload",
@@ -802,15 +879,24 @@ fn quality_grade_media_roundtrip_history_and_dimension_refusals() {
 }
 
 fn fixture(canonical: bool) -> (CatalogStore, tempfile::TempDir) {
+    fixture_in_mode(canonical, false)
+}
+
+fn fixture_in_mode(canonical: bool, store_mode: bool) -> (CatalogStore, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let store = CatalogStore::open(&StorageDescriptor {
+    let descriptor = StorageDescriptor {
         module_id: "fusiform".into(),
         storage_namespace: "default".into(),
         isolation: Isolation::Module,
         backend: StorageBackend::Sqlite {
             path: dir.path().join("quality.db").to_string_lossy().into(),
         },
-    })
+    };
+    let store = if store_mode {
+        CatalogStore::open_for_store(&descriptor)
+    } else {
+        CatalogStore::open(&descriptor)
+    }
     .unwrap();
     for row in store.quality_grades().unwrap() {
         store

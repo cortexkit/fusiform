@@ -1080,6 +1080,9 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
                 "id":"synthetic-model", "canonical_model_id":"synthetic-lab/synthetic-model",
                 "reasoning_options":[{"type":"effort","values":["low","high"]}]
             },
+            "synthetic-model-no-effort": {
+                "id":"synthetic-model-no-effort", "canonical_model_id":"synthetic-lab/synthetic-model"
+            },
             "synthetic-excluded": {
                 "id":"synthetic-excluded", "canonical_model_id":"synthetic-lab/synthetic-excluded"
             }

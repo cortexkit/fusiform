@@ -190,11 +190,20 @@ pub(super) fn workload(
     if request.withdraw && current.is_none() {
         return Err(missing());
     }
-    for effort in [&request.effort_default, &request.effort_minimum]
-        .into_iter()
-        .flatten()
-    {
+    if let Some(effort) = &request.effort_default {
         require_effort(&catalog, &affected, effort)?;
+    }
+    if let Some(effort) = &request.effort_minimum {
+        if effort.trim().is_empty()
+            || !catalog.models.values().any(|facts| {
+                curate::fact_overrides::options_list_effort(
+                    facts.get("capability.reasoning_options"),
+                    effort,
+                )
+            })
+        {
+            return Err(RouteError::bad_request(format!("minimum effort {effort:?} is not listed in capability.reasoning_options on any current catalog row")));
+        }
     }
     let row = WorkloadEffortEra {
         model: request.model.clone(),

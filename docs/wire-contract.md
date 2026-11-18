@@ -147,15 +147,15 @@ value would do to a consumer:
 | `quality.elo.effort.<effort>` | advisory | derived ELO at a listed effort, excluding the graded effort; current and dated |
 | `quality.eq.effort.<effort>` | advisory | derived EQ at a listed effort, excluding the graded effort; current and dated |
 | `workload.reason.effort_default` | advisory | curated default effort for reason, if the row lists it; current and dated |
-| `workload.reason.effort_minimum` | advisory | curated floor for automatic reason selections, if the row lists it; current and dated |
+| `workload.reason.effort_minimum` | advisory | routing threshold for reason, on every row reached by the judgment; current and dated (§5.9) |
 | `workload.code.effort_default` | advisory | curated default effort for code, if the row lists it; current and dated |
-| `workload.code.effort_minimum` | advisory | curated floor for automatic code selections, if the row lists it; current and dated |
+| `workload.code.effort_minimum` | advisory | routing threshold for code, on every row reached by the judgment; current and dated (§5.9) |
 | `workload.synthesize.effort_default` | advisory | curated default effort for synthesize, if the row lists it; current and dated |
-| `workload.synthesize.effort_minimum` | advisory | curated floor for automatic synthesize selections, if the row lists it; current and dated |
+| `workload.synthesize.effort_minimum` | advisory | routing threshold for synthesize, on every row reached by the judgment; current and dated (§5.9) |
 | `workload.lookup.effort_default` | advisory | curated default effort for lookup, if the row lists it; current and dated |
-| `workload.lookup.effort_minimum` | advisory | curated floor for automatic lookup selections, if the row lists it; current and dated |
+| `workload.lookup.effort_minimum` | advisory | routing threshold for lookup, on every row reached by the judgment; current and dated (§5.9) |
 | `workload.quick.effort_default` | advisory | curated default effort for quick, if the row lists it; current and dated |
-| `workload.quick.effort_minimum` | advisory | curated floor for automatic quick selections, if the row lists it; current and dated |
+| `workload.quick.effort_minimum` | advisory | routing threshold for quick, on every row reached by the judgment; current and dated (§5.9) |
 | `workload.<name>.excluded` | advisory | `true` means never select the model for this workload; otherwise absent; current and dated |
 | `quality.elo` | advisory | operator-assigned general quality score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
 | `quality.eq` | advisory | operator-assigned writing and judgment score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
@@ -947,9 +947,21 @@ retain their decimal representation without a binary-float conversion.
 `fact_prefixes` applies normally (`["quality."]` selects all quality dimensions).
 
 Workload judgments use the same canonical key as grades and resolve on both
-current and dated reads, from their recorded time. A default or minimum effort
-is served only where the row lists that effort. `workload.<name>.excluded`
-applies to every row sharing the key, even if the row has no reasoning options.
+current and dated reads, from their recorded time. Local overrides follow the
+same rule. A default is served only where the row lists that effort. A minimum
+is a routing threshold, not a request effort: it is served on every row reached
+by the judgment, even if the row does not list that effort or has no reasoning
+options. For the named workload, run the lowest effort the row offers at or
+above the minimum, or drop the row if it offers none.
+
+When writing a workload judgment through `quality.workload` or
+`ck models workload`, a minimum must be a nonblank exact value listed by an
+`effort` option in `capability.reasoning_options` on at least one current
+catalog row. The default must still be offered on a current row reached by the
+judgment.
+
+`workload.<name>.excluded` applies to every row sharing the key, even if the
+row has no reasoning options.
 The supported workload names are `reason`, `code`, `synthesize`, `lookup` and
 `quick`. An exclusion has no default or minimum for that workload. An absent
 exclusion fact means no exclusion is recorded, not that the model is recommended.

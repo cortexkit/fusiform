@@ -135,18 +135,22 @@ pub fn apply_effort_facts(
                 );
                 continue;
             }
-            for (suffix, effort) in [
-                ("effort_default", row.effort_default.as_deref()),
-                ("effort_minimum", row.effort_minimum.as_deref()),
-            ] {
-                if let Some(effort) = effort {
-                    add(
-                        format!("workload.{}.{suffix}", row.workload),
-                        Value::String(effort.into()),
-                        Some(effort),
-                        row.recorded_at_ms,
-                    );
-                }
+            if let Some(effort) = &row.effort_default {
+                add(
+                    format!("workload.{}.effort_default", row.workload),
+                    Value::String(effort.clone()),
+                    Some(effort),
+                    row.recorded_at_ms,
+                );
+            }
+            // A minimum is a routing threshold, even on rows that cannot meet it.
+            if let Some(effort) = &row.effort_minimum {
+                add(
+                    format!("workload.{}.effort_minimum", row.workload),
+                    Value::String(effort.clone()),
+                    None,
+                    row.recorded_at_ms,
+                );
             }
         }
         facts.extend(additions);
