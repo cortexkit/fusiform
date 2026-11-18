@@ -7,7 +7,7 @@
 # Phase 1 runs on this machine in seconds and compiles nothing: lock parity,
 # formatting, lock resolution, the path-dependency check, the shell-script
 # exit guard, the wire-crate version check and the importer's Python tests.
-# Phase 2 runs the compile-heavy CI steps (clippy and the full test suite). On
+# Phase 2 runs the CI builds, clippy and the full test suite. On
 # a Mac it sends them as one job to the remote Linux build server (`ck motor
 # run`), never compiling here. Anywhere else it runs them in place, which is
 # how a worker gates: it runs this whole script as one remote Linux job.
@@ -98,12 +98,13 @@ step shell-guard python3 scripts/check-shell-exit-guard.py
 step wire-crate-version wire_version
 
 if [ "$fast_only" -eq 0 ]; then
-    # Prints each exit code and fails if either failed.
+    # Print each exit code so a later success cannot mask a failed check.
     compile_steps='
+        (rustup target add wasm32-unknown-unknown && cargo build --locked -p fusiform-curate --target wasm32-unknown-unknown); w=$?
         cargo clippy --locked --workspace --all-targets -- -D warnings; c=$?
         cargo test --locked --workspace --all-targets; t=$?
-        echo "clippy=$c test=$t"
-        [ "$c" -eq 0 ] && [ "$t" -eq 0 ]'
+        echo "wasm=$w clippy=$c test=$t"
+        [ "$w" -eq 0 ] && [ "$c" -eq 0 ] && [ "$t" -eq 0 ]'
     if [ "$(uname -s)" = Darwin ]; then
         echo "phase 2 (remote Linux build server)"
         # One job, so both steps share one snapshot and one warm build folder.
@@ -114,7 +115,7 @@ if [ "$fast_only" -eq 0 ]; then
         echo "phase 2 (in place)"
         step clippy-and-tests bash -c "$compile_steps"
     fi
-    grep -E '^test result:|^clippy=' "$log_dir/clippy-and-tests.log" |
+    grep -E '^test result:|^wasm=' "$log_dir/clippy-and-tests.log" |
         awk '/^test result/{p+=$4; f+=$6; next} {print "      " $0} END{printf "      tests passed=%d failed=%d\n", p, f}'
 fi
 

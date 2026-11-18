@@ -11,6 +11,7 @@ tools over the supervisor's route.
 | Crate | Role |
 | --- | --- |
 | `fusiform-core` | the domain: identity, observations, eras, rates, money, and the normalizer that turns a models.dev document into typed facts. No I/O. |
+| `fusiform-curate` | the in-memory merge that produces served facts and disclosures; also builds for WebAssembly. |
 | `fusiform-store` | the SQLite store: schema and migrations, ingest (diffing a normalized document against the facts in force), point-in-time reads, corrections, artifact marks, plan-price history. |
 | `fusiform-protocol` | the wire types consumers compile against. Depends on `serde` and `serde_json` only. Published to crates.io. |
 | `fusiform-module` | the `ck-fusiform` binary: subc handshake, poll loop, fetcher, tool routing, health, and the curated data files. |
@@ -32,14 +33,25 @@ models.dev/api.json
   SQLite store (observation, era, catalog_version, …)
         │
         ▼
-  route (fusiform-module) ── point-in-time read, then serve-time layers:
+  route (fusiform-module) ── current or point-in-time store reads
+        │
+        ▼
+  fusiform-curate ─────────── serve-time layers:
         │                    overrides, wire corrections, open-weight
         │                    inheritance, aliases, curated rows, cache
         │                    lifetimes, lineage, quality scores, billing planes
         ▼
+  route (fusiform-module) ── request filters, paging and serialization
+        │
+        ▼
   tools: catalog.get / history / status / correct / mark_artifact /
          retract_artifact, plan.prices
 ```
+
+The module embeds and caches the reviewed documents. It resolves dated claims
+from SQLite before calling the relevant curation stages. A caller can use
+`fusiform_curate::curate` with raw upstream facts, parsed tables, current grades,
+and decommission marks to build the whole plain current view without a store.
 
 The curated subscription prices take a separate path: the compiled-in file is
 applied to `plan_price_era` on every start and served by `plan.prices`. The
