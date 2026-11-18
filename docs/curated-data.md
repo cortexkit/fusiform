@@ -995,6 +995,7 @@ an addition is always written as one. Each fact key has its own rule:
 | `limit.context`, `limit.output` | replacement only | positive integer | a different positive integer |
 | `capability.server_side_fallback` | addition only | `true` or `false` | `null` |
 | `capability.mid_conversation_system` | addition only | `true` or `false` | `null` |
+| `capability.reasoning_default` | addition only | exactly `{"type": "effort", "value": <nonempty effort>}` | `null` |
 | `capability.temperature` | replacement only | boolean | a different published boolean |
 | `model.status` | replacement of the stored `null` only | `"deprecated"` | `null` |
 | `rate.output` | replacement only | sourced per-million-token rate | exact stored upstream token-rate object, without serve-time currency provenance |
@@ -1007,8 +1008,9 @@ or serve-time derivation (other rates: inheritance and billing planes; `wire.*`:
 served value depend on which ran last. Limits cannot be added: an unpublished
 limit is stored as `null`, so a limit is absent only when a correction
 withholds it, and an addition must never undo a withholding.
-`capability.server_side_fallback` and `capability.mid_conversation_system` can
-only be added, because models.dev has no such fields. Ingest stores
+`capability.server_side_fallback`, `capability.mid_conversation_system` and
+`capability.reasoning_default` can only be added, because models.dev has no
+such fields. Ingest stores
 `model.status` on every row, as `null` when
 models.dev publishes none, so a `model.status` row replaces that stored `null`
 (`replaces: null`), only with `"deprecated"`: it marks a model its vendor has
@@ -1036,10 +1038,10 @@ serves upstream eras only, and every applied override is
 disclosed in the response's `fact_overrides` list
 ([wire contract](wire-contract.md) §5.8). Alias entries are built from their
 target's served facts, so an alias of an overridden row serves the overridden
-value, disclosed under the alias id. `capability.server_side_fallback` and
-`capability.mid_conversation_system` are not projected onto aliases, because
-they describe what the Claude API accepts and an alias route reaches the model
-another way. Curated model rows (§4) are
+value, disclosed under the alias id. `capability.server_side_fallback`,
+`capability.mid_conversation_system` and `capability.reasoning_default` are not
+projected onto aliases, because they describe what the vendor's own API
+accepts or applies and an alias route reaches the model another way. Curated model rows (§4) are
 fusiform's own data and are never overridden.
 
 Gemini 3.1 Flash Image splits its published $60/M image-output price from
@@ -1103,6 +1105,41 @@ does not carry them. They have no addition rows until the catalog carries
 those ids, preserving the seed-presence gate. If models.dev ever publishes
 the fact key, its value wins at the instant being read. The
 `capability.mid_conversation_system` addition has dated claim history.
+
+Forty-five addition rows serve `capability.reasoning_default`: the reasoning
+effort a vendor documents its own API applying when a request names none, as
+`{"type": "effort", "value": <effort>}`, so a runner can send it explicitly
+instead of omitting effort. models.dev publishes no default. Each row quotes
+the vendor's sentence, accessed 2026-11-18, with review due 2027-01-17
+(60 days). A row is served only on the vendor's first-party row, never on
+other rows sharing its `model.canonical_id`, because a reseller or gateway may
+apply a different default or map efforts differently; alias routes state their
+own `route.reasoning_default`. A row applies only while that row's
+`capability.reasoning_options` lists the effort in an entry of type `effort`,
+and the seed gate refuses a row whose seed options do not list it.
+
+| Provider | Model | Value |
+| --- | --- | --- |
+| `openai` | `gpt-6.1-terra`, `gpt-6-luna`, `gpt-6-sol`, `gpt-6.1-sol`, `gpt-5.6`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4-pro` | `medium` |
+| `openai` | `gpt-5.5-pro`, `gpt-5-pro` | `high` |
+| `openai` | `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.2`, `gpt-5.1` | `none` |
+| `anthropic` | `claude-opus-5-5`, `claude-haiku-5-5` | `medium` |
+| `anthropic` | `claude-sonnet-5-5`, `claude-fable-5`, `claude-fable-5-1`, `claude-fable-5-2`, `claude-opus-5` | `high` |
+| `google` | `gemini-4-carbon`, `gemini-4-argon`, `gemini-3.8-flash`, `gemini-3.6-flash` | `medium` |
+| `google` | `gemini-4-hydrogen` | `high` |
+| `google` | `gemini-3.5-flash-lite` | `minimal` |
+| `xai` | `grok-4.7`, `grok-4.6`, `grok-4.5` | `high` |
+| `xai` | `grok-4.3` | `low` |
+| `moonshotai` | `kimi-k3`, `kimi-k3.1-pro` | `max` |
+| `deepseek` | `deepseek-flash` (DeepSeek V4.1 Flash), `deepseek-v4-pro` | `high` |
+| `meta` | `muse-spark-1.1`, `muse-spark-1.2`, `muse-spark-1.3`, `muse-spark-1.2-contributor`, `muse-spark-1.3-contributor` | `high` |
+| `meta` | `muse-wonder-1.0`, `muse-ember-1.0` | `max` |
+
+Absence means the vendor documents no default, never a guess from the
+options. `openai/gpt-6.2-sol` and `openai/gpt-6.2-astra` have no row: OpenAI's
+pages state only that the API rejects effort `none` for them. Anthropic
+documents `high` for Claude Mythos 5, 5.1 and 5.2, which the seed does not
+carry, so they have no row.
 
 Gates in `fact_overrides.rs` check rejects, review dates
 (`fact_overrides_are_within_their_review_dates`, with a planted overdue row in

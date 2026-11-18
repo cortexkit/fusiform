@@ -1335,7 +1335,8 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                limit.context, and a consumer must not reserve that as an \
                output cap; the consumer that renders it treats those rows as \
                unknown. NULL means UNKNOWN and must not be defaulted to a \
-               number. A sourced current-read override is disclosed in \
+               number. A sourced override, applied on current reads and on \
+               dated reads from its recorded establishment, is disclosed in \
                fact_overrides.",
     },
     ServedFact {
@@ -1410,9 +1411,10 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                classifier refusal is retried on Anthropic's recommended model; \
                false means Anthropic states the model has none. ABSENT MEANS \
                NOT STATED, never false. models.dev publishes no such field: \
-               served only on current reads of anthropic rows from sourced \
-               additions disclosed in fact_overrides (replaces null), never on \
-               at_ms reads, never projected onto alias routes, and suppressed \
+               served on current reads of anthropic rows from sourced \
+               additions disclosed in fact_overrides (replaces null), and on \
+               dated reads from its recorded establishment, never \
+               projected onto alias routes, and suppressed \
                for a row once upstream records the key. It becomes \
                ByteAffecting if a consumer renders it into requests.",
     },
@@ -1423,12 +1425,28 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                inside messages for this model, without a beta header; not the \
                beta turn-scoped clear_at variant. false means Anthropic states \
                the model does not support it. ABSENT MEANS NOT STATED, never \
-               false. Served only on current reads of documented anthropic rows \
+               false. Served on current reads of documented anthropic rows \
                from sourced additions disclosed in fact_overrides (replaces \
-               null), never stored or served on at_ms reads, never projected \
+               null), and on dated reads from its recorded establishment, never \
+               projected \
                onto reseller, Bedrock, Vertex or Code Assist alias rows, and \
                suppressed once upstream records the key. It becomes \
                ByteAffecting if a consumer renders it into requests.",
+    },
+    ServedFact {
+        key: "capability.reasoning_default",
+        class: FactClass::ByteAffecting,
+        note: "vendor-documented reasoning effort applied when a request names \
+               none, as {\"type\":\"effort\",\"value\":<effort>}; a runner sends \
+               it explicitly instead of omitting effort. Curated with a source \
+               and disclosed in fact_overrides (replaces null); served on \
+               current reads, and on dated reads from its recorded \
+               establishment; served on the vendor's own first-party row, never \
+               projected onto reseller rows sharing model.canonical_id or onto \
+               alias routes, which state route.reasoning_default; served only \
+               while the row's capability.reasoning_options effort values list \
+               it, and suppressed once upstream records the key. ABSENT MEANS \
+               UNDOCUMENTED: never infer a default from the options.",
     },
     ServedFact {
         key: "capability.attachment",

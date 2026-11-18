@@ -164,8 +164,9 @@ value would do to a consumer:
 | `capability.reasoning_options` | byte-affecting | the upstream's `reasoning_options` array verbatim, or `null` |
 | `capability.structured_output` | advisory | `true` or `false` only when published by models.dev; otherwise no fact |
 | `capability.tool_call` | advisory | `true`, `false` or `null` |
-| `capability.server_side_fallback` | advisory | `true` or `false` on current reads of the `anthropic` rows Anthropic's documentation covers, from sourced additions disclosed in `fact_overrides` (§5.8); otherwise no fact, which means not stated, never `false` |
-| `capability.mid_conversation_system` | advisory | `true` or `false` for persistent `role: "system"` messages inside `messages`, without a beta header, not the beta turn-scoped `clear_at` variant; sourced current-read-only additions on documented `anthropic` rows, disclosed in `fact_overrides` (§5.8), never stored or inherited by resellers, Bedrock, Vertex or Code Assist aliases; any upstream value wins; otherwise no fact, which means not stated, never `false` |
+| `capability.server_side_fallback` | advisory | `true` or `false` on the `anthropic` rows Anthropic's documentation covers, from sourced additions disclosed in `fact_overrides` (§5.8), on current reads and on dated reads from the addition's recorded establishment; otherwise no fact, which means not stated, never `false` |
+| `capability.mid_conversation_system` | advisory | `true` or `false` for persistent `role: "system"` messages inside `messages`, without a beta header, not the beta turn-scoped `clear_at` variant; sourced additions on documented `anthropic` rows, disclosed in `fact_overrides` (§5.8), served on current reads and on dated reads from the addition's recorded establishment, never inherited by resellers, Bedrock, Vertex or Code Assist aliases; any upstream value wins; otherwise no fact, which means not stated, never `false` |
+| `capability.reasoning_default` | byte-affecting | `{"type":"effort","value":<effort>}`: the reasoning effort the vendor documents its own API applying when a request names none, so a runner can send it explicitly; sourced additions on the vendor's first-party rows, disclosed in `fact_overrides` (§5.8), served on current reads and on dated reads from the addition's recorded establishment, and only while the row's `capability.reasoning_options` lists the effort in an entry of type `effort`; never projected onto other rows sharing `model.canonical_id` or onto alias routes, which state `route.reasoning_default`; any upstream value wins; otherwise no fact, which means the vendor documents no default |
 | `capability.cache_lifetimes` | advisory | prompt-cache lifetimes the model offers, shortest first: durations (`"5m"`, `"30m"`, `"1h"`, `"12h"`, `"24h"`) or OpenAI's `"in_memory"`; curated, first-party `openai` and `anthropic` rows only; dated reads use the rule in force from first serving, otherwise no fact ([`curated-data.md`](curated-data.md)) |
 | `capability.attachment` | advisory | `true`, `false` or `null` |
 | `capability.input_modalities` | advisory | list of modality strings, or `null` |
@@ -828,8 +829,8 @@ An entry is either a REPLACEMENT, whose `replaces` is the upstream value it
 corrects, or an ADDITION, whose `replaces` is always present and `null`: a
 fact models.dev publishes no value for, sourced from the vendor's own
 documentation. The added facts are `capability.server_side_fallback`,
-`capability.mid_conversation_system`, `rate.output_image` and
-`rate.cached_input_audio`.
+`capability.mid_conversation_system`, `capability.reasoning_default`,
+`rate.output_image` and `rate.cached_input_audio`.
 
 For example, a current `google/gemini-4-argon` read serves
 `limit.output: 65536` where models.dev publishes 32,768, Google's cap for a
@@ -847,6 +848,15 @@ messages inside `messages`, without a beta header, not the beta turn-scoped
 `clear_at` variant. Supported `anthropic` rows serve `true`, Sonnet 5 and
 Opus 4.7 serve `false`, and absence on any other row means not stated. Its
 additions use the same dated-history and upstream-wins rules.
+`capability.reasoning_default` serves the effort a vendor documents its API
+applying when a request names none, for example `{"type":"effort","value":"medium"}`
+on `openai/gpt-5.5`. A row applies only while that row's served
+`capability.reasoning_options` lists the effort in an entry of type `effort`,
+so a runner sending the default never sends an effort the row says the model
+refuses; a read filtered to the default fetches the options to check it
+against and drops them again
+(`fact_overrides::a_current_read_serves_the_documented_reasoning_default`).
+Absence means the vendor documents no default, as for `openai/gpt-6.2-sol`.
 
 1. **Compiled current reads, stored historical reads.** Current reads use the
     compiled file unchanged. Every boot diffs its claims into
@@ -881,9 +891,10 @@ additions use the same dated-history and upstream-wins rules.
    facts, so it serves the overridden value too, and its disclosure has the
    alias id in `model` and the target in `provider_id`/`model_id`
    (`fact_overrides::the_antigravity_alias_serves_the_overridden_value`).
-   `capability.server_side_fallback` and `capability.mid_conversation_system`
-   are exceptions: they describe what the Claude API accepts, so an alias route
-   reaching the model another way never carries them
+   `capability.server_side_fallback`, `capability.mid_conversation_system`
+   and `capability.reasoning_default` are exceptions: they describe what the
+   vendor's own API accepts or applies, so an alias route reaching the model
+   another way never carries them
    (`fact_overrides::the_antigravity_route_to_opus_does_not_carry_server_side_fallback`).
    A curated row (§5.6) is fusiform's own data and replaces no upstream value,
    so no override applies to it.

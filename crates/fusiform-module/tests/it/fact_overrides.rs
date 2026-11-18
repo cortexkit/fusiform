@@ -630,12 +630,13 @@ fn assert_overridden(response: &CatalogGetResponse, model: &str, label: &str) {
     );
     let rows = disclosed_fact(response, model, "limit.output");
     // An unfiltered Argon read also carries its independent temperature
-    // replacement. Every disclosed row must still correspond to a served fact.
+    // replacement and reasoning-default addition. Every disclosed row must
+    // still correspond to a served fact.
     for row in disclosed(response, model) {
         assert_eq!(response.models[model].get(&row.fact_key), Some(&row.value));
         assert!(matches!(
             row.fact_key.as_str(),
-            "limit.output" | "capability.temperature"
+            "limit.output" | "capability.temperature" | "capability.reasoning_default"
         ));
     }
     assert_eq!(
@@ -1543,4 +1544,213 @@ fn hydrogen_antigravity_alias_serves_the_sourced_output_limit() {
         target.models["google/gemini-4-hydrogen"]["limit.output"],
         json!(65_536)
     );
+}
+
+const REASONING_DEFAULT: &str = "capability.reasoning_default";
+const REASONING_DEFAULT_ESTABLISHED: i64 = 1_794_960_000_000;
+const GPT_55: &str = "openai/gpt-5.5";
+const GPT_62_SOL: &str = "openai/gpt-6.2-sol";
+const AZURE_GPT_55: &str = "azure/gpt-5.5";
+
+/// Seeded rows for the reasoning default: two documented first-party rows,
+/// one OpenAI row whose vendor documents no default, a reseller row sharing
+/// gpt-5.5's canonical id under the same model id, and the Antigravity alias
+/// of Opus 5.5 (its google provider comes from Gemini 3.8 Flash).
+fn reasoning_default_store() -> (CatalogStore, tempfile::TempDir) {
+    let seed: Value =
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+    let mut upstream = json!({});
+    for (provider, ids) in [
+        ("openai", vec!["gpt-5.5", "gpt-6.2-sol"]),
+        ("azure", vec!["gpt-5.5"]),
+        ("anthropic", vec!["claude-opus-5-5"]),
+        ("google", vec!["gemini-3.8-flash"]),
+    ] {
+        upstream[provider] = seed[provider].clone();
+        upstream[provider]["models"] = json!({});
+        for id in ids {
+            let row = seed[provider]["models"][id].clone();
+            assert!(row.is_object(), "the seed must carry {provider}/{id}");
+            upstream[provider]["models"][id] = row;
+        }
+    }
+    store_document(&serde_json::to_vec(&upstream).unwrap())
+}
+
+#[test]
+fn a_current_read_serves_the_documented_reasoning_default() {
+    let (store, _dir) = reasoning_default_store();
+    for (label, response) in [
+        (
+            "named",
+            get(&store, json!({"provider_id":"openai","model_id":"gpt-5.5"})),
+        ),
+        ("provider", get(&store, json!({"provider_id":"openai"}))),
+        ("bulk", get(&store, json!({}))),
+        ("paged", paged(&store, json!({}))),
+        // The options the default is checked against are not requested, so
+        // the read must fetch them anyway and still serve only the default.
+        (
+            "filtered bulk",
+            get(&store, json!({"fact_prefixes":[REASONING_DEFAULT]})),
+        ),
+        (
+            "filtered named",
+            get(
+                &store,
+                json!({"provider_id":"openai","model_id":"gpt-5.5","fact_prefixes":[REASONING_DEFAULT]}),
+            ),
+        ),
+    ] {
+        assert_eq!(
+            response.models[GPT_55][REASONING_DEFAULT],
+            json!({"type":"effort","value":"medium"}),
+            "{label}"
+        );
+        let rows = disclosed_fact(&response, GPT_55, REASONING_DEFAULT);
+        assert_eq!(rows.len(), 1, "{label}: {:?}", response.fact_overrides);
+        assert!(rows[0].replaces.is_null(), "{label}");
+        assert!(
+            rows[0]
+                .source_ref
+                .contains("https://developers.openai.com/api/docs/models/gpt-5.5"),
+            "{label}"
+        );
+        assert!(rows[0].quote.contains("medium (default)"), "{label}");
+        assert_eq!(
+            rows[0].review_by_ms - rows[0].established_at_ms,
+            60 * 86_400_000
+        );
+        if label.starts_with("filtered") {
+            assert!(
+                response
+                    .models
+                    .values()
+                    .all(|facts| facts.keys().all(|key| key == REASONING_DEFAULT)),
+                "{label}"
+            );
+        }
+        if !label.contains("named") && label != "provider" {
+            assert_eq!(
+                response.models["anthropic/claude-opus-5-5"][REASONING_DEFAULT],
+                json!({"type":"effort","value":"medium"}),
+                "{label}"
+            );
+        }
+        // OpenAI documents no default for GPT-6.2 Sol: no fact, no disclosure.
+        if let Some(facts) = response.models.get(GPT_62_SOL) {
+            assert!(!facts.contains_key(REASONING_DEFAULT), "{label}");
+        }
+        assert!(
+            disclosed_fact(&response, GPT_62_SOL, REASONING_DEFAULT).is_empty(),
+            "{label}"
+        );
+    }
+    let sol = get(
+        &store,
+        json!({"provider_id":"openai","model_id":"gpt-6.2-sol"}),
+    );
+    assert!(sol.models[GPT_62_SOL].contains_key("capability.reasoning_options"));
+    assert!(!sol.models[GPT_62_SOL].contains_key(REASONING_DEFAULT));
+}
+
+#[test]
+fn the_reasoning_default_reaches_neither_resellers_nor_aliases() {
+    let (store, _dir) = reasoning_default_store();
+    for (provider, model_id) in [
+        ("azure", "gpt-5.5"),
+        ("google", "antigravity-claude-opus-5-5"),
+    ] {
+        for response in [
+            get(&store, json!({"provider_id":provider,"model_id":model_id})),
+            get(&store, json!({"provider_id":provider})),
+            get(&store, json!({})),
+        ] {
+            let model = format!("{provider}/{model_id}");
+            let facts = &response.models[&model];
+            assert!(facts.contains_key("limit.context"), "{model} is served");
+            assert!(!facts.contains_key(REASONING_DEFAULT), "{model}");
+            assert!(
+                disclosed_fact(&response, &model, REASONING_DEFAULT).is_empty(),
+                "{model}"
+            );
+        }
+    }
+    let azure = get(&store, json!({"provider_id":"azure","model_id":"gpt-5.5"}));
+    assert_eq!(
+        azure.models[AZURE_GPT_55]["model.canonical_id"],
+        json!(GPT_55)
+    );
+}
+
+#[test]
+fn an_at_ms_read_serves_the_reasoning_default_only_from_its_recorded_establishment() {
+    let (store, _dir) = reasoning_default_store();
+    // Before any boot records the claim, no dated read serves it.
+    for at in [1_000, REASONING_DEFAULT_ESTABLISHED] {
+        let response = get(
+            &store,
+            json!({"provider_id":"openai","model_id":"gpt-5.5","at_ms":at}),
+        );
+        assert!(response.models[GPT_55].contains_key("limit.context"));
+        assert!(
+            !response.models[GPT_55].contains_key(REASONING_DEFAULT),
+            "{at}"
+        );
+        assert!(response.fact_overrides.is_empty(), "{at}");
+    }
+    fusiform_module::fact_overrides::apply_to_store(
+        &store,
+        fusiform_module::fact_overrides::overrides(),
+        REASONING_DEFAULT_ESTABLISHED + 1,
+    )
+    .unwrap();
+    for at in [1_000, REASONING_DEFAULT_ESTABLISHED - 1] {
+        for response in [
+            get(
+                &store,
+                json!({"provider_id":"openai","model_id":"gpt-5.5","at_ms":at}),
+            ),
+            get(&store, json!({"at_ms":at})),
+            paged(&store, json!({"at_ms":at})),
+        ] {
+            assert!(response.models[GPT_55].contains_key("limit.context"));
+            assert!(
+                !response.models[GPT_55].contains_key(REASONING_DEFAULT),
+                "{at}"
+            );
+            assert!(
+                disclosed_fact(&response, GPT_55, REASONING_DEFAULT).is_empty(),
+                "{at}"
+            );
+        }
+    }
+    for at in [
+        REASONING_DEFAULT_ESTABLISHED,
+        REASONING_DEFAULT_ESTABLISHED + 1,
+    ] {
+        for response in [
+            get(
+                &store,
+                json!({"provider_id":"openai","model_id":"gpt-5.5","at_ms":at}),
+            ),
+            get(
+                &store,
+                json!({"at_ms":at, "fact_prefixes":[REASONING_DEFAULT]}),
+            ),
+        ] {
+            assert_eq!(
+                response.models[GPT_55][REASONING_DEFAULT],
+                json!({"type":"effort","value":"medium"}),
+                "{at}"
+            );
+            assert_eq!(
+                disclosed_fact(&response, GPT_55, REASONING_DEFAULT).len(),
+                1
+            );
+            if let Some(facts) = response.models.get(GPT_62_SOL) {
+                assert!(!facts.contains_key(REASONING_DEFAULT), "{at}");
+            }
+        }
+    }
 }

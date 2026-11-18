@@ -41,6 +41,13 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 /// are vendor-documented request features that models.dev has no fields for,
 /// so they can only arrive as additions.
 ///
+/// `capability.reasoning_default` is the reasoning effort a vendor documents
+/// its own API applying when a request names none. models.dev publishes no
+/// default, so it too can only arrive as an addition, and it is served only
+/// while the row's own `capability.reasoning_options` lists that effort: a
+/// runner that sends the default explicitly must never send an effort the
+/// row says the model refuses.
+///
 /// `model.status` can only replace the `null` ingest stores when models.dev
 /// publishes no status, and only with `"deprecated"`, for a model whose
 /// vendor marks it deprecated before models.dev does. Consumers stop routing
@@ -50,11 +57,12 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 /// replacement and an image-rate addition, before alias and plane projection.
 /// `capability.temperature` replaces only a published boolean when the vendor
 /// documents different acceptance; it never fills an unknown upstream claim.
-pub const OVERRIDABLE_FACTS: [&str; 9] = [
+pub const OVERRIDABLE_FACTS: [&str; 10] = [
     "limit.context",
     "limit.output",
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
+    "capability.reasoning_default",
     "capability.temperature",
     "model.status",
     "rate.output",
@@ -65,9 +73,10 @@ pub const OVERRIDABLE_FACTS: [&str; 9] = [
 /// The facts only an addition row can serve, because models.dev publishes no
 /// value for them. A read filtered to one of these must still reach the rows
 /// an addition applies to, even though the store holds no matching fact.
-pub const ADDED_FACTS: [&str; 4] = [
+pub const ADDED_FACTS: [&str; 5] = [
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
+    "capability.reasoning_default",
     "rate.output_image",
     "rate.cached_input_audio",
 ];
@@ -135,6 +144,17 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
+        "capability.reasoning_default" => {
+            if default_effort(&row.value).is_none()
+                || row.value.as_object().is_none_or(|object| object.len() != 2)
+            {
+                Some("reasoning default value must be exactly {\"type\":\"effort\",\"value\":<nonempty effort>}")
+            } else if !row.replaces.is_null() {
+                Some("capability rows must be additions: models.dev publishes no such field, so replaces must be null")
+            } else {
+                None
+            }
+        }
         // Only the vendor's deprecation is served. Other statuses (beta,
         // alpha) change nothing a consumer does, and a status models.dev
         // publishes is never replaced: the row applies only over the `null`
@@ -148,8 +168,46 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
-        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system, capability.temperature, model.status, rate.output, rate.output_image and rate.cached_input_audio may be overridden"),
+        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system, capability.reasoning_default, capability.temperature, model.status, rate.output, rate.output_image and rate.cached_input_audio may be overridden"),
     }
+}
+
+/// The effort a `capability.reasoning_default` value names, when it has the
+/// one shape the fact allows: `{"type":"effort","value":"<effort>"}`.
+fn default_effort(value: &serde_json::Value) -> Option<&str> {
+    (value["type"] == "effort")
+        .then(|| value["value"].as_str())
+        .flatten()
+        .filter(|effort| !effort.trim().is_empty())
+}
+
+/// Whether a row's `capability.reasoning_options` lists `effort` among the
+/// values of an entry of type `effort`. Absent or unreadable options list
+/// nothing, so a default is never served beside options that do not name it.
+fn options_list_effort(options: Option<&serde_json::Value>, effort: &str) -> bool {
+    options
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|options| {
+            options.iter().any(|option| {
+                option["type"] == "effort"
+                    && option["values"]
+                        .as_array()
+                        .is_some_and(|values| values.iter().any(|v| v.as_str() == Some(effort)))
+            })
+        })
+}
+
+/// Whether an addition's value agrees with the other facts of the row it is
+/// added to. Only a reasoning default depends on another fact: the effort it
+/// names must be one the row's own options list, so a consumer that sends the
+/// default never sends an effort the row says the model refuses.
+fn consistent_with_row(row: &FactOverride, facts: &BTreeMap<String, serde_json::Value>) -> bool {
+    if row.fact_key != "capability.reasoning_default" {
+        return true;
+    }
+    default_effort(&row.value).is_some_and(|effort| {
+        options_list_effort(facts.get("capability.reasoning_options"), effort)
+    })
 }
 
 fn plain_token_rate(value: &serde_json::Value) -> bool {
@@ -448,6 +506,18 @@ fn stale_row(
         ));
     };
     let published = facts.get(&row.fact_key);
+    if published.is_none() && is_addition(row) && !consistent_with_row(row, facts) {
+        return Some(format!(
+            "{}/{} {}: the embedded seed's capability.reasoning_options {} do not list {}, so the default would never be served; re-verify the vendor's default against the model's listed efforts, or remove the override",
+            row.provider_id,
+            row.model_id,
+            row.fact_key,
+            facts
+                .get("capability.reasoning_options")
+                .map_or("(absent)".to_string(), |v| v.to_string()),
+            row.value
+        ));
+    }
     let applies = if is_addition(row) {
         published.is_none()
     } else {
@@ -511,6 +581,12 @@ pub(crate) fn apply_rows(
             // key, and upstream wins. A withheld fact is stored too, just not
             // served.
             if facts.contains_key(fact_key) || withheld.contains(&fact_key.as_str()) {
+                continue;
+            }
+            // A value that disagrees with the row's other facts, such as a
+            // reasoning default its options no longer list, is not served:
+            // upstream has moved and the row needs review.
+            if !consistent_with_row(row, facts) {
                 continue;
             }
             facts.insert(fact_key.clone(), row.value.clone());
@@ -590,7 +666,7 @@ mod tests {
     fn shipped_overrides_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 27);
+        assert_eq!(rows.len(), 72);
         let row = argon();
         assert_eq!(row.value, json!(65_536));
         assert_eq!(row.replaces, json!(32_768));
@@ -824,7 +900,11 @@ mod tests {
             .unwrap()
             .remove("claude-haiku-5-5");
         let stale = stale_against_seed(overrides(), &seed);
-        assert_eq!(stale.len(), 2, "{stale:?}");
+        let haiku_rows = overrides()
+            .values()
+            .filter(|row| row.provider_id == "anthropic" && row.model_id == "claude-haiku-5-5")
+            .count();
+        assert_eq!(stale.len(), haiku_rows, "{stale:?}");
         for row in overrides()
             .values()
             .filter(|row| row.provider_id == "anthropic" && row.model_id == "claude-haiku-5-5")
@@ -921,6 +1001,8 @@ mod tests {
                 assert_eq!(rejects.len(), 1, "{field}");
                 let reason = if key.starts_with("rate.") && matches!(field, "value" | "replaces") {
                     "must add a sourced token rate"
+                } else if key == "capability.reasoning_default" && field == "value" {
+                    "reasoning default value must be exactly"
                 } else {
                     reason
                 };
@@ -1052,6 +1134,158 @@ mod tests {
             ("limit.context".to_string(), json!(1_048_576)),
             ("limit.output".to_string(), output),
         ])
+    }
+
+    fn reasoning_default(provider: &str, model: &str) -> Option<&'static FactOverride> {
+        overrides().get(&(
+            provider.to_string(),
+            model.to_string(),
+            "capability.reasoning_default".to_string(),
+        ))
+    }
+
+    #[test]
+    fn reasoning_default_rows_match_the_documented_models() {
+        let expected: BTreeMap<(&str, &str), &str> = [
+            ("openai", "gpt-6.1-terra", "medium"),
+            ("openai", "gpt-6-luna", "medium"),
+            ("openai", "gpt-6-sol", "medium"),
+            ("openai", "gpt-6.1-sol", "medium"),
+            ("openai", "gpt-5.6", "medium"),
+            ("openai", "gpt-5.6-sol", "medium"),
+            ("openai", "gpt-5.6-terra", "medium"),
+            ("openai", "gpt-5.6-luna", "medium"),
+            ("openai", "gpt-5.5", "medium"),
+            ("openai", "gpt-5.4-pro", "medium"),
+            ("openai", "gpt-5.5-pro", "high"),
+            ("openai", "gpt-5-pro", "high"),
+            ("openai", "gpt-5.4", "none"),
+            ("openai", "gpt-5.4-mini", "none"),
+            ("openai", "gpt-5.4-nano", "none"),
+            ("openai", "gpt-5.2", "none"),
+            ("openai", "gpt-5.1", "none"),
+            ("anthropic", "claude-opus-5-5", "medium"),
+            ("anthropic", "claude-sonnet-5-5", "high"),
+            ("anthropic", "claude-haiku-5-5", "medium"),
+            ("anthropic", "claude-fable-5", "high"),
+            ("anthropic", "claude-fable-5-1", "high"),
+            ("anthropic", "claude-fable-5-2", "high"),
+            ("anthropic", "claude-opus-5", "high"),
+            ("google", "gemini-4-carbon", "medium"),
+            ("google", "gemini-4-argon", "medium"),
+            ("google", "gemini-4-hydrogen", "high"),
+            ("google", "gemini-3.8-flash", "medium"),
+            ("google", "gemini-3.6-flash", "medium"),
+            ("google", "gemini-3.5-flash-lite", "minimal"),
+            ("xai", "grok-4.7", "high"),
+            ("xai", "grok-4.6", "high"),
+            ("xai", "grok-4.5", "high"),
+            ("xai", "grok-4.3", "low"),
+            ("moonshotai", "kimi-k3", "max"),
+            ("moonshotai", "kimi-k3.1-pro", "max"),
+            ("deepseek", "deepseek-flash", "high"),
+            ("deepseek", "deepseek-v4-pro", "high"),
+            ("meta", "muse-spark-1.1", "high"),
+            ("meta", "muse-spark-1.2", "high"),
+            ("meta", "muse-spark-1.3", "high"),
+            ("meta", "muse-spark-1.2-contributor", "high"),
+            ("meta", "muse-spark-1.3-contributor", "high"),
+            ("meta", "muse-wonder-1.0", "max"),
+            ("meta", "muse-ember-1.0", "max"),
+        ]
+        .into_iter()
+        .map(|(provider, model, effort)| ((provider, model), effort))
+        .collect();
+        let rows: Vec<_> = overrides()
+            .values()
+            .filter(|row| row.fact_key == "capability.reasoning_default")
+            .collect();
+        assert_eq!(rows.len(), expected.len());
+        for row in rows {
+            let effort = expected[&(row.provider_id.as_str(), row.model_id.as_str())];
+            assert_eq!(
+                row.value,
+                json!({"type":"effort","value":effort}),
+                "{}/{}",
+                row.provider_id,
+                row.model_id
+            );
+            assert!(row.replaces.is_null());
+            assert_eq!(row.review_by_ms - row.established_at_ms, REVIEW_INTERVAL_MS);
+        }
+        // OpenAI documents no default for these two, so nothing is served.
+        for model in ["gpt-6.2-sol", "gpt-6.2-astra"] {
+            assert!(reasoning_default("openai", model).is_none(), "{model}");
+        }
+    }
+
+    #[test]
+    fn a_reasoning_default_outside_the_row_options_is_refused() {
+        const KEY: &str = "capability.reasoning_default";
+        let row = reasoning_default("openai", "gpt-5.5").unwrap();
+        let options = |values: serde_json::Value| {
+            BTreeMap::from([(
+                "capability.reasoning_options".to_string(),
+                json!([{"type":"toggle"}, {"type":"effort","values":values}]),
+            )])
+        };
+        // Control: options listing the effort let the row apply.
+        let mut served = options(json!(["low", "medium", "high"]));
+        assert_eq!(apply("openai", "gpt-5.5", &mut served, None, &[]).len(), 1);
+        assert_eq!(served[KEY], json!({"type":"effort","value":"medium"}));
+        assert!(stale_row(row, Some(&options(json!(["medium"])))).is_none());
+        // Options that do not list it, or no options at all, refuse it at
+        // serve time and in the seed gate.
+        for stored in [
+            options(json!(["low", "high"])),
+            BTreeMap::from([(
+                "capability.reasoning_options".to_string(),
+                json!([{"type":"budget","values":["medium"]}]),
+            )]),
+            BTreeMap::from([("capability.reasoning_options".to_string(), json!(null))]),
+            BTreeMap::new(),
+        ] {
+            let mut served = stored.clone();
+            assert!(apply("openai", "gpt-5.5", &mut served, None, &[]).is_empty());
+            assert!(!served.contains_key(KEY));
+            let stale = stale_row(row, Some(&stored)).expect("refused");
+            assert!(stale.contains("openai/gpt-5.5 capability.reasoning_default"));
+            assert!(stale.contains("do not list"), "{stale}");
+        }
+        // Through the real gate, a seed whose options drop the effort names
+        // the row.
+        let mut seed = seed();
+        seed["openai"]["models"]["gpt-5.5"]["reasoning_options"] =
+            json!([{"type":"effort","values":["low","high"]}]);
+        let stale = stale_against_seed(overrides(), &seed);
+        assert_eq!(stale.len(), 1, "{stale:?}");
+        assert!(stale[0].contains("openai/gpt-5.5 capability.reasoning_default"));
+        // The loader refuses any other value shape.
+        let shipped = document()["overrides"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["fact_key"] == KEY)
+            .unwrap()
+            .clone();
+        for value in [
+            json!("medium"),
+            json!({"type":"budget","value":"medium"}),
+            json!({"type":"effort","value":""}),
+            json!({"type":"effort","value":1}),
+            json!({"type":"effort"}),
+            json!({"type":"effort","value":"medium","extra":true}),
+        ] {
+            let mut planted = shipped.clone();
+            planted["value"] = value.clone();
+            let (rows, rejects) =
+                load_reporting_rejects(&json!({"overrides":[planted]}).to_string());
+            assert!(rows.is_empty(), "{value}");
+            assert!(
+                rejects[0].contains("reasoning default value must be exactly"),
+                "{value}: {rejects:?}"
+            );
+        }
     }
 
     #[test]

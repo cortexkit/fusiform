@@ -6281,6 +6281,18 @@ fn widened_for_inheritance(prefixes: &[String]) -> Vec<String> {
     if admits_rates(prefixes) && !out.iter().any(|p| p == fusiform_store::prefix::MODEL) {
         out.push(fusiform_store::prefix::MODEL.to_string());
     }
+    // A sourced reasoning default is served only while the row's own effort
+    // options list it, so a read filtered to the default must also fetch the
+    // options it is checked against.
+    if prefixes
+        .iter()
+        .any(|p| "capability.reasoning_default".starts_with(p.as_str()))
+        && !out
+            .iter()
+            .any(|p| "capability.reasoning_options".starts_with(p.as_str()))
+    {
+        out.push("capability.reasoning_options".to_string());
+    }
     out
 }
 
@@ -6758,6 +6770,10 @@ fn omit_route_dependent_alias_facts(facts: &mut BTreeMap<String, serde_json::Val
     // Claude API message support does not establish what a Code Assist alias
     // accepts, even when it routes to the same model.
     facts.remove("capability.mid_conversation_system");
+    // A vendor's documented default effort describes its own API. A route
+    // reaching the model another way may apply a different default or map
+    // efforts differently; an alias states its own in route.reasoning_default.
+    facts.remove("capability.reasoning_default");
     facts.remove("wire.npm");
     facts.remove("wire.api");
     facts.remove("wire.shape");
