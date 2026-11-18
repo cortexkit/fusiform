@@ -292,11 +292,42 @@ fn cache_lifetime_boot_diff_records_changes_removals_and_new_rules_once() {
     let (store, dir) = store(None);
     let original = stored_rules(rules());
     // Schema v12 backfilled 34 per-model rules before GPT-6.2 was added.
-    // Each stored rule includes its group's model_ids list, so adding two ids
-    // changes the JSON for nine existing GPT rules and introduces two new ones.
+    // Add one model at a time. Neither addition should restate a backfilled
+    // claim, even though the stored model_ids list is stale for those claims.
+    let history = || {
+        fusiform_module::route::serve_history(
+            &store,
+            br#"{"provider_id":"openai","model_id":"gpt-6.1-sol","fact_key":"rate.cache_write.ttl.30m","served":true}"#,
+        )
+        .unwrap()
+    };
+    let before_boot = history();
+    let mut first: Vec<_> = original
+        .iter()
+        .filter(|row| row.model_id != "gpt-6.2-sol")
+        .cloned()
+        .collect();
+    for row in &mut first {
+        row.rule["model_ids"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|model| model != "gpt-6.2-sol");
+    }
+    assert_eq!(store.append_cache_lifetimes(&first, DATED_READ).unwrap(), 1);
     assert_eq!(
         store.append_cache_lifetimes(&original, DATED_READ).unwrap(),
-        11
+        1
+    );
+    let after_boot = history();
+    let timeline = before_boot.served.as_ref().unwrap();
+    assert_eq!(
+        timeline.last().unwrap().value.as_ref().unwrap()["units"],
+        2_500_000_000_i64
+    );
+    assert_eq!(after_boot.served, before_boot.served);
+    assert_eq!(
+        after_boot.last_changed_at_ms,
+        before_boot.last_changed_at_ms
     );
     assert_eq!(
         store
@@ -305,6 +336,9 @@ fn cache_lifetime_boot_diff_records_changes_removals_and_new_rules_once() {
         0
     );
     for model in ["gpt-6.2-astra", "gpt-6.2-sol"] {
+        let eras = store.model_cache_lifetime_eras("openai", model).unwrap();
+        assert_eq!(eras.len(), 1);
+        assert_eq!(eras[0].rule.as_ref().unwrap()["model_ids"], json!([model]));
         for (at, present) in [(DATED_READ - 1, false), (DATED_READ, true)] {
             assert_eq!(
                 store
@@ -407,7 +441,7 @@ fn cache_lifetime_boot_diff_records_changes_removals_and_new_rules_once() {
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM cache_lifetime_era", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(count, 48);
+    assert_eq!(count, 39);
     // Current reads still use the compiled rule after stored changes and removal.
     let current = get(
         &store,

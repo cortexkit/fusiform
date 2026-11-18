@@ -452,17 +452,20 @@ same guarded price calculation. Derived TTL rates are never stored as upstream
 `era` rows or reported as upstream changes by `catalog.history`.
 
 - The STRICT table holds `id`, `provider_id`, `model_id`, `boundary_at_ms`,
-  `rule_json` and `recorded_at_ms`. `rule_json` holds the whole loaded rule,
-  including provenance and multipliers; SQL NULL is a removal tombstone.
+  `rule_json` and `recorded_at_ms`. `rule_json` holds the rule for that model,
+  including provenance and multipliers; SQL NULL is a removal tombstone. New
+  rows list only their own model in `model_ids`. Older rows may list the whole
+  group.
 - Migration v12 imports the frozen `cache-lifetimes-v12.json` once. Initial
   rules begin at 1794089713000 (2026-11-07T22:15:13Z), except Claude Fable 5.2
   at 1794341726000 (2026-11-10T20:15:26Z). These are first-serving instants,
   not source-review dates. `recorded_at_ms` records when the import ran.
 - Every boot calls `CatalogStore::append_cache_lifetimes`. A parsed JSON diff
-  of the whole loaded rule appends only additions, changes and removals. New
-  rules, changed rules, reappearances and tombstones begin at boot, clamped to
-  the key's newest boundary if the clock moved backwards. An unchanged restart
-  writes nothing, and a removed rule is tombstoned only once.
+  of the per-model claim ignores group membership and appends only additions,
+  changes and removals. New rules, changed rules, reappearances and tombstones
+  begin at boot, clamped to the key's newest boundary if the clock moved
+  backwards. An unchanged restart writes nothing, and a removed rule is
+  tombstoned only once.
 - The rule in force is the greatest boundary not exceeding `at_ms`, with
   newest `id` breaking ties. Before a key's first era, or after a tombstone,
   no lifetime facts or TTL rates are added. The provider/model/boundary/id

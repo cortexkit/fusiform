@@ -493,7 +493,7 @@ mod cache_lifetime_boot_tests {
         );
         // A new store has the schema migration's original rule snapshot. Record
         // today's rules first so the refusal trigger tests an unchanged boot.
-        assert_eq!(store.append_cache_lifetimes(&rows, boot).unwrap(), 11);
+        assert_eq!(store.append_cache_lifetimes(&rows, boot).unwrap(), 2);
         let original = store.cache_lifetimes_at(boot, None).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch("CREATE TRIGGER refuse_lifetime BEFORE INSERT ON cache_lifetime_era BEGIN SELECT RAISE(ABORT, 'lifetime refused'); END;").unwrap();

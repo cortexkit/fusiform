@@ -25,6 +25,15 @@ pub struct CacheLifetimeEra {
 
 type Newest = (i64, Option<serde_json::Value>);
 
+fn per_model_claim(model_id: &str, mut rule: serde_json::Value) -> serde_json::Value {
+    if let Some(fields) = rule.as_object_mut() {
+        // Group membership is not part of a model's claim. Keep the field
+        // with only this row's model so older readers can still decode it.
+        fields.insert("model_ids".into(), serde_json::json!([model_id]));
+    }
+    rule
+}
+
 impl CatalogStore {
     /// All cache-lifetime eras for one model, oldest first, including tombstones.
     pub fn model_cache_lifetime_eras(
@@ -66,7 +75,10 @@ impl CatalogStore {
                     params![provider, model],
                     |r| {
                         let rule: Option<String> = r.get(1)?;
-                        Ok((r.get(0)?, rule.and_then(|v| serde_json::from_str(&v).ok())))
+                        let claim = rule
+                            .and_then(|v| serde_json::from_str(&v).ok())
+                            .map(|rule| per_model_claim(model, rule));
+                        Ok((r.get(0)?, claim))
                     },
                 )
                 .optional()
@@ -93,12 +105,13 @@ impl CatalogStore {
             };
             let mut written = 0;
             for row in rows {
+                let claim = per_model_claim(&row.model_id, row.rule.clone());
                 let boundary = match newest(&row.provider_id, &row.model_id)? {
-                    Some((_, Some(rule))) if rule == row.rule => continue,
+                    Some((_, Some(previous))) if previous == claim => continue,
                     Some((boundary, _)) => boot_at_ms.max(boundary),
                     None => boot_at_ms,
                 };
-                insert(&row.provider_id, &row.model_id, boundary, Some(&row.rule))?;
+                insert(&row.provider_id, &row.model_id, boundary, Some(&claim))?;
                 written += 1;
             }
             let mut stmt =
