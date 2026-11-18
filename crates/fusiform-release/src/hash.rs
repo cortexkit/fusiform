@@ -219,10 +219,10 @@ fn write_fact_line(
 }
 
 #[derive(Default)]
-struct DigestWriter(Sha256);
+pub(crate) struct DigestWriter(Sha256);
 
 impl DigestWriter {
-    fn finish(self) -> Hash {
+    pub(crate) fn finish(self) -> Hash {
         Hash(self.0.finalize().into())
     }
 }

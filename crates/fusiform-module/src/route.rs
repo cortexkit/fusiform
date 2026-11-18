@@ -2115,7 +2115,7 @@ fn read_quality(store: &CatalogStore) -> Result<curate::Quality, RouteError> {
 
 fn read_quality_at(store: &CatalogStore, at: Option<i64>) -> Result<curate::Quality, RouteError> {
     let grades = match at {
-        Some(at) => store.quality_grades_at(at, !store.is_store_mode()),
+        Some(at) => store.quality_grades_at(at),
         None => store.quality_grades(),
     }
     .map_err(|e| store_error(&e))?
@@ -2131,18 +2131,14 @@ fn read_quality_at(store: &CatalogStore, at: Option<i64>) -> Result<curate::Qual
         recorded_at_ms: row.recorded_at_ms,
     })
     .collect();
-    let marks = if at.is_none() || store.is_store_mode() {
-        match at {
-            Some(at) => store.model_marks_at(at),
-            None => store.model_marks(),
-        }
-        .map_err(|e| store_error(&e))?
-        .into_iter()
-        .map(|row| (row.model, row.recorded_at_ms))
-        .collect()
-    } else {
-        BTreeMap::new()
-    };
+    let marks = match at {
+        Some(at) => store.model_marks_at(at),
+        None => store.model_marks(),
+    }
+    .map_err(|e| store_error(&e))?
+    .into_iter()
+    .map(|row| (row.model, row.recorded_at_ms))
+    .collect();
     let efforts = store
         .effort_grades_at(at)
         .map_err(|e| store_error(&e))?

@@ -8,7 +8,7 @@ use std::{
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_release::{canonical_json, sign_envelope, sign_head, SigningKey};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::*;
 

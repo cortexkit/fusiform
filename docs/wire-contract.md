@@ -973,8 +973,9 @@ unrelated grade write does not redate another model's grade. There is no
 per-model attribution duplication. The object
 is omitted for an empty grade table, unmatched rows, filters excluding quality,
 and pages with no quality facts. Grades have their own append-only history;
-point-in-time (`at_ms`) catalog reads still carry no quality facts or attribution,
-and `catalog.history` remains upstream fact history. See
+point-in-time (`at_ms`) catalog reads serve the judgments in force at the
+requested instant. Current reads are unchanged, and `catalog.history` remains
+upstream fact history. See
 [`curated-data.md`](curated-data.md) §11 for storage and operator commands.
 
 #### Operator grade tools
@@ -1045,7 +1046,7 @@ mark for the key is a restoration or no mark exists. Like grades, it joins on
 the row's served `model.canonical_id`, falling back to its own row key; reseller
 rows sharing that canonical id receive the same veto. Alias rows without a
 served canonical identity are excluded exactly as for grades.
-Only current reads serve marks. `at_ms` omits them. The existing `quality_scores`
+Both current and dated reads serve marks in force at the read instant. The `quality_scores`
 disclosure attributes grades and marks to the operator, with `graded_at_ms` the
 newest recording time among the quality records actually served. Filtering and
 paging omit the disclosure when no quality facts survive.
@@ -1261,7 +1262,10 @@ The storage rules are in [`data-model.md`](data-model.md) §6.
 
 ## 9. `plan.prices`
 
-Curated subscription list prices, current reads only. See
+Curated subscription list prices. Both modes serve current prices; signed-store
+mode also accepts `at_ms`. `boundary_at_ms` is the start of the current price
+claim, not the publication time of a metadata-only revision. A dated read uses
+only metadata revisions in force at the requested instant. See
 [`plan-prices.md`](plan-prices.md) for the complete row contract.
 
 Each priced row may carry `service_tiers`, independent of `quota_value`:
@@ -1280,8 +1284,9 @@ Each priced row may carry `service_tiers`, independent of `quota_value`:
 
 Standard is implicit and never listed. Tier names match model rows'
 `rate.<dim>.mode.<name>` suffixes; which models offer a tier stays on those
-rows, not here. Plan entitlements are joined at read time, never stored as
-plan-price eras. Their own review dates can expire independently of the price.
+rows, not here. Plan entitlements are joined from the curated file in
+models.dev mode and resolved from published eras in store mode. Their own
+review dates can expire independently of the price.
 
 Each priced row may also carry `concurrency`, a simultaneous-request cap for
 the subscription account, not a requests-per-time rate. **Absent means unknown,
@@ -1290,9 +1295,9 @@ never unlimited and never zero.** The object carries a positive integer `limit`,
 separately), optional `per_model` model-key-to-positive-integer overrides,
 `source_ref`, a verbatim first-party `quote`, `established_at_ms` and `review_by_ms`.
 `per_model` is valid only with `account_model`; omitted overrides use `limit`.
-Like service tiers, concurrency is joined by `(provider_id, tier)` at each
-current read, omitted for tombstones, and never stored or given an era. Its
-independent review is due after 60 days. Consumers choose their own settings
+Like service tiers, concurrency is joined by `(provider_id, tier)` and omitted
+for plan rows that no longer carry a price. Its independent review is due
+after 60 days. Consumers choose their own settings
 overrides; the catalog does not infer a cap from usage or rate limits.
 
 ## 10. Versioning

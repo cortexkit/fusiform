@@ -5,15 +5,21 @@ mod state;
 mod tests;
 mod translate;
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    fs::File,
+    io::{BufReader, Seek, Write},
+    sync::Arc,
+    time::Duration,
+};
 
 use fusiform_release::{
-    verify_head, verify_history_attestation, Head, HeadBody, Release, Snapshot,
+    verify_head, verify_history_attestation, Hash, Head, HeadBody, HistoryFile, Release,
+    ReleaseEnvelope, Snapshot,
 };
-use fusiform_store::{CatalogStore, ImportedTables};
+use fusiform_store::CatalogStore;
 use reqwest::Url;
 use serde::{de::DeserializeOwned, Deserialize};
-use serde_json::Value;
+use sha2::{Digest as _, Sha256};
 
 use crate::{fetch::Fetcher, settings::ReleaseKeys, signals::Signals};
 use state::Verified;
@@ -25,17 +31,16 @@ const INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct HistoryBase {
-    format: String,
-    release: u64,
-    tables: ImportedTables,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct HistoryDay {
     day: String,
     releases: Vec<Release>,
+}
+
+struct History {
+    snapshot: ReleaseEnvelope,
+    base: Option<BufReader<File>>,
+    first: Verified,
+    later: Vec<Release>,
 }
 
 pub struct StorePoller {
@@ -72,15 +77,41 @@ impl StorePoller {
         })
     }
 
-    async fn bytes(&self, name: &str) -> Result<Vec<u8>, String> {
+    async fn response(&self, name: &str) -> Result<reqwest::Response, String> {
         let url = step(name, self.url.join(name))?;
         // A signed head can reach this edge before its objects do. The fetcher
         // returns HTTP 404 as an error, so the next tick retries the same cursor.
-        step(name, self.fetcher.fetch_store_file(url).await)
+        step(name, self.fetcher.store_response(url).await)
     }
 
     async fn json<T: DeserializeOwned>(&self, name: &str) -> Result<T, String> {
-        step(name, serde_json::from_slice(&self.bytes(name).await?))
+        let bytes = step(name, self.response(name).await?.bytes().await)?;
+        step(name, serde_json::from_slice(&bytes))
+    }
+
+    async fn history_base(&self, attested: &HistoryFile) -> Result<BufReader<File>, String> {
+        let mut response = self.response(HISTORY_BASE_PATH).await?;
+        let expected_size = response.content_length();
+        let mut spool = step(HISTORY_BASE_PATH, tempfile::tempfile())?;
+        let mut digest = Sha256::new();
+        let mut size = 0_u64;
+        while let Some(chunk) = step(HISTORY_BASE_PATH, response.chunk().await)? {
+            size += chunk.len() as u64;
+            digest.update(&chunk);
+            step(HISTORY_BASE_PATH, spool.write_all(&chunk))?;
+        }
+        if expected_size.is_some_and(|expected| expected != size) {
+            return Err(format!(
+                "{HISTORY_BASE_PATH}: response size does not match Content-Length"
+            ));
+        }
+        if Hash::from_bytes(digest.finalize().into()) != attested.sha256 {
+            return Err(format!(
+                "{HISTORY_BASE_PATH}: history file does not match its attested hash"
+            ));
+        }
+        step(HISTORY_BASE_PATH, spool.rewind())?;
+        Ok(BufReader::new(spool))
     }
 
     async fn head(&self) -> Result<HeadBody, String> {
@@ -97,28 +128,35 @@ impl StorePoller {
         Ok(head)
     }
 
-    async fn history(
-        &self,
-        snapshot_number: u64,
-        bootstrap: bool,
-    ) -> Result<(Snapshot, Option<ImportedTables>, Vec<Release>), String> {
+    async fn history(&self, snapshot_number: u64, bootstrap: bool) -> Result<History, String> {
         let path = format!("v1/snapshots/{snapshot_number}");
         let snapshot: Snapshot = self.json(&path).await?;
         if snapshot.envelope.release != snapshot_number {
             return Err(format!("{path}: envelope names a different release"));
         }
         state::verify_snapshot(&snapshot, &self.keys)?;
-        let attestation = snapshot
-            .history_attestation
+        let Snapshot {
+            envelope,
+            history_attestation,
+            state,
+            ..
+        } = snapshot;
+        // The replay must reproduce the signed envelope, not a second live
+        // copy of the snapshot's model facts.
+        drop(state);
+        let attestation = history_attestation
             .as_ref()
             .ok_or_else(|| format!("{path}: missing history_attestation"))?;
         step(
             "snapshot history attestation",
-            verify_history_attestation(attestation, &snapshot.envelope, &self.keys),
+            verify_history_attestation(attestation, &envelope, &self.keys),
         )?;
 
         let first: Release = self.json("v1/releases/1").await?;
-        Verified::advance(None, &first, &self.keys)?;
+        if first.envelope.release != 1 {
+            return Err("v1/releases/1: wrong release number".into());
+        }
+        let first = Verified::first(first, &self.keys)?;
         let (base, days) = attestation
             .body
             .history
@@ -128,25 +166,12 @@ impl StorePoller {
             return Err("history attestation must start with base.json".into());
         }
         let tables = if bootstrap {
-            let bytes = self.bytes(HISTORY_BASE_PATH).await?;
-            step(HISTORY_BASE_PATH, base.verify_bytes(&bytes))?;
-            let base: HistoryBase = step(HISTORY_BASE_PATH, serde_json::from_slice(&bytes))?;
-            if base.release != 1 || base.format != "ck-models-history-base/v1" {
-                return Err(format!(
-                    "{HISTORY_BASE_PATH}: wrong history format or release number"
-                ));
-            }
-            for table in &fusiform_store::STORE_HISTORY_TABLES[..9] {
-                if !base.tables.contains_key(*table) {
-                    return Err(format!("{HISTORY_BASE_PATH}: missing table {table}"));
-                }
-            }
-            Some(base.tables)
+            Some(self.history_base(base).await?)
         } else {
             None
         };
 
-        let mut releases = vec![first];
+        let mut later = Vec::new();
         let mut previous_day = "";
         for file in days {
             let day = day_name(&file.file)
@@ -158,7 +183,7 @@ impl StorePoller {
                     )
                 })?;
             let path = format!("v1/history/{}", file.file);
-            let bytes = self.bytes(&path).await?;
+            let bytes = step(&path, self.response(&path).await?.bytes().await)?;
             step(&path, file.verify_bytes(&bytes))?;
             let document: HistoryDay = step(&path, serde_json::from_slice(&bytes))?;
             if document.day != day || document.releases.is_empty() {
@@ -173,9 +198,14 @@ impl StorePoller {
             }
             step(&path, fusiform_release::history_day_bytes(day, &lines))?;
             previous_day = day;
-            releases.extend(document.releases);
+            later.extend(document.releases);
         }
-        Ok((snapshot, tables, releases))
+        Ok(History {
+            snapshot: envelope,
+            base: tables,
+            first,
+            later,
+        })
     }
 
     pub async fn poll(&mut self, store: &CatalogStore) -> Result<(), String> {
@@ -202,20 +232,24 @@ impl StorePoller {
                 > DAY_MS
                 && head.latest_snapshot > applied
         });
-        let (snapshot, base, mut releases, mut current) = if self.verified.is_none() || catch_up {
-            let (snapshot, base, releases) =
-                self.history(head.latest_snapshot, applied == 0).await?;
-            (Some(snapshot), base, releases, None)
-        } else {
-            (None, None, Vec::new(), self.verified.clone())
-        };
-        let mut last_observation = match &base {
-            Some(tables) => tables
-                .get("observation")
-                .and_then(|rows| rows.last())
-                .and_then(|row| row.get("id"))
-                .and_then(Value::as_i64)
-                .unwrap_or(0),
+        let (snapshot, mut base, first, mut releases, mut current) =
+            if self.verified.is_none() || catch_up {
+                let history = self.history(head.latest_snapshot, applied == 0).await?;
+                (
+                    Some(history.snapshot),
+                    history.base,
+                    Some(history.first),
+                    history.later,
+                    None,
+                )
+            } else {
+                (None, None, None, Vec::new(), self.verified.clone())
+            };
+        let mut last_observation = match &mut base {
+            Some(spool) => step(
+                HISTORY_BASE_PATH,
+                CatalogStore::history_observation_watermark(spool),
+            )?,
             None => step(
                 "read upstream observation watermark",
                 store.latest_observation_id(),
@@ -223,10 +257,12 @@ impl StorePoller {
         };
         let first_individual = snapshot
             .as_ref()
-            .map_or(applied, |snapshot| snapshot.envelope.release);
+            .map_or(applied, |snapshot| snapshot.release);
         if releases
             .last()
-            .is_some_and(|last| last.envelope.release != first_individual)
+            .map(|last| last.envelope.release)
+            .or_else(|| first.as_ref().map(|first| first.envelope.release))
+            .is_some_and(|last| last != first_individual)
         {
             return Err("snapshot history does not end at the attested release".into());
         }
@@ -240,12 +276,23 @@ impl StorePoller {
         }
 
         let mut arrivals = Vec::new();
-        for release in releases {
-            let next = Verified::advance(current.as_ref(), &release, &self.keys)?;
+        for entry in first
+            .into_iter()
+            .map(Ok)
+            .chain(releases.into_iter().map(Err))
+        {
+            let (next, incremental) = match entry {
+                Ok(first) => (first, None),
+                Err(release) => {
+                    let previous = current.as_ref().ok_or("published chain lacks an anchor")?;
+                    (
+                        Verified::advance(previous, &release, &self.keys)?,
+                        Some(release.change),
+                    )
+                }
+            };
             if let Some(snapshot) = &snapshot {
-                if next.envelope.release == snapshot.envelope.release
-                    && next.envelope != snapshot.envelope
-                {
+                if next.envelope.release == snapshot.release && next.envelope != *snapshot {
                     return Err("verified history does not reproduce the snapshot envelope".into());
                 }
             }
@@ -263,7 +310,12 @@ impl StorePoller {
                 arrivals.push(translate::arrival(
                     current.as_ref(),
                     &next,
-                    &release.change,
+                    incremental
+                        .as_ref()
+                        .map_or(&[], |change| change.upstream.as_slice()),
+                    incremental
+                        .as_ref()
+                        .is_none_or(|change| change.curation_set.is_some()),
                     &mut last_observation,
                 )?);
             }
@@ -278,7 +330,10 @@ impl StorePoller {
         }
         step(
             "commit verified store history",
-            store.apply_store_releases(base.as_ref(), &arrivals),
+            match base {
+                Some(spool) => store.apply_streamed_store_releases(spool, &arrivals),
+                None => store.apply_store_releases(None, &arrivals),
+            },
         )?;
         self.verified = Some(current);
         Ok(())

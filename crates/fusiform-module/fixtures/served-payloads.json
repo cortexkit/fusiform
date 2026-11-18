@@ -3506,6 +3506,8 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "Anthropic",
+          "quality.elo": 2315,
+          "quality.eq": 2273,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -3612,6 +3614,10 @@
           }
         }
       },
+      "quality_scores": {
+        "graded_at_ms": 1794404263242,
+        "graded_by": "operator"
+      },
       "resolved_at_ms": 1794490800000,
       "source": "models.dev"
     }
@@ -3667,6 +3673,8 @@
           "model.open_weights": false,
           "model.status": null,
           "provider.name": "OpenAI",
+          "quality.elo": 1931,
+          "quality.eq": 1660,
           "rate.cache_read": {
             "currency": "USD",
             "exponent": 9,
@@ -3912,6 +3920,10 @@
             "value": "@ai-sdk/openai"
           }
         }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794404263242,
+        "graded_by": "operator"
       },
       "resolved_at_ms": 1794490800000,
       "source": "models.dev"

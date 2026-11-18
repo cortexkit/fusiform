@@ -1194,6 +1194,7 @@ fn render_local_override() -> serde_json::Value {
         .apply_store_releases(
             Some(&rows),
             &[ReleaseArrival {
+                published_at_ms: 2000,
                 release: StoreRelease {
                     release: 1,
                     state_hash: "a".repeat(64),

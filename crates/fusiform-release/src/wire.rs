@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt, num::NonZeroU64};
+use std::{collections::BTreeMap, fmt, io::Write as _, num::NonZeroU64};
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Number, Value};
@@ -95,7 +95,31 @@ pub struct Change {
 
 impl Change {
     pub fn change_hash(&self) -> Hash {
-        fact_hash(&serde_json::to_value(self).expect("a change is JSON"))
+        use crate::{hash::DigestWriter, write_canonical_json};
+
+        // The two v1 fields have a fixed canonical order. Encode one operation
+        // at a time so hashing does not make a second tree of a whole release.
+        let mut out = DigestWriter::default();
+        let encode = |out: &mut DigestWriter, value| {
+            write_canonical_json(out, &value).expect("digest writes cannot fail");
+        };
+        out.write_all(br#"{"curation_set":"#).unwrap();
+        encode(
+            &mut out,
+            serde_json::to_value(&self.curation_set).expect("curation is JSON"),
+        );
+        out.write_all(br#","upstream":["#).unwrap();
+        for (index, operation) in self.upstream.iter().enumerate() {
+            if index != 0 {
+                out.write_all(b",").unwrap();
+            }
+            encode(
+                &mut out,
+                serde_json::to_value(operation).expect("an operation is JSON"),
+            );
+        }
+        out.write_all(b"]}").unwrap();
+        out.finish()
     }
 }
 

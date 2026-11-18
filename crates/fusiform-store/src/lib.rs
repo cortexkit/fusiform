@@ -18,6 +18,7 @@ pub mod correct;
 mod curated;
 mod fact_overrides;
 mod history;
+mod history_base;
 pub mod ingest;
 mod local_overrides;
 pub use local_overrides::{LocalMark, LocalOverrides};
@@ -2038,6 +2039,10 @@ impl CatalogStore {
     /// in force is the newest id among those at or before the instant. A
     /// correction shares its predecessor's boundary, so ordering by boundary
     /// alone would be free to serve either one.
+    ///
+    /// The returned price boundary is the first eligible era in the unbroken
+    /// run of equal claims. Metadata-only revisions can change which row is
+    /// eligible without changing when the price claim took effect.
     pub fn plan_prices_at(
         &self,
         at_ms: i64,
@@ -2046,7 +2051,19 @@ impl CatalogStore {
         let rows = self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT provider_id, tier, minor_units, exponent, currency, period, \
-                        boundary_at_ms, established_by, established_at_ms, \
+                        (SELECT origin.boundary_at_ms FROM plan_price_era origin \
+                         WHERE origin.provider_id = p.provider_id AND origin.tier = p.tier \
+                           AND origin.id <= p.id AND origin.boundary_at_ms <= ?1 \
+                           AND origin.id > COALESCE(( \
+                               SELECT MAX(previous.id) FROM plan_price_era previous \
+                               WHERE previous.provider_id = p.provider_id AND previous.tier = p.tier \
+                                 AND previous.id < p.id AND previous.boundary_at_ms <= ?1 \
+                                 AND NOT (previous.minor_units IS p.minor_units \
+                                     AND previous.exponent IS p.exponent \
+                                     AND previous.currency IS p.currency AND previous.period IS p.period \
+                                     AND previous.refusal_reason IS p.refusal_reason) \
+                           ), 0) \
+                         ORDER BY origin.id LIMIT 1), established_by, established_at_ms, \
                         review_by_ms, source_ref, refusal_reason \
                  FROM plan_price_era p \
                  WHERE boundary_at_ms <= ?1 \

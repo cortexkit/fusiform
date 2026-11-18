@@ -639,7 +639,7 @@ pub struct CatalogGetResponse {
 
     /// Operator judgments for routing selection, not upstream observations or
     /// request bytes. Present once only when this response serves quality facts;
-    /// point-in-time reads omit both the facts and this disclosure.
+    /// point-in-time reads resolve judgments as of the requested instant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quality_scores: Option<QualityScoresWire>,
     /// Local judgments that replace published values on this computer.

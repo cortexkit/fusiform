@@ -295,18 +295,12 @@ pub(crate) fn document_rows(
                 } else {
                     tombstone(table, previous.unwrap())
                 };
-                if old.is_none() {
-                    if table != "plan_price_era" {
-                        continue;
-                    }
-                    if ["quota_value_json", "service_tiers_json", "concurrency_json"]
-                        .iter()
-                        .all(|column| row[*column].is_null())
-                    {
-                        continue;
-                    }
+                if old.is_none() && table != "plan_price_era" {
+                    continue;
                 }
-                row["boundary_at_ms"] = json!(at);
+                if table != "plan_price_era" || next.is_none() {
+                    row["boundary_at_ms"] = json!(at);
+                }
                 if table == "cache_lifetime_era" {
                     row["recorded_at_ms"] = json!(at);
                 }
@@ -359,7 +353,7 @@ fn changeable_claims(name: &str, doc: Option<&Value>) -> Result<Claims, String> 
                 let key = (row.provider_id.clone(), row.tier.clone(), empty());
                 if rows.get(&key).is_some_and(|(at, _)| *at > row.boundary_at_ms) { continue; }
                 let value = json!({"provider_id":row.provider_id,"tier":row.tier,"minor_units":row.minor_units,"exponent":row.exponent,
-                    "currency":row.currency,"period":row.period,"boundary_kind":"asserted","established_by":row.established_by,
+                    "currency":row.currency,"period":row.period,"boundary_kind":"asserted","boundary_at_ms":row.boundary_at_ms,"established_by":row.established_by,
                     "established_at_ms":row.established_at_ms,"review_by_ms":row.review_by_ms,"source_ref":row.source_ref,"refusal_reason":row.refusal_reason,
                     "quota_value_json":plan.quota_value.as_ref().map(|v| json!(v).to_string()),
                     "service_tiers_json":plan.service_tiers.as_ref().map(|v| json!(v).to_string()),
@@ -482,6 +476,7 @@ mod tests {
             .apply_store_releases(
                 Some(&ImportedTables::new()),
                 &[ReleaseArrival {
+                    published_at_ms: at,
                     release: StoreRelease {
                         release: 1,
                         state_hash: "a".repeat(64),
@@ -548,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn store_mode_plan_metadata_changes_open_dated_eras_but_boot_is_idempotent() {
+    fn plan_metadata_revision_keeps_price_origin_and_real_changes_break_the_run() {
         let dir = tempfile::tempdir().unwrap();
         let make = |name: &str| StorageDescriptor {
             module_id: "fusiform".into(),
@@ -573,28 +568,53 @@ mod tests {
 
         let fixture: Value =
             serde_json::from_str(include_str!("../../data/plan-prices.json")).unwrap();
-        let raw = fixture["cells"]
+        let mut raw = fixture["cells"]
             .as_array()
             .unwrap()
             .iter()
             .find(|cell| cell["quota_value"]["low"]["units"].is_u64())
             .unwrap()
             .clone();
-        let mut changed = raw.clone();
+        raw["boundary_at_ms"] = json!(1000);
         let provider = raw["provider_id"].as_str().unwrap();
         let tier = raw["tier"].as_str().unwrap();
         let low = raw["quota_value"]["low"]["units"].as_u64().unwrap();
-        let new_low = low + 1;
-        changed["quota_value"]["low"]["units"] = json!(new_low);
+        let original_amount = raw["price"]["minor_units"].as_i64().unwrap();
         let documents = |cell| BTreeMap::from([("plan-prices".into(), json!({"cells":[cell]}))]);
         let first = documents(raw.clone());
-        let next = documents(changed);
+        let mut base_row = changeable_claims("plan-prices", first.get("plan-prices"))
+            .unwrap()
+            .into_values()
+            .next()
+            .unwrap();
+        base_row["id"] = json!(1);
+        base_row["boundary_at_ms"] = json!(1000);
+        for key in ["quota_value_json", "concurrency_json", "service_tiers_json"] {
+            base_row.as_object_mut().unwrap().remove(key);
+        }
+        let base = ImportedTables::from([(
+            "plan_price_era".into(),
+            vec![base_row.as_object().unwrap().clone()],
+        )]);
+
+        let mut raised = raw.clone();
+        raised["price"]["minor_units"] = json!(original_amount + 1);
+        raised["boundary_at_ms"] = json!(2500);
+        let raised = documents(raised);
+        let mut returned = raw.clone();
+        returned["boundary_at_ms"] = json!(3500);
+        let returned = documents(returned);
+        let mut metadata = raw.clone();
+        metadata["boundary_at_ms"] = json!(3500);
+        metadata["quota_value"]["low"]["units"] = json!(low + 1);
+        let metadata = documents(metadata);
         let consumer = CatalogStore::open_for_store(&make("consumer.db")).unwrap();
         let prepare = |n, old, current, at| {
             let mut rows = ImportedTables::new();
             document_rows(&mut rows, old, current, at).unwrap();
             assert!(!rows.contains_key("store_document_era"));
             ReleaseArrival {
+                published_at_ms: at,
                 release: StoreRelease {
                     release: n,
                     state_hash: "a".repeat(64),
@@ -604,30 +624,63 @@ mod tests {
                 rows,
             }
         };
-        consumer
-            .apply_store_releases(
-                Some(&ImportedTables::new()),
-                &[
-                    prepare(1, None, &first, 1000),
-                    prepare(2, Some(&first), &next, 2000),
-                ],
-            )
-            .unwrap();
-        for (time, expected) in [(1000, low), (2000, new_low)] {
-            let request =
-                json!({"name":"plan.prices","arguments":{"provider_id":provider,"at_ms":time}});
+        let read = |store: &CatalogStore, at: Option<i64>| {
+            let mut args = json!({"provider_id":provider});
+            if let Some(at) = at {
+                args["at_ms"] = json!(at);
+            }
+            let request = json!({"name":"plan.prices","arguments":args});
             let response =
-                crate::route::serve_tool_call(&consumer, &serde_json::to_vec(&request).unwrap())
+                crate::route::serve_tool_call(store, &serde_json::to_vec(&request).unwrap())
                     .unwrap();
             let value = serde_json::to_value(response).unwrap();
-            let cell = value["prices"]
+            value["prices"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .find(|cell| cell["tier"] == tier)
-                .unwrap();
-            assert_eq!(cell["quota_value"]["low"]["units"], expected);
-            assert_eq!(cell["boundary_at_ms"], time);
-        }
+                .unwrap()
+                .clone()
+        };
+        let legacy = read(&store, None);
+        let asserted = crate::plan_prices::rows()
+            .iter()
+            .filter(|plan| plan.provider_id == provider && plan.tier == tier)
+            .map(|p| p.boundary_at_ms)
+            .max()
+            .unwrap();
+        assert_eq!(legacy["boundary_at_ms"], asserted);
+
+        consumer
+            .apply_store_releases(Some(&base), &[prepare(1, None, &first, 2000)])
+            .unwrap();
+        let prior = read(&consumer, Some(1500));
+        assert!(prior.get("quota_value").is_none());
+        assert_eq!(prior["boundary_at_ms"], 1000);
+        let current = read(&consumer, None);
+        assert_eq!(current["quota_value"]["low"]["units"], low);
+        assert_eq!(current["boundary_at_ms"], 1000);
+
+        consumer
+            .apply_store_releases(
+                None,
+                &[
+                    prepare(2, Some(&first), &raised, 3000),
+                    prepare(3, Some(&raised), &returned, 4000),
+                    prepare(4, Some(&returned), &metadata, 5000),
+                ],
+            )
+            .unwrap();
+        let raised = read(&consumer, Some(2600));
+        assert_eq!(raised["price"]["minor_units"], original_amount + 1);
+        assert_eq!(raised["boundary_at_ms"], 2500);
+        assert_eq!(
+            read(&consumer, Some(4500))["quota_value"]["low"]["units"],
+            low
+        );
+        let current = read(&consumer, None);
+        assert_eq!(current["price"]["minor_units"], original_amount);
+        assert_eq!(current["quota_value"]["low"]["units"], low + 1);
+        assert_eq!(current["boundary_at_ms"], 3500);
     }
 }

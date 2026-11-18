@@ -31,6 +31,8 @@ blake3 = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
+sha2 = "0.10"
+tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sync"] }
 
 [dev-dependencies]
@@ -42,8 +44,3 @@ fusiform-testkit = { workspace = true }
 # was a test that calls the flag setter directly and therefore cannot see the
 # read that is supposed to call it.
 rusqlite = { workspace = true, features = ["backup"] }
-tempfile = "3"
-# Verifies the compiled-in snapshot against the sha256 the refresh script
-# recorded. Must be sha256 specifically: checking a different hash would verify
-# the test's own arithmetic rather than what the script wrote.
-sha2 = "0.10"

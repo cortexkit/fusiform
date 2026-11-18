@@ -95,9 +95,9 @@ pub fn derive_row_facts(
                 }
             }
         }
-        apply_quality_scores(quality, response, requested_prefixes);
         apply_model_lineage(current.model_lineage, response);
     }
+    apply_quality_scores(quality, response, requested_prefixes);
     apply_effort_facts(quality, response, requested_prefixes);
 }
 

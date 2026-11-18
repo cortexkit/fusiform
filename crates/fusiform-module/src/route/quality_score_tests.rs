@@ -738,6 +738,13 @@ fn quality_grade_media_roundtrip_history_and_dimension_refusals() {
     let past = get(&store, json!({"at_ms":1000}));
     assert!(!past.models["reseller/transcribe"].contains_key("quality.grade.transcription"));
     assert!(past.quality_scores.is_none());
+    let recorded = store.quality_grade_history("lab/transcribe").unwrap()[0].recorded_at_ms;
+    let dated = get(&store, json!({"at_ms":recorded}));
+    assert_eq!(
+        dated.models["reseller/transcribe"]["quality.grade.transcription"].to_string(),
+        "87.500"
+    );
+    assert_eq!(dated.quality_scores.unwrap().graded_at_ms, recorded);
     let filtered = get(&store, json!({"fact_prefixes":["model."]}));
     assert!(filtered.quality_scores.is_none());
     call(
@@ -906,14 +913,56 @@ fn quality_scores_join_served_identity_without_upstream_eras() {
 }
 
 #[test]
-fn quality_scores_obey_fact_filters_and_point_in_time_exclusion() {
+fn models_dev_dated_reads_apply_grades_and_marks_as_of_the_instant() {
+    let (store, _dir) = fixture(true);
+    let at = 2_000;
+    let grade = fusiform_store::QualityGrade::Chat {
+        elo: 1200.into(),
+        eq: 1300.into(),
+    };
+    store
+        .append_quality_grade(
+            "reseller/own",
+            None,
+            Some(&grade),
+            "operator",
+            "fixture",
+            at,
+        )
+        .unwrap();
+    store
+        .append_model_mark("reseller/own", true, "operator", "fixture", at)
+        .unwrap();
+
+    for query in [
+        json!({}),
+        json!({"provider_id":"reseller","model_id":"own"}),
+        json!({"paged":true}),
+    ] {
+        let mut args = query;
+        args["at_ms"] = json!(at - 1);
+        let before = get(&store, args.clone());
+        assert!(before.quality_scores.is_none());
+        assert!(!before.models["reseller/own"].contains_key("quality.elo"));
+        assert!(!before.models["reseller/own"].contains_key("quality.decommissioned"));
+
+        args["at_ms"] = json!(at);
+        let after = get(&store, args);
+        assert_eq!(after.models["reseller/own"]["quality.elo"], 1200);
+        assert_eq!(after.models["reseller/own"]["quality.eq"], 1300);
+        assert_eq!(after.models["reseller/own"]["quality.decommissioned"], true);
+        assert_eq!(after.quality_scores.unwrap().graded_at_ms, at);
+    }
+}
+
+#[test]
+fn quality_scores_obey_fact_filters() {
     let (store, _dir) = fixture(true);
     seed_grades(&store);
     for args in [
-        json!({"at_ms":1000}),
         json!({"fact_prefixes":["rate."]}),
         json!({"fact_prefixes":[]}),
-        json!({"provider_id":"reseller","model_id":"shared","at_ms":1000}),
+        json!({"at_ms":1000,"fact_prefixes":["rate."]}),
     ] {
         let response = get(&store, args);
         assert!(response.quality_scores.is_none());

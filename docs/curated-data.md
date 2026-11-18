@@ -1179,8 +1179,8 @@ when its served canonical id matches; it does not borrow a target's own-key
 grade. Canonical links are applied before the join. Billing-plane reads use
 the same grades as plain reads. Read-pool queries select the newest row by
 insertion id per (key, kind); a withdrawal hides only that kind's grade.
-Point-in-time `at_ms` catalog
-reads still omit grades. Grade history is available separately.
+Point-in-time `at_ms` catalog reads resolve grades in force at the requested
+instant. Grade history is available separately.
 
 All scores must be finite positive JSON numbers. They travel as exact
 `serde_json::Number` values with `arbitrary_precision` and are stored as decimal

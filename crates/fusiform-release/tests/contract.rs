@@ -1,9 +1,9 @@
 use std::{collections::BTreeMap, num::NonZeroU64};
 
 use fusiform_release::{
-    ChangeOp, Hash, Head, HeadBody, Release, ReleaseEnvelope, SignatureError, SigningKey, Snapshot,
-    canonical_json, fact_hash, sha256, sign_envelope, sign_head, upstream_hash, verify_envelope,
-    verify_head,
+    Change, ChangeOp, Hash, Head, HeadBody, Release, ReleaseEnvelope, SignatureError, SigningKey,
+    Snapshot, canonical_json, fact_hash, sha256, sign_envelope, sign_head, upstream_hash,
+    verify_envelope, verify_head,
 };
 use serde_json::{Value, json};
 
@@ -50,6 +50,25 @@ fn fact_hash_is_sha256_of_the_canonical_value() {
     assert_eq!(
         fact_hash(&json!(null)).to_string(),
         "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    );
+}
+
+#[test]
+fn change_hash_matches_canonical_whole_document() {
+    let change: Change = serde_json::from_str(
+        r#"{
+        "upstream": [
+            {"op":"set_provider","provider":"é","fact":"provider.name","value":"A\nB"},
+            {"op":"set","provider":"é","model":"m","fact":"data","value":{"z":3E0,"a":[-0.0]}},
+            {"op":"remove","provider":"é","model":"m","fact":"old"}
+        ],
+        "curation_set": null
+    }"#,
+    )
+    .unwrap();
+    assert_eq!(
+        change.change_hash(),
+        fact_hash(&serde_json::to_value(&change).unwrap())
     );
 }
 

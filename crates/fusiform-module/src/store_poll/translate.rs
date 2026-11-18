@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use fusiform_release::{Change, ChangeOp, CurationSet};
+use fusiform_release::{ChangeOp, CurationSet};
 use fusiform_store::{ImportedTables, ReleaseArrival, StoreRelease};
 use serde_json::{json, Value};
 
@@ -16,14 +16,15 @@ fn add(rows: &mut ImportedTables, table: &str, row: Value) {
 pub(super) fn arrival(
     previous: Option<&Verified>,
     next: &Verified,
-    change: &Change,
+    operations: &[ChangeOp],
+    curation_changed: bool,
     last_observation: &mut i64,
 ) -> Result<ReleaseArrival, String> {
     let mut rows = ImportedTables::new();
     let before = previous.map(|p| &p.state.curation_set);
     let release = &next.envelope;
     if let Some(previous) = previous {
-        if !change.upstream.is_empty() {
+        if !operations.is_empty() {
             *last_observation = last_observation
                 .checked_add(1)
                 .ok_or("observation id overflow")?;
@@ -33,7 +34,7 @@ pub(super) fn arrival(
                 json!({"id":last_observation,"source":"models.dev","outcome":"changed",
                 "observed_at_ms":release.upstream_observed_at_ms,"normalized_hash":release.upstream_hash.to_string()}),
             );
-            for op in &change.upstream {
+            for op in operations {
                 let (provider, model, fact) = op.key();
                 let value = match op {
                     ChangeOp::Set { value, .. } | ChangeOp::SetProvider { value, .. } => {
@@ -56,7 +57,7 @@ pub(super) fn arrival(
             }
         }
     }
-    if change.curation_set.is_some() {
+    if curation_changed {
         let curation = &next.state.curation_set;
         let at = release.published_at_ms;
         if let Some(before) = before {
@@ -70,6 +71,7 @@ pub(super) fn arrival(
         )?;
     }
     Ok(ReleaseArrival {
+        published_at_ms: release.published_at_ms,
         release: StoreRelease {
             release: release.release,
             state_hash: release.state_hash.to_string(),

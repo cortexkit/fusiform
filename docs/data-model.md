@@ -382,9 +382,9 @@ shared version-advance helper holds the fence.
 
 Current reads and full grade histories use the read pool. Withdrawals hide
 grades from current catalog reads but remain in `quality.grades` history.
-Catalog `at_ms` reads continue to omit the existing quality scores and marks.
-The new graded effort, effort-specific scores and workload facts resolve as of
-their recording time. Grade history is not upstream `catalog.history`.
+Catalog `at_ms` reads resolve quality scores, marks, graded effort,
+effort-specific scores and workload facts as of their recording time. Grade
+history is not upstream `catalog.history`.
 See [`curated-data.md`](curated-data.md) §11.
 
 `effort_grade_era` keeps decimal ELO/EQ tokens per `(model, effort)`.
@@ -444,7 +444,8 @@ the shared helper also used by grades.
 Previews do neither. The newest row with `decommissioned = 1` serves
 `quality.decommissioned: true` on all rows sharing the key; a newest 0 removes
 the fact without deleting history. The key is the served canonical id, falling
-back to the row id exactly as grades do. Point-in-time catalog reads omit marks.
+back to the row id exactly as grades do. Point-in-time catalog reads use the
+mark, if any, in force at the requested instant.
 Current facts share the `quality_scores` attribution, whose time includes marks.
 The latest mark id also participates in the page-plan cache key.
 `quality.marks` lists current decommissioned keys, or one key's full history.

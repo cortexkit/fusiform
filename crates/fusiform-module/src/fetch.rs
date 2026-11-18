@@ -65,19 +65,11 @@ pub struct Fetcher {
 }
 
 impl Fetcher {
-    pub(crate) async fn fetch_store_file(
+    pub(crate) async fn store_response(
         &self,
         url: reqwest::Url,
-    ) -> Result<Vec<u8>, reqwest::Error> {
-        Ok(self
-            .client
-            .get(url)
-            .send()
-            .await?
-            .error_for_status()?
-            .bytes()
-            .await?
-            .to_vec())
+    ) -> Result<reqwest::Response, reqwest::Error> {
+        self.client.get(url).send().await?.error_for_status()
     }
 
     /// Build a fetcher.

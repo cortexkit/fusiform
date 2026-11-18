@@ -146,6 +146,7 @@ mod tests {
             .apply_store_releases(
                 Some(&base),
                 &[fusiform_store::ReleaseArrival {
+                    published_at_ms: i64::MAX / 2,
                     release: fusiform_store::StoreRelease {
                         release: 1,
                         state_hash: "a".repeat(64),

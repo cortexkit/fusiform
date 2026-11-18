@@ -252,19 +252,15 @@ impl CatalogStore {
         })
     }
 
-    pub fn quality_grades_at(
-        &self,
-        at: i64,
-        chat_only: bool,
-    ) -> Result<Vec<QualityGradeEra>, CatalogError> {
+    pub fn quality_grades_at(&self, at: i64) -> Result<Vec<QualityGradeEra>, CatalogError> {
         self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms, grade, kind, graded_effort \
-                 FROM quality_grade_era q WHERE withdrawn = 0 AND (?2 = 0 OR kind IS NULL) \
+                 FROM quality_grade_era q WHERE withdrawn = 0 \
                  AND id = (SELECT MAX(id) FROM quality_grade_era WHERE model = q.model \
                            AND kind IS q.kind AND recorded_at_ms <= ?1) ORDER BY model, kind",
             )?;
-            let rows = stmt.query_map(params![at, chat_only], decode)?.collect();
+            let rows = stmt.query_map([at], decode)?.collect();
             rows
         })
     }
