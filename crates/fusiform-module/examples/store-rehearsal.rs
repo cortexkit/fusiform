@@ -97,9 +97,11 @@ async fn main() -> Result<ExitCode> {
     // The store's writer lease is keyed by namespace, not by database path.
     let source = CatalogStore::open(&descriptor(&source_copy, format!("{run_name}-source"))?)?;
 
-    println!("Masks (top-level fields only):");
+    println!("Masks:");
     println!("  /catalog_version (catalog.get, catalog.status): local database revision");
     println!("  /source (catalog.get, catalog.history, catalog.status): data-source label");
+    println!("  /next_page_token catalog_version component: repeats the local database revision");
+    println!("  /resolved_at_ms (current catalog.get and plan.prices) and /next_page_token resolved_at_ms component (current catalog.get): each side is read at a different instant");
     println!(
         "Bytes are measured before masking. An error's byte count is its JSON code/message pair."
     );
@@ -159,20 +161,37 @@ fn read(store: &CatalogStore, tool: &str, args: &Value) -> Result<Reply> {
             true,
         ),
     };
-    let mut body: Value = serde_json::from_slice(&bytes)?;
-    if let Some(fields) = body.as_object_mut().filter(|_| !is_error) {
+    Ok(Reply {
+        body: serde_json::from_slice(&bytes)?,
+        bytes: bytes.len(),
+        is_error,
+    })
+}
+
+fn mask(reply: &mut Reply, tool: &str, current: bool) -> Result<()> {
+    if let Some(fields) = reply.body.as_object_mut().filter(|_| !reply.is_error) {
         if matches!(tool, TOOL_GET | TOOL_STATUS) {
             fields.remove("catalog_version");
         }
         if matches!(tool, TOOL_GET | TOOL_HISTORY | TOOL_STATUS) {
             fields.remove("source");
         }
+        if current {
+            fields.remove("resolved_at_ms");
+        }
+        if tool == TOOL_GET {
+            if let Some(token) = fields.get_mut("next_page_token") {
+                let raw = token.as_str().ok_or("page token is not a string")?;
+                let parts: Vec<_> = raw.splitn(4, ':').collect();
+                let ["v1", _version, at, provider] = parts.as_slice() else {
+                    return Err(format!("unexpected page token format: {raw:?}").into());
+                };
+                let at = if current { "<instant>" } else { *at };
+                *token = format!("v1:<version>:{at}:{provider}").into();
+            }
+        }
     }
-    Ok(Reply {
-        body,
-        bytes: bytes.len(),
-        is_error,
-    })
+    Ok(())
 }
 
 struct PageScan {
@@ -222,7 +241,7 @@ fn compare_catalog(
     let (mut rebuilt_pages, mut source_pages, mut rebuilt_bytes, mut source_bytes) = (0, 0, 0, 0);
     let mut findings = 0;
     loop {
-        let (left, right) = (rebuilt_scan.read(rebuilt)?, source_scan.read(source)?);
+        let (mut left, mut right) = (rebuilt_scan.read(rebuilt)?, source_scan.read(source)?);
         if left.is_none() && right.is_none() {
             break;
         }
@@ -231,11 +250,11 @@ fn compare_catalog(
         rebuilt_bytes += left.as_ref().map_or(0, |page| page.bytes);
         source_bytes += right.as_ref().map_or(0, |page| page.bytes);
         let page = rebuilt_pages.max(source_pages);
-        findings += report(
-            &format!("{label} page {page}"),
-            left.as_ref(),
-            right.as_ref(),
-        );
+        // Follow the unmodified continuation token before masking its copy.
+        for reply in left.iter_mut().chain(right.iter_mut()) {
+            mask(reply, TOOL_GET, at.is_none())?;
+        }
+        findings += report(&label, Some(page), left.as_ref(), right.as_ref());
     }
     println!(
         "TOTAL {label}: rebuilt {rebuilt_bytes} B/{rebuilt_pages} pages; source {source_bytes} B/{source_pages} pages; {findings} differing replies"
@@ -250,12 +269,20 @@ fn compare_single(
     label: &str,
     args: &Value,
 ) -> Result<usize> {
-    let left = read(rebuilt, tool, args)?;
-    let right = read(source, tool, args)?;
-    Ok(report(label, Some(&left), Some(&right)))
+    let mut left = read(rebuilt, tool, args)?;
+    let mut right = read(source, tool, args)?;
+    let current = tool == TOOL_PLAN_PRICES && args.get("at_ms").is_none();
+    mask(&mut left, tool, current)?;
+    mask(&mut right, tool, current)?;
+    Ok(report(label, None, Some(&left), Some(&right)))
 }
 
-fn report(label: &str, rebuilt: Option<&Reply>, source: Option<&Reply>) -> usize {
+fn report(
+    label: &str,
+    page: Option<usize>,
+    rebuilt: Option<&Reply>,
+    source: Option<&Reply>,
+) -> usize {
     fn size(reply: Option<&Reply>) -> String {
         match reply {
             Some(reply) if reply.is_error => format!("{} B (error)", reply.bytes),
@@ -264,95 +291,89 @@ fn report(label: &str, rebuilt: Option<&Reply>, source: Option<&Reply>) -> usize
         }
     }
 
-    let difference = match (rebuilt, source) {
-        (Some(rebuilt), Some(source)) if rebuilt.is_error == source.is_error => {
-            first_difference(&rebuilt.body, &source.body, "")
+    let left_body = rebuilt.map(|reply| &reply.body);
+    let right_body = source.map(|reply| &reply.body);
+    if label == TOOL_PLAN_PRICES {
+        let rows = |body: Option<&Value>| body?.get("prices")?.as_array().map(Vec::len);
+        if let (Some(left), Some(right)) = (rows(left_body), rows(right_body)) {
+            println!("ROWS {label}: rebuilt {left}; source {right}");
         }
-        _ => Some(Difference {
-            pointer: String::new(),
-            rebuilt: display(rebuilt.map(|r| &r.body)),
-            source: display(source.map(|r| &r.body)),
-        }),
-    };
-    let comparison = if difference.is_some() {
-        "DIFF"
-    } else {
-        "MATCH"
-    };
-    println!(
-        "{comparison} {label}: rebuilt {}; source {}",
-        size(rebuilt),
-        size(source)
-    );
-    if let Some(diff) = difference {
-        let path = if diff.pointer.is_empty() {
-            "(root)"
-        } else {
-            &diff.pointer
+    }
+    let mut count = 0;
+    let mut emit = |path: &str, left: Option<&Value>, right: Option<&Value>| {
+        count += 1;
+        let plan_row = |value: Option<&Value>| {
+            let index = path.strip_prefix("/prices/")?.split('/').next()?;
+            let row = value?.get("prices")?.get(index.parse::<usize>().ok()?)?;
+            Some(json!([row.get("provider_id")?, row.get("tier")?]))
         };
-        println!(
-            "  {path}\n  rebuilt: {}\n  source:  {}",
-            diff.rebuilt, diff.source
-        );
-        1
+        // An absent value and an explicit JSON null are different findings.
+        let mut finding = json!({"read": label, "page": page, "path": path});
+        if let Some(value) = left {
+            finding["rebuilt"] = value.clone();
+        }
+        if let Some(value) = right {
+            finding["source"] = value.clone();
+        }
+        if label == TOOL_PLAN_PRICES {
+            finding["rebuilt_row"] = json!(plan_row(left_body));
+            finding["source_row"] = json!(plan_row(right_body));
+        }
+        println!("DIFFERENCE {finding}");
+    };
+    if rebuilt.map(|r| r.is_error) != source.map(|r| r.is_error) {
+        emit("", left_body, right_body);
     } else {
+        differences(left_body, right_body, "", &mut emit);
+    }
+    let page = page.map_or_else(String::new, |p| format!(" page {p}"));
+    let comparison = if count == 0 { "MATCH" } else { "DIFF" };
+    println!(
+        "{comparison} {label}{page}: rebuilt {}; source {}; {count} differing paths",
+        size(rebuilt),
+        size(source),
+    );
+    if count == 0 {
         if let Some(error) = rebuilt.filter(|reply| reply.is_error) {
             println!("  both returned {}", error.body);
         }
-        0
     }
+    usize::from(count != 0)
 }
 
-fn display(value: Option<&Value>) -> String {
-    value.map_or_else(|| "<absent>".into(), Value::to_string)
-}
-
-struct Difference {
-    pointer: String,
-    rebuilt: String,
-    source: String,
-}
-
-fn first_difference(rebuilt: &Value, source: &Value, pointer: &str) -> Option<Difference> {
-    fn at(rebuilt: Option<&Value>, source: Option<&Value>, pointer: String) -> Option<Difference> {
-        match (rebuilt, source) {
-            (Some(rebuilt), Some(source)) => first_difference(rebuilt, source, &pointer),
-            _ => Some(Difference {
-                pointer,
-                rebuilt: display(rebuilt),
-                source: display(source),
-            }),
-        }
+fn differences(
+    rebuilt: Option<&Value>,
+    source: Option<&Value>,
+    path: &str,
+    emit: &mut impl FnMut(&str, Option<&Value>, Option<&Value>),
+) {
+    if rebuilt == source {
+        return;
     }
-
     match (rebuilt, source) {
-        (Value::Object(rebuilt), Value::Object(source)) => rebuilt
-            .keys()
-            .chain(source.keys())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .find_map(|key| {
+        (Some(Value::Object(rebuilt)), Some(Value::Object(source))) => {
+            for key in rebuilt.keys().chain(source.keys()).collect::<BTreeSet<_>>() {
                 let escaped = key.replace('~', "~0").replace('/', "~1");
-                at(
+                differences(
                     rebuilt.get(key),
                     source.get(key),
-                    format!("{pointer}/{escaped}"),
-                )
-            }),
-        (Value::Array(rebuilt), Value::Array(source)) => (0..rebuilt.len().max(source.len()))
-            .find_map(|index| {
-                at(
+                    &format!("{path}/{escaped}"),
+                    emit,
+                );
+            }
+        }
+        (Some(Value::Array(rebuilt)), Some(Value::Array(source))) => {
+            for index in 0..rebuilt.len().max(source.len()) {
+                differences(
                     rebuilt.get(index),
                     source.get(index),
-                    format!("{pointer}/{index}"),
-                )
-            }),
-        _ if rebuilt == source => None,
-        _ => Some(Difference {
-            pointer: pointer.into(),
-            rebuilt: rebuilt.to_string(),
-            source: source.to_string(),
-        }),
+                    &format!("{path}/{index}"),
+                    emit,
+                );
+            }
+        }
+        // If a whole subtree is missing, report its path and full value once.
+        _ => emit(path, rebuilt, source),
     }
 }
 
@@ -366,4 +387,68 @@ fn peak_rss_kib() -> Option<u64> {
             .parse()
             .ok()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_mask_keeps_provider_and_dated_instant() {
+        let body = json!({
+            "catalog_version": 91,
+            "source": "models.dev",
+            "resolved_at_ms": 123,
+            "next_page_token": "v1:91:123:provider:suffix",
+            "models": {},
+        });
+        for (current, expected_token) in [
+            (false, "v1:<version>:123:provider:suffix"),
+            (true, "v1:<version>:<instant>:provider:suffix"),
+        ] {
+            let mut reply = Reply {
+                body: body.clone(),
+                bytes: 1,
+                is_error: false,
+            };
+            mask(&mut reply, TOOL_GET, current).unwrap();
+            assert_eq!(reply.body["next_page_token"], expected_token);
+            assert_eq!(
+                reply.body.get("resolved_at_ms"),
+                (!current).then_some(&body["resolved_at_ms"])
+            );
+            assert!(
+                reply.body.get("catalog_version").is_none() && reply.body.get("source").is_none()
+            );
+            assert_eq!(reply.body["models"], body["models"]);
+        }
+    }
+
+    #[test]
+    fn full_diff_keeps_later_paths_and_distinguishes_absent_from_null() {
+        let rebuilt =
+            json!({"models": {"slash/~": {"first": null, "later": true}}, "tail": [1, 2]});
+        let source = json!({"models": {"slash/~": {"later": false}}, "tail": [1]});
+        let mut changes = Vec::new();
+        differences(
+            Some(&rebuilt),
+            Some(&source),
+            "",
+            &mut |path, left, right| {
+                changes.push((path.to_string(), left.cloned(), right.cloned()));
+            },
+        );
+        assert_eq!(
+            changes,
+            [
+                ("/models/slash~1~0/first".into(), Some(Value::Null), None),
+                (
+                    "/models/slash~1~0/later".into(),
+                    Some(json!(true)),
+                    Some(json!(false))
+                ),
+                ("/tail/1".into(), Some(json!(2)), None),
+            ]
+        );
+    }
 }
