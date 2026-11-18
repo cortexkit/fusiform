@@ -257,7 +257,7 @@ fn version_helper_callers_are_all_named_and_fenced() {
             "quality.rs:append_model_mark".into(),
             "quality_efforts.rs:append_effort_grade".into(),
             "quality_efforts.rs:append_workload_effort".into(),
-            "store_consumer.rs:apply_store_releases".into(),
+            "store_consumer.rs:apply_releases".into(),
             "local_overrides.rs:append_override_grade".into(),
             "local_overrides.rs:append_override_mark".into(),
             "local_overrides.rs:append_override_effort".into(),

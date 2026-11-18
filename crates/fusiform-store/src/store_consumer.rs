@@ -90,7 +90,7 @@ fn history_read_error(error: serde_json::Error) -> CatalogError {
 }
 
 fn write_tables(
-    tx: &Connection,
+    writer: &mut RowWriter<'_>,
     tables: &ImportedTables,
     arrival: Option<&ReleaseArrival>,
 ) -> rusqlite::Result<()> {
@@ -102,7 +102,6 @@ fn write_tables(
             "unexpected catalog history table {name:?}"
         )));
     }
-    let mut writer = RowWriter::new(tx);
     for &table in STORE_HISTORY_TABLES.iter().chain([&DOCUMENT_TABLE]) {
         let Some(rows) = tables.get(table) else {
             continue;
@@ -126,15 +125,19 @@ fn write_tables(
     Ok(())
 }
 
+type InsertRow<'a> = &'a dyn Fn(&str, &[&str], &[rusqlite::types::Value]) -> rusqlite::Result<()>;
+
 struct RowWriter<'a> {
     tx: &'a Connection,
+    insert: InsertRow<'a>,
     valid_columns: BTreeMap<&'static str, BTreeSet<String>>,
 }
 
 impl<'a> RowWriter<'a> {
-    fn new(tx: &'a Connection) -> Self {
+    fn new(tx: &'a Connection, insert: InsertRow<'a>) -> Self {
         Self {
             tx,
+            insert,
             valid_columns: BTreeMap::new(),
         }
     }
@@ -184,16 +187,7 @@ impl<'a> RowWriter<'a> {
                 return Ok(());
             }
         }
-        // Table and column names were checked above; row data remains bound.
-        let sql = format!(
-            "INSERT INTO {table} ({}) VALUES ({})",
-            columns.join(","),
-            vec!["?"; columns.len()].join(",")
-        );
-        self.tx
-            .prepare_cached(&sql)?
-            .execute(params_from_iter(values.iter()))?;
-        Ok(())
+        (self.insert)(table, &columns, &values)
     }
 }
 
@@ -277,7 +271,7 @@ impl CatalogStore {
         arrivals: &[ReleaseArrival],
     ) -> Result<(), CatalogError> {
         self.apply_releases(
-            base.map(|base| move |tx: &Connection| write_tables(tx, base, None)),
+            base.map(|base| move |writer: &mut RowWriter<'_>| write_tables(writer, base, None)),
             arrivals,
         )
     }
@@ -301,10 +295,9 @@ impl CatalogStore {
         arrivals: &[ReleaseArrival],
     ) -> Result<(), CatalogError> {
         self.apply_releases(
-            Some(|tx: &Connection| {
+            Some(|writer: &mut RowWriter<'_>| {
                 // The wire orders tables by name. Install observations first so
                 // SQLite checks era and artifact foreign keys on each insert.
-                let mut writer = RowWriter::new(tx);
                 for tables in [Tables::Observations, Tables::Rest] {
                     input.rewind().map_err(|error| invalid(error.to_string()))?;
                     history_base::read(&mut input, tables, |table, row| {
@@ -320,7 +313,7 @@ impl CatalogStore {
 
     fn apply_releases(
         &self,
-        write_base: Option<impl FnOnce(&Connection) -> rusqlite::Result<()>>,
+        write_base: Option<impl FnOnce(&mut RowWriter<'_>) -> rusqlite::Result<()>>,
         arrivals: &[ReleaseArrival],
     ) -> Result<(), CatalogError> {
         if !self.is_store_mode() {
@@ -329,13 +322,25 @@ impl CatalogStore {
             ));
         }
         let rates_version = self.inner.with_conn_fenced(|tx| {
+            let insert = |table: &str, columns: &[&str], values: &[rusqlite::types::Value]| {
+                // The row writer validates table and column names; row values
+                // are passed as SQL parameters, never interpolated.
+                let sql = format!(
+                    "INSERT INTO {table} ({}) VALUES ({})",
+                    columns.join(","),
+                    vec!["?"; columns.len()].join(",")
+                );
+                tx.prepare_cached(&sql)?.execute(params_from_iter(values.iter()))?;
+                Ok(())
+            };
+            let mut writer = RowWriter::new(tx, &insert);
             let current = cursor(tx)?;
             if current.is_none() != write_base.is_some() || arrivals.is_empty() {
                 return Err(invalid("store bootstrap needs a base and releases; incremental apply needs an existing cursor"));
             }
             if let Some(write_base) = write_base {
                 require_empty_history(tx)?;
-                write_base(tx)?;
+                write_base(&mut writer)?;
             }
             let mut previous = current.as_ref().map_or(0, |r| r.release);
             let mut previous_curation = current.as_ref().map(|r| r.curation_hash.as_str());
@@ -345,7 +350,7 @@ impl CatalogStore {
                 if previous.checked_add(1) != Some(release.release) {
                     return Err(invalid(format!("release {} does not follow {previous}", release.release)));
                 }
-                write_tables(tx, &arrival.rows, Some(arrival))?;
+                write_tables(&mut writer, &arrival.rows, Some(arrival))?;
                 tx.execute("INSERT INTO store_release (release, state_hash, curation_hash, applied_at_ms) VALUES (?1, ?2, ?3, ?4)",
                     params![release.release, release.state_hash, release.curation_hash, release.applied_at_ms])?;
                 let issued = advance_catalog_version_in(tx, None, Timestamp(release.applied_at_ms))?;
