@@ -391,6 +391,7 @@ fn every_response_type_round_trips() {
         }),
         source: "models.dev".into(),
         catalog_version: 7,
+        rates_version: 6,
         model_count: 6_270,
         models_priced: Some(5_850),
         history_begins_at_ms: Some(1_786_529_249_396),
@@ -461,6 +462,7 @@ fn a_status_response_without_the_newest_fields_still_parses() {
         serde_json::from_str(older).expect("a response from an older module must parse");
 
     assert_eq!(parsed.recent_polls.len(), 1);
+    assert_eq!(parsed.rates_version, 0);
     assert!(
         parsed.recent_polls[0].changes.is_none(),
         "an older module reports no composition, which is absence rather than zero"

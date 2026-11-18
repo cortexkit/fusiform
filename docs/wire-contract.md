@@ -1160,6 +1160,7 @@ What fusiform has been doing. Request: optional `source`, optional `polls`
 | Field | Meaning |
 | --- | --- |
 | `catalog_version` | §3; a cursor to compare, not a snapshot identity |
+| `rates_version` | rate change cursor in milliseconds; compare with a previous reply, not a snapshot identity |
 | `bus_published_version` | last catalog version acknowledged by the bus in this process; null before the first acknowledgement |
 | `bus_publish_failures` | failed publication attempts during this process lifetime; starts at 0 |
 | `bus_last_error` | text from the last observed publication error, null before any error; retained after recovery |
@@ -1178,6 +1179,17 @@ wrote nothing (`route::status_reports_what_each_poll_changed`,
 `route::a_poll_that_wrote_nothing_reports_no_changes`). Optional fields absent
 from an older module's response still decode
 (`deps::a_status_response_without_the_newest_fields_still_parses`).
+
+`rates_version` takes the newly issued `catalog_version` (`max(now_ms, current + 1)`)
+at each process start, so changes to compiled-in prices and curation are visible,
+and on polls that write or withdraw an era for `rate.*`, `existence`,
+`model.canonical_id`, `model.family`, or `model.open_weights`. It is derived, not
+stored separately, and never exceeds `catalog_version`. Grade, effort grade,
+workload, decommission, local overrides, corrections, and artifact marks or
+retractions do not advance it. In store mode, applying a published release
+advances `catalog_version` but not `rates_version`; compare `catalog_version`
+instead. Also use `catalog_version` when an older producer does not report
+`rates_version` (decoded as zero).
 
 The three bus fields are also health metrics and never make health Degraded.
 Older responses decode with null versions/errors and a zero failure count.

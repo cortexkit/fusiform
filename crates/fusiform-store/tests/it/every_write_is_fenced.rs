@@ -250,6 +250,7 @@ fn version_helper_callers_are_all_named_and_fenced() {
     assert_eq!(
         callers,
         BTreeSet::from([
+            "lib.rs:append_eras_inner".into(),
             "lib.rs:advance_catalog_version".into(),
             "lib.rs:advance_catalog_version_at_start".into(),
             "quality.rs:append_quality_grade_with_effort".into(),

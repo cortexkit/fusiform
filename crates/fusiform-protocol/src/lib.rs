@@ -2409,6 +2409,18 @@ pub struct StatusResponse {
     /// It is also not a cursor you SEND: `catalog.status` takes no instant, only
     /// a count of recent polls.
     pub catalog_version: i64,
+    /// A rate change cursor to compare with a previous reply, not a snapshot
+    /// identity. It is derived, not stored separately: it takes the newly issued
+    /// `catalog_version` (milliseconds) at each process start and on polls that
+    /// write or withdraw a `rate.*`, `existence`, `model.canonical_id`,
+    /// `model.family`, or `model.open_weights` era, and otherwise stays put.
+    /// Grade, effort grade, workload, decommission, local overrides, corrections,
+    /// and artifact marks or retractions do not move it. In store mode, applying
+    /// a published release does not move it; compare `catalog_version` instead.
+    /// An older producer may omit this field, which decodes as zero; use
+    /// `catalog_version` for invalidation in that case too.
+    #[serde(default)]
+    pub rates_version: u64,
     /// Stored upstream models only. Curated rows and aliases are computed at
     /// read time and do not increase this count or `models_priced`.
     pub model_count: usize,

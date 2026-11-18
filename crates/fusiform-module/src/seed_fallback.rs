@@ -32,6 +32,7 @@ impl SeedFallback {
     pub(crate) fn prepare(
         descriptor: &StorageDescriptor,
         build: bool,
+        minimum_version: i64,
     ) -> Result<Option<Self>, Box<dyn std::error::Error>> {
         let StorageBackend::Sqlite { path } = &descriptor.backend else {
             return Ok(None);
@@ -65,7 +66,8 @@ impl SeedFallback {
             &cache_lifetimes::stored_rules(cache_lifetimes::rules()),
             now,
         )?;
-        store.advance_catalog_version_at_start(fusiform_core::Timestamp(now))?;
+        store
+            .advance_catalog_version_at_start(fusiform_core::Timestamp(now.max(minimum_version)))?;
         Ok(Some(Self {
             store: Arc::new(store),
             _directory: cleanup,
@@ -120,7 +122,11 @@ mod tests {
         )
         .unwrap();
 
-        let seed = SeedFallback::prepare(&descriptor, true).unwrap().unwrap();
+        let floor = 9_000_000_000_000;
+        let seed = SeedFallback::prepare(&descriptor, true, floor)
+            .unwrap()
+            .unwrap();
+        assert_eq!(seed.store.rates_version(), floor as u64);
         let seeded = fusiform_module::route::serve_catalog_get(
             &seed.store,
             br#"{"provider_id":"anthropic","model_id":"claude-sonnet-4-5"}"#,
@@ -152,7 +158,9 @@ mod tests {
             .unwrap();
         drop(seed);
         assert!(!folder.exists());
-        assert!(SeedFallback::prepare(&descriptor, false).unwrap().is_none());
+        assert!(SeedFallback::prepare(&descriptor, false, floor)
+            .unwrap()
+            .is_none());
         assert_eq!(selected.latest_store_release().unwrap().unwrap().release, 1);
     }
 }

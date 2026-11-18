@@ -900,6 +900,9 @@ fn print_status(response: &serde_json::Value) {
             .and_then(|v| v.as_i64())
             .unwrap_or(-1)
     );
+    if let Some(rates_version) = get("rates_version").and_then(|v| v.as_u64()) {
+        println!("rates version    {rates_version}");
+    }
     let models = get("model_count").and_then(|v| v.as_i64()).unwrap_or(-1);
     // Pricing coverage beside the model total, because the total cannot express
     // it: measured on the live catalog, 420 of 6,293 models carry no rate at

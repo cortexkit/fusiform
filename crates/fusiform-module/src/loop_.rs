@@ -399,9 +399,9 @@ fn apply_with_count_reader(
             )
             .map_err(TickError::Store)?;
 
-            let eras_written = ctx
+            let (eras_written, next_version) = ctx
                 .store
-                .append_eras(&plan.eras)
+                .append_poll_eras(&plan.eras, observation_id, Timestamp(now_ms))
                 .map_err(TickError::Store)?;
             // This count only refreshes health telemetry; its failure must not
             // turn an already-appended ingest into a failed poll.
@@ -416,19 +416,6 @@ fn apply_with_count_reader(
                 }
             }
             ctx.signals.wrote(now_ms);
-
-            // The version advances only after the eras are durable. A version
-            // published ahead of its content would have consumers refuse the
-            // push that carried it, permanently: they would hold a high-water
-            // mark for a catalog they never received.
-            //
-            // The store derives the value rather than taking one from here: it
-            // is `max(now_ms, current + 1)` so a restore cannot rewind it, and
-            // that derivation belongs next to the counter it protects.
-            let next_version = ctx
-                .store
-                .advance_catalog_version(observation_id, Timestamp(now_ms))
-                .map_err(TickError::Store)?;
 
             Ok(TickReport {
                 outcome: TickOutcome::Changed {

@@ -515,6 +515,7 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
         .recent_observations(source, request.polls.unwrap_or(10))
         .map_err(|e| store_error(&e))?;
     let era_count = store.era_count(source).map_err(|e| store_error(&e))?;
+    let rates_version = store.rates_version();
     let catalog_version = store.catalog_version().map_err(|e| store_error(&e))?;
 
     // Count visible existence and rate facts without materializing their values.
@@ -550,6 +551,7 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
         bus_publish_failures: 0,
         bus_last_error: None,
         catalog_version,
+        rates_version,
         failures,
         // Read from the contract table rather than collected from the snapshot.
         //

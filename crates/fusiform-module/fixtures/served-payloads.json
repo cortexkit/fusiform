@@ -8387,6 +8387,7 @@
       "history_begins_at_ms": 1000,
       "model_count": 20,
       "models_priced": 14,
+      "rates_version": 0,
       "recent_polls": [
         {
           "detail": "upstream returned 503",

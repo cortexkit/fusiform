@@ -63,6 +63,7 @@ pub struct CatalogStore {
     path: std::path::PathBuf,
     instance_id: u64,
     catalog_changes: tokio::sync::Notify,
+    rates_version: AtomicU64,
     store_mode: bool,
 }
 
@@ -265,8 +266,10 @@ impl CatalogStore {
             path: std::path::PathBuf::from(path),
             instance_id: NEXT_STORE_INSTANCE.fetch_add(1, Ordering::Relaxed),
             catalog_changes: tokio::sync::Notify::new(),
+            rates_version: AtomicU64::new(0),
             store_mode,
         };
+        store.record_rates_version(store.catalog_version()?);
         if store_mode && store.latest_store_release()?.is_none() {
             store.raw_conn(store_consumer::require_empty_history)?;
         }
@@ -431,7 +434,38 @@ impl CatalogStore {
         if eras.is_empty() {
             return Ok(0);
         }
+        self.append_eras_inner(eras, None).map(|(count, _)| count)
+    }
 
+    /// Commit a changed poll's eras and catalog version together. Publish the
+    /// derived rates version only after the transaction succeeds.
+    pub fn append_poll_eras(
+        &self,
+        eras: &[NewEra],
+        observation_id: i64,
+        now: Timestamp,
+    ) -> Result<(usize, i64), CatalogError> {
+        let (count, issued) = self.append_eras_inner(eras, Some((observation_id, now)))?;
+        let issued = issued.expect("appending poll eras always issues a catalog version");
+        if eras.iter().any(|era| {
+            let key = era.fact_key.as_str();
+            key.starts_with(prefix::RATE)
+                || matches!(
+                    key,
+                    "existence" | "model.canonical_id" | "model.family" | "model.open_weights"
+                )
+        }) {
+            self.record_rates_version(issued);
+        }
+        self.signal_catalog_changed();
+        Ok((count, issued))
+    }
+
+    fn append_eras_inner(
+        &self,
+        eras: &[NewEra],
+        poll: Option<(i64, Timestamp)>,
+    ) -> Result<(usize, Option<i64>), CatalogError> {
         // Resolve the window's near edge per (source, boundary instant), before
         // the write transaction. Keyed on the boundary as well as the source
         // because the edge is "the last confirming observation before THIS
@@ -587,7 +621,12 @@ impl CatalogStore {
                 )?;
                 count += 1;
             }
-            Ok(count)
+            let issued = poll
+                .map(|(observation_id, now)| {
+                    advance_catalog_version_in(tx, Some(observation_id), now)
+                })
+                .transpose()?;
+            Ok((count, issued))
         })?;
 
         Ok(written)
@@ -1264,6 +1303,18 @@ impl CatalogStore {
         Ok(v)
     }
 
+    /// The catalog version issued at startup or at the last rate-changing poll.
+    /// Read this before `catalog_version` when serving the pair so a concurrent
+    /// commit cannot make the rates version appear newer than the catalog.
+    pub fn rates_version(&self) -> u64 {
+        self.rates_version.load(Ordering::Acquire)
+    }
+
+    fn record_rates_version(&self, issued: i64) {
+        self.rates_version
+            .fetch_max(issued as u64, Ordering::Release);
+    }
+
     /// A coalesced wake after a committed version advance, not a version payload.
     pub async fn catalog_changed(&self) {
         self.catalog_changes.notified().await;
@@ -1417,7 +1468,7 @@ impl CatalogStore {
         Ok(issued)
     }
 
-    /// Advance the version once when a process starts serving.
+    /// Advance both versions once when a process starts serving.
     ///
     /// Compiled-in data (aliases, curated rows, overrides, planes) changes with
     /// the binary, not with a poll, and readers refetch only when the version
@@ -1428,6 +1479,7 @@ impl CatalogStore {
         let issued = self
             .inner
             .with_conn_fenced(|tx| advance_catalog_version_in(tx, None, now))?;
+        self.record_rates_version(issued);
         self.signal_catalog_changed();
         Ok(issued)
     }

@@ -224,15 +224,21 @@ impl ModuleHandler for Fusiform {
                     return;
                 }
             };
-            match SeedFallback::prepare(&descriptor, bootstrap) {
-                Ok(fallback) => {
-                    *self.fallback.lock().unwrap_or_else(|p| p.into_inner()) =
-                        fallback.map(Arc::new);
-                }
+            let floor = (store.rates_version() as i64).saturating_add(1);
+            let fallback = match SeedFallback::prepare(&descriptor, bootstrap, floor) {
+                Ok(fallback) => fallback,
                 Err(error) => {
-                    eprintln!("fusiform: built-in snapshot fallback unavailable: {error}")
+                    eprintln!("fusiform: built-in snapshot fallback unavailable: {error}");
+                    None
                 }
-            }
+            };
+            // Once a release replaces the seed fallback, the selected store
+            // must not offer a cursor at or below one already served by the seed.
+            let startup_at = fallback.as_ref().map_or_else(now_ms, |seed| {
+                now_ms().max((seed.store.rates_version() as i64).saturating_add(1))
+            });
+            advance_versions_at_start(&store, startup_at);
+            *self.fallback.lock().unwrap_or_else(|p| p.into_inner()) = fallback.map(Arc::new);
             *self.store.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&store));
             if !bootstrap {
                 tokio::spawn(fusiform_module::catalog_bus::run_publisher(
@@ -365,19 +371,7 @@ impl ModuleHandler for Fusiform {
         record_fact_overrides_at_start(&store, now_ms());
         record_cache_lifetimes_at_start(&store, now_ms());
 
-        // Move the catalog version once per start, after the compiled data
-        // above is in place. A deploy that changes only compiled data (an alias,
-        // a curated row, an override) does not write a poll era, and readers
-        // refetch only when the version moves; without this they would keep
-        // serving the previous build's view until the next upstream change.
-        // Not fatal: reads are correct either way, only reader refresh waits.
-        if let Err(e) = store.advance_catalog_version_at_start(fusiform_core::Timestamp(now_ms())) {
-            eprintln!(
-                "fusiform: could not advance the catalog version at start, so \
-                 readers that refetch on a version change keep their previous \
-                 copy until the next upstream change: {e}"
-            );
-        }
+        advance_versions_at_start(&store, now_ms());
 
         // Adopt the catalog's real age before the loop starts. The staleness
         // signal lives in an atomic, so a restart empties it — and a module
@@ -446,6 +440,15 @@ fn record_cache_lifetimes_at_start(store: &CatalogStore, boot_at_ms: i64) {
             "fusiform: could not record cache lifetime rules, so point-in-time reads \
              serve what the store already held; current reads are unaffected: {e}"
         ),
+    }
+}
+
+fn advance_versions_at_start(store: &CatalogStore, at_ms: i64) {
+    if let Err(e) = store.advance_catalog_version_at_start(fusiform_core::Timestamp(at_ms)) {
+        eprintln!(
+            "fusiform: could not advance the catalog and rates versions at start, so \
+             readers that refetch on a version change may keep their previous copy: {e}"
+        );
     }
 }
 

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::{FailureClass, SourceId, Timestamp};
-use fusiform_store::CatalogStore;
+use fusiform_store::{CatalogStore, QualityGrade};
 
 use fusiform_module::fetch::FetchOutcome;
 use fusiform_module::health;
@@ -436,6 +436,92 @@ fn the_version_advances_once_per_change() {
         );
         previous = issued;
     }
+}
+
+fn status_versions(store: &CatalogStore) -> (u64, u64) {
+    let response = fusiform_module::route::serve_status(store, b"").unwrap();
+    let wire = serde_json::to_value(response).unwrap();
+    (
+        wire["catalog_version"].as_u64().unwrap(),
+        wire["rates_version"]
+            .as_u64()
+            .expect("catalog.status must serve an integer rates_version"),
+    )
+}
+
+#[test]
+fn rates_version_tracks_rate_polls_but_not_renames_or_grades() {
+    let f = fixture();
+    f.store
+        .advance_catalog_version_at_start(Timestamp(1_000))
+        .unwrap();
+    run(&f, body(FIXTURE, None), 2_000);
+    let before = status_versions(&f.store);
+
+    let mut changed: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
+    changed["anthropic"]["models"]["claude-sonnet-4-5"]["cost"]["input"] = serde_json::json!(4);
+    let report = run(
+        &f,
+        body(&serde_json::to_vec(&changed).unwrap(), None),
+        3_000,
+    );
+    assert_eq!(report.eras_written, 1);
+    let after_rate = status_versions(&f.store);
+    assert_eq!(after_rate, (3_000, 3_000));
+    assert!(after_rate.0 > before.0 && after_rate.1 > before.1);
+
+    changed["anthropic"]["models"]["claude-sonnet-4-5"]["name"] =
+        serde_json::json!("Renamed Sonnet");
+    let report = run(
+        &f,
+        body(&serde_json::to_vec(&changed).unwrap(), None),
+        4_000,
+    );
+    assert_eq!(report.eras_written, 1);
+    assert_eq!(status_versions(&f.store), (4_000, after_rate.1));
+
+    f.store
+        .append_quality_grade(
+            "anthropic/claude-sonnet-4-5",
+            None,
+            Some(&QualityGrade::Chat {
+                elo: 1100.into(),
+                eq: 1000.into(),
+            }),
+            "user",
+            "Update quality judgment",
+            5_000,
+        )
+        .unwrap();
+    assert_eq!(status_versions(&f.store), (5_000, after_rate.1));
+}
+
+#[test]
+fn rates_version_restarts_at_the_new_catalog_version() {
+    let f = fixture();
+    f.store
+        .advance_catalog_version_at_start(Timestamp(1_000))
+        .unwrap();
+    let original = status_versions(&f.store);
+    assert_eq!(original, (1_000, 1_000));
+    let Fixture { store, _dir, .. } = f;
+    drop(store);
+
+    let reopened = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: _dir.path().join("store.db").to_string_lossy().into_owned(),
+        },
+    })
+    .unwrap();
+    reopened
+        .advance_catalog_version_at_start(Timestamp(900))
+        .unwrap();
+    let restarted = status_versions(&reopened);
+    assert_eq!(restarted, (1_001, 1_001));
+    assert!(restarted.1 > original.1);
 }
 
 /// Signals track what actually happened, so health cannot be fooled.
