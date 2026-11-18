@@ -4,6 +4,7 @@
 !.cortexkit/WORKER.md
 __pycache__/
 /target
+/dist/
 
 # Tooling-generated codebase summaries. Ignored rather than committed because
 # they are regenerated from the tree and would go stale silently — and because

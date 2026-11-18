@@ -1,6 +1,6 @@
 //! Prepare seed inputs, then measure each poll in a separate process.
 //!
-//!     measure_seed prepare <work-dir>
+//!     measure_seed prepare <work-dir>  # includes snapshot.json for the WASM measurement
 //!     /usr/bin/time -v measure_seed rebuild <work-dir>
 //!     /usr/bin/time -v measure_seed rebuild-stream <work-dir>
 //!     /usr/bin/time -v measure_seed one <work-dir>
@@ -16,7 +16,9 @@ use fusiform_curate::input_audio::{
     add_output_evidence, evidence_from, load_for_schema, load_reporting_rejects,
 };
 use fusiform_publish::{FactIndex, publish_step};
-use fusiform_release::{ProviderFacts, Upstream};
+use fusiform_release::{
+    ProviderFacts, SigningKey, Snapshot, Upstream, sign_envelope, state_hash, upstream_state_hash,
+};
 use serde_json::{Value, json};
 
 const SEED: &[u8] = include_bytes!("../../fusiform-module/data/models-dev-seed.json");
@@ -114,7 +116,7 @@ fn prepare(path: &Path) {
         })
         .collect();
     write_json(path, "upstream.json", &upstream);
-    drop(upstream);
+    write_snapshot(path, upstream);
     println!(
         "snapshot_upstream_bytes={}",
         fs::metadata(path.join("upstream.json")).unwrap().len()
@@ -142,6 +144,35 @@ fn prepare(path: &Path) {
     }
     assert_eq!(context_changes, 0);
     write_json(path, "large.json", &edited);
+}
+
+fn write_snapshot(path: &Path, upstream: Upstream) {
+    let mut snapshot: Snapshot = serde_json::from_slice(include_bytes!(
+        "../../fusiform-release/fixtures/release-format-v1/snapshot.json"
+    ))
+    .unwrap();
+    snapshot.state.upstream = upstream;
+    let curation = &mut snapshot.state.curation_set;
+    for (name, doc) in [
+        ("input-audio-per-token", INPUT_AUDIO),
+        ("output-audio-per-token", OUTPUT_AUDIO),
+    ] {
+        curation
+            .vendor_facts
+            .insert(name.to_owned(), serde_json::from_str(doc).unwrap());
+    }
+    let envelope = &mut snapshot.envelope;
+    envelope.upstream_hash = upstream_state_hash(&snapshot.state.upstream);
+    envelope.curation_hash = curation.curation_hash();
+    envelope.state_hash = state_hash(envelope.curation_hash, envelope.upstream_hash);
+    // The release-format test key signs the generated benchmark snapshot only.
+    snapshot.signatures = sign_envelope(
+        envelope,
+        "release-format-v1-test-key",
+        &SigningKey::from_bytes(&[42; 32]),
+    )
+    .unwrap();
+    write_json(path, "snapshot.json", &snapshot);
 }
 
 fn audit_tiers(bytes: &[u8]) {

@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/fusiform-core",
     "crates/fusiform-protocol", "crates/fusiform-store", "crates/fusiform-module", "crates/fusiform-cli",
     "crates/fusiform-testkit", "crates/fusiform-curate", "crates/fusiform-release",
-    "crates/fusiform-publish"]
+    "crates/fusiform-publish", "crates/fusiform-publish-wasm"]
 
 # The daemon contract is a library rather than a template: HELLO, HELLO_ACK,
 # route binding, health control and the frame lifecycle all live in
@@ -39,3 +39,12 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 # caches.
 [profile.dev.package."*"]
 opt-level = 2
+
+# Only the vendored WASM build selects this profile.
+[profile.publish-wasm]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -195,6 +195,40 @@ jobs:
           rustup target add wasm32-unknown-unknown &&
             cargo build --locked -p fusiform-curate -p fusiform-release -p fusiform-publish --target wasm32-unknown-unknown
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install pinned publisher WebAssembly build tools
+        shell: bash
+        run: |
+          tools="$RUNNER_TEMP/publish-wasm-tools"
+          mkdir -p "$tools"
+          cd "$tools"
+          bindgen=wasm-bindgen-0.2.127-x86_64-unknown-linux-musl
+          curl -fsSLo "$bindgen.tar.gz" "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.127/$bindgen.tar.gz"
+          echo "61d4a7dc85acfa0d2354ccc0b8361928c7e52a746d17f28ebaa795ed3dc1614a  $bindgen.tar.gz" | sha256sum -c -
+          tar -xzf "$bindgen.tar.gz" --strip-components=1 "$bindgen/wasm-bindgen"
+          binaryen=binaryen-version_120-x86_64-linux
+          curl -fsSLo "$binaryen.tar.gz" "https://github.com/WebAssembly/binaryen/releases/download/version_120/$binaryen.tar.gz"
+          echo "ddb097af51d1bdb17300d986b0de7d97422f1933dedb4c9eda3510e0bf4076cc  $binaryen.tar.gz" | sha256sum -c -
+          tar -xzf "$binaryen.tar.gz" --strip-components=2 binaryen-version_120/bin/wasm-opt
+          echo "$tools" >> "$GITHUB_PATH"
+
+      - name: Build and test vendorable publisher WebAssembly
+        shell: bash
+        run: |
+          scripts/build-publish-wasm.sh
+          node --test crates/fusiform-publish-wasm/tests/node.mjs
+          (cd dist/publish-wasm && sha256sum -c SHA256SUMS)
+
+      - name: Upload publisher WebAssembly
+        uses: actions/upload-artifact@v4
+        with:
+          name: fusiform-publish-wasm
+          path: dist/publish-wasm/
+          if-no-files-found: error
+
       # `--all-targets` so the integration tests run, which is where every
       # guard in this repository lives.
       #

@@ -43,10 +43,7 @@ pub fn sign_envelope(
     kid: &str,
     key: &SigningKey,
 ) -> Result<Signatures, SignatureError> {
-    envelope
-        .validate_parent()
-        .map_err(SignatureError::InvalidParent)?;
-    Ok(sign(envelope, kid, key))
+    Ok(sign(&envelope_signing_bytes(envelope)?, kid, key))
 }
 
 pub fn verify_envelope(
@@ -54,15 +51,12 @@ pub fn verify_envelope(
     signatures: &Signatures,
     pinned_keys: &BTreeMap<String, VerifyingKey>,
 ) -> Result<(), SignatureError> {
-    envelope
-        .validate_parent()
-        .map_err(SignatureError::InvalidParent)?;
-    verify(envelope, signatures, pinned_keys)
+    verify(&envelope_signing_bytes(envelope)?, signatures, pinned_keys)
 }
 
 /// Sign the canonical `head` body, without its enclosing signature fields.
 pub fn sign_head(head: &HeadBody, kid: &str, key: &SigningKey) -> Signatures {
-    sign(head, kid, key)
+    sign(&head_signing_bytes(head), kid, key)
 }
 
 pub fn verify_head(
@@ -70,22 +64,35 @@ pub fn verify_head(
     signatures: &Signatures,
     pinned_keys: &BTreeMap<String, VerifyingKey>,
 ) -> Result<(), SignatureError> {
-    verify(head, signatures, pinned_keys)
+    verify(&head_signing_bytes(head), signatures, pinned_keys)
+}
+
+/// Canonical envelope bytes for external Ed25519 signers.
+pub fn envelope_signing_bytes(envelope: &ReleaseEnvelope) -> Result<Vec<u8>, SignatureError> {
+    envelope
+        .validate_parent()
+        .map_err(SignatureError::InvalidParent)?;
+    Ok(signed_bytes(envelope))
+}
+
+/// Canonical head body bytes for external Ed25519 signers.
+pub fn head_signing_bytes(head: &HeadBody) -> Vec<u8> {
+    signed_bytes(head)
 }
 
 fn signed_bytes(body: &impl Serialize) -> Vec<u8> {
     canonical_json(&serde_json::to_value(body).expect("a valid signed body is JSON"))
 }
 
-fn sign(body: &impl Serialize, kid: &str, key: &SigningKey) -> Signatures {
+fn sign(bytes: &[u8], kid: &str, key: &SigningKey) -> Signatures {
     Signatures {
         kid: kid.to_owned(),
-        sig: URL_SAFE_NO_PAD.encode(key.sign(&signed_bytes(body)).to_bytes()),
+        sig: URL_SAFE_NO_PAD.encode(key.sign(bytes).to_bytes()),
     }
 }
 
 fn verify(
-    body: &impl Serialize,
+    message: &[u8],
     signatures: &Signatures,
     pinned_keys: &BTreeMap<String, VerifyingKey>,
 ) -> Result<(), SignatureError> {
@@ -99,6 +106,6 @@ fn verify(
         .decode(&signatures.sig)
         .map_err(|_| SignatureError::InvalidEncoding)?;
     let signature = Signature::from_slice(&bytes).map_err(|_| SignatureError::InvalidEncoding)?;
-    key.verify_strict(&signed_bytes(body), &signature)
+    key.verify_strict(message, &signature)
         .map_err(|_| SignatureError::BadSignature)
 }
