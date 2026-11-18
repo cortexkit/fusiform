@@ -144,7 +144,7 @@ impl SnapshotDocs {
 
 pub fn fixtures() -> BTreeMap<&'static str, Vec<u8>> {
     let (r1, r2, _) = two_releases();
-    let base = wire(&r1);
+    let base = history_base(&r1);
     let day = history_day_bytes(DAY, &jsonl(&[&r2])).unwrap();
     let docs = SnapshotDocs::new(
         &r2,
@@ -163,10 +163,52 @@ pub fn fixtures() -> BTreeMap<&'static str, Vec<u8>> {
         snapshot_bytes(docs.inputs(&models_with_rename(), &ChargeUnitEvidence::default())).unwrap();
     BTreeMap::from([
         ("chain/base.json", base),
+        ("chain/release-1.json", wire(&r1)),
         ("chain/release-2.json", wire(&r2)),
         ("chain/snapshot.json", snapshot),
         ("chain/days/2026-11-19.json", day),
     ])
+}
+
+fn history_base(import: &Release) -> Vec<u8> {
+    use fusiform_release::ChangeOp;
+
+    let at = import.envelope.upstream_observed_at_ms;
+    let era: Vec<_> = import
+        .change
+        .upstream
+        .iter()
+        .enumerate()
+        .map(|(i, op)| {
+            let ChangeOp::Set {
+                provider,
+                model,
+                fact,
+                value,
+            } = op
+            else {
+                panic!("the fixture starts from an empty upstream with only model-scoped facts");
+            };
+            json!({"id": i + 1, "source": "models.dev", "provider_id": provider, "model_id": model,
+            "fact_key": fact, "value_json": str::from_utf8(&wire(value)).unwrap(),
+            "boundary_at_ms": at, "boundary_kind": "seed", "prior_observation_at_ms": null,
+            "observation_id": null, "corrected_fields_json": null, "affected_from_ms": null,
+            "affected_until_ms": null, "correction_reason": null})
+        })
+        .collect();
+    let grade = &import.change.curation_set.as_ref().unwrap().grades["mini"];
+    wire(
+        json!({"format": "ck-models-history-base/v1", "release": 1, "tables": {
+            "cache_lifetime_era": [], "curated_model_era": [], "era": era, "fact_override_era": [],
+            "model_mark_era": [], "observation": [{"id": 1, "source": "models.dev", "observed_at_ms": at,
+                "outcome": "seeded", "failure_class": null, "detail": null, "normalized_hash": null,
+                "raw_hash": null, "etag": null, "duration_ms": null}],
+            "observation_artifact_event": [], "plan_price_era": [],
+            "quality_grade_era": [{"id": 1, "model": "mini", "elo": grade.elo.to_string(),
+                "eq": grade.eq.to_string(), "withdrawn": 0, "graded_by": "operator",
+                "reason": "Fixture grade", "recorded_at_ms": at, "grade": null, "kind": null}]
+        }}),
+    )
 }
 
 #[test]

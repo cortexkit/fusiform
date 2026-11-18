@@ -36,6 +36,8 @@ use serde::Deserialize;
 mod paging_tests;
 #[cfg(test)]
 mod publisher_tests;
+#[cfg(test)]
+mod release_import_tests;
 
 mod dated_model;
 mod history;
@@ -1229,6 +1231,9 @@ fn serve_catalog_get_prepared(
     } else {
         let query = CatalogQuery {
             source,
+            #[cfg(test)]
+            at: at.or_else(release_import_tests::current_at),
+            #[cfg(not(test))]
             at,
             presence: if request.include_retired {
                 Presence::IncludingRetired

@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash, webcrypto } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import * as wasm from '../../../dist/publish-wasm/fusiform_publish_wasm.js';
 
 import {
   build_release, canonical_json, envelope_signing_bytes, head_signing_bytes,
@@ -177,7 +178,7 @@ test('build and sign the release chain, history and snapshot for the Rust consum
   const r2 = await release(changed, curation, r1.env, 2n, start);
   const newCuration = Buffer.from(curation.toString().replace('"version":1', '"version":2'));
   const r3 = await release(unchanged, newCuration, r2.env, 3n, start + 86399999n);
-  assert.deepEqual(r1.wire, releaseFixture('chain/base.json'));
+  assert.deepEqual(r1.wire, releaseFixture('chain/release-1.json'));
   assert.deepEqual(r2.wire, releaseFixture('chain/release-2.json'));
   const dayFile = Buffer.from(history_day_bytes(day, r2.wire));
   assert.deepEqual(dayFile, releaseFixture('chain/days/2026-11-19.json'));
@@ -185,7 +186,7 @@ test('build and sign the release chain, history and snapshot for the Rust consum
   assert.deepEqual(JSON.parse(fullDay).releases.map((r) => r.envelope.release), [2, 3]);
 
   const history = [
-    { file: 'base.json', sha256: sha256(r1.wire) },
+    { file: 'base.json', sha256: sha256(releaseFixture('chain/base.json')) },
     { file: 'days/2026-11-19.json', sha256: sha256(dayFile) },
   ];
   const attestation = { release: r2.body.release, state_hash: r2.body.state_hash, history };
@@ -204,6 +205,38 @@ test('build and sign the release chain, history and snapshot for the Rust consum
   checkInRust({
     releases: [r1, r2, r3].map((r) => r.wire.toString()),
     snapshot: snapshot.toString(),
+    base: releaseFixture('chain/base.json').toString(),
     day: dayFile.toString(),
   }, 'chain');
+});
+
+test('snapshot from state streams the signed upstream and rejects tampering', async () => {
+  const { publicKey, sign } = await testKey();
+  const expected = releaseFixture('chain/snapshot.json');
+  const { envelope, state, signatures, history_attestation: attestation } = JSON.parse(expected);
+  const build = (input, releaseSignatures = signatures, historySignatures = attestation.signatures) =>
+    Buffer.from(wasm.snapshot_bytes_from_state(input, bytes(envelope), bytes(releaseSignatures),
+      bytes(attestation.body.history), bytes(historySignatures), publicKey));
+  // Splice the state bytes out of the golden without rounding its JSON numbers in JavaScript.
+  const stateWire = expected.subarray(expected.indexOf(Buffer.from(',"state":')) + 9, -1);
+  assert.deepEqual(build(stateWire), expected);
+
+  const refusal = (wire) => JSON.parse(wire).refusal.class;
+  const changedUpstream = Buffer.from(stateWire.toString().replace('"existence":"present"', '"existence":"withdrawn"'));
+  assert.equal(refusal(build(changedUpstream)), 'snapshot_hash_mismatch');
+  assert.equal(refusal(build(bytes({ ...state, curation_set: { ...state.curation_set, version: 99 } }))), 'snapshot_curation_mismatch');
+  assert.equal(refusal(build(stateWire, attestation.signatures)), 'invalid_release_signature');
+  assert.equal(refusal(build(stateWire, signatures, signatures)), 'invalid_history_signature');
+
+  // The other fixture has provider-level facts. They hash before model facts
+  // but serialize after models in a canonical provider object.
+  const providerFixture = JSON.parse(releaseFixture('snapshot.json'));
+  const body = { release: providerFixture.envelope.release, state_hash: providerFixture.envelope.state_hash,
+    history: attestation.body.history };
+  const providerHistorySignature = await sign(history_attestation_signing_bytes(bytes(body)));
+  const providerSnapshot = wasm.snapshot_bytes_from_state(bytes(providerFixture.state),
+    bytes(providerFixture.envelope), bytes(providerFixture.signatures), bytes(body.history),
+    bytes(providerHistorySignature), publicKey);
+  assert.deepEqual(providerSnapshot, canonical_json(bytes({ ...providerFixture,
+    history_attestation: { body, signatures: providerHistorySignature } })));
 });

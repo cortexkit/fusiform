@@ -110,11 +110,12 @@ fn generate() -> BTreeMap<&'static str, Vec<u8>> {
     };
     let head = HeadBody {
         release: release.envelope.release.try_into().unwrap(),
+        latest_snapshot: 2,
         published_at_ms: release.envelope.published_at_ms,
         state_hash,
     };
     let head = Head {
-        signatures: sign_head(&head, TEST_KID, &test_key),
+        signatures: sign_head(&head, TEST_KID, &test_key).unwrap(),
         head,
     };
     let mut files = BTreeMap::from([

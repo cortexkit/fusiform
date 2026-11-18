@@ -96,7 +96,7 @@ impl<'de> Deserialize<'de> for HashedFact {
 }
 
 // The map sorts decoded keys while retaining just digests and their identities.
-struct UniqueMap<V>(BTreeMap<String, V>);
+pub(crate) struct UniqueMap<V>(pub(crate) BTreeMap<String, V>);
 
 impl<'de, V: Deserialize<'de>> Deserialize<'de> for UniqueMap<V> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {

@@ -561,6 +561,8 @@ dependencies = [
  "fusiform-core",
  "fusiform-curate",
  "fusiform-release",
+ "fusiform-store",
+ "rusqlite",
  "serde",
  "serde_json",
 ]

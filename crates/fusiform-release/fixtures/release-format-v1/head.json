@@ -1,1 +1,1 @@
-{"head":{"published_at_ms":1795000000000,"release":2,"state_hash":"42ef6c2b89d498312fe99d8f61dbc292137497a813a23dced553fc5cf47da6ce"},"signatures":{"kid":"release-format-v1-test-key","sig":"lHZ59obbNunQTJ3pwyUY6PkmkdHvpGqF-ilOBqDvd4TCLpkdqr1dEilzvoriXpfN8-nsJCMnCYx-9C2W9ghUDw"}}
+{"head":{"latest_snapshot":2,"published_at_ms":1795000000000,"release":2,"state_hash":"42ef6c2b89d498312fe99d8f61dbc292137497a813a23dced553fc5cf47da6ce"},"signatures":{"kid":"release-format-v1-test-key","sig":"3LtR7QQVoxR8quQUpjYJOSJXdPRybl0KplB9WkLaJrLDaOWl4aUvflg02unXoVnHe0S_8VINK4ybNdRttwdWCw"}}

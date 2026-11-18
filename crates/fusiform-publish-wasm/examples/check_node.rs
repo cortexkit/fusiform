@@ -62,6 +62,7 @@ fn check_signed_chain() {
     struct Observations {
         releases: [String; 3],
         snapshot: String,
+        base: String,
         day: String,
     }
 
@@ -88,7 +89,7 @@ fn check_signed_chain() {
     verify_history_attestation(&attestation, &snapshot.envelope, &keys).unwrap();
     assert_eq!(attestation.body.history.len(), 2);
     attestation.body.history[0]
-        .verify_bytes(result.releases[0].as_bytes())
+        .verify_bytes(result.base.as_bytes())
         .unwrap();
     attestation.body.history[1]
         .verify_bytes(result.day.as_bytes())

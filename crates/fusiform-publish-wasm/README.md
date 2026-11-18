@@ -25,6 +25,7 @@ Release numbers and millisecond timestamps passed as arguments are `bigint`.
 | `publish_step` | Complete models.dev response, persisted index, audio evidence | `[summaryBytes, newIndexBytes]` on success; `[summaryBytes, null]` on a refusal |
 | `build_release` | `summary`, raw curation set, parent envelope (zero bytes for release 1), release number, publication time in ms, upstream observation time in ms | Canonical unsigned `{envelope, change}` or an in-band refusal |
 | `snapshot_bytes` | models.dev, audio evidence, envelope, raw curation set, release signatures, history file list, history signatures, pinned release public key | Canonical signed snapshot or an in-band refusal |
+| `snapshot_bytes_from_state` | Full `state.json`, envelope, release signatures, history file list, history signatures, pinned release public key | Canonical signed snapshot from an imported state or an in-band refusal |
 | `history_day_bytes` | UTC day as UTF-8 `YYYY-MM-DD`, then signed release objects as JSON Lines | Canonical `{day, releases}` with signatures retained, or an in-band refusal |
 | `canonical_json` | Any JSON value | Canonical bytes with curation number spellings preserved |
 | `index_from_snapshot` | Complete `snapshot.json` | Opaque index. Reads `state.upstream` one value at a time and checks the envelope's upstream hash; does not verify signatures or curation. |
@@ -46,7 +47,7 @@ The evidence is canonical JSON `{"input-audio-per-token": <doc>,
 curation set's `vendor_facts`, not just the provider IDs. See the publisher
 WASM crate's `fixtures/evidence.json` for an example from the embedded data.
 
-The three artifact builders return `{"refusal": {"class": ..., "detail": ...}}`
+The artifact builders return `{"refusal": {"class": ..., "detail": ...}}`
 on failure, never a partial artifact. Other API errors (including malformed
 indexes or evidence passed to `publish_step`) throw `Error` with a JSON
 message `{ "class": ..., "detail": ... }`. Branch on `class`, not `detail`.
@@ -56,6 +57,26 @@ JavaScript. Sign `envelope_signing_bytes` and attach `signatures` to the unsigne
 release without reserializing the `change` through JavaScript numbers. An
 unchanged curation version must have the parent's curation hash; if it matches
 and there are also no upstream operations, there is nothing to publish.
+The signed head's `latest_snapshot` must be between `1` and `release`
+(inclusive); it locates `snapshots/<latest_snapshot>.json` without probing.
+
+## Release 1 import
+
+Run the native importer against a SQLite backup-API copy, not the live store:
+
+```sh
+cargo run --locked -p fusiform-publish --example import-release -- \
+    backup.db new-output-dir <published-at-ms>
+```
+
+It writes canonical unsigned `release-1.json`, `state.json` and
+`history/base.json`. The host signs the release envelope and the history
+attestation over the hash of the exact `history/base.json` bytes, and passes
+the unmodified `state.json` to `snapshot_bytes_from_state` to build snapshot 1.
+The importer does not take a signing key. Imported legacy grades omit
+`graded_effort`, which was not recorded in the SQLite store.
+
+## History attestation
 
 A day file requires a nonempty run of consecutive releases published on the
 given UTC day. Release 1 belongs in the separately generated `history/base.json`.

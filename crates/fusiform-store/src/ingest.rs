@@ -439,7 +439,7 @@ pub fn states_the_same_upstream_claim(held: &str, incoming: &str) -> bool {
 /// than the current field list: the next annotation someone stores has to be
 /// named here or it moves the digest, and this function is where that decision
 /// gets made rather than discovered.
-fn upstream_claim_of(mut value: serde_json::Value) -> serde_json::Value {
+pub fn upstream_claim_of(mut value: serde_json::Value) -> serde_json::Value {
     if let Some(obj) = value.as_object_mut() {
         for annotation in PRODUCER_ANNOTATIONS {
             obj.remove(*annotation);

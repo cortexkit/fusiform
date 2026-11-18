@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 pub use ed25519_dalek::{SigningKey, VerifyingKey};
 
 use crate::{
-    HeadBody, HistoryAttestation, HistoryAttestationBody, InvalidParent, ReleaseEnvelope,
-    canonical_json,
+    HeadBody, HistoryAttestation, HistoryAttestationBody, InvalidLatestSnapshot, InvalidParent,
+    ReleaseEnvelope, canonical_json,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,6 +20,7 @@ pub struct Signatures {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignatureError {
     InvalidParent(InvalidParent),
+    InvalidLatestSnapshot(InvalidLatestSnapshot),
     UnknownKey,
     InvalidEncoding,
     InvalidPublicKey,
@@ -31,6 +32,7 @@ impl fmt::Display for SignatureError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidParent(err) => err.fmt(f),
+            Self::InvalidLatestSnapshot(err) => err.fmt(f),
             Self::UnknownKey => f.write_str("signature key id is not trusted"),
             Self::InvalidEncoding => {
                 f.write_str("expected an unpadded base64url Ed25519 signature")
@@ -66,8 +68,12 @@ pub fn verify_envelope(
 }
 
 /// Sign the canonical `head` body, without its enclosing signature fields.
-pub fn sign_head(head: &HeadBody, kid: &str, key: &SigningKey) -> Signatures {
-    sign(&head_signing_bytes(head), kid, key)
+pub fn sign_head(
+    head: &HeadBody,
+    kid: &str,
+    key: &SigningKey,
+) -> Result<Signatures, SignatureError> {
+    Ok(sign(&head_signing_bytes(head)?, kid, key))
 }
 
 pub fn verify_head(
@@ -75,7 +81,7 @@ pub fn verify_head(
     signatures: &Signatures,
     pinned_keys: &BTreeMap<String, VerifyingKey>,
 ) -> Result<(), SignatureError> {
-    verify(&head_signing_bytes(head), signatures, pinned_keys)
+    verify(&head_signing_bytes(head)?, signatures, pinned_keys)
 }
 
 /// Canonical envelope bytes for external Ed25519 signers.
@@ -87,8 +93,10 @@ pub fn envelope_signing_bytes(envelope: &ReleaseEnvelope) -> Result<Vec<u8>, Sig
 }
 
 /// Canonical head body bytes for external Ed25519 signers.
-pub fn head_signing_bytes(head: &HeadBody) -> Vec<u8> {
-    signed_bytes(head)
+pub fn head_signing_bytes(head: &HeadBody) -> Result<Vec<u8>, SignatureError> {
+    head.validate_latest_snapshot()
+        .map_err(SignatureError::InvalidLatestSnapshot)?;
+    Ok(signed_bytes(head))
 }
 
 /// Canonical history attestation body bytes for external Ed25519 signers.

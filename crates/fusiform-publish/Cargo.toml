@@ -10,7 +10,11 @@ description = "Upstream fact diffs for the curated model store publisher"
 fusiform-core = { path = "../fusiform-core" }
 fusiform-release = { path = "../fusiform-release" }
 serde.workspace = true
-serde_json = { workspace = true, features = ["arbitrary_precision"] }
+serde_json = { workspace = true, features = ["arbitrary_precision", "raw_value"] }
 
 [dev-dependencies]
 fusiform-curate = { path = "../fusiform-curate" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+fusiform-store = { path = "../fusiform-store" }
+rusqlite.workspace = true

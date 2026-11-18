@@ -153,11 +153,61 @@ pub struct Head {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct HeadBody {
     pub release: NonZeroU64,
+    pub latest_snapshot: u64,
     pub state_hash: Hash,
     pub published_at_ms: i64,
 }
+
+impl HeadBody {
+    pub fn validate_latest_snapshot(&self) -> Result<(), InvalidLatestSnapshot> {
+        if (1..=self.release.get()).contains(&self.latest_snapshot) {
+            Ok(())
+        } else {
+            Err(InvalidLatestSnapshot {
+                release: self.release,
+                latest_snapshot: self.latest_snapshot,
+            })
+        }
+    }
+}
+
+impl Serialize for HeadBody {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.validate_latest_snapshot()
+            .map_err(serde::ser::Error::custom)?;
+        Self::serialize(self, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for HeadBody {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let head = Self::deserialize(deserializer)?;
+        head.validate_latest_snapshot()
+            .map_err(serde::de::Error::custom)?;
+        Ok(head)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidLatestSnapshot {
+    pub release: NonZeroU64,
+    pub latest_snapshot: u64,
+}
+
+impl fmt::Display for InvalidLatestSnapshot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "latest_snapshot {} is outside 1..={}",
+            self.latest_snapshot, self.release
+        )
+    }
+}
+
+impl std::error::Error for InvalidLatestSnapshot {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -229,7 +279,20 @@ pub struct CurationSet {
 pub struct Grade {
     pub elo: Number,
     pub eq: Number,
-    pub graded_effort: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "nonempty_effort"
+    )]
+    pub graded_effort: Option<String>,
+}
+
+fn nonempty_effort<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    let effort = String::deserialize(deserializer)?;
+    if effort.is_empty() {
+        return Err(serde::de::Error::custom("an effort must not be empty"));
+    }
+    Ok(Some(effort))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -241,7 +304,12 @@ pub struct EffortGrade {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkloadEffort {
     pub default: String,
-    pub minimum: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "nonempty_effort"
+    )]
+    pub minimum: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

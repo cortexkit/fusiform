@@ -18,7 +18,7 @@ use fusiform_release::{ChangeOp, FactKeyRef, Hash, fact_hash};
 use index::IndexBuilder;
 pub use index::{FactIndex, IndexDecodeError};
 pub use recovery::{ReplayError, ReplayRefusal, SnapshotIndexError};
-pub use snapshot::{SnapshotInputs, snapshot_bytes};
+pub use snapshot::{SnapshotInputs, snapshot_bytes, snapshot_bytes_from_state};
 pub use snapshot_reader::SnapshotReadError;
 
 #[derive(Debug)]

@@ -96,6 +96,25 @@ pub fn snapshot_bytes(
 }
 
 #[wasm_bindgen]
+pub fn snapshot_bytes_from_state(
+    state: &[u8],
+    envelope: &[u8],
+    signatures: &[u8],
+    history_files: &[u8],
+    history_signatures: &[u8],
+    release_public_key: &[u8],
+) -> Vec<u8> {
+    artifacts::in_band(fusiform_publish::snapshot_bytes_from_state(
+        state,
+        envelope,
+        signatures,
+        history_files,
+        history_signatures,
+        release_public_key,
+    ))
+}
+
+#[wasm_bindgen]
 pub fn history_day_bytes(day: &[u8], releases_jsonl: &[u8]) -> Vec<u8> {
     let day = str::from_utf8(day)
         .map_err(|err| fusiform_release::ArtifactRefusal::new("invalid_day", err));

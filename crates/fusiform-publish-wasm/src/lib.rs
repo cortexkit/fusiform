@@ -169,10 +169,8 @@ fn envelope_signing_bytes(bytes: &[u8]) -> Result<Vec<u8>, Failure> {
 }
 
 fn head_signing_bytes(bytes: &[u8]) -> Result<Vec<u8>, Failure> {
-    Ok(fusiform_release::head_signing_bytes(&decode_json(
-        bytes,
-        "invalid_head",
-    )?))
+    fusiform_release::head_signing_bytes(&decode_json(bytes, "invalid_head")?)
+        .map_err(|err| Failure::new("invalid_head", err))
 }
 
 fn decode_json<'a, T: Deserialize<'a>>(bytes: &'a [u8], class: &'static str) -> Result<T, Failure> {

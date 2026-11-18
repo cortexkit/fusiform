@@ -154,7 +154,7 @@ fn release_head_and_snapshot_round_trip() {
     ));
 
     round_trip::<Head>(json!({
-        "head":{"release":2,"state_hash":release.envelope.state_hash,"published_at_ms":910},
+        "head":{"release":2,"latest_snapshot":1,"state_hash":release.envelope.state_hash,"published_at_ms":910},
         "signatures":signature
     }));
     round_trip::<Snapshot>(json!({
@@ -163,7 +163,7 @@ fn release_head_and_snapshot_round_trip() {
             "upstream":{"p":{"provider":{"provider.name":"P"},"models":{"m":{"existence":"present"}}}},
             "curation_set":{
                 "version":4, "approved_at_ms":null, "approved_drafts":["draft-42"],
-                "grades":{"m":{"elo":13,"eq":14,"graded_effort":"low"}},
+                "grades":{"m":{"elo":13,"eq":14,"graded_effort":"low"},"legacy":{"elo":12,"eq":13}},
                 "effort_grades":{"m":{"high":{"elo":15,"eq":16}}},
                 "kind_grades":{"m":{"chat":12}},
                 "workload_efforts":{"m":{"reason":{"default":"high","minimum":"low"}}},
@@ -172,6 +172,55 @@ fn release_head_and_snapshot_round_trip() {
             }
         }
     }));
+}
+
+#[test]
+fn unrecorded_graded_effort_is_omitted_and_empty_effort_is_refused() {
+    use fusiform_release::Grade;
+
+    round_trip::<Grade>(json!({"elo":13,"eq":14}));
+    round_trip::<Grade>(json!({"elo":13,"eq":14,"graded_effort":"low"}));
+    for invalid in [json!(""), Value::Null] {
+        assert!(
+            serde_json::from_value::<Grade>(json!({
+                "elo":13,"eq":14,"graded_effort":invalid
+            }))
+            .is_err()
+        );
+    }
+}
+
+#[test]
+fn workload_without_minimum_omits_it_and_empty_minimum_is_refused() {
+    use fusiform_release::WorkloadEffort;
+
+    round_trip::<WorkloadEffort>(json!({"default":"high"}));
+    round_trip::<WorkloadEffort>(json!({"default":"high","minimum":"low"}));
+    for invalid in [json!(""), Value::Null] {
+        assert!(
+            serde_json::from_value::<WorkloadEffort>(json!({
+                "default":"high","minimum":invalid
+            }))
+            .is_err()
+        );
+    }
+}
+
+#[test]
+fn head_only_accepts_an_existing_snapshot_number() {
+    use fusiform_release::{HeadBody, head_signing_bytes};
+
+    let valid = json!({"release":2,"latest_snapshot":1,"state_hash":sha256(b"state"),"published_at_ms":910});
+    let body = round_trip::<HeadBody>(valid.clone());
+    assert_eq!(head_signing_bytes(&body).unwrap(), canonical_json(&valid));
+    for latest_snapshot in [0, 3] {
+        let mut invalid = valid.clone();
+        invalid["latest_snapshot"] = json!(latest_snapshot);
+        assert!(serde_json::from_value::<HeadBody>(invalid).is_err());
+    }
+    let mut missing = valid;
+    missing.as_object_mut().unwrap().remove("latest_snapshot");
+    assert!(serde_json::from_value::<HeadBody>(missing).is_err());
 }
 
 #[test]
@@ -247,15 +296,16 @@ fn head_verification_accepts_only_unpadded_base64url() {
     let pinned_keys = BTreeMap::from([("test-key".into(), key.verifying_key())]);
     let head = HeadBody {
         release: NonZeroU64::new(2).unwrap(),
+        latest_snapshot: 1,
         state_hash: Hash::from_bytes([12; 32]),
         published_at_ms: 910,
     };
-    let signatures = sign_head(&head, "test-key", &key);
+    let signatures = sign_head(&head, "test-key", &key).unwrap();
     assert_eq!(signatures.sig.len(), 86);
     assert_eq!(verify_head(&head, &signatures, &pinned_keys), Ok(()));
 
     let tampered = HeadBody {
-        published_at_ms: 911,
+        latest_snapshot: 2,
         ..head.clone()
     };
     assert_eq!(
