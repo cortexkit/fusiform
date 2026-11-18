@@ -10,8 +10,10 @@ use fusiform_core::{normalize_models_dev, upstream_facts::facts_of};
 use fusiform_publish::FactIndex;
 use fusiform_release as release;
 use fusiform_release::{
-    ChangeOp, CurationSet, Decommissioned, Grade, ProviderFacts, State, Upstream, VendorDocument,
+    ChangeOp, CurationSet, Decommissioned, EffortGrade, Grade, ProviderFacts, State, Upstream,
+    VendorDocument, WorkloadEffort,
 };
+use fusiform_store::STORE_HISTORY_TABLES;
 use fusiform_store::{ingest::upstream_claim_of, serve::POINT_IN_TIME_SQL};
 use rusqlite::params;
 use rusqlite::types::ValueRef;
@@ -178,7 +180,9 @@ fn nullable_projection_keys() -> ImportResult<BTreeSet<String>> {
 fn curation(conn: &Connection, data: &Path) -> ImportResult<CurationSet> {
     let approved_at_ms = conn.query_row(
         "SELECT MAX(recorded_at_ms) FROM (SELECT recorded_at_ms FROM quality_grade_era \
-         UNION ALL SELECT recorded_at_ms FROM model_mark_era)",
+         UNION ALL SELECT recorded_at_ms FROM model_mark_era \
+         UNION ALL SELECT recorded_at_ms FROM effort_grade_era \
+         UNION ALL SELECT recorded_at_ms FROM workload_effort_era)",
         [],
         |row| row.get(0),
     )?;
@@ -195,7 +199,7 @@ fn curation(conn: &Connection, data: &Path) -> ImportResult<CurationSet> {
     };
 
     let mut stmt = conn.prepare(
-        "SELECT model, kind, elo, eq, grade FROM quality_grade_era q WHERE withdrawn = 0 \
+        "SELECT model, kind, elo, eq, grade, graded_effort FROM quality_grade_era q WHERE withdrawn = 0 \
          AND id = (SELECT MAX(id) FROM quality_grade_era WHERE model = q.model AND kind IS q.kind)",
     )?;
     let mut grades = stmt.query([])?;
@@ -215,10 +219,42 @@ fn curation(conn: &Connection, data: &Path) -> ImportResult<CurationSet> {
                 Grade {
                     elo: serde_json::from_str(&elo)?,
                     eq: serde_json::from_str(&eq)?,
-                    graded_effort: None,
+                    graded_effort: row.get(5)?,
                 },
             );
         }
+    }
+    let mut stmt = conn.prepare(
+        "SELECT model, effort, elo, eq FROM effort_grade_era e WHERE withdrawn = 0 \
+         AND id = (SELECT MAX(id) FROM effort_grade_era WHERE model = e.model AND effort = e.effort)",
+    )?;
+    let mut efforts = stmt.query([])?;
+    while let Some(row) = efforts.next()? {
+        let elo: String = row.get(2)?;
+        let eq: String = row.get(3)?;
+        set.effort_grades.entry(row.get(0)?).or_default().insert(
+            row.get(1)?,
+            EffortGrade {
+                elo: serde_json::from_str(&elo)?,
+                eq: serde_json::from_str(&eq)?,
+            },
+        );
+    }
+    let mut stmt = conn.prepare(
+        "SELECT model, workload, effort_default, effort_minimum, excluded \
+         FROM workload_effort_era w WHERE withdrawn = 0 AND id = ( \
+            SELECT MAX(id) FROM workload_effort_era WHERE model = w.model AND workload = w.workload)",
+    )?;
+    let mut workloads = stmt.query([])?;
+    while let Some(row) = workloads.next()? {
+        set.workload_efforts.entry(row.get(0)?).or_default().insert(
+            row.get(1)?,
+            WorkloadEffort {
+                default: row.get(2)?,
+                minimum: row.get(3)?,
+                excluded: row.get(4)?,
+            },
+        );
     }
     let mut stmt = conn.prepare(
         "SELECT model, reason FROM model_mark_era m WHERE decommissioned = 1 \
@@ -287,17 +323,9 @@ fn write_history(conn: &Connection, path: &Path) -> ImportResult<BTreeMap<&'stat
     let mut counts = BTreeMap::new();
     // Canonical table keys are byte-sorted; original row ids preserve SQLite's
     // tie order as well as the foreign keys to observations and artifact events.
-    for table in [
-        "cache_lifetime_era",
-        "curated_model_era",
-        "era",
-        "fact_override_era",
-        "model_mark_era",
-        "observation",
-        "observation_artifact_event",
-        "plan_price_era",
-        "quality_grade_era",
-    ] {
+    let mut tables = STORE_HISTORY_TABLES.to_vec();
+    tables.sort_unstable();
+    for table in tables {
         if !counts.is_empty() {
             out.write_all(b",")?;
         }

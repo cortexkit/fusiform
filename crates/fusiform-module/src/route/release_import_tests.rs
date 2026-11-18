@@ -1,4 +1,10 @@
-use std::{cell::Cell, collections::BTreeMap, fs, path::Path};
+use std::{
+    cell::Cell,
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    io::Cursor,
+    path::Path,
+};
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::{normalize_models_dev, BoundaryKind, ChargeUnitEvidence, ObservationOutcome};
@@ -9,10 +15,10 @@ use fusiform_release::{
     Snapshot,
 };
 use fusiform_store::{
-    ingest::plan_ingest, ImportedTables, NewEra, NewObservation, QualityGrade, ReleaseArrival,
-    StoreRelease,
+    ingest::plan_ingest, EffortGradeEra, ImportedTables, NewEra, NewObservation, QualityGrade,
+    ReleaseArrival, StoreRelease, WorkloadEffortEra,
 };
-use rusqlite::{params_from_iter, types::Value as SqlValue, Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
 
 use super::{serve_catalog_get_with_limits, CatalogStore, FactKey, SourceId, Timestamp};
@@ -32,28 +38,19 @@ pub(super) fn current_at() -> Option<Timestamp> {
 
 const KID: &str = "release-format-v1-test-key";
 const PUBLIC_KEY: &[u8] = br#"{"kid":"release-format-v1-test-key","public_key":"GX9rI-FshTLGq8g4-s1ep4m-DHaykgM0A5v6iz02jWE"}"#;
-const TABLES_IN_LOAD_ORDER: [&str; 9] = [
-    "observation",
-    "observation_artifact_event",
-    "era",
-    "quality_grade_era",
-    "model_mark_era",
-    "fact_override_era",
-    "curated_model_era",
-    "cache_lifetime_era",
-    "plan_price_era",
-];
-
-fn open(path: &Path) -> CatalogStore {
-    CatalogStore::open(&StorageDescriptor {
+fn descriptor(path: &Path) -> StorageDescriptor {
+    StorageDescriptor {
         module_id: "fusiform".into(),
         storage_namespace: "default".into(),
         isolation: Isolation::Module,
         backend: StorageBackend::Sqlite {
             path: path.to_string_lossy().into_owned(),
         },
-    })
-    .unwrap()
+    }
+}
+
+fn open(path: &Path) -> CatalogStore {
+    CatalogStore::open(&descriptor(path)).unwrap()
 }
 
 fn wire(value: impl serde::Serialize) -> Vec<u8> {
@@ -145,52 +142,6 @@ fn sign_snapshot(out: &Path, base: &[u8]) -> Snapshot {
     snapshot
 }
 
-fn load_history(conn: &mut Connection, base: &Value) {
-    assert_eq!(base["format"], "ck-models-history-base/v1");
-    assert_eq!(base["release"], 1);
-    let tables = base["tables"].as_object().unwrap();
-    assert_eq!(tables.len(), TABLES_IN_LOAD_ORDER.len());
-    conn.pragma_update(None, "foreign_keys", true).unwrap();
-    let tx = conn.transaction().unwrap();
-    // Some migrations seed the data tables. An install takes the exact rows
-    // from the attested import instead of combining them with migration seeds.
-    for table in TABLES_IN_LOAD_ORDER.into_iter().rev() {
-        tx.execute(&format!("DELETE FROM {table}"), []).unwrap();
-    }
-    for table in TABLES_IN_LOAD_ORDER {
-        let mut columns = tx.prepare(&format!("PRAGMA table_info({table})")).unwrap();
-        let names: Vec<String> = columns
-            .query_map([], |row| row.get(1))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        let placeholders = vec!["?"; names.len()].join(",");
-        let sql = format!(
-            "INSERT INTO {table} ({}) VALUES ({placeholders})",
-            names.join(",")
-        );
-        let mut stmt = tx.prepare(&sql).unwrap();
-        let mut previous_id = 0;
-        for row in tables[table].as_array().unwrap() {
-            let row = row.as_object().unwrap();
-            assert_eq!(row.len(), names.len());
-            let id = row["id"].as_i64().unwrap();
-            assert!(id > previous_id);
-            previous_id = id;
-            stmt.execute(params_from_iter(names.iter().map(|name| {
-                match &row[name] {
-                    Value::Null => SqlValue::Null,
-                    Value::Number(n) => SqlValue::Integer(n.as_i64().unwrap()),
-                    Value::String(s) => SqlValue::Text(s.clone()),
-                    other => panic!("unexpected SQLite value {other}"),
-                }
-            })))
-            .unwrap();
-        }
-    }
-    tx.commit().unwrap();
-}
-
 fn assert_catalog_bytes(source: &CatalogStore, destination: &CatalogStore, at: [i64; 3], now: i64) {
     CURRENT_AT.set(Some(Timestamp(now)));
     for request in at
@@ -201,8 +152,9 @@ fn assert_catalog_bytes(source: &CatalogStore, destination: &CatalogStore, at: [
         let read = |store| {
             let mut response =
                 serve_catalog_get_with_limits(store, &request, usize::MAX, usize::MAX).unwrap();
-            // Catalog versions are local watermarks and are not in the import.
+            // The producer and consumer have separate watermarks and source labels.
             response.catalog_version = 0;
+            response.source.clear();
             assert!(!response.models.is_empty());
             serde_json::to_vec(&response).unwrap()
         };
@@ -237,12 +189,34 @@ fn load_and_compare(
     let rows: Value = serde_json::from_slice(&base).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("consumer.db");
-    let destination = open(&path);
-    let mut conn = Connection::open(&path).unwrap();
-    load_history(&mut conn, &rows);
-    // Base already includes the release-1 facts and curation eras. Install
-    // the snapshot by checking those loaded tables against its current state,
-    // not by appending duplicates that would manufacture history.
+    let destination = CatalogStore::open_for_store(&descriptor(&path)).unwrap();
+    let mut documents = ImportedTables::new();
+    let envelope = &snapshot.envelope;
+    // Release 1 takes upstream and judgment eras from the base and installs
+    // the snapshot's vendor documents through the same writer as store polling.
+    crate::curation::document_rows(
+        &mut documents,
+        None,
+        &snapshot.state.curation_set.vendor_facts,
+        envelope.published_at_ms,
+    )
+    .unwrap();
+    destination
+        .apply_streamed_store_releases(
+            Cursor::new(base),
+            &[ReleaseArrival {
+                published_at_ms: envelope.published_at_ms,
+                release: StoreRelease {
+                    release: envelope.release,
+                    state_hash: envelope.state_hash.to_string(),
+                    curation_hash: envelope.curation_hash.to_string(),
+                    applied_at_ms: current,
+                },
+                rows: documents,
+            }],
+        )
+        .unwrap();
+    let conn = Connection::open(&path).unwrap();
     let (observed_at, loaded_state) = build::read_state(&conn, data).unwrap();
     assert_eq!(observed_at, snapshot.envelope.upstream_observed_at_ms);
     assert_eq!(loaded_state, snapshot.state);
@@ -392,11 +366,12 @@ fn release_import_preserves_catalog_get_bytes() {
     let path = dir.path().join("source.db");
     let store = open(&path);
     let models = |price| {
-        let first = if price == 2 {
+        let mut first = if price == 2 {
             json!({"name":"First", "structured_output":true, "cost":{"input":price,"output":4}})
         } else {
             json!({"name":"First", "cost":{"input":price}})
         };
+        first["reasoning_options"] = json!([{"type":"effort", "values":["low", "high"]}]);
         wire(json!({"fixture": {"name":"Fixture Labs", "models": {
             "first":first,
             "steady":{"name":"Steady", "cost":{"input":5,"output":6}}
@@ -408,6 +383,10 @@ fn release_import_preserves_catalog_get_bytes() {
     let end = seed + 400;
     observe(&store, &first, seed, true);
     let marked = observe(&store, &last, end, false);
+    let tables = crate::curation::embedded();
+    // The producer records its embedded curated models at boot. Store mode
+    // serves those models from the restored eras instead of the embedded file.
+    crate::curated_models::apply_to_store(&store, tables.curated_models, seed).unwrap();
     let mut rate: Value = serde_json::from_str(
         &store.current_values(SourceId::ModelsDev).unwrap()[&("fixture".into(), "steady".into())]
             [&FactKey::from_stored("rate.input".into())],
@@ -431,7 +410,7 @@ fn release_import_preserves_catalog_get_bytes() {
         .unwrap();
     assert_eq!(store.same_claim_era_fraction(marked).unwrap(), (1, 4));
     store
-        .append_quality_grade(
+        .append_quality_grade_with_effort(
             "fixture/first",
             None,
             Some(&QualityGrade::Chat {
@@ -440,6 +419,20 @@ fn release_import_preserves_catalog_get_bytes() {
             }),
             "operator",
             "fixture chat grade",
+            end + 2,
+            Some("high"),
+        )
+        .unwrap();
+    store
+        .append_quality_grade(
+            "fixture/steady",
+            None,
+            Some(&QualityGrade::Chat {
+                elo: 980.into(),
+                eq: 750.into(),
+            }),
+            "operator",
+            "fixture chat grade without a graded effort",
             end + 2,
         )
         .unwrap();
@@ -466,17 +459,74 @@ fn release_import_preserves_catalog_get_bytes() {
     store
         .append_model_mark("fixture/steady", true, "operator", "fixture mark", end + 4)
         .unwrap();
+    for (effort, elo, eq, at) in [
+        ("low", Some(980), Some(750), end + 5),
+        ("high", Some(1012), Some(780), end + 5),
+        ("high", None, None, end + 6),
+    ] {
+        store
+            .append_effort_grade(
+                &EffortGradeEra {
+                    model: "fixture/first".into(),
+                    effort: effort.into(),
+                    elo: elo.map(Into::into),
+                    eq: eq.map(Into::into),
+                    reason: "fixture effort grade".into(),
+                    recorded_at_ms: at,
+                },
+                "operator",
+            )
+            .unwrap();
+    }
+    for (workload, default, minimum, excluded, at) in [
+        ("code", Some("high"), Some("low"), false, end + 5),
+        ("quick", Some("low"), None, false, end + 5),
+        ("quick", None, None, true, end + 6),
+        ("reason", Some("high"), None, false, end + 5),
+        ("reason", None, None, false, end + 6),
+    ] {
+        store
+            .append_workload_effort(
+                &WorkloadEffortEra {
+                    model: "fixture/first".into(),
+                    workload: workload.into(),
+                    effort_default: default.map(Into::into),
+                    effort_minimum: minimum.map(Into::into),
+                    excluded,
+                    reason: "fixture workload effort".into(),
+                    recorded_at_ms: at,
+                },
+                "operator",
+            )
+            .unwrap();
+    }
 
     let copy = dir.path().join("backup.db");
     backup(&path, &copy);
     let input_before = sha256(&fs::read(&copy).unwrap());
     let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
     let out = dir.path().join("import");
-    let counts = build::import(&copy, &data, &out, end + 5).unwrap();
+    let published_at = end + 7;
+    let counts = build::import(&copy, &data, &out, published_at).unwrap();
     assert_eq!(sha256(&fs::read(&copy).unwrap()), input_before);
     assert_eq!(counts["observation"], 2);
     assert_eq!(counts["observation_artifact_event"], 1);
-    let (rows, snapshot) = load_and_compare(&store, &out, &data, [seed, seed + 200, end], end + 5);
+    assert_eq!(counts.get("effort_grade_era"), Some(&3));
+    assert_eq!(counts.get("workload_effort_era"), Some(&5));
+    let (rows, snapshot) =
+        load_and_compare(&store, &out, &data, [seed, seed + 200, end], published_at);
+    CURRENT_AT.set(Some(Timestamp(published_at)));
+    let current = serve_catalog_get_with_limits(&store, b"{}", usize::MAX, usize::MAX).unwrap();
+    CURRENT_AT.set(None);
+    let facts = &current.models["fixture/first"];
+    assert_eq!(facts["quality.graded_effort"], "high");
+    assert_eq!(facts["quality.elo.effort.low"], 980);
+    assert_eq!(facts["quality.eq.effort.low"], 750);
+    assert_eq!(facts["workload.code.effort_default"], "high");
+    assert_eq!(facts["workload.code.effort_minimum"], "low");
+    assert_eq!(facts["workload.quick.excluded"], true);
+    assert!(!facts.contains_key("quality.elo.effort.high"));
+    assert!(!facts.contains_key("workload.reason.effort_default"));
     assert_eq!(
         fs::read(out.join("history/base.json")).unwrap(),
         wire(&rows)
@@ -498,10 +548,25 @@ fn release_import_preserves_catalog_get_bytes() {
     let published = publish_step(&last, &empty, &ChargeUnitEvidence::default()).unwrap();
     assert_eq!(published.upstream_hash, snapshot.envelope.upstream_hash);
     let curation = snapshot.state.curation_set;
-    assert_eq!(curation.approved_at_ms, Some(end + 4));
+    assert_eq!(curation.approved_at_ms, Some(end + 6));
     assert_eq!(curation.approved_drafts, ["import-2026-11"]);
     assert_eq!(curation.grades["fixture/first"].elo.to_string(), "1012.30");
-    assert_eq!(curation.grades["fixture/first"].graded_effort, None);
+    assert_eq!(
+        curation.grades["fixture/first"].graded_effort.as_deref(),
+        Some("high")
+    );
+    let json = serde_json::to_value(&curation).unwrap();
+    assert!(json["grades"]["fixture/steady"]
+        .get("graded_effort")
+        .is_none());
+    assert_eq!(
+        json["effort_grades"]["fixture/first"],
+        json!({"low": {"elo": 980, "eq": 750}})
+    );
+    assert_eq!(
+        json["workload_efforts"]["fixture/first"],
+        json!({"code": {"default": "high", "minimum": "low"}, "quick": {"excluded": true}})
+    );
     assert_eq!(
         curation.kind_grades["fixture/first"]["search"].as_i64(),
         Some(91)
@@ -517,6 +582,51 @@ fn release_import_preserves_catalog_get_bytes() {
     assert!(curation.vendor_facts.contains_key("plan-prices"));
     assert!(!curation.vendor_facts.contains_key("models-dev-seed"));
     assert!(!curation.vendor_facts.contains_key("engram-catalog"));
+}
+
+#[test]
+fn release_import_classifies_every_store_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("source.db");
+    let store = open(&path);
+    let at = 1_800_000_000_000;
+    observe(&store, br#"{"fixture":{"models":{"test":{}}}}"#, at, true);
+    let copy = dir.path().join("backup.db");
+    backup(&path, &copy);
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+    let counts = build::import(&copy, &data, &dir.path().join("import"), at).unwrap();
+    let excluded = BTreeSet::from([
+        // SQLite sequences are regenerated as the original ids are inserted.
+        "sqlite_sequence",
+        // Schema, write fence, and catalog version belong to each database.
+        "cortexkit_schema_version",
+        "cortexkit_fence",
+        "catalog_version",
+        // These operator overrides apply only on the computer that set them.
+        "override_grade_era",
+        "override_mark_era",
+        "override_effort_grade_era",
+        "override_workload_effort_era",
+        // Consumers track applied releases and install documents from snapshots.
+        "store_release",
+        "store_document_era",
+    ]);
+    let exported: BTreeSet<_> = counts.keys().copied().collect();
+    assert!(exported.is_disjoint(&excluded));
+    let conn = Connection::open_with_flags(&copy, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table'")
+        .unwrap();
+    let actual = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<BTreeSet<_>>>()
+        .unwrap();
+    assert_eq!(
+        actual.iter().map(String::as_str).collect::<BTreeSet<_>>(),
+        exported.union(&excluded).copied().collect(),
+        "each store table must be exported or explicitly excluded"
+    );
 }
 
 #[test]
@@ -566,21 +676,21 @@ fn release_import_refuses_home_paths_in_buried_history_values() {
 }
 
 #[test]
-#[ignore = "requires the operator's store backup-API copy"]
+#[ignore = "requires the operator's store backup-API copy and import-release output"]
 fn release_import_real_backup_preserves_catalog_get_bytes() {
     let input =
         std::env::var_os("FUSIFORM_IMPORT_PROOF_BACKUP").expect("set FUSIFORM_IMPORT_PROOF_BACKUP");
+    let out =
+        std::env::var_os("FUSIFORM_IMPORT_PROOF_OUTPUT").expect("set FUSIFORM_IMPORT_PROOF_OUTPUT");
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("source.db");
     backup(Path::new(&input), &copy);
     let source = open(&copy);
     let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
-    let out = dir.path().join("import");
-    let at = 1_795_009_999_139;
-    build::import(Path::new(&input), &data, &out, at).unwrap();
+    let at = 1_795_043_632_000;
     let (rows, _) = load_and_compare(
         &source,
-        &out,
+        Path::new(&out),
         &data,
         [1_786_529_249_396, 1_786_865_960_643, 1_793_491_200_000],
         at,
