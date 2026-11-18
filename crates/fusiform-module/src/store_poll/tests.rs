@@ -78,11 +78,11 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     let mut snapshot: Snapshot = serde_json::from_slice(SNAPSHOT).unwrap();
     let wrong_base = [b" ".as_slice(), BASE].concat();
     let files = Arc::new(Mutex::new(BTreeMap::from([
-        ("/head.json".into(), signed_head(&snapshot, 2, &key)),
-        ("/snapshots/2.json".into(), SNAPSHOT.to_vec()),
-        ("/releases/1.json".into(), FIRST.to_vec()),
-        ("/history/base.json".into(), wrong_base),
-        ("/history/days/2026-11-19.json".into(), DAY.to_vec()),
+        ("/v1/head".into(), signed_head(&snapshot, 2, &key)),
+        ("/v1/snapshots/2".into(), SNAPSHOT.to_vec()),
+        ("/v1/releases/1".into(), FIRST.to_vec()),
+        ("/v1/history/base.json".into(), wrong_base),
+        ("/v1/history/days/2026-11-19.json".into(), DAY.to_vec()),
     ])));
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open_for_store(&StorageDescriptor {
@@ -102,7 +102,7 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     let mut unattested = snapshot.clone();
     unattested.history_attestation = None;
     files.lock().unwrap().insert(
-        "/snapshots/2.json".into(),
+        "/v1/snapshots/2".into(),
         serde_json::to_vec(&unattested).unwrap(),
     );
     assert!(poller
@@ -113,11 +113,11 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     files
         .lock()
         .unwrap()
-        .insert("/snapshots/2.json".into(), SNAPSHOT.to_vec());
+        .insert("/v1/snapshots/2".into(), SNAPSHOT.to_vec());
     let mut invalid_anchor: Release = serde_json::from_slice(FIRST).unwrap();
     invalid_anchor.envelope.published_at_ms -= 1;
     files.lock().unwrap().insert(
-        "/releases/1.json".into(),
+        "/v1/releases/1".into(),
         serde_json::to_vec(&invalid_anchor).unwrap(),
     );
     assert!(poller
@@ -129,7 +129,7 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     files
         .lock()
         .unwrap()
-        .insert("/releases/1.json".into(), FIRST.to_vec());
+        .insert("/v1/releases/1".into(), FIRST.to_vec());
     assert!(poller
         .poll(&store)
         .await
@@ -140,7 +140,7 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     files
         .lock()
         .unwrap()
-        .insert("/history/base.json".into(), BASE.to_vec());
+        .insert("/v1/history/base.json".into(), BASE.to_vec());
     poller.poll(&store).await.unwrap();
     assert_eq!(store.latest_store_release().unwrap().unwrap().release, 2);
     let at_release_two = snapshot.envelope.upstream_observed_at_ms;
@@ -194,14 +194,22 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
         change,
         signatures: sign_envelope(envelope, KID, &key).unwrap(),
     };
-    {
-        let mut files = files.lock().unwrap();
-        files.insert("/head.json".into(), signed_head(&snapshot, 2, &key));
-        files.insert(
-            "/releases/3.json".into(),
-            serde_json::to_vec(&third).unwrap(),
-        );
-    }
+    files
+        .lock()
+        .unwrap()
+        .insert("/v1/head".into(), signed_head(&snapshot, 2, &key));
+    let version = store.catalog_version().unwrap();
+    let error = poller.poll(&store).await.unwrap_err();
+    assert!(
+        error.contains("v1/releases/3") && error.contains("404"),
+        "{error}"
+    );
+    assert_eq!(store.catalog_version().unwrap(), version);
+    assert_eq!(store.latest_store_release().unwrap().unwrap().release, 2);
+    files
+        .lock()
+        .unwrap()
+        .insert("/v1/releases/3".into(), serde_json::to_vec(&third).unwrap());
     poller.poll(&store).await.unwrap();
     let version = store.catalog_version().unwrap();
     assert_eq!(
@@ -229,7 +237,7 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     files
         .lock()
         .unwrap()
-        .insert("/head.json".into(), serde_json::to_vec(&head).unwrap());
+        .insert("/v1/head".into(), serde_json::to_vec(&head).unwrap());
     assert!(poller.poll(&store).await.unwrap_err().contains("signature"));
     assert_eq!(store.catalog_version().unwrap(), version);
     assert_eq!(store.latest_store_release().unwrap().unwrap().release, 3);

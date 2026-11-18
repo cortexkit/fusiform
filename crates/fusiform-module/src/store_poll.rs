@@ -18,6 +18,8 @@ use serde_json::Value;
 use crate::{fetch::Fetcher, settings::ReleaseKeys, signals::Signals};
 use state::Verified;
 
+const HEAD_PATH: &str = "v1/head";
+const HISTORY_BASE_PATH: &str = "v1/history/base.json";
 const DAY_MS: i64 = 86_400_000;
 const INTERVAL: Duration = Duration::from_secs(60);
 
@@ -72,6 +74,8 @@ impl StorePoller {
 
     async fn bytes(&self, name: &str) -> Result<Vec<u8>, String> {
         let url = step(name, self.url.join(name))?;
+        // A signed head can reach this edge before its objects do. The fetcher
+        // returns HTTP 404 as an error, so the next tick retries the same cursor.
         step(name, self.fetcher.fetch_store_file(url).await)
     }
 
@@ -80,13 +84,15 @@ impl StorePoller {
     }
 
     async fn head(&self) -> Result<HeadBody, String> {
-        let Head { head, signatures } = self.json("head.json").await?;
+        let Head { head, signatures } = self.json(HEAD_PATH).await?;
         step(
-            "head.json signature",
+            &format!("{HEAD_PATH} signature"),
             verify_head(&head, &signatures, &self.keys),
         )?;
         if i64::try_from(head.release.get()).is_err() {
-            return Err("head.json: release is outside the supported SQLite integer range".into());
+            return Err(format!(
+                "{HEAD_PATH}: release is outside the supported SQLite integer range"
+            ));
         }
         Ok(head)
     }
@@ -96,7 +102,7 @@ impl StorePoller {
         snapshot_number: u64,
         bootstrap: bool,
     ) -> Result<(Snapshot, Option<ImportedTables>, Vec<Release>), String> {
-        let path = format!("snapshots/{snapshot_number}.json");
+        let path = format!("v1/snapshots/{snapshot_number}");
         let snapshot: Snapshot = self.json(&path).await?;
         if snapshot.envelope.release != snapshot_number {
             return Err(format!("{path}: envelope names a different release"));
@@ -111,7 +117,7 @@ impl StorePoller {
             verify_history_attestation(attestation, &snapshot.envelope, &self.keys),
         )?;
 
-        let first: Release = self.json("releases/1.json").await?;
+        let first: Release = self.json("v1/releases/1").await?;
         Verified::advance(None, &first, &self.keys)?;
         let (base, days) = attestation
             .body
@@ -122,15 +128,17 @@ impl StorePoller {
             return Err("history attestation must start with base.json".into());
         }
         let tables = if bootstrap {
-            let bytes = self.bytes("history/base.json").await?;
-            step("history/base.json", base.verify_bytes(&bytes))?;
-            let base: HistoryBase = step("history/base.json", serde_json::from_slice(&bytes))?;
+            let bytes = self.bytes(HISTORY_BASE_PATH).await?;
+            step(HISTORY_BASE_PATH, base.verify_bytes(&bytes))?;
+            let base: HistoryBase = step(HISTORY_BASE_PATH, serde_json::from_slice(&bytes))?;
             if base.release != 1 || base.format != "ck-models-history-base/v1" {
-                return Err("history/base.json: wrong history format or release number".into());
+                return Err(format!(
+                    "{HISTORY_BASE_PATH}: wrong history format or release number"
+                ));
             }
             for table in &fusiform_store::STORE_HISTORY_TABLES[..9] {
                 if !base.tables.contains_key(*table) {
-                    return Err(format!("history/base.json: missing table {table}"));
+                    return Err(format!("{HISTORY_BASE_PATH}: missing table {table}"));
                 }
             }
             Some(base.tables)
@@ -149,7 +157,7 @@ impl StorePoller {
                         file.file
                     )
                 })?;
-            let path = format!("history/{}", file.file);
+            let path = format!("v1/history/{}", file.file);
             let bytes = self.bytes(&path).await?;
             step(&path, file.verify_bytes(&bytes))?;
             let document: HistoryDay = step(&path, serde_json::from_slice(&bytes))?;
@@ -175,7 +183,7 @@ impl StorePoller {
         let cursor = step("read store cursor", store.latest_store_release())?;
         let applied = cursor.as_ref().map_or(0, |cursor| cursor.release);
         if applied > head.release.get() {
-            return Err("head.json: store head moved backwards".into());
+            return Err(format!("{HEAD_PATH}: store head moved backwards"));
         }
         if applied == head.release.get() {
             if cursor
@@ -184,7 +192,9 @@ impl StorePoller {
             {
                 return Ok(());
             }
-            return Err("head.json: same release has a different state hash".into());
+            return Err(format!(
+                "{HEAD_PATH}: same release has a different state hash"
+            ));
         }
         let catch_up = self.verified.as_ref().is_some_and(|old| {
             head.published_at_ms
@@ -221,7 +231,7 @@ impl StorePoller {
             return Err("snapshot history does not end at the attested release".into());
         }
         for number in first_individual + 1..=head.release.get() {
-            let file = format!("releases/{number}.json");
+            let file = format!("v1/releases/{number}");
             let release: Release = self.json(&file).await?;
             if release.envelope.release != number {
                 return Err(format!("{file}: wrong release number"));
@@ -264,7 +274,7 @@ impl StorePoller {
             || current.envelope.state_hash != head.state_hash
             || current.envelope.published_at_ms != head.published_at_ms
         {
-            return Err("verified release does not match head.json".into());
+            return Err(format!("verified release does not match {HEAD_PATH}"));
         }
         step(
             "commit verified store history",

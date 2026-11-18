@@ -404,7 +404,7 @@ separate from published history.
 number, signed state and curation hashes, and local application time. It is
 updated in the same writer transaction as the release's era rows and the local
 catalog version. The first transaction checks that every catalog data table
-is empty and preserves row IDs and foreign keys from `history/base.json`.
+is empty and preserves row IDs and foreign keys from `/v1/history/base.json`.
 The snapshot's signed history attestation covers the hash of that file.
 Store-mode migrations create the same tables without the three embedded
 history imports. In `models_dev` mode the consumer tables stay empty.

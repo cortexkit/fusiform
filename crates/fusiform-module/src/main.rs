@@ -257,7 +257,7 @@ impl ModuleHandler for Fusiform {
                         if uses_seed {
                             seed_fallback::OFFLINE_REASON
                         } else {
-                            "waiting for verified head.json"
+                            "waiting for verified store head"
                         }
                         .into(),
                     ));

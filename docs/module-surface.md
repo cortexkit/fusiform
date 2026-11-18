@@ -48,10 +48,16 @@ For a signed catalog, set `source` to
 `{"mode":"store","url":"https://example.com/catalog/","keys":[{"kid":"release-key","public_key":"…"}]}`.
 Pin your store's unpadded base64url Ed25519 public key. Use a fresh fusiform data
 folder when switching modes: the daemon refuses to import into a database that
-already holds local catalog history. It checks the signed head every minute.
+already holds local catalog history. It checks `{base}/v1/head` every minute
+(the edge caches it for 30 seconds). Immutable objects are at
+`{base}/v1/releases/{n}`, `{base}/v1/snapshots/{n}`,
+`{base}/v1/history/base.json`, and `{base}/v1/history/days/{YYYY-MM-DD}.json`.
+Release and snapshot numbers are canonical positive decimals. The daemon does
+not fetch `{base}/.well-known/models-keys.json`; that endpoint is for operators.
 Before the first verified release, the daemon can serve the built-in snapshot
-read-only and reports Degraded; a later fetch failure leaves the last verified
-release in force.
+read-only and reports Degraded. A later fetch failure, including a 404 for an
+object named by a verified head, leaves the last verified release in force and
+is retried on the next poll.
 
 In store mode, `grade`, `workload`, `decommission`, and `restore` record local
 judgments. They preview by default; add `--commit` to write and `--withdraw`
