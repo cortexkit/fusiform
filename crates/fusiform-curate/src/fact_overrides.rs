@@ -183,7 +183,7 @@ fn default_effort(value: &serde_json::Value) -> Option<&str> {
 /// Whether a row's `capability.reasoning_options` lists `effort` among the
 /// values of an entry of type `effort`. Absent or unreadable options list
 /// nothing, so a default is never served beside options that do not name it.
-fn options_list_effort(options: Option<&serde_json::Value>, effort: &str) -> bool {
+pub fn options_list_effort(options: Option<&serde_json::Value>, effort: &str) -> bool {
     options
         .and_then(serde_json::Value::as_array)
         .is_some_and(|options| {

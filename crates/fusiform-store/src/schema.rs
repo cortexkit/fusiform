@@ -86,6 +86,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 13,
         statements: SCHEMA_V13,
     },
+    Migration {
+        version: 14,
+        statements: include_str!("schema-v14.sql"),
+    },
 ];
 
 const SCHEMA_V1: &str = r#"

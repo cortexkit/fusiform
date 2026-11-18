@@ -647,6 +647,7 @@ fn every_tool_schema_names_exactly_its_request_fields() {
         ("quality.decommission", "QualityMarkRequest"),
         ("quality.restore", "QualityMarkRequest"),
         ("quality.marks", "QualityMarksRequest"),
+        ("quality.workload", "WorkloadEffortRequest"),
     ];
     let manifest = fusiform_module::manifest();
     let tools: Vec<_> = manifest
@@ -783,6 +784,9 @@ fn the_manifest_and_the_dispatch_agree_on_which_tools_exist() {
             }
             "quality.withdraw" => {
                 serde_json::json!({"model":"openai/gpt-4","reason":"reachability check"})
+            }
+            "quality.workload" => {
+                serde_json::json!({"model":"openai/gpt-4","workload":"reason","withdraw":true,"reason":"reachability check"})
             }
             "catalog.history" => serde_json::json!({
                 "provider_id": "anthropic",

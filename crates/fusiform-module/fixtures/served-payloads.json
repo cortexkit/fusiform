@@ -7222,7 +7222,8 @@
     "request": {
       "arguments": {
         "fact_prefixes": [
-          "quality."
+          "quality.",
+          "workload."
         ],
         "model_id": "synthetic-model",
         "provider_id": "synthetic-quality-reseller"
@@ -7234,7 +7235,20 @@
       "models": {
         "synthetic-quality-reseller/synthetic-model": {
           "quality.elo": 1284,
-          "quality.eq": 1599.8
+          "quality.elo.effort.low": 1200,
+          "quality.eq": 1599.8,
+          "quality.eq.effort.low": 1400,
+          "quality.graded_effort": "high",
+          "workload.code.effort_default": "high",
+          "workload.code.effort_minimum": "low",
+          "workload.lookup.effort_default": "high",
+          "workload.lookup.effort_minimum": "low",
+          "workload.quick.effort_default": "high",
+          "workload.quick.effort_minimum": "low",
+          "workload.reason.effort_default": "high",
+          "workload.reason.effort_minimum": "low",
+          "workload.synthesize.effort_default": "high",
+          "workload.synthesize.effort_minimum": "low"
         }
       },
       "quality_scores": {
@@ -8349,6 +8363,19 @@
         "quality.decommissioned",
         "quality.elo",
         "quality.eq",
+        "quality.graded_effort",
+        "quality.elo.effort.<effort>",
+        "quality.eq.effort.<effort>",
+        "workload.reason.effort_default",
+        "workload.reason.effort_minimum",
+        "workload.code.effort_default",
+        "workload.code.effort_minimum",
+        "workload.synthesize.effort_default",
+        "workload.synthesize.effort_minimum",
+        "workload.lookup.effort_default",
+        "workload.lookup.effort_minimum",
+        "workload.quick.effort_default",
+        "workload.quick.effort_minimum",
         "quality.grade.transcription",
         "quality.grade.speech",
         "quality.grade.image",
@@ -11902,11 +11929,43 @@
       }
     }
   },
+  "quality.grade — effort preview": {
+    "request": {
+      "arguments": {
+        "effort_grade": "low",
+        "elo": 1400,
+        "eq": 1500.0,
+        "model": "synthetic/model",
+        "reason": "derived evaluation"
+      },
+      "name": "quality.grade"
+    },
+    "response": {
+      "affected_count": 1,
+      "affected_ids": [
+        "synthetic/model"
+      ],
+      "current": null,
+      "dry_run": true,
+      "model": "synthetic/model",
+      "new": {
+        "effort_grade": "low",
+        "elo": 1400,
+        "eq": 1500.0,
+        "graded_by": "operator",
+        "model": "synthetic/model",
+        "reason": "derived evaluation",
+        "recorded_at_ms": -1,
+        "withdrawn": false
+      }
+    }
+  },
   "quality.grade — preview": {
     "request": {
       "arguments": {
         "elo": 1500,
         "eq": 1600.5,
+        "graded_effort": "high",
         "model": "synthetic/model",
         "reason": "new evaluation"
       },
@@ -11932,6 +11991,7 @@
         "elo": 1500,
         "eq": 1600.5,
         "graded_by": "operator",
+        "graded_effort": "high",
         "model": "synthetic/model",
         "reason": "new evaluation",
         "recorded_at_ms": -1,
@@ -12105,6 +12165,36 @@
         "reason": "evaluation withdrawn",
         "recorded_at_ms": -1,
         "withdrawn": true
+      }
+    }
+  },
+  "quality.workload — preview": {
+    "request": {
+      "arguments": {
+        "effort_default": "high",
+        "effort_minimum": "low",
+        "model": "synthetic/model",
+        "reason": "coding evaluation",
+        "workload": "code"
+      },
+      "name": "quality.workload"
+    },
+    "response": {
+      "affected_count": 1,
+      "affected_ids": [
+        "synthetic/model"
+      ],
+      "current": null,
+      "dry_run": true,
+      "model": "synthetic/model",
+      "new": {
+        "effort_default": "high",
+        "effort_minimum": "low",
+        "model": "synthetic/model",
+        "reason": "coding evaluation",
+        "recorded_at_ms": -1,
+        "withdrawn": false,
+        "workload": "code"
       }
     }
   },

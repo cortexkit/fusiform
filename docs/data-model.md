@@ -15,6 +15,8 @@ in `crates/fusiform-store/tests/it/history.rs`.
 Tables, as shipped: `observation`, `era`, `catalog_version`,
 `observation_artifact_event`, `plan_price_era`, `curated_model_era`,
 `quality_grade_era`, `model_mark_era`, `fact_override_era`, `cache_lifetime_era`,
+`effort_grade_era`, `workload_effort_era`, `override_grade_era`,
+`override_effort_grade_era`, `override_workload_effort_era`, `override_mark_era`,
 `cortexkit_schema_version`, `cortexkit_fence`.
 
 - `observation`, `era`, `catalog_version`, `observation_artifact_event`,
@@ -49,6 +51,7 @@ does not create.
 | 11 | `model_mark_era`, with a one-time import of 107 operator decommissioned keys |
 | 12 | `cache_lifetime_era`, with a frozen first-served history of prompt-cache rules |
 | 13 | `quality_grade_era.kind`, separating media judgments and withdrawals by task |
+| 14 | `quality_grade_era.graded_effort`, effort grade and workload judgment eras, and separate local override eras |
 
 A store whose recorded schema version is newer than the running binary's chain
 is refused at open, and the error names the store's version
@@ -347,6 +350,7 @@ of clock order. Columns:
 | `model` | served canonical id, a provider/model row id with no canonical id, or an independent `local:provider/model` engine key |
 | `elo`, `eq` | exact JSON number tokens stored as TEXT, both present for a chat judgment, otherwise both null |
 | `grade` | exact JSON number token stored as TEXT for a task judgment, otherwise null |
+| `graded_effort` | effort at which the chat row's ELO and EQ were measured, or null when unknown |
 | `kind` | `transcription`, `speech`, `image`, `video` or `search` for a task judgment or its withdrawal; null for ELO/EQ or its withdrawal |
 | `withdrawn` | 1 for a withdrawal with all numbers null, 0 for a complete judgment |
 | `graded_by` | operator attribution |
@@ -377,8 +381,17 @@ shared version-advance helper holds the fence.
 
 Current reads and full grade histories use the read pool. Withdrawals hide
 grades from current catalog reads but remain in `quality.grades` history.
-Catalog `at_ms` reads omit grades, as before; grade history is not upstream
-`catalog.history`. See [`curated-data.md`](curated-data.md) §11.
+Catalog `at_ms` reads continue to omit the existing quality scores and marks.
+The new graded effort, effort-specific scores and workload facts resolve as of
+their recording time. Grade history is not upstream `catalog.history`.
+See [`curated-data.md`](curated-data.md) §11.
+
+`effort_grade_era` keeps decimal ELO/EQ tokens per `(model, effort)`.
+`workload_effort_era` keeps a default and optional minimum per `(model, workload)`.
+Both are append-only; the latest eligible insertion wins and a withdrawal
+carries no scores or efforts. Writes advance the catalog version in the same
+fenced transaction. The four `override_*_era` tables keep local judgments
+separate from published history.
 
 ELO/EQ remains a chat judgment. Media writes require the kind's capability on
 at least one current row reached by the key: audio input for transcription,

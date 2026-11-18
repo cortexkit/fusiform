@@ -76,11 +76,12 @@ commands:
   retract-artifact          take back an artifact mark
   correct                   record that fusiform's own record was wrong over a
                             past window (previews by default; --commit writes)
-  grade <model> --elo N --eq N --reason TEXT [--commit]
+  grade <model> --elo N --eq N [--effort E | --effort-grade E] --reason TEXT [--commit]
                             set chat quality grades (previews by default)
   grade <key> --kind K --grade N --reason TEXT [--commit]
                             grade transcription, speech, image, video or search engines
-  withdraw-grade <key> [--kind K] --reason TEXT [--commit]
+  withdraw-grade <key> [--kind K | --effort-grade E] --reason TEXT [--commit]
+  workload <model> <workload> (--default E [--minimum E] | --withdraw) --reason TEXT [--commit]
                             withdraw that kind (or ELO/EQ), retaining history
   grades [--model <key> | --prefix <prefix>]
                             current grades (e.g. --prefix local:), or key history
@@ -232,6 +233,12 @@ struct Args {
     eq: Option<serde_json::Number>,
     grade: Option<serde_json::Number>,
     kind: Option<String>,
+    graded_effort: Option<String>,
+    effort_grade: Option<String>,
+    workload: Option<String>,
+    effort_default: Option<String>,
+    effort_minimum: Option<String>,
+    withdraw: bool,
     prefix: Option<String>,
     fact: Option<String>,
     fact_prefix: Option<String>,
@@ -282,6 +289,22 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
     if args.kind.is_some() && !matches!(args.command.as_str(), "grade" | "withdraw-grade") {
         return Err("--kind applies to grade and withdraw-grade only".into());
     }
+    if args.graded_effort.is_some() && args.command != "grade"
+        || args.effort_grade.is_some()
+            && !matches!(args.command.as_str(), "grade" | "withdraw-grade")
+    {
+        return Err(
+            "--effort applies to grade; --effort-grade applies to grade and withdraw-grade".into(),
+        );
+    }
+    if (args.effort_default.is_some() || args.effort_minimum.is_some())
+        && args.command != "workload"
+    {
+        return Err("--default and --minimum apply to workload only".into());
+    }
+    if args.withdraw && !matches!(args.command.as_str(), "grade" | "workload") {
+        return Err("--withdraw applies to grade and workload only".into());
+    }
     if args.prefix.is_some() && args.command != "grades" {
         return Err("--prefix applies to grades only".into());
     }
@@ -322,7 +345,7 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
     }
 
     match args.command.as_str() {
-        "grade" | "withdraw-grade" | "decommission" | "restore" => {
+        "grade" | "withdraw-grade" | "decommission" | "restore" | "workload" => {
             let model = args
                 .model
                 .as_ref()
@@ -334,6 +357,31 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
                 .ok_or("a nonempty --reason is required")?;
             let mut body =
                 serde_json::json!({"model":model,"reason":reason,"dry_run":!args.commit});
+            if args.command == "workload" {
+                let workload = args
+                    .workload
+                    .as_deref()
+                    .filter(|w| fusiform_protocol::WORKLOADS.contains(w))
+                    .ok_or("workload must be reason, code, synthesize, lookup or quick")?;
+                body["workload"] = serde_json::json!(workload);
+                if args.withdraw {
+                    if args.effort_default.is_some() || args.effort_minimum.is_some() {
+                        return Err(
+                            "--withdraw cannot be combined with --default or --minimum".into()
+                        );
+                    }
+                    body["withdraw"] = serde_json::json!(true);
+                } else {
+                    body["effort_default"] = serde_json::json!(args
+                        .effort_default
+                        .as_deref()
+                        .ok_or("workload requires --default or --withdraw")?);
+                    if let Some(effort) = &args.effort_minimum {
+                        body["effort_minimum"] = serde_json::json!(effort);
+                    }
+                }
+                return Ok((fusiform_protocol::TOOL_QUALITY_WORKLOAD, body));
+            }
             if let Some(kind) = &args.kind {
                 if !matches!(
                     kind.as_str(),
@@ -348,7 +396,19 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
                 }
                 body["kind"] = serde_json::json!(kind);
             }
-            if args.command == "grade" {
+            if let Some(effort) = &args.effort_grade {
+                if args.kind.is_some() || args.graded_effort.is_some() {
+                    return Err("--effort-grade cannot be combined with --kind or --effort".into());
+                }
+                body["effort_grade"] = serde_json::json!(effort);
+            }
+            if args.command == "grade" && !args.withdraw {
+                if let Some(effort) = &args.graded_effort {
+                    if args.kind.is_some() {
+                        return Err("--effort cannot be combined with --kind".into());
+                    }
+                    body["graded_effort"] = serde_json::json!(effort);
+                }
                 let dimensions = match (&args.elo, &args.eq, &args.grade, &args.kind) {
                     (Some(elo), Some(eq), None, None) => vec![("elo", elo), ("eq", eq)],
                     (None, None, Some(grade), Some(_)) => vec![("grade", grade)],
@@ -362,6 +422,16 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
                 }
                 Ok((fusiform_protocol::TOOL_QUALITY_GRADE, body))
             } else {
+                if args.withdraw
+                    && (args.elo.is_some()
+                        || args.eq.is_some()
+                        || args.grade.is_some()
+                        || args.graded_effort.is_some())
+                {
+                    return Err(
+                        "--withdraw cannot be combined with score values or --effort".into(),
+                    );
+                }
                 let tool = match args.command.as_str() {
                     "decommission" => fusiform_protocol::TOOL_QUALITY_DECOMMISSION,
                     "restore" => fusiform_protocol::TOOL_QUALITY_RESTORE,
@@ -562,7 +632,8 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
         "plan-prices" => print!("{}", render_plan_prices(&response)),
         "mark-artifact" => print_mark(&response),
         "retract-artifact" => print_retraction(&response),
-        "grade" | "withdraw-grade" | "grades" | "decommission" | "restore" | "marks" => {
+        "grade" | "withdraw-grade" | "grades" | "decommission" | "restore" | "marks"
+        | "workload" => {
             print!("{}", render_grades(&response))
         }
         _ => unreachable!("the command was validated above"),
@@ -1791,6 +1862,12 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         eq: None,
         grade: None,
         kind: None,
+        graded_effort: None,
+        effort_grade: None,
+        workload: None,
+        effort_default: None,
+        effort_minimum: None,
+        withdraw: false,
         prefix: None,
         fact: None,
         fact_prefix: None,
@@ -1821,6 +1898,11 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
             "--auth-method" => args.auth_method = Some(value()?),
             "--model" => args.model = Some(value()?),
             "--kind" => args.kind = Some(value()?),
+            "--effort" => args.graded_effort = Some(value()?),
+            "--effort-grade" => args.effort_grade = Some(value()?),
+            "--default" => args.effort_default = Some(value()?),
+            "--minimum" => args.effort_minimum = Some(value()?),
+            "--withdraw" => args.withdraw = true,
             "--prefix" => args.prefix = Some(value()?),
             "--elo" | "--eq" | "--grade" => {
                 let number = serde_json::from_str::<serde_json::Number>(&value()?)
@@ -1894,11 +1976,18 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
                 if !model.starts_with('-')
                     && matches!(
                         args.command.as_str(),
-                        "grade" | "withdraw-grade" | "decommission" | "restore"
+                        "grade" | "withdraw-grade" | "decommission" | "restore" | "workload"
                     )
                     && args.model.is_none() =>
             {
                 args.model = Some(model.to_string())
+            }
+            workload
+                if !workload.starts_with('-')
+                    && args.command == "workload"
+                    && args.workload.is_none() =>
+            {
+                args.workload = Some(workload.to_string())
             }
             other => return Err(format!("unknown option {other:?}\n\n{USAGE}")),
         }
@@ -2382,6 +2471,83 @@ fn render_grades(response: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn quality_effort_commands_select_the_exact_judgment() {
+        use super::*;
+        let request = |args: &[&str]| {
+            request_for(
+                &parse_args(
+                    std::iter::once("ck-models")
+                        .chain(args.iter().copied())
+                        .map(OsString::from),
+                )
+                .unwrap(),
+            )
+        };
+        let (tool, args) = request(&[
+            "grade",
+            "lab/model",
+            "--elo",
+            "1",
+            "--eq",
+            "2",
+            "--effort",
+            "high",
+            "--reason",
+            "measured",
+        ])
+        .unwrap();
+        assert_eq!(tool, "quality.grade");
+        assert_eq!(
+            args,
+            serde_json::json!({"model":"lab/model","elo":1,"eq":2,"graded_effort":"high","dry_run":true,"reason":"measured"})
+        );
+        let (tool, args) = request(&[
+            "grade",
+            "lab/model",
+            "--effort-grade",
+            "low",
+            "--withdraw",
+            "--commit",
+            "--reason",
+            "retract",
+        ])
+        .unwrap();
+        assert_eq!(tool, "quality.withdraw");
+        assert_eq!(
+            args,
+            serde_json::json!({"model":"lab/model","effort_grade":"low","dry_run":false,"reason":"retract"})
+        );
+        let (tool, args) = request(&[
+            "workload",
+            "lab/model",
+            "reason",
+            "--default",
+            "high",
+            "--minimum",
+            "low",
+            "--commit",
+            "--reason",
+            "tested",
+        ])
+        .unwrap();
+        assert_eq!(tool, "quality.workload");
+        assert_eq!(
+            args,
+            serde_json::json!({"model":"lab/model","workload":"reason","effort_default":"high","effort_minimum":"low","dry_run":false,"reason":"tested"})
+        );
+        assert!(request(&[
+            "workload",
+            "lab/model",
+            "reason",
+            "--default",
+            "high",
+            "--withdraw",
+            "--reason",
+            "invalid"
+        ])
+        .is_err());
+    }
     #[test]
     fn decommission_cli_preview_commit_and_listing() {
         use super::*;

@@ -1072,7 +1072,8 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
     let doc = serde_json::json!({"synthetic-quality-reseller": {
         "id":"synthetic-quality-reseller", "name":"Synthetic Quality Reseller",
         "models":{"synthetic-model": {
-            "id":"synthetic-model", "canonical_model_id":"synthetic-lab/synthetic-model"
+            "id":"synthetic-model", "canonical_model_id":"synthetic-lab/synthetic-model",
+            "reasoning_options":[{"type":"effort","values":["low","high"]}]
         }}
     }});
     let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
@@ -1082,10 +1083,38 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
     store.append_eras(&plan.eras).unwrap();
     let request = serde_json::json!({"name":"catalog.get","arguments":{
         "provider_id":"synthetic-quality-reseller", "model_id":"synthetic-model",
-        "fact_prefixes":["quality."]
+        "fact_prefixes":["quality.","workload."]
     }});
     store
-        .append_quality_grade(
+        .append_effort_grade(
+            &fusiform_store::EffortGradeEra {
+                model: "synthetic-lab/synthetic-model".into(),
+                effort: "low".into(),
+                elo: Some(1200.into()),
+                eq: Some(1400.into()),
+                reason: "synthetic routing grade".into(),
+                recorded_at_ms: 110,
+            },
+            "operator",
+        )
+        .unwrap();
+    for workload in fusiform_protocol::WORKLOADS {
+        store
+            .append_workload_effort(
+                &fusiform_store::WorkloadEffortEra {
+                    model: "synthetic-lab/synthetic-model".into(),
+                    workload: (*workload).into(),
+                    effort_default: Some("high".into()),
+                    effort_minimum: Some("low".into()),
+                    reason: "synthetic routing effort".into(),
+                    recorded_at_ms: 100,
+                },
+                "operator",
+            )
+            .unwrap();
+    }
+    store
+        .append_quality_grade_with_effort(
             "synthetic-lab/synthetic-model",
             None,
             Some(&fusiform_store::QualityGrade::Chat {
@@ -1095,6 +1124,7 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
             "operator",
             "synthetic routing grades",
             123,
+            Some("high"),
         )
         .unwrap();
     let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
@@ -1151,6 +1181,18 @@ pub(super) fn render_quality_tools() -> serde_json::Map<String, serde_json::Valu
         .append_eras(&[fusiform_store::NewEra {
             source: SourceId::ModelsDev,
             provider_id: "synthetic".into(),
+            model_id: "model".into(),
+            fact_key: fusiform_store::FactKey::from_stored("capability.reasoning_options".into()),
+            value_json: r#"[{"type":"effort","values":["low","high"]}]"#.into(),
+            boundary_at: Timestamp(1000),
+            boundary_kind: BoundaryKind::Seed,
+            observation_id: None,
+        }])
+        .unwrap();
+    store
+        .append_eras(&[fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "synthetic".into(),
             model_id: "unmarked".into(),
             fact_key: fusiform_store::FactKey::existence(),
             value_json: "\"present\"".into(),
@@ -1163,7 +1205,17 @@ pub(super) fn render_quality_tools() -> serde_json::Map<String, serde_json::Valu
         (
             "quality.grade — preview",
             "quality.grade",
-            serde_json::json!({"model":key,"elo":1500,"eq":1600.5,"reason":"new evaluation"}),
+            serde_json::json!({"model":key,"elo":1500,"eq":1600.5,"graded_effort":"high","reason":"new evaluation"}),
+        ),
+        (
+            "quality.grade — effort preview",
+            "quality.grade",
+            serde_json::json!({"model":key,"elo":1400,"eq":1500.0,"effort_grade":"low","reason":"derived evaluation"}),
+        ),
+        (
+            "quality.workload — preview",
+            "quality.workload",
+            serde_json::json!({"model":key,"workload":"code","effort_default":"high","effort_minimum":"low","reason":"coding evaluation"}),
         ),
         (
             "quality.withdraw — commit",
@@ -2905,6 +2957,8 @@ fn every_read_response_field_reaches_the_fixture() {
             "ModelMarkWire",
             "QualityMarkWriteResponse",
             "QualityMarksResponse",
+            "WorkloadEffortWriteResponse",
+            "WorkloadEffortWire",
             "CanonicalLinkWire",
             "SpeedTwinWire",
             "WireCorrectionWire",

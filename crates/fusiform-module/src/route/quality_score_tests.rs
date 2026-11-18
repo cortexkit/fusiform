@@ -5,6 +5,162 @@ use fusiform_store::NewEra;
 use serde_json::{json, Value};
 
 #[test]
+fn effort_curation_is_row_gated_and_dated() {
+    let (store, _dir) = fixture(true);
+    for (provider, model, efforts) in [
+        ("reseller", "shared", json!(["low", "high"])),
+        ("google", "gemini-4-argon", json!(["high"])),
+    ] {
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: provider.into(),
+                model_id: model.into(),
+                fact_key: FactKey::from_stored("capability.reasoning_options".into()),
+                value_json: json!([{"type":"effort", "values":efforts}]).to_string(),
+                boundary_at: Timestamp(1000),
+                boundary_kind: BoundaryKind::Seed,
+                observation_id: None,
+            }])
+            .unwrap();
+    }
+    let grade = fusiform_store::QualityGrade::Chat {
+        elo: 1200.into(),
+        eq: 900.into(),
+    };
+    store
+        .append_quality_grade_with_effort(
+            "lab/shared",
+            None,
+            Some(&grade),
+            "operator",
+            "test",
+            2000,
+            Some("high"),
+        )
+        .unwrap();
+    for effort in ["low", "high"] {
+        store
+            .append_effort_grade(
+                &fusiform_store::EffortGradeEra {
+                    model: "lab/shared".into(),
+                    effort: effort.into(),
+                    elo: Some(1000.into()),
+                    eq: Some(850.into()),
+                    recorded_at_ms: 2100,
+                    reason: "test".into(),
+                },
+                "operator",
+            )
+            .unwrap();
+    }
+    store
+        .append_workload_effort(
+            &fusiform_store::WorkloadEffortEra {
+                model: "lab/shared".into(),
+                workload: "code".into(),
+                effort_default: Some("high".into()),
+                effort_minimum: Some("low".into()),
+                recorded_at_ms: 2200,
+                reason: "test".into(),
+            },
+            "operator",
+        )
+        .unwrap();
+
+    let prefixes = json!([
+        "quality.graded_effort",
+        "quality.elo.effort.",
+        "workload.code."
+    ]);
+    for at in [None, Some(2200)] {
+        let mut query = json!({"fact_prefixes":prefixes});
+        if let Some(at) = at {
+            query["at_ms"] = json!(at);
+        }
+        let reply = get(&store, query);
+        let reseller = &reply.models["reseller/shared"];
+        assert_eq!(reseller.get("quality.graded_effort"), Some(&json!("high")));
+        assert_eq!(reseller["quality.elo.effort.low"], 1000);
+        assert!(!reseller.contains_key("quality.elo.effort.high"));
+        assert_eq!(reseller["workload.code.effort_default"], "high");
+        assert_eq!(reseller["workload.code.effort_minimum"], "low");
+        assert!(!reseller.contains_key("capability.reasoning_options"));
+        let google = &reply.models["google/gemini-4-argon"];
+        assert_eq!(google["quality.graded_effort"], "high");
+        assert!(!google.contains_key("quality.elo.effort.low"));
+        assert_eq!(google["workload.code.effort_default"], "high");
+        assert!(!google.contains_key("workload.code.effort_minimum"));
+        assert_eq!(reply.quality_scores.unwrap().graded_at_ms, 2200);
+    }
+    let before = get(&store, json!({"at_ms":1999}));
+    assert!(!before.models["reseller/shared"].contains_key("quality.graded_effort"));
+    assert!(before.quality_scores.is_none());
+}
+
+#[test]
+fn effort_curation_tools_preview_commit_and_withdraw() {
+    let (store, _dir) = fixture(true);
+    store
+        .append_eras(&[NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "reseller".into(),
+            model_id: "shared".into(),
+            fact_key: FactKey::from_stored("capability.reasoning_options".into()),
+            value_json: json!([{"type":"effort","values":["high","low"]}]).to_string(),
+            boundary_at: Timestamp(1000),
+            boundary_kind: BoundaryKind::Seed,
+            observation_id: None,
+        }])
+        .unwrap();
+    let call = |name: &str, arguments: Value| {
+        serve_tool_call(
+            &store,
+            &serde_json::to_vec(&json!({"name":name,"arguments":arguments})).unwrap(),
+        )
+        .map(|response| serde_json::to_value(response).unwrap())
+    };
+    let mut version = store.catalog_version().unwrap();
+    for (tool, mut input, served) in [
+        (
+            "quality.grade",
+            json!({"elo":1000,"eq":900,"graded_effort":"high"}),
+            "quality.graded_effort",
+        ),
+        (
+            "quality.grade",
+            json!({"elo":950,"eq":850,"effort_grade":"low"}),
+            "quality.elo.effort.low",
+        ),
+        (
+            "quality.workload",
+            json!({"workload":"code","effort_default":"high"}),
+            "workload.code.effort_default",
+        ),
+    ] {
+        input["model"] = json!("lab/shared");
+        input["reason"] = json!("evaluation");
+        assert_eq!(call(tool, input.clone()).unwrap()["dry_run"], true);
+        assert_eq!(store.catalog_version().unwrap(), version);
+        input["dry_run"] = json!(false);
+        assert_eq!(call(tool, input).unwrap()["dry_run"], false);
+        let next = store.catalog_version().unwrap();
+        assert!(next > version);
+        version = next;
+        assert!(get(&store, json!({})).models["reseller/shared"].contains_key(served));
+    }
+    assert!(call(
+        "quality.workload",
+        json!({"model":"lab/shared","workload":"code","effort_default":"xhigh","reason":"invalid"})
+    )
+    .is_err());
+    let withdrawn = call("quality.workload", json!({"model":"lab/shared","workload":"code","withdraw":true,"dry_run":false,"reason":"retract"})).unwrap();
+    assert_eq!(withdrawn["new"]["withdrawn"], true);
+    assert!(!get(&store, json!({})).models["reseller/shared"]
+        .contains_key("workload.code.effort_default"));
+}
+
+#[test]
 fn decommission_embedded_seed_served_row_count() {
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {

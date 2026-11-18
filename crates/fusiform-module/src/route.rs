@@ -43,6 +43,7 @@ mod dated_model;
 mod history;
 mod page_plan;
 mod quality;
+mod quality_efforts;
 use page_plan::{serve_planned_page, ProviderRange};
 
 #[cfg(test)]
@@ -219,6 +220,9 @@ pub fn serve_tool_call(store: &CatalogStore, body: &[u8]) -> Result<ToolResponse
         }
         TOOL_PLAN_PRICES => serve_plan_prices(store, &args).map(ToolResponse::PlanPrices),
         TOOL_QUALITY_GRADE => quality::grade(store, &args).map(ToolResponse::QualityWrite),
+        fusiform_protocol::TOOL_QUALITY_WORKLOAD => {
+            quality_efforts::workload(store, &args).map(ToolResponse::WorkloadEffortWrite)
+        }
         TOOL_QUALITY_WITHDRAW => quality::withdraw(store, &args).map(ToolResponse::QualityWrite),
         TOOL_QUALITY_GRADES => quality::grades(store, &args).map(ToolResponse::QualityGrades),
         TOOL_QUALITY_DECOMMISSION => {
@@ -918,6 +922,16 @@ fn serve_catalog_get_prepared(
             // even when the caller requested only one derived key.
             wide.push("rate.".to_string());
             wide.push("existence".to_string());
+        }
+        if prefixes.iter().any(|p| curate::selects_effort_facts(p)) {
+            wide.extend(
+                [
+                    "model.canonical_id",
+                    "capability.reasoning_options",
+                    "existence",
+                ]
+                .map(str::to_owned),
+            );
         }
         wide
     });
@@ -1729,6 +1743,7 @@ impl ProviderRows {
             facts.contains_key("quality.elo")
                 || facts.contains_key("quality.eq")
                 || facts.keys().any(|key| key.starts_with("quality.grade."))
+                || facts.keys().any(|key| curate::is_effort_fact(key))
         });
         Ok(ProviderContribution {
             bytes,
@@ -1947,7 +1962,7 @@ fn finish_plane_view(
     let quality = if current.is_some() {
         read_quality(store)?
     } else {
-        curate::Quality::default()
+        read_quality_at(store, at.map(|time| time.0))?
     };
     curate::derive_row_facts(
         &mut response,
@@ -2010,27 +2025,71 @@ fn finish_plane_view(
 }
 
 fn read_quality(store: &CatalogStore) -> Result<curate::Quality, RouteError> {
-    let grades = store
-        .quality_grades()
+    read_quality_at(store, None)
+}
+
+fn read_quality_at(store: &CatalogStore, at: Option<i64>) -> Result<curate::Quality, RouteError> {
+    let grades = match at {
+        Some(at) => store.chat_grades_at(at),
+        None => store.quality_grades(),
+    }
+    .map_err(|e| store_error(&e))?
+    .into_iter()
+    .map(|row| curate::RecordedGrade {
+        model: row.model,
+        kind: row.kind,
+        graded_effort: row.graded_effort,
+        grade: match row.grade.expect("current grades exclude withdrawals") {
+            fusiform_store::QualityGrade::Chat { elo, eq } => curate::Grade::Chat { elo, eq },
+            fusiform_store::QualityGrade::NonChat { grade } => curate::Grade::NonChat { grade },
+        },
+        recorded_at_ms: row.recorded_at_ms,
+    })
+    .collect();
+    let marks = if at.is_none() {
+        store
+            .model_marks()
+            .map_err(|e| store_error(&e))?
+            .into_iter()
+            .map(|row| (row.model, row.recorded_at_ms))
+            .collect()
+    } else {
+        BTreeMap::new()
+    };
+    let efforts = store
+        .effort_grades_at(at)
         .map_err(|e| store_error(&e))?
         .into_iter()
-        .map(|row| curate::RecordedGrade {
-            model: row.model,
-            kind: row.kind,
-            grade: match row.grade.expect("current grades exclude withdrawals") {
-                fusiform_store::QualityGrade::Chat { elo, eq } => curate::Grade::Chat { elo, eq },
-                fusiform_store::QualityGrade::NonChat { grade } => curate::Grade::NonChat { grade },
-            },
-            recorded_at_ms: row.recorded_at_ms,
+        .filter_map(|row| {
+            Some(curate::RecordedEffortGrade {
+                model: row.model,
+                effort: row.effort,
+                elo: row.elo?,
+                eq: row.eq?,
+                recorded_at_ms: row.recorded_at_ms,
+            })
         })
         .collect();
-    let marks = store
-        .model_marks()
+    let workloads = store
+        .workload_efforts_at(at)
         .map_err(|e| store_error(&e))?
         .into_iter()
-        .map(|row| (row.model, row.recorded_at_ms))
+        .filter_map(|row| {
+            Some(curate::RecordedWorkloadEffort {
+                model: row.model,
+                workload: row.workload,
+                effort_default: row.effort_default?,
+                effort_minimum: row.effort_minimum,
+                recorded_at_ms: row.recorded_at_ms,
+            })
+        })
         .collect();
-    Ok(curate::Quality { grades, marks })
+    Ok(curate::Quality {
+        grades,
+        marks,
+        efforts,
+        workloads,
+    })
 }
 
 fn read_speed_twin_cards(

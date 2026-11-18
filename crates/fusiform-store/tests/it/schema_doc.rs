@@ -138,7 +138,7 @@ fn cache_lifetime_v12_backfills_populated_v11_and_reopen_preserves_history() {
         )
         .unwrap();
     assert!(outcome.store_ahead());
-    assert_eq!((outcome.recorded, outcome.chain_max), (13, 11));
+    assert_eq!((outcome.recorded, outcome.chain_max), (14, 11));
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn decommission_v11_import_on_populated_v10_and_reopen() {
         )
         .unwrap();
     assert!(outcome.store_ahead());
-    assert_eq!((outcome.recorded, outcome.chain_max), (13, 10));
+    assert_eq!((outcome.recorded, outcome.chain_max), (14, 10));
     let conn = rusqlite::Connection::open(dir.path().join("marks.db")).unwrap();
     for value in ["2", "-1", "'not-a-boolean'"] {
         assert!(conn.execute(&format!("INSERT INTO model_mark_era (model, decommissioned, marked_by, reason, recorded_at_ms) VALUES ('test/invalid', {value}, 'operator', 'invalid', 1)"), []).is_err());
@@ -404,7 +404,7 @@ fn quality_grade_v8_reopen_never_reimports_and_v7_reports_store_ahead() {
         outcome.store_ahead(),
         "the v7 binary's existing refusal guard must reject a newer store"
     );
-    assert_eq!(outcome.recorded, 13);
+    assert_eq!(outcome.recorded, 14);
     assert_eq!(outcome.chain_max, 7);
 }
 
@@ -491,7 +491,7 @@ fn fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it() {
         outcome.store_ahead(),
         "the existing v8 refusal guard must reject a newer store"
     );
-    assert_eq!((outcome.recorded, outcome.chain_max), (13, 8));
+    assert_eq!((outcome.recorded, outcome.chain_max), (14, 8));
     let outcome = old
         .migrate(
             fusiform_store::schema::NAMESPACE,
@@ -499,7 +499,7 @@ fn fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it() {
         )
         .unwrap();
     assert!(outcome.store_ahead(), "v9 must also refuse a newer store");
-    assert_eq!((outcome.recorded, outcome.chain_max), (13, 9));
+    assert_eq!((outcome.recorded, outcome.chain_max), (14, 9));
 }
 
 #[test]

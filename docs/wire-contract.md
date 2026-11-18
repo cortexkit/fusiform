@@ -143,6 +143,19 @@ value would do to a consumer:
 | `model.name` | advisory | human display name as a JSON string; otherwise no fact |
 | `model.lineage` | advisory | curated routing diversity and cost-fallback group; current reads only; otherwise no fact (§5.10) |
 | `provider.name` | advisory | the row's provider display name as a JSON string; otherwise no fact |
+| `quality.graded_effort` | advisory | effort at which the chat scores were measured, if the row lists it; current and dated |
+| `quality.elo.effort.<effort>` | advisory | derived ELO at a listed effort, excluding the graded effort; current and dated |
+| `quality.eq.effort.<effort>` | advisory | derived EQ at a listed effort, excluding the graded effort; current and dated |
+| `workload.reason.effort_default` | advisory | curated default effort for reason, if the row lists it; current and dated |
+| `workload.reason.effort_minimum` | advisory | curated floor for automatic reason selections, if the row lists it; current and dated |
+| `workload.code.effort_default` | advisory | curated default effort for code, if the row lists it; current and dated |
+| `workload.code.effort_minimum` | advisory | curated floor for automatic code selections, if the row lists it; current and dated |
+| `workload.synthesize.effort_default` | advisory | curated default effort for synthesize, if the row lists it; current and dated |
+| `workload.synthesize.effort_minimum` | advisory | curated floor for automatic synthesize selections, if the row lists it; current and dated |
+| `workload.lookup.effort_default` | advisory | curated default effort for lookup, if the row lists it; current and dated |
+| `workload.lookup.effort_minimum` | advisory | curated floor for automatic lookup selections, if the row lists it; current and dated |
+| `workload.quick.effort_default` | advisory | curated default effort for quick, if the row lists it; current and dated |
+| `workload.quick.effort_minimum` | advisory | curated floor for automatic quick selections, if the row lists it; current and dated |
 | `quality.elo` | advisory | operator-assigned general quality score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
 | `quality.eq` | advisory | operator-assigned writing and judgment score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
 | `quality.grade.transcription` | advisory | operator-assigned transcription score, comparable only among transcription engines; current reads only (§5.9) |

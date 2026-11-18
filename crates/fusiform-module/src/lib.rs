@@ -453,13 +453,15 @@ pub fn manifest() -> ModuleManifest {
                         "model":{"type":"string"}, "elo":{"type":"number", "exclusiveMinimum":0},
                         "eq":{"type":"number", "exclusiveMinimum":0}, "reason":{"type":"string"},
                         "grade":{"type":"number", "exclusiveMinimum":0},
+                        "graded_effort":{"type":"string", "minLength":1},
+                        "effort_grade":{"type":"string", "minLength":1},
                         "kind":{"type":"string", "enum":["transcription","speech","image","video","search"]},
                         "dry_run":{"type":"boolean", "default":true}
                     },
                     "required":["model","reason"], "additionalProperties":false,
                     "oneOf":[
-                        {"required":["elo","eq"], "not":{"anyOf":[{"required":["grade"]},{"required":["kind"]}]}},
-                        {"required":["kind","grade"], "not":{"anyOf":[{"required":["elo"]},{"required":["eq"]}]}}
+                        {"required":["elo","eq"], "not":{"anyOf":[{"required":["grade"]},{"required":["kind"]},{"required":["graded_effort","effort_grade"]}]}},
+                        {"required":["kind","grade"], "not":{"anyOf":[{"required":["elo"]},{"required":["eq"]},{"required":["graded_effort"]},{"required":["effort_grade"]}]}}
                     ]
                 }),
             },
@@ -472,9 +474,11 @@ pub fn manifest() -> ModuleManifest {
                     "properties": {
                         "model":{"type":"string"}, "reason":{"type":"string"},
                         "kind":{"type":"string", "enum":["transcription","speech","image","video","search"]},
+                        "effort_grade":{"type":"string", "minLength":1},
                         "dry_run":{"type":"boolean", "default":true}
                     },
-                    "required":["model","reason"], "additionalProperties":false
+                    "required":["model","reason"], "additionalProperties":false,
+                    "not":{"required":["kind","effort_grade"]}
                 }),
             },
             Tool {
@@ -515,6 +519,24 @@ pub fn manifest() -> ModuleManifest {
                 execution_mode: ExecutionMode::Pure,
                 schema: serde_json::json!({
                     "type":"object", "properties":{"model":{"type":"string"}}, "additionalProperties":false
+                }),
+            },
+            Tool {
+                name: fusiform_protocol::TOOL_QUALITY_WORKLOAD.to_string(),
+                description: Some("Set a workload's default and optional minimum effort, or withdraw the judgment. Previews unless dry_run is false.".into()),
+                execution_mode: ExecutionMode::Mutating,
+                schema: serde_json::json!({
+                    "type":"object",
+                    "properties":{
+                        "model":{"type":"string"}, "workload":{"type":"string", "enum":fusiform_protocol::WORKLOADS},
+                        "effort_default":{"type":"string", "minLength":1}, "effort_minimum":{"type":"string", "minLength":1},
+                        "withdraw":{"type":"boolean", "default":false}, "reason":{"type":"string"},
+                        "dry_run":{"type":"boolean", "default":true}
+                    },
+                    "required":["model","workload","reason"], "additionalProperties":false,
+                    "if":{"required":["withdraw"],"properties":{"withdraw":{"const":true}}},
+                    "then":{"not":{"anyOf":[{"required":["effort_default"]},{"required":["effort_minimum"]}]}},
+                    "else":{"required":["effort_default"]}
                 }),
             },
         ],

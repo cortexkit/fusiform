@@ -175,7 +175,14 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
                     .as_object()
                     .unwrap()
                     .keys()
-                    .filter(|key| QUALITY_ONLY.contains(&key.as_str()))
+                    .inspect(|key| {
+                        assert!(
+                            QUALITY_ONLY.iter().any(|family| {
+                                fusiform_protocol::served_fact_key_matches(family, key)
+                            }),
+                            "untabled quality fact: {key}"
+                        );
+                    })
                     .cloned()
             }),
     );
@@ -392,6 +399,19 @@ pub(crate) const ADDITION_ONLY: &[&str] = &[
 const QUALITY_ONLY: &[&str] = &[
     "quality.elo",
     "quality.eq",
+    "quality.graded_effort",
+    "quality.elo.effort.<effort>",
+    "quality.eq.effort.<effort>",
+    "workload.reason.effort_default",
+    "workload.reason.effort_minimum",
+    "workload.code.effort_default",
+    "workload.code.effort_minimum",
+    "workload.synthesize.effort_default",
+    "workload.synthesize.effort_minimum",
+    "workload.lookup.effort_default",
+    "workload.lookup.effort_minimum",
+    "workload.quick.effort_default",
+    "workload.quick.effort_minimum",
     "quality.grade.transcription",
     "quality.grade.speech",
     "quality.grade.image",

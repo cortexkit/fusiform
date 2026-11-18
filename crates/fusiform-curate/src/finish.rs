@@ -1,17 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
+    apply_effort_facts,
     billing_planes::{self, Plane, PlaneKind, RuleState},
-    cache_lifetimes, fact_for_the_wire, is_mode_rate, name_the_provenance_of_a_pre_0_11_row,
-    narrow_to_requested,
+    cache_lifetimes, fact_for_the_wire, is_effort_fact, is_mode_rate,
+    name_the_provenance_of_a_pre_0_11_row, narrow_to_requested,
     speed_twins::{SpeedTwin, SpeedTwins},
-    CurationSet, Facts, RawFacts, ServedState, RATE,
+    CurationSet, Facts, RawFacts, RecordedEffortGrade, RecordedWorkloadEffort, ServedState, RATE,
 };
 use fusiform_protocol::{BillingRuleWire, CatalogGetResponse, PlaneWire};
 
 #[derive(Default)]
 pub struct Quality {
     pub grades: Vec<RecordedGrade>,
+    pub efforts: Vec<RecordedEffortGrade>,
+    pub workloads: Vec<RecordedWorkloadEffort>,
     /// The currently decommissioned model keys and the marks' recording times.
     pub marks: BTreeMap<String, i64>,
 }
@@ -20,6 +23,7 @@ pub struct RecordedGrade {
     pub model: String,
     pub kind: Option<String>,
     pub grade: Grade,
+    pub graded_effort: Option<String>,
     pub recorded_at_ms: i64,
 }
 
@@ -92,6 +96,7 @@ pub fn derive_row_facts(
         apply_quality_scores(quality, response, requested_prefixes);
         apply_model_lineage(current.model_lineage, response);
     }
+    apply_effort_facts(quality, response, requested_prefixes);
 }
 
 /// Get the exact upstream card a declared quota proxy may borrow for this row.
@@ -377,13 +382,16 @@ fn apply_quality_scores(
     retain_quality_disclosure(response);
 }
 
+pub fn counts_for_quality_disclosure(facts: &Facts) -> bool {
+    facts.contains_key("quality.elo")
+        || facts.contains_key("quality.eq")
+        || facts.keys().any(|key| key.starts_with("quality.grade."))
+        || facts.contains_key("quality.decommissioned")
+        || facts.keys().any(|key| is_effort_fact(key))
+}
+
 pub fn retain_quality_disclosure(response: &mut CatalogGetResponse) {
-    if !response.models.values().any(|facts| {
-        facts.contains_key("quality.elo")
-            || facts.contains_key("quality.eq")
-            || facts.keys().any(|key| key.starts_with("quality.grade."))
-            || facts.contains_key("quality.decommissioned")
-    }) {
+    if !response.models.values().any(counts_for_quality_disclosure) {
         response.quality_scores = None;
     }
 }

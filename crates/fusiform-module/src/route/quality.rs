@@ -125,6 +125,8 @@ fn wire(row: QualityGradeEra) -> QualityGradeWire {
     QualityGradeWire {
         model: row.model,
         kind: row.kind,
+        graded_effort: row.graded_effort,
+        effort_grade: None,
         elo: row.grade.as_ref().and_then(QualityGrade::elo).cloned(),
         eq: row.grade.as_ref().and_then(QualityGrade::eq).cloned(),
         grade: row.grade.as_ref().and_then(QualityGrade::grade).cloned(),
@@ -197,6 +199,34 @@ pub(super) fn grade(store: &CatalogStore, body: &[u8]) -> Result<QualityWriteRes
         (None, None, Some(grade)) => Some(QualityGrade::NonChat { grade }),
         _ => None,
     };
+    if let Some(effort) = request.effort_grade {
+        let Some(QualityGrade::Chat { elo, eq }) = grade else {
+            return Err(RouteError::bad_request("effort-grade requires elo and eq"));
+        };
+        if request.kind.is_some() || request.graded_effort.is_some() {
+            return Err(RouteError::bad_request(
+                "effort-grade cannot be combined with kind or graded_effort",
+            ));
+        }
+        return super::quality_efforts::grade(
+            store,
+            request.model,
+            effort,
+            Some((elo, eq)),
+            request.reason,
+            request.dry_run,
+        );
+    }
+    if request.graded_effort.is_some()
+        && !matches!(
+            (&grade, &request.kind),
+            (Some(QualityGrade::Chat { .. }), None)
+        )
+    {
+        return Err(RouteError::bad_request(
+            "graded_effort requires elo and eq without kind",
+        ));
+    }
     write(
         store,
         request.model,
@@ -204,6 +234,7 @@ pub(super) fn grade(store: &CatalogStore, body: &[u8]) -> Result<QualityWriteRes
         grade,
         request.reason,
         request.dry_run,
+        request.graded_effort,
         false,
     )
 }
@@ -214,6 +245,21 @@ pub(super) fn withdraw(
 ) -> Result<QualityWriteResponse, RouteError> {
     let request: QualityWithdrawRequest = serde_json::from_slice(body)
         .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?;
+    if let Some(effort) = request.effort_grade {
+        if request.kind.is_some() {
+            return Err(RouteError::bad_request(
+                "effort-grade cannot be combined with kind",
+            ));
+        }
+        return super::quality_efforts::grade(
+            store,
+            request.model,
+            effort,
+            None,
+            request.reason,
+            request.dry_run,
+        );
+    }
     write(
         store,
         request.model,
@@ -221,10 +267,12 @@ pub(super) fn withdraw(
         None,
         request.reason,
         request.dry_run,
+        None,
         true,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write(
     store: &CatalogStore,
     model: String,
@@ -232,6 +280,7 @@ fn write(
     grade: Option<QualityGrade>,
     reason: String,
     dry_run: bool,
+    graded_effort: Option<String>,
     withdraw: bool,
 ) -> Result<QualityWriteResponse, RouteError> {
     if reason.trim().is_empty() {
@@ -312,6 +361,9 @@ fn write(
         if affected.is_empty() {
             return Err(RouteError::bad_request(format!("unknown quality grade key {model:?}; model.type is unavailable because no current served row matches; use a canonical model id carried by a current served row, or the provider/model row id when it has no canonical id")));
         }
+        if let Some(effort) = &graded_effort {
+            super::quality_efforts::require_effort(catalog, &affected, effort)?;
+        }
         if let Some((fact, required)) = modality {
             let capable = affected.iter().any(|id| {
                 catalog.models[id]
@@ -349,6 +401,8 @@ fn write(
     let new = QualityGradeWire {
         model: model.clone(),
         kind: kind.clone(),
+        graded_effort,
+        effort_grade: None,
         elo: grade.as_ref().and_then(QualityGrade::elo).cloned(),
         eq: grade.as_ref().and_then(QualityGrade::eq).cloned(),
         grade: grade.as_ref().and_then(QualityGrade::grade).cloned(),
@@ -359,13 +413,14 @@ fn write(
     };
     if !dry_run {
         store
-            .append_quality_grade(
+            .append_quality_grade_with_effort(
                 &model,
                 kind.as_deref(),
                 grade.as_ref(),
                 "operator",
                 &reason,
                 new.recorded_at_ms,
+                new.graded_effort.as_deref(),
             )
             .map_err(|e| store_error(&e))?;
     }

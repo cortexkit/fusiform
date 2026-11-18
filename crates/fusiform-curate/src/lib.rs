@@ -28,11 +28,13 @@ pub mod wire_families;
 mod catalog;
 mod finish;
 mod project;
+mod quality_efforts;
 mod render;
 
 pub use catalog::{curate, UpstreamState};
 pub use finish::*;
 pub use project::*;
+pub use quality_efforts::*;
 pub use render::*;
 
 pub type Facts = BTreeMap<String, Value>;

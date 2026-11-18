@@ -87,6 +87,7 @@ pub const TOOL_QUALITY_GRADES: &str = "quality.grades";
 pub const TOOL_QUALITY_DECOMMISSION: &str = "quality.decommission";
 pub const TOOL_QUALITY_RESTORE: &str = "quality.restore";
 pub const TOOL_QUALITY_MARKS: &str = "quality.marks";
+pub const TOOL_QUALITY_WORKLOAD: &str = "quality.workload";
 
 /// Every tool name, so a dispatch and a manifest cannot disagree about which
 /// tools exist.
@@ -131,6 +132,7 @@ pub const TOOLS: &[&str] = &[
     TOOL_QUALITY_DECOMMISSION,
     TOOL_QUALITY_RESTORE,
     TOOL_QUALITY_MARKS,
+    TOOL_QUALITY_WORKLOAD,
 ];
 
 /// Ask what curated subscription prices fusiform holds.
@@ -1110,6 +1112,8 @@ pub fn version_line(binary: &str, binary_version: &str) -> String {
 /// `wire.npm`, `wire.api` and `wire.shape` carry published connection claims.
 /// `wire.family` verifies the request protocol on current reads; consumers own
 /// runner support and transport quirks. No header/body overrides are served.
+pub const WORKLOADS: &[&str] = &["reason", "code", "synthesize", "lookup", "quick"];
+
 pub const SERVED_FACTS: &[ServedFact] = &[
     ServedFact {
         key: "model.mode_of",
@@ -1141,6 +1145,31 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         class: FactClass::Advisory,
         note: "operator-assigned writing and judgment score for routing selection, not request bytes; current reads only, disclosed in quality_scores.",
     },
+    ServedFact {
+        key: "quality.graded_effort",
+        class: FactClass::Advisory,
+        note: "Effort used to measure the curated ELO and EQ; current and dated, quality_scores disclosure.",
+    },
+    ServedFact {
+        key: "quality.elo.effort.<effort>",
+        class: FactClass::Advisory,
+        note: "Derived ELO at a listed effort other than the graded effort; current and dated, quality_scores disclosure.",
+    },
+    ServedFact {
+        key: "quality.eq.effort.<effort>",
+        class: FactClass::Advisory,
+        note: "Derived EQ at a listed effort other than the graded effort; current and dated, quality_scores disclosure.",
+    },
+    ServedFact { key: "workload.reason.effort_default", class: FactClass::Advisory, note: "Curated default effort for reasoning." },
+    ServedFact { key: "workload.reason.effort_minimum", class: FactClass::Advisory, note: "Curated minimum effort for automatic reasoning choices." },
+    ServedFact { key: "workload.code.effort_default", class: FactClass::Advisory, note: "Curated default effort for coding." },
+    ServedFact { key: "workload.code.effort_minimum", class: FactClass::Advisory, note: "Curated minimum effort for automatic coding choices." },
+    ServedFact { key: "workload.synthesize.effort_default", class: FactClass::Advisory, note: "Curated default effort for synthesis." },
+    ServedFact { key: "workload.synthesize.effort_minimum", class: FactClass::Advisory, note: "Curated minimum effort for automatic synthesis choices." },
+    ServedFact { key: "workload.lookup.effort_default", class: FactClass::Advisory, note: "Curated default effort for lookups." },
+    ServedFact { key: "workload.lookup.effort_minimum", class: FactClass::Advisory, note: "Curated minimum effort for automatic lookup choices." },
+    ServedFact { key: "workload.quick.effort_default", class: FactClass::Advisory, note: "Curated default effort for quick tasks." },
+    ServedFact { key: "workload.quick.effort_minimum", class: FactClass::Advisory, note: "Curated minimum effort for automatic quick-task choices." },
     ServedFact {
         key: "quality.grade.transcription",
         class: FactClass::Advisory,
@@ -1683,7 +1712,7 @@ pub struct ServedFact {
     pub note: &'static str,
 }
 
-/// Match an exact served-fact key or a concrete instance of a registered `<n>` family.
+/// Match an exact served-fact key or a concrete instance of a registered family.
 /// Numeric selectors are positive decimal integers without leading zeros.
 pub fn served_fact_key_matches(registered: &str, key: &str) -> bool {
     if let Some(prefix) = registered.strip_suffix("<n>") {
@@ -1692,6 +1721,9 @@ pub fn served_fact_key_matches(registered: &str, key: &str) -> bool {
                 .parse::<u64>()
                 .is_ok_and(|n| n > 0 && suffix == n.to_string())
         })
+    } else if let Some(prefix) = registered.strip_suffix("<effort>") {
+        key.strip_prefix(prefix)
+            .is_some_and(|effort| !effort.is_empty() && effort != "<effort>")
     } else {
         registered == key
     }
@@ -1817,6 +1849,7 @@ pub enum ToolResponse {
     QualityGrades(QualityGradesResponse),
     QualityMarkWrite(QualityMarkWriteResponse),
     QualityMarks(QualityMarksResponse),
+    WorkloadEffortWrite(WorkloadEffortWriteResponse),
 }
 
 /// Upstream eras and, optionally, the dated-read timeline for a fact or prefix.
@@ -1910,6 +1943,10 @@ pub struct QualityScoresWire {
 pub struct QualityGradeRequest {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graded_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort_grade: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     #[serde(
         default,
@@ -1946,6 +1983,8 @@ fn quality_number<'de, D: serde::Deserializer<'de>>(
 pub struct QualityWithdrawRequest {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort_grade: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     pub reason: String,
     #[serde(default = "default_true")]
@@ -1965,6 +2004,10 @@ pub struct QualityGradesRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QualityGradeWire {
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graded_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort_grade: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     pub elo: Option<serde_json::Number>,
@@ -1992,6 +2035,46 @@ pub struct QualityWriteResponse {
 pub struct QualityGradesResponse {
     /// Current grades ordered by key, or one key's history newest first.
     pub grades: Vec<QualityGradeWire>,
+}
+
+/// Set or withdraw the recommended effort for one workload. Previews by default.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkloadEffortRequest {
+    pub model: String,
+    pub workload: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort_default: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort_minimum: Option<String>,
+    #[serde(default)]
+    pub withdraw: bool,
+    pub reason: String,
+    #[serde(default = "default_true")]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkloadEffortWire {
+    pub model: String,
+    pub workload: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort_default: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort_minimum: Option<String>,
+    pub withdrawn: bool,
+    pub reason: String,
+    pub recorded_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkloadEffortWriteResponse {
+    pub dry_run: bool,
+    pub model: String,
+    pub current: Option<WorkloadEffortWire>,
+    pub new: WorkloadEffortWire,
+    pub affected_count: usize,
+    pub affected_ids: Vec<String>,
 }
 
 /// Decommission or restore a served key. Both tools preview by default.

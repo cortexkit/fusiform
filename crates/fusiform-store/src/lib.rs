@@ -20,6 +20,8 @@ mod fact_overrides;
 mod history;
 pub mod ingest;
 mod quality;
+mod quality_efforts;
+pub use quality_efforts::{EffortGradeEra, WorkloadEffortEra};
 mod readers;
 pub mod schema;
 pub mod serve;

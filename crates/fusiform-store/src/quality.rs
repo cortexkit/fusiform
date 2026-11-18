@@ -45,6 +45,7 @@ pub struct QualityGradeEra {
     pub model: String,
     pub kind: Option<String>,
     pub grade: Option<QualityGrade>,
+    pub graded_effort: Option<String>,
     pub graded_by: String,
     pub reason: String,
     pub recorded_at_ms: i64,
@@ -97,6 +98,7 @@ fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<QualityGradeEra> {
         reason: row.get(5)?,
         recorded_at_ms: row.get(6)?,
         kind: row.get(8)?,
+        graded_effort: row.get(9)?,
     })
 }
 
@@ -164,11 +166,33 @@ impl CatalogStore {
         reason: &str,
         recorded_at_ms: i64,
     ) -> Result<i64, CatalogError> {
+        self.append_quality_grade_with_effort(
+            model,
+            kind,
+            grade,
+            graded_by,
+            reason,
+            recorded_at_ms,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn append_quality_grade_with_effort(
+        &self,
+        model: &str,
+        kind: Option<&str>,
+        grade: Option<&QualityGrade>,
+        graded_by: &str,
+        reason: &str,
+        recorded_at_ms: i64,
+        graded_effort: Option<&str>,
+    ) -> Result<i64, CatalogError> {
         let id = self.inner.with_conn_fenced(|tx| {
             tx.execute(
                 "INSERT INTO quality_grade_era \
-                 (model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms, grade, kind) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 (model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms, grade, kind, graded_effort) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     model,
                     grade.and_then(QualityGrade::elo).map(ToString::to_string),
@@ -178,7 +202,8 @@ impl CatalogStore {
                     reason,
                     recorded_at_ms,
                     grade.and_then(QualityGrade::grade).map(ToString::to_string),
-                    kind
+                    kind,
+                    graded_effort,
                 ],
             )?;
             crate::advance_catalog_version_in(tx, None, fusiform_core::Timestamp(recorded_at_ms))?;
@@ -192,7 +217,7 @@ impl CatalogStore {
     pub fn quality_grades(&self) -> Result<Vec<QualityGradeEra>, CatalogError> {
         self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms, grade, kind \
+                "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms, grade, kind, graded_effort \
                  FROM quality_grade_era q WHERE withdrawn = 0 \
                  AND id = (SELECT MAX(id) FROM quality_grade_era WHERE model = q.model AND kind IS q.kind) \
                  ORDER BY model, kind",
@@ -206,10 +231,23 @@ impl CatalogStore {
     pub fn quality_grade_history(&self, model: &str) -> Result<Vec<QualityGradeEra>, CatalogError> {
         self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms, grade, kind \
+                "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms, grade, kind, graded_effort \
                  FROM quality_grade_era WHERE model = ?1 ORDER BY id",
             )?;
             let rows = stmt.query_map([model], decode)?.collect();
+            rows
+        })
+    }
+
+    pub fn chat_grades_at(&self, at: i64) -> Result<Vec<QualityGradeEra>, CatalogError> {
+        self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, model, elo, eq, graded_by, reason, recorded_at_ms, grade, kind, graded_effort \
+                 FROM quality_grade_era q WHERE withdrawn = 0 AND kind IS NULL \
+                 AND id = (SELECT MAX(id) FROM quality_grade_era WHERE model = q.model \
+                           AND kind IS NULL AND recorded_at_ms <= ?1) ORDER BY model",
+            )?;
+            let rows = stmt.query_map([at], decode)?.collect();
             rows
         })
     }
