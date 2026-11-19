@@ -1825,11 +1825,6 @@ fn boundary_columns(kind: &BoundaryKind) -> (&'static str, Option<CorrectionColu
     }
 }
 
-/// The confirming outcomes as a SQL literal list.
-///
-/// Rendered from the domain's `CONFIRMING_OUTCOMES` rather than written out, so
-/// adding an outcome cannot leave the query behind. Safe to interpolate: every
-/// element is a compile-time constant from a closed enum, never user input.
 fn last_confirming_before_in(
     conn: &rusqlite::Connection,
     source: SourceId,
@@ -1846,6 +1841,8 @@ fn last_confirming_before_in(
         .map(|ts| ts.map(Timestamp))
 }
 
+/// Render from the domain's closed set of confirming outcomes so the query
+/// cannot drift from it. Every interpolated value is a compile-time constant.
 fn confirming_in_list() -> String {
     fusiform_core::CONFIRMING_OUTCOMES
         .iter()
