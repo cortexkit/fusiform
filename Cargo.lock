@@ -251,15 +251,15 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cortexkit-bus-client"
-version = "0.1.4"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f49f294985b669e4440c01ba3b31e0897adc107f0dd3b50454808f8ab833c0e"
+checksum = "2138258ff809265a7478914e99cc32988978b0b5fd4247e87bdeb2cbbeae5d1b"
 dependencies = [
  "async-nats",
  "async-trait",
  "base64",
  "bytes",
- "cortexkit-bus-naming",
+ "cortexkit-bus-naming 0.5.5",
  "cortexkit-bus-nats",
  "cortexkit-bus-trait",
  "futures-util",
@@ -279,18 +279,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be84df2874202cd171f19acd2a38f6e13db498b31813a0f0e7a6e91235ddcc54"
 
 [[package]]
-name = "cortexkit-bus-nats"
-version = "0.5.0"
+name = "cortexkit-bus-naming"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d321fc4091746e63c719f722f7658a26c40fdc20b41f0bf9cde0e78b6cea2234"
+checksum = "93b3e349aaed14c76cc85d6b4bdfc1553b2d85778b830626a7bb2777a8ed11c1"
+
+[[package]]
+name = "cortexkit-bus-nats"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55a7bd392e37c754ff51d56d1ded432f9db4c453d9c7a924abbbdc619ad601a5"
 dependencies = [
  "async-nats",
  "async-trait",
  "bytes",
- "cortexkit-bus-naming",
+ "cortexkit-bus-naming 0.4.0",
  "cortexkit-bus-trait",
  "futures-util",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
