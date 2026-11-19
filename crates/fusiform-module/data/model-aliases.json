@@ -118,6 +118,32 @@
     },
     {
       "provider_id": "google",
+      "model_id": "antigravity-gemini-4-neon",
+      "model_name": "Gemini 4 Neon (Antigravity)",
+      "wire_family": "google.code_assist",
+      "target": {
+        "provider_id": "google",
+        "model_id": "gemini-4-neon"
+      },
+      "basis": "The plugin resolves low, medium, high and xhigh to the corresponding gemini-4-neon wire ids, defaulting to high, the native client's default agent model. OpenCode 1 lists only low, medium and high because its Google library cannot carry xhigh; OpenCode 2 and Pi carry all four.",
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/229ffc79/packages/core/src/model-registry.ts#L107-L135 (native routes), #L352-L364 (public model), #L704-L716 (tier mapping); https://github.com/cortexkit/antigravity-auth/blob/229ffc79/test-fixtures/agy-cli-1.5.9/neon-evidence.json (native catalog and requests); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
+      "established_at_ms": 1795046400000,
+      "review_by_ms": 1800230400000,
+      "limit_output": {
+        "value": 262144,
+        "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/229ffc79/test-fixtures/agy-cli-1.5.9/neon-evidence.json#L30-L46; https://github.com/cortexkit/antigravity-auth/blob/229ffc79/packages/core/src/model-registry.ts#L107-L135",
+        "quote": "The native agy 1.5.9 catalog lists maxOutputTokens 262144 on all four Neon routes, and its Low, Medium, High and XHigh requests each send \"maxOutputTokens\": 262144. All four returned HTTP 200 with STOP."
+      },
+      "reasoning_wire_ids": {
+        "low": "gemini-4-neon-low",
+        "medium": "gemini-4-neon-medium",
+        "high": "gemini-4-neon-high",
+        "xhigh": "gemini-4-neon-xhigh"
+      },
+      "reasoning_default": "high"
+    },
+    {
+      "provider_id": "google",
       "model_id": "antigravity-gemini-3.8-flash",
       "model_name": "Gemini 3.8 Flash (Antigravity)",
       "wire_family": "google.code_assist",
