@@ -5,7 +5,6 @@ use fusiform_release::{
 
 use super::{step, ReleaseKeys};
 
-#[derive(Clone)]
 pub(super) struct Verified {
     pub envelope: ReleaseEnvelope,
     pub state: State,

@@ -72,6 +72,42 @@ fn model_name_at(store: &CatalogStore, at_ms: i64) -> Value {
         .clone()
 }
 
+fn next_named_release(snapshot: &mut Snapshot, key: &SigningKey) -> Release {
+    let envelope = &mut snapshot.envelope;
+    envelope.parent = Some(envelope.release);
+    envelope.release += 1;
+    envelope.published_at_ms += 120_000;
+    envelope.upstream_observed_at_ms += 120_000;
+    let value = json!(format!("Mini {}", envelope.release % 10));
+    snapshot
+        .state
+        .upstream
+        .get_mut("zeta")
+        .unwrap()
+        .models
+        .get_mut("mini")
+        .unwrap()
+        .insert("model.name".into(), value.clone());
+    let change = fusiform_release::Change {
+        upstream: vec![fusiform_release::ChangeOp::Set {
+            provider: "zeta".into(),
+            model: "mini".into(),
+            fact: "model.name".into(),
+            value,
+        }],
+        curation_set: None,
+    };
+    envelope.upstream_hash = fusiform_release::upstream_state_hash(&snapshot.state.upstream);
+    envelope.state_hash =
+        fusiform_release::state_hash(envelope.curation_hash, envelope.upstream_hash);
+    envelope.change_hash = change.change_hash();
+    Release {
+        envelope: envelope.clone(),
+        signatures: sign_envelope(envelope, KID, key).unwrap(),
+        change,
+    }
+}
+
 #[test]
 fn store_poll_writes_the_same_model_eras_as_direct_ingest() {
     use fusiform_core::{
@@ -500,4 +536,74 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     let after = get(row.recorded_at_ms);
     assert!(!after.models["zeta/mini"].contains_key("workload.quick.excluded"));
     assert_eq!(after.models["zeta/mini"]["workload.code.excluded"], true);
+}
+
+#[tokio::test]
+async fn store_poll_keeps_one_state_and_refuses_tampered_bytes() {
+    let key = SigningKey::from_bytes(&[42; 32]);
+    let mut snapshot: Snapshot = serde_json::from_slice(SNAPSHOT).unwrap();
+    let files = Arc::new(Mutex::new(BTreeMap::from([
+        ("/v1/head".into(), signed_head(&snapshot, 2, &key)),
+        ("/v1/snapshots/2".into(), SNAPSHOT.to_vec()),
+        ("/v1/releases/1".into(), FIRST.to_vec()),
+        ("/v1/history/base.json".into(), BASE.to_vec()),
+        ("/v1/history/days/2026-11-19.json".into(), DAY.to_vec()),
+    ])));
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open_for_store(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into_owned(),
+        },
+    })
+    .unwrap();
+    let mut poller = StorePoller::new(
+        server(Arc::clone(&files)),
+        BTreeMap::from([(KID.into(), key.verifying_key())]),
+    )
+    .unwrap();
+    assert_eq!(poller.poll(&store).await.unwrap(), 2);
+    let bytes_at_bootstrap = poller.verified.as_ref().unwrap().bytes.len();
+    let publish = |snapshot: &mut Snapshot, number| {
+        let release = next_named_release(snapshot, &key);
+        assert_eq!(release.envelope.release, number);
+        let mut files = files.lock().unwrap();
+        files.insert("/v1/head".into(), signed_head(snapshot, 2, &key));
+        files.insert(
+            format!("/v1/releases/{number}"),
+            serde_json::to_vec(&release).unwrap(),
+        );
+    };
+    for number in 3..=32 {
+        publish(&mut snapshot, number);
+        assert_eq!(poller.poll(&store).await.unwrap(), number);
+        assert_eq!(
+            poller.verified.as_ref().unwrap().bytes.len(),
+            bytes_at_bootstrap
+        );
+    }
+
+    // A trailing space changes the bytes but not the decoded state or its
+    // release hashes. Only the retained-buffer integrity check can reject it.
+    let retained = poller.verified.as_mut().unwrap();
+    let tampered = [retained.bytes.as_ref(), b" "].concat().into_boxed_slice();
+    let original = std::mem::replace(&mut retained.bytes, tampered);
+    assert_eq!(poller.poll(&store).await.unwrap(), 32);
+    let version = store.catalog_version().unwrap();
+    publish(&mut snapshot, 33);
+    assert_eq!(
+        poller.poll(&store).await.unwrap_err(),
+        "retained store state does not match its verified hash"
+    );
+    assert_eq!(store.catalog_version().unwrap(), version);
+    assert_eq!(store.latest_store_release().unwrap().unwrap().release, 32);
+
+    poller.verified.as_mut().unwrap().bytes = original;
+    assert_eq!(poller.poll(&store).await.unwrap(), 33);
+    assert_eq!(
+        model_name_at(&store, snapshot.envelope.upstream_observed_at_ms),
+        "Mini 3"
+    );
 }

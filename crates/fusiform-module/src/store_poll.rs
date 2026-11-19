@@ -13,7 +13,7 @@ use std::{
 };
 
 use fusiform_release::{
-    verify_head, verify_history_attestation, Hash, Head, HeadBody, HistoryFile, Release,
+    sha256, verify_head, verify_history_attestation, Hash, Head, HeadBody, HistoryFile, Release,
     ReleaseEnvelope, Snapshot,
 };
 use fusiform_store::CatalogStore;
@@ -43,11 +43,45 @@ struct History {
     later: Vec<Release>,
 }
 
+// Keep only the consumer's verified state between polls, without the heap
+// overhead of the maps and individual facts in the decoded tree.
+struct Retained {
+    envelope: ReleaseEnvelope,
+    bytes: Box<[u8]>,
+    hash: Hash,
+}
+
+impl Retained {
+    fn encode(Verified { envelope, state }: Verified) -> Result<Self, String> {
+        let bytes =
+            step("encode verified store state", serde_json::to_vec(&state))?.into_boxed_slice();
+        let hash = sha256(&bytes);
+        Ok(Self {
+            envelope,
+            bytes,
+            hash,
+        })
+    }
+
+    fn decode(&self) -> Result<Verified, String> {
+        if sha256(&self.bytes) != self.hash {
+            return Err("retained store state does not match its verified hash".into());
+        }
+        Ok(Verified {
+            envelope: self.envelope.clone(),
+            state: step(
+                "decode verified store state",
+                serde_json::from_slice(&self.bytes),
+            )?,
+        })
+    }
+}
+
 pub struct StorePoller {
     fetcher: Fetcher,
     url: Url,
     keys: ReleaseKeys,
-    verified: Option<Verified>,
+    verified: Option<Retained>,
 }
 
 fn step<T, E: std::fmt::Display>(name: &str, value: Result<T, E>) -> Result<T, String> {
@@ -233,19 +267,17 @@ impl StorePoller {
                 > DAY_MS
                 && head.latest_snapshot > applied
         });
-        let (snapshot, mut base, first, mut releases, mut current) =
-            if self.verified.is_none() || catch_up {
-                let history = self.history(head.latest_snapshot, applied == 0).await?;
-                (
-                    Some(history.snapshot),
-                    history.base,
-                    Some(history.first),
-                    history.later,
-                    None,
-                )
-            } else {
-                (None, None, None, Vec::new(), self.verified.clone())
-            };
+        let (snapshot, mut base, first, mut releases) = if self.verified.is_none() || catch_up {
+            let history = self.history(head.latest_snapshot, applied == 0).await?;
+            (
+                Some(history.snapshot),
+                history.base,
+                Some(history.first),
+                history.later,
+            )
+        } else {
+            (None, None, None, Vec::new())
+        };
         let mut last_observation = match &mut base {
             Some(spool) => step(
                 HISTORY_BASE_PATH,
@@ -276,6 +308,11 @@ impl StorePoller {
             releases.push(release);
         }
 
+        let mut current = if snapshot.is_none() {
+            self.verified.as_ref().map(Retained::decode).transpose()?
+        } else {
+            None
+        };
         let mut arrivals = Vec::new();
         for entry in first
             .into_iter()
@@ -329,6 +366,7 @@ impl StorePoller {
         {
             return Err(format!("verified release does not match {HEAD_PATH}"));
         }
+        let retained = Retained::encode(current)?;
         step(
             "commit verified store history",
             match base {
@@ -336,7 +374,7 @@ impl StorePoller {
                 None => store.apply_store_releases(None, &arrivals),
             },
         )?;
-        self.verified = Some(current);
+        self.verified = Some(retained);
         Ok(head.release.get())
     }
 
