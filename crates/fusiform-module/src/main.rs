@@ -93,8 +93,12 @@ struct Fusiform {
 
 impl Fusiform {
     fn with_settings(settings: Settings) -> Self {
+        let signals = match &settings.source {
+            Source::ModelsDev => Signals::new(),
+            Source::Store { url, .. } => Signals::for_store(url.clone()),
+        };
         Self {
-            signals: Arc::new(Signals::new()),
+            signals: Arc::new(signals),
             store: Mutex::new(None),
             fallback: Arc::new(Mutex::new(None)),
             settings,
@@ -218,7 +222,11 @@ impl ModuleHandler for Fusiform {
                     StorePoller::new(url, keys).map_err(|error| error.to_string())
                 });
             let bootstrap = match store.latest_store_release() {
-                Ok(cursor) => cursor.is_none(),
+                Ok(Some(cursor)) => {
+                    self.signals.record_store_applied_release(cursor.release);
+                    false
+                }
+                Ok(None) => true,
                 Err(error) => {
                     self.signals.store_poll_result(Some(error.to_string()));
                     return;

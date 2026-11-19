@@ -72,7 +72,11 @@ const fn decode_class(value: u64) -> Option<FailureClass> {
 /// `new()`, so the sentinel under test was never the sentinel that ships.
 #[derive(Debug)]
 pub struct Signals {
+    store_url: Option<String>,
     store_poll_error: arc_swap::ArcSwapOption<String>,
+    /// Zero until a release is known. Adopted from the store at startup, so
+    /// the metric describes the catalog rather than resetting per process.
+    store_applied_release: AtomicU64,
     /// Advances once per poll that reached a VERDICT — an observation row, or
     /// a recorded failure.
     ///
@@ -188,7 +192,9 @@ impl Default for Signals {
 impl Signals {
     pub fn new() -> Self {
         Self {
+            store_url: None,
             store_poll_error: arc_swap::ArcSwapOption::empty(),
+            store_applied_release: AtomicU64::new(0),
             polls_recorded: AtomicU64::new(0),
             attempts: AtomicU64::new(0),
             last_attempt_ms: AtomicI64::new(NEVER),
@@ -210,12 +216,34 @@ impl Signals {
         }
     }
 
+    /// Keep the configured URL even while requests are served from the seed.
+    pub fn for_store(url: String) -> Self {
+        Self {
+            store_url: Some(url),
+            ..Self::new()
+        }
+    }
+
+    pub fn store_url(&self) -> Option<&str> {
+        self.store_url.as_deref()
+    }
+
     pub fn store_poll_result(&self, error: Option<String>) {
         self.store_poll_error.store(error.map(std::sync::Arc::new));
     }
 
     pub fn store_poll_error(&self) -> Option<std::sync::Arc<String>> {
         self.store_poll_error.load_full()
+    }
+
+    pub fn record_store_applied_release(&self, release: u64) {
+        self.store_applied_release.store(release, Ordering::Relaxed);
+    }
+
+    pub fn store_applied_release(&self) -> Option<u64> {
+        let release = self.store_applied_release.load(Ordering::Relaxed);
+        // Persisted release numbers start at one.
+        (release != 0).then_some(release)
     }
 
     /// Stamp only acknowledged publications, never queued attempts.

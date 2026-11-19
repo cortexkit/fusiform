@@ -547,6 +547,7 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
 
     Ok(StatusResponse {
         source: source.as_str().to_string(),
+        store: None,
         bus_published_version: None,
         bus_publish_failures: 0,
         bus_last_error: None,
@@ -2843,7 +2844,7 @@ fn parse_plan_meta<T: serde::de::DeserializeOwned>(
     .transpose()
 }
 
-fn store_error(e: &CatalogError) -> RouteError {
+pub(crate) fn store_error(e: &CatalogError) -> RouteError {
     RouteError::unavailable(format!("catalog read failed: {e}"))
 }
 

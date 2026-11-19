@@ -208,7 +208,8 @@ impl StorePoller {
         })
     }
 
-    pub async fn poll(&mut self, store: &CatalogStore) -> Result<(), String> {
+    /// Verify the store head and return the release now held locally.
+    pub async fn poll(&mut self, store: &CatalogStore) -> Result<u64, String> {
         let head = self.head().await?;
         let cursor = step("read store cursor", store.latest_store_release())?;
         let applied = cursor.as_ref().map_or(0, |cursor| cursor.release);
@@ -220,7 +221,7 @@ impl StorePoller {
                 .as_ref()
                 .is_some_and(|cursor| cursor.state_hash == head.state_hash.to_string())
             {
-                return Ok(());
+                return Ok(applied);
             }
             return Err(format!(
                 "{HEAD_PATH}: same release has a different state hash"
@@ -336,7 +337,7 @@ impl StorePoller {
             },
         )?;
         self.verified = Some(current);
-        Ok(())
+        Ok(head.release.get())
     }
 
     pub async fn run(
@@ -352,11 +353,12 @@ impl StorePoller {
         loop {
             ticks.tick().await;
             match self.poll(&store).await {
-                Ok(()) => {
+                Ok(release) => {
                     if let Some(installed) = install.take() {
                         installed();
                     }
                     uses_seed = false;
+                    signals.record_store_applied_release(release);
                     signals.store_poll_result(None);
                 }
                 Err(error) if uses_seed => signals.store_poll_result(Some(format!(

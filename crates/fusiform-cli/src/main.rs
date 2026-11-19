@@ -890,10 +890,7 @@ async fn call(
 
 fn print_status(response: &serde_json::Value) {
     let get = |k: &str| response.get(k);
-    println!(
-        "source           {}",
-        get("source").and_then(|v| v.as_str()).unwrap_or("?")
-    );
+    print!("{}", render_status_source(response));
     println!(
         "catalog version  {}",
         get("catalog_version")
@@ -1282,6 +1279,30 @@ fn render_bus(response: &serde_json::Value) -> String {
     }
     line.push('\n');
     line
+}
+
+fn render_status_source(response: &serde_json::Value) -> String {
+    let source = response["source"].as_str().unwrap_or("?");
+    let mut out = format!("source           {source}\n");
+    let store = &response["store"];
+    let Some(url) = store["url"].as_str() else {
+        return out;
+    };
+    let release = match store["release"].as_u64() {
+        Some(number) => {
+            let applied = store["applied_at_ms"]
+                .as_i64()
+                .map(|at| format!(" (applied {})", format_instant(at)))
+                .unwrap_or_default();
+            format!("release {number}{applied}")
+        }
+        None => "no release applied".into(),
+    };
+    let _ = writeln!(out, "store            {url}  {release}");
+    if let Some(error) = store["last_error"].as_str() {
+        let _ = writeln!(out, "store poll error {error}");
+    }
+    out
 }
 
 fn render_failures(response: &serde_json::Value) -> String {
@@ -3862,6 +3883,30 @@ mod tests {
             render_failures(&serde_json::json!({})),
             "",
             "a clean history must print nothing rather than a zero line"
+        );
+    }
+
+    #[test]
+    fn store_status_source_lines_show_release_or_fallback() {
+        let applied = serde_json::json!({
+            "source": "models.dev",
+            "store": {"url": "https://models.example/", "release": 7, "applied_at_ms": 2000},
+        });
+        assert_eq!(
+            render_status_source(&applied),
+            "source           models.dev\nstore            https://models.example/  release 7 (applied 1970-01-01 00:00:02Z)\n"
+        );
+        let fallback = serde_json::json!({
+            "source": "built_in_snapshot",
+            "store": {"url": "https://models.example/", "release": null, "last_error": "network unavailable"},
+        });
+        assert_eq!(
+            render_status_source(&fallback),
+            "source           built_in_snapshot\nstore            https://models.example/  no release applied\nstore poll error network unavailable\n"
+        );
+        assert_eq!(
+            render_status_source(&serde_json::json!({"source": "models.dev"})),
+            "source           models.dev\n"
         );
     }
 

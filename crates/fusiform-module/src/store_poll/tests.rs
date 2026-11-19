@@ -375,7 +375,7 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
         .lock()
         .unwrap()
         .insert("/v1/history/base.json".into(), BASE.to_vec());
-    poller.poll(&store).await.unwrap();
+    assert_eq!(poller.poll(&store).await.unwrap(), 2);
     assert_eq!(store.latest_store_release().unwrap().unwrap().release, 2);
     let at_release_two = snapshot.envelope.upstream_observed_at_ms;
     assert_eq!(model_name_at(&store, at_release_two), "Mini 2");
@@ -444,7 +444,7 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
         .lock()
         .unwrap()
         .insert("/v1/releases/3".into(), serde_json::to_vec(&third).unwrap());
-    poller.poll(&store).await.unwrap();
+    assert_eq!(poller.poll(&store).await.unwrap(), 3);
     let version = store.catalog_version().unwrap();
     assert_eq!(
         model_name_at(&store, third.envelope.upstream_observed_at_ms),

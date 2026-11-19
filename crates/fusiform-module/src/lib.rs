@@ -83,16 +83,44 @@ pub async fn serve_catalog_request(
     built_in_snapshot: bool,
 ) -> HandlerOutcome {
     let bulk = route::needs_catalog_permit(&body);
-    let work = move || match route::serve_tool_call(&store, &body).map(|mut response| {
+    let work = move || match route::serve_tool_call(&store, &body).and_then(|mut response| {
         if let fusiform_protocol::ToolResponse::Status(status) = &mut response {
             if built_in_snapshot {
                 status.source = "built_in_snapshot".into();
+            }
+            if let Some(url) = signals.store_url() {
+                // The built-in snapshot is not a signed release and has no
+                // applied release row of its own.
+                let release = if built_in_snapshot {
+                    None
+                } else {
+                    store
+                        .latest_store_release()
+                        .map_err(|error| route::store_error(&error))?
+                };
+                let (release, state_hash, curation_hash, applied_at_ms) =
+                    release.map_or((None, None, None, None), |row| {
+                        (
+                            Some(row.release),
+                            Some(row.state_hash),
+                            Some(row.curation_hash),
+                            Some(row.applied_at_ms),
+                        )
+                    });
+                status.store = Some(fusiform_protocol::StoreStatusWire {
+                    url: url.into(),
+                    release,
+                    state_hash,
+                    curation_hash,
+                    applied_at_ms,
+                    last_error: signals.store_poll_error().map(|error| (*error).clone()),
+                });
             }
             status.bus_published_version = signals.bus_published_version();
             status.bus_publish_failures = signals.bus_publish_failures();
             status.bus_last_error = signals.bus_last_error();
         }
-        response
+        Ok(response)
     }) {
         Ok(response) => match serde_json::to_vec(&response) {
             Ok(bytes) => HandlerOutcome::Response(bytes),

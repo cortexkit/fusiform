@@ -1178,6 +1178,7 @@ What fusiform has been doing. Request: optional `source`, optional `polls`
 
 | Field | Meaning |
 | --- | --- |
+| `store` | signed store delivery status; omitted in models.dev polling mode |
 | `catalog_version` | §3; a cursor to compare, not a snapshot identity |
 | `rates_version` | rate change cursor in milliseconds; compare with a previous reply, not a snapshot identity |
 | `bus_published_version` | last catalog version acknowledged by the bus in this process; null before the first acknowledgement |
@@ -1190,6 +1191,17 @@ What fusiform has been doing. Request: optional `source`, optional `polls`
 | `era_count` | total stored eras |
 | `failures` | absent when no poll has ever failed; otherwise `ever`, `last_at_ms`, `polls_back` and `last_class` (`served_corrections::a_failure_older_than_the_poll_window_is_still_reported`) |
 | `recent_polls` | newest first, including 304s and failures (`route::status_reports_quiet_polls_and_failures`) |
+
+In store mode, `store.url` is the configured base URL. The `source` field still
+names the data source, not how it was delivered. `store.release` is the latest
+applied release number, or null before the first verified release. Its
+`state_hash`, `curation_hash` and `applied_at_ms` are present once a release has
+been applied. `applied_at_ms` is this consumer's application time in Unix
+milliseconds; the release's publication time is not stored and is not
+reported. `last_error`, when present, is the same store poll error text health
+reports. A successful store poll clears it. Health also reports
+`store_applied_release` in store mode only, null until the release is known and
+restored from the local store on startup.
 
 Each poll carries `observed_at_ms`, `outcome`, and when set `failure_class`,
 `detail`, `duration_ms`, and `changes` (`eras`, `models_arrived`,

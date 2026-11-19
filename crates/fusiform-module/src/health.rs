@@ -366,7 +366,7 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
     let (attempts, recorded) = signals.attempt_ledger();
     let (failures_ever, last_failure_age) = signals.failure_history(now_ms);
     let (model_count, models_priced) = signals.model_counts();
-    serde_json::json!({
+    let mut metrics = serde_json::json!({
         // Both halves of the conservation identity, so an operator can see the
         // divergence rather than take health's word for it. Named for what
         // they count: ticks that started, and ticks that reached a verdict.
@@ -432,7 +432,11 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
         // observation clock at startup. It is not, and the scope test caught
         // that within a minute of the sentence being written.
         "process_attempt_age_ms": signals.attempt_age_ms(now_ms),
-    })
+    });
+    if signals.store_url().is_some() {
+        metrics["store_applied_release"] = serde_json::json!(signals.store_applied_release());
+    }
+    metrics
 }
 
 #[cfg(test)]
@@ -443,6 +447,21 @@ mod tests {
         let s = Signals::new();
         s.store_opened();
         s
+    }
+
+    #[test]
+    fn store_applied_release_metric_is_only_present_in_store_mode() {
+        assert!(metrics(&open_store(), 0)
+            .get("store_applied_release")
+            .is_none());
+        let signals = Signals::for_store("https://models.example/".into());
+        assert_eq!(
+            metrics(&signals, 0).get("store_applied_release"),
+            Some(&serde_json::Value::Null)
+        );
+        signals.record_store_applied_release(7);
+        signals.store_poll_result(Some("published head unavailable".into()));
+        assert_eq!(metrics(&signals, 0)["store_applied_release"], 7);
     }
 
     #[test]

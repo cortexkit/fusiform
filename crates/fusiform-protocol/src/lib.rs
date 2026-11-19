@@ -2366,10 +2366,34 @@ pub struct PollChanges {
     pub facts_changed: i64,
 }
 
+/// The signed release currently applied from the configured store.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StoreStatusWire {
+    /// Configured base URL of the signed release store.
+    pub url: String,
+    /// Latest applied release number, or null before the first release.
+    pub release: Option<u64>,
+    /// Hash of the catalog state attested by the applied release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_hash: Option<String>,
+    /// Hash of the published curation attested by the applied release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curation_hash: Option<String>,
+    /// When this consumer applied the release, in Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_at_ms: Option<i64>,
+    /// Error text from the store poll signal, cleared after a successful poll.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
 /// A `catalog.status` response: what fusiform has been doing.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StatusResponse {
     pub source: String,
+    /// Signed release delivery status, present only in store mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<StoreStatusWire>,
     /// Last catalog version acknowledged by the bus in this process, or null.
     #[serde(default)]
     pub bus_published_version: Option<i64>,

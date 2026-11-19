@@ -390,6 +390,7 @@ fn every_response_type_round_trips() {
             polls_back: Some(196),
         }),
         source: "models.dev".into(),
+        store: None,
         catalog_version: 7,
         rates_version: 6,
         model_count: 6_270,
@@ -463,6 +464,7 @@ fn a_status_response_without_the_newest_fields_still_parses() {
 
     assert_eq!(parsed.recent_polls.len(), 1);
     assert_eq!(parsed.rates_version, 0);
+    assert!(parsed.store.is_none());
     assert!(
         parsed.recent_polls[0].changes.is_none(),
         "an older module reports no composition, which is absence rather than zero"

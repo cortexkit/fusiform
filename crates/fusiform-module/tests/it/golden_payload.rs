@@ -534,6 +534,13 @@ fn render_all() -> String {
         "catalog.get — curated search engines".into(),
         render_search_engines(),
     );
+    ordinary.as_object_mut().unwrap().insert(
+        "catalog.status — signed store release".into(),
+        render_status_case(
+            StatusCase::AppliedRelease,
+            Some("published head unavailable"),
+        ),
+    );
     let mut text = serde_json::to_string_pretty(&ordinary).unwrap();
     text.push('\n');
     text
@@ -1165,6 +1172,113 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
     serde_json::json!({"request":request, "response":response})
 }
 
+const STORE_STATUS_URL: &str = "https://models.example/";
+
+enum StatusCase {
+    AppliedRelease,
+    SeedFallback,
+    ModelsDev,
+}
+
+fn render_status_case(case: StatusCase, poll_error: Option<&str>) -> serde_json::Value {
+    use fusiform_module::signals::Signals;
+    use fusiform_store::{ImportedTables, ReleaseArrival, StoreRelease};
+    use serde_json::json;
+    use std::sync::Arc;
+    use subc_client_rs::HandlerOutcome;
+
+    let dir = tempfile::tempdir().unwrap();
+    let descriptor = StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("status.db").to_string_lossy().into_owned(),
+        },
+    };
+    let store = if matches!(case, StatusCase::AppliedRelease) {
+        let store = CatalogStore::open_for_store(&descriptor).unwrap();
+        store
+            .apply_store_releases(
+                Some(&ImportedTables::new()),
+                &[ReleaseArrival {
+                    published_at_ms: 1000,
+                    release: StoreRelease {
+                        release: 1,
+                        state_hash: "a".repeat(64),
+                        curation_hash: "b".repeat(64),
+                        applied_at_ms: 2000,
+                    },
+                    rows: ImportedTables::new(),
+                    upstream: None,
+                }],
+            )
+            .unwrap();
+        store
+    } else {
+        // The seed fallback is opened as an ordinary catalog, not as the
+        // store-mode database that will hold verified releases.
+        CatalogStore::open(&descriptor).unwrap()
+    };
+    let signals = Arc::new(match case {
+        StatusCase::ModelsDev => Signals::new(),
+        _ => Signals::for_store(STORE_STATUS_URL.into()),
+    });
+    signals.store_poll_result(poll_error.map(str::to_owned));
+    let request = json!({"name":"catalog.status","arguments":{"polls":0}});
+    let outcome = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap()
+        .block_on(fusiform_module::serve_catalog_request(
+            Arc::new(store),
+            signals,
+            serde_json::to_vec(&request).unwrap(),
+            matches!(case, StatusCase::SeedFallback),
+        ));
+    let HandlerOutcome::Response(bytes) = outcome else {
+        panic!("expected catalog.status, got {outcome:?}");
+    };
+    let response: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    json!({"request": request, "response": response})
+}
+
+#[test]
+fn store_status_names_the_applied_release() {
+    let case = render_status_case(StatusCase::AppliedRelease, None);
+    assert_eq!(case["response"]["source"], "models.dev");
+    assert_eq!(
+        case["response"]["store"],
+        serde_json::json!({
+            "url": STORE_STATUS_URL,
+            "release": 1,
+            "state_hash": "a".repeat(64),
+            "curation_hash": "b".repeat(64),
+            "applied_at_ms": 2000,
+        })
+    );
+}
+
+#[test]
+fn store_status_names_the_seed_fallback_without_a_release() {
+    let case = render_status_case(StatusCase::SeedFallback, Some("published head unavailable"));
+    assert_eq!(case["response"]["source"], "built_in_snapshot");
+    assert_eq!(
+        case["response"]["store"],
+        serde_json::json!({
+            "url": STORE_STATUS_URL,
+            "release": null,
+            "last_error": "published head unavailable",
+        })
+    );
+}
+
+#[test]
+fn store_status_is_omitted_in_models_dev_mode() {
+    let case = render_status_case(StatusCase::ModelsDev, None);
+    assert_eq!(case["response"]["source"], "models.dev");
+    assert!(case["response"].get("store").is_none());
+}
+
 fn render_local_override() -> serde_json::Value {
     use fusiform_store::{ImportedTables, ReleaseArrival, StoreRelease};
     use serde_json::json;
@@ -1716,7 +1830,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
             GOLDEN.to_string(),
             cases().len()
                 + plain_plane_cases
-                + 11
+                + 12
                 + curated_wire.len()
                 + quality_tools.len()
                 + media_quality.len()
@@ -1791,6 +1905,11 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         ),
         (
             serde_json::json!({"local_override":render_local_override()}).to_string(),
+            1,
+        ),
+        (
+            serde_json::json!({"store_status":render_status_case(StatusCase::AppliedRelease, None)})
+                .to_string(),
             1,
         ),
     ] {
@@ -3100,6 +3219,7 @@ fn every_read_response_field_reaches_the_fixture() {
             "BillingRuleWire",
             "HistoryResponse",
             "StatusResponse",
+            "StoreStatusWire",
             "PlanPricesResponse",
             "PlanPriceWire",
             "ConcurrencyWire",
