@@ -10,6 +10,36 @@ use crate::CatalogStore;
 const READ_DEADLINE: Duration = Duration::from_secs(2);
 const HOLD_DEADLINE: Duration = Duration::from_secs(10);
 
+#[test]
+fn read_snapshot_keeps_same_commit_across_nested_getters() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(&dir);
+    let source = fusiform_core::SourceId::ModelsDev;
+    let query = crate::serve::CatalogQuery::current(source);
+    let (before, during, nested) = store
+        .with_read_snapshot(|| {
+            let before = store.read_catalog(&query).unwrap().catalog_version;
+            thread::scope(|scope| {
+                scope
+                    .spawn(|| {
+                        store
+                            .advance_catalog_version_at_start(fusiform_core::Timestamp(1))
+                            .unwrap()
+                    })
+                    .join()
+                    .unwrap();
+            });
+            let during = store.catalog_version().unwrap();
+            let nested = store
+                .with_read_snapshot(|| store.read_catalog(&query).unwrap().catalog_version)
+                .unwrap();
+            (before, during, nested)
+        })
+        .unwrap();
+    assert_eq!((before, during, nested), (0, 0, 0));
+    assert_eq!(store.catalog_version().unwrap(), 1);
+}
+
 fn open(dir: &tempfile::TempDir) -> CatalogStore {
     CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),

@@ -266,18 +266,28 @@ pub fn plan_correction(
 
         // A correction WITHHOLDS. So there must be something wrong to withhold.
         //
-        // Entering the window, fusiform served some value; now it serves
-        // another. If they are the same, nothing was repaired and the operator
-        // is describing a defect in the BOUNDARY rather than in the value —
-        // which this mechanism does not fix, and would make worse by refusing
-        // reads of a value that is correct.
+        // Refuse if every value in the window restates the current claim.
+        // Equal endpoints alone do not establish this: a transient bad value
+        // may have been recorded and then replaced with the original value.
         //
         // The case is real: the 17,455 eras of 2026-08-16 all carry identical
         // values on both sides. See `ValueUnchangedAcrossWindow`.
         let entering =
             store.recorded_value_at(source, provider_id, model_id, fact_key, affected_from)?;
         if let Some(entering) = entering {
-            if entering.value_json == current.value_json {
+            if crate::ingest::states_the_same_upstream_claim(
+                &entering.value_json,
+                &current.value_json,
+            ) && !window_contains_different_claim(
+                store,
+                source,
+                provider_id,
+                model_id,
+                fact_key,
+                affected_from,
+                affected_until,
+                &current.value_json,
+            )? {
                 refusals.push(CorrectionRefusal::ValueUnchangedAcrossWindow {
                     fact_key: fact_key.clone(),
                     value_json: current.value_json.clone(),
@@ -326,6 +336,40 @@ pub fn plan_correction(
         affected_until,
         reason: reason.to_string(),
     }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn window_contains_different_claim(
+    store: &CatalogStore,
+    source: SourceId,
+    provider: &str,
+    model: &str,
+    fact: &FactKey,
+    from: Timestamp,
+    until: Timestamp,
+    current: &str,
+) -> Result<bool, CatalogError> {
+    store.raw_conn(|conn| {
+        let mut stmt = conn.prepare_cached(
+            "SELECT value_json FROM era WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3 \
+             AND fact_key = ?4 AND boundary_at_ms > ?5 AND boundary_at_ms <= ?6",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![
+            source.as_str(),
+            provider,
+            model,
+            fact.as_str(),
+            from.0,
+            until.0
+        ])?;
+        while let Some(row) = rows.next()? {
+            let claim: String = row.get(0)?;
+            if !crate::ingest::states_the_same_upstream_claim(&claim, current) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    })
 }
 
 /// Write a planned correction, refusing if the store moved since it was

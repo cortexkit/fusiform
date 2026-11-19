@@ -169,6 +169,26 @@ pub struct NewEra {
     pub observation_id: Option<i64>,
 }
 
+enum PollWrite<'a> {
+    Observation(&'a NewObservation),
+    Existing {
+        observation_id: i64,
+        now: Timestamp,
+    },
+    Document {
+        observation: &'a NewObservation,
+        catalog: &'a fusiform_core::NormalizedCatalog,
+        matching_hash: bool,
+    },
+}
+
+struct EraWrite {
+    count: usize,
+    version: Option<i64>,
+    observation_id: Option<i64>,
+    plan: Option<ingest::IngestPlan>,
+}
+
 pub use fusiform_core::upstream_facts::{prefix, rate_key, FactKey};
 
 fn is_rate_relevant_fact(key: &str) -> bool {
@@ -310,28 +330,8 @@ impl CatalogStore {
     /// lease handover must not append to the history its replacement is already
     /// writing.
     pub fn record_observation(&self, obs: &NewObservation) -> Result<i64, CatalogError> {
-        let (outcome, failure_class) = outcome_columns(&obs.outcome);
-        let id = self.inner.with_conn_fenced(|tx| {
-            tx.execute(
-                "INSERT INTO observation \
-                 (source, observed_at_ms, outcome, failure_class, detail, \
-                  normalized_hash, raw_hash, etag, duration_ms) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![
-                    obs.source.as_str(),
-                    obs.observed_at.0,
-                    outcome,
-                    failure_class,
-                    obs.detail,
-                    obs.normalized_hash,
-                    obs.raw_hash,
-                    obs.etag,
-                    obs.duration_ms,
-                ],
-            )?;
-            Ok(tx.last_insert_rowid())
-        })?;
-        Ok(id)
+        let written = self.append_eras_inner(&[], Some(PollWrite::Observation(obs)))?;
+        Ok(written.observation_id.expect("observation was inserted"))
     }
 
     /// The most recent observation that CONFIRMED current values.
@@ -417,21 +417,7 @@ impl CatalogStore {
         source: SourceId,
         instant: Timestamp,
     ) -> Result<Option<Timestamp>, CatalogError> {
-        let sql = format!(
-            "SELECT observed_at_ms FROM observation \
-             WHERE source = ?1 \
-               AND observed_at_ms < ?2 \
-               AND outcome IN ({}) \
-             ORDER BY observed_at_ms DESC LIMIT 1",
-            confirming_in_list()
-        );
-        let ts = self.raw_conn(|conn| {
-            conn.query_row(&sql, params![source.as_str(), instant.0], |r| {
-                r.get::<_, i64>(0)
-            })
-            .optional()
-        })?;
-        Ok(ts.map(Timestamp))
+        self.raw_conn(|conn| last_confirming_before_in(conn, source, instant))
     }
 
     /// Append eras, deriving each observed boundary's window from the store's
@@ -445,7 +431,8 @@ impl CatalogStore {
         if eras.is_empty() {
             return Ok(0);
         }
-        self.append_eras_inner(eras, None).map(|(count, _)| count)
+        self.append_eras_inner(eras, None)
+            .map(|written| written.count)
     }
 
     /// Commit a changed poll's eras and catalog version together. Publish the
@@ -462,8 +449,49 @@ impl CatalogStore {
         observation_id: i64,
         now: Timestamp,
     ) -> Result<(usize, i64), CatalogError> {
-        let (count, issued) = self.append_eras_inner(eras, Some((observation_id, now)))?;
-        let issued = issued.expect("appending poll eras always issues a catalog version");
+        let written = self.append_eras_inner(
+            eras,
+            Some(PollWrite::Existing {
+                observation_id,
+                now,
+            }),
+        )?;
+        let issued = written
+            .version
+            .expect("appending poll eras always issues a catalog version");
+        self.publish_poll_write(eras, issued);
+        Ok((written.count, issued))
+    }
+
+    /// Diff a normalized body and commit its observation, eras and version
+    /// together. A matching saved digest can still require a diff on startup:
+    /// older writers could persist a digest without its eras.
+    pub fn commit_polled_document(
+        &self,
+        observation: &NewObservation,
+        catalog: &fusiform_core::NormalizedCatalog,
+        matching_hash: bool,
+    ) -> Result<(i64, ingest::IngestPlan, Option<i64>), CatalogError> {
+        let written = self.append_eras_inner(
+            &[],
+            Some(PollWrite::Document {
+                observation,
+                catalog,
+                matching_hash,
+            }),
+        )?;
+        let plan = written.plan.expect("a polled document is diffed");
+        if let Some(version) = written.version {
+            self.publish_poll_write(&plan.eras, version);
+        }
+        Ok((
+            written.observation_id.expect("observation was inserted"),
+            plan,
+            written.version,
+        ))
+    }
+
+    fn publish_poll_write(&self, eras: &[NewEra], issued: i64) {
         if eras
             .iter()
             .any(|era| is_rate_relevant_fact(era.fact_key.as_str()))
@@ -471,49 +499,13 @@ impl CatalogStore {
             self.record_rates_version(issued);
         }
         self.signal_catalog_changed();
-        Ok((count, issued))
     }
 
     fn append_eras_inner(
         &self,
         eras: &[NewEra],
-        poll: Option<(i64, Timestamp)>,
-    ) -> Result<(usize, Option<i64>), CatalogError> {
-        // Resolve the window's near edge per (source, boundary instant), before
-        // the write transaction. Keyed on the boundary as well as the source
-        // because the edge is "the last confirming observation before THIS
-        // boundary" — a batch carrying eras at two different boundaries has two
-        // different near edges, and sharing one would attach the wrong window to
-        // whichever era did not own it.
-        let mut prior_by_key: BTreeMap<(SourceId, i64), Option<Timestamp>> = BTreeMap::new();
-        for era in eras {
-            let key = (era.source, era.boundary_at.0);
-            if let std::collections::btree_map::Entry::Vacant(slot) = prior_by_key.entry(key) {
-                slot.insert(self.last_confirming_observation_before(era.source, era.boundary_at)?);
-            }
-        }
-
-        // An observed boundary with no prior confirming observation cannot state
-        // a window, and the schema will reject it. Failing here names the era
-        // rather than surfacing a constraint violation from the driver.
-        for era in eras {
-            if matches!(era.boundary_kind, BoundaryKind::Observed)
-                && prior_by_key
-                    .get(&(era.source, era.boundary_at.0))
-                    .copied()
-                    .flatten()
-                    .is_none()
-            {
-                return Err(CatalogError::Invariant(format!(
-                    "{}/{} {}: an observed boundary needs a prior confirming observation; \
-                     the first era for a source is a seed",
-                    era.provider_id,
-                    era.model_id,
-                    era.fact_key.as_str()
-                )));
-            }
-        }
-
+        poll: Option<PollWrite<'_>>,
+    ) -> Result<EraWrite, CatalogError> {
         // A correction's declared extent must name the fact it is written on.
         //
         // The row says "this fact's recorded value was wrong"; the extent says
@@ -596,17 +588,89 @@ impl CatalogStore {
         }
 
         let written = self.inner.with_conn_fenced(|tx| {
+            let insert_observation =
+                |obs: &NewObservation, outcome: &ObservationOutcome| -> rusqlite::Result<i64> {
+                    let (outcome, failure_class) = outcome_columns(outcome);
+                    tx.execute(
+                        "INSERT INTO observation \
+                     (source, observed_at_ms, outcome, failure_class, detail, \
+                      normalized_hash, raw_hash, etag, duration_ms) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        params![
+                            obs.source.as_str(),
+                            obs.observed_at.0,
+                            outcome,
+                            failure_class,
+                            obs.detail,
+                            obs.normalized_hash,
+                            obs.raw_hash,
+                            obs.etag,
+                            obs.duration_ms
+                        ],
+                    )?;
+                    Ok(tx.last_insert_rowid())
+                };
+            let mut document = None;
+            let (observation_id, version_at) = match poll {
+                None => (None, None),
+                Some(PollWrite::Observation(obs)) => {
+                    (Some(insert_observation(obs, &obs.outcome)?), None)
+                }
+                Some(PollWrite::Existing {
+                    observation_id,
+                    now,
+                }) => (Some(observation_id), Some(now)),
+                Some(PollWrite::Document {
+                    observation,
+                    catalog,
+                    matching_hash,
+                }) => {
+                    let at = observation.observed_at;
+                    let prior = last_confirming_before_in(tx, observation.source, at)?;
+                    let boundary = if prior.is_some() {
+                        BoundaryKind::Observed
+                    } else {
+                        BoundaryKind::Seed
+                    };
+                    let mut plan = ingest::plan_ingest_in(tx, catalog, at, boundary, None)?;
+                    let unchanged = matching_hash && plan.is_empty();
+                    let outcome = if unchanged {
+                        ObservationOutcome::Unchanged
+                    } else {
+                        ObservationOutcome::Changed { snapshot_seq: 0 }
+                    };
+                    let id = insert_observation(observation, &outcome)?;
+                    if prior.is_some() {
+                        for era in &mut plan.eras {
+                            era.observation_id = Some(id);
+                        }
+                    }
+                    document = Some((plan, prior));
+                    (Some(id), (!unchanged).then_some(at))
+                }
+            };
+            let eras = document.as_ref().map_or(eras, |(plan, _)| &plan.eras);
+            // A batch can carry observed eras for more than one source or
+            // instant. Resolve each distinct window on the writer transaction.
+            let mut prior_by_key = BTreeMap::new();
             let mut count = 0usize;
             for era in eras {
-                let prior = prior_by_key
-                    .get(&(era.source, era.boundary_at.0))
-                    .copied()
-                    .flatten();
                 let (kind, correction) = boundary_columns(&era.boundary_kind);
-                // Only an observed boundary carries a window. Every other kind
-                // writes NULL, which the schema enforces independently.
                 let prior_ms = match era.boundary_kind {
-                    BoundaryKind::Observed => prior.map(|t| t.0),
+                    BoundaryKind::Observed => {
+                        let prior = if let Some((_, prior)) = &document {
+                            *prior
+                        } else {
+                            let key = (era.source, era.boundary_at.0);
+                            match prior_by_key.entry(key) {
+                                std::collections::btree_map::Entry::Occupied(slot) => *slot.get(),
+                                std::collections::btree_map::Entry::Vacant(slot) => *slot.insert(
+                                    last_confirming_before_in(tx, era.source, era.boundary_at)?,
+                                ),
+                            }
+                        };
+                        prior.map(|t| t.0)
+                    }
                     _ => None,
                 };
                 tx.execute(
@@ -634,12 +698,15 @@ impl CatalogStore {
                 )?;
                 count += 1;
             }
-            let issued = poll
-                .map(|(observation_id, now)| {
-                    advance_catalog_version_in(tx, Some(observation_id), now)
-                })
+            let version = version_at
+                .map(|now| advance_catalog_version_in(tx, observation_id, now))
                 .transpose()?;
-            Ok((count, issued))
+            Ok(EraWrite {
+                count,
+                version,
+                observation_id,
+                plan: document.map(|(plan, _)| plan),
+            })
         })?;
 
         Ok(written)
@@ -910,6 +977,13 @@ impl CatalogStore {
         Ok(self.readers.with_conn(f)?)
     }
 
+    /// Run related reads synchronously on one pooled connection. The first
+    /// query establishes the snapshot; nested reads reuse it until the callback
+    /// returns. A concurrent writer can commit without waiting for this read.
+    pub fn with_read_snapshot<T>(&self, read: impl FnOnce() -> T) -> Result<T, CatalogError> {
+        Ok(self.readers.with_snapshot(read)?)
+    }
+
     /// The ETag from the most recent observation that received one.
     ///
     /// Read from the store rather than held in memory, so it survives a
@@ -1134,7 +1208,7 @@ impl CatalogStore {
         // table at mark time, so there is ONE definition of "restates the held
         // claim" and no stored set that can drift from it. Cheap because facts
         // carry few eras — 68,419 of them have exactly one, 140 have two.
-        let rows: Vec<(i64, String, bool)> = self.raw_conn(|conn| {
+        self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT e.boundary_at_ms, e.value_json, \
                         (e.observation_id IS NOT NULL AND e.observation_id IN \
@@ -1148,37 +1222,33 @@ impl CatalogStore {
                    AND e.fact_key = ?4 \
                  ORDER BY e.boundary_at_ms DESC",
             )?;
-            let mapped = stmt.query_map(
-                params![source.as_str(), provider_id, model_id, fact_key.as_str()],
-                |r| {
-                    Ok((
-                        r.get::<_, i64>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, bool>(2)?,
-                    ))
-                },
-            )?;
-            mapped.collect::<Result<Vec<_>, _>>()
-        })?;
-
-        for (i, (boundary, value, marked)) in rows.iter().enumerate() {
-            // An era inside a marked poll is an artifact only if it RESTATES
-            // what the previous era already said. One that carries a different
-            // claim is a real change the operator's coarse mark would otherwise
-            // have swallowed.
-            //
-            // The oldest era has no predecessor to restate, so it is never an
-            // artifact by this test — correct, since a first era establishes a
-            // value rather than repeating one.
-            let restates_previous = rows
-                .get(i + 1)
-                .is_some_and(|(_, prev, _)| ingest::states_the_same_upstream_claim(prev, value));
-            if *marked && restates_previous {
-                continue;
+            let mut rows = stmt.query(params![
+                source.as_str(),
+                provider_id,
+                model_id,
+                fact_key.as_str()
+            ])?;
+            let Some(mut row) = rows.next()? else {
+                return Ok(None);
+            };
+            loop {
+                let boundary = Timestamp(row.get(0)?);
+                // The newest unmarked row resolves the query without scanning
+                // its predecessors. A marked row needs one predecessor to
+                // tell whether it restated the claim or recorded a real change.
+                if !row.get::<_, bool>(2)? {
+                    return Ok(Some(boundary));
+                }
+                let value: String = row.get(1)?;
+                let Some(previous) = rows.next()? else {
+                    return Ok(Some(boundary));
+                };
+                if !ingest::states_the_same_upstream_claim(serve::row_text(previous, 1)?, &value) {
+                    return Ok(Some(boundary));
+                }
+                row = previous;
             }
-            return Ok(Some(Timestamp(*boundary)));
-        }
-        Ok(None)
+        })
     }
 
     /// Every mark and retraction recorded against one poll, oldest first.
@@ -1760,6 +1830,22 @@ fn boundary_columns(kind: &BoundaryKind) -> (&'static str, Option<CorrectionColu
 /// Rendered from the domain's `CONFIRMING_OUTCOMES` rather than written out, so
 /// adding an outcome cannot leave the query behind. Safe to interpolate: every
 /// element is a compile-time constant from a closed enum, never user input.
+fn last_confirming_before_in(
+    conn: &rusqlite::Connection,
+    source: SourceId,
+    instant: Timestamp,
+) -> rusqlite::Result<Option<Timestamp>> {
+    let sql = format!(
+        "SELECT observed_at_ms FROM observation \
+         WHERE source = ?1 AND observed_at_ms < ?2 AND outcome IN ({}) \
+         ORDER BY observed_at_ms DESC LIMIT 1",
+        confirming_in_list()
+    );
+    conn.query_row(&sql, params![source.as_str(), instant.0], |r| r.get(0))
+        .optional()
+        .map(|ts| ts.map(Timestamp))
+}
+
 fn confirming_in_list() -> String {
     fusiform_core::CONFIRMING_OUTCOMES
         .iter()

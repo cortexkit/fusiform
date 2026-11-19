@@ -69,6 +69,53 @@ fn run(f: &Fixture, outcome: FetchOutcome, at: i64) -> fusiform_module::loop_::T
     apply(&f.store, &f.signals, SourceId::ModelsDev, outcome, at).unwrap()
 }
 
+#[test]
+fn changed_poll_rolls_back_observation_and_retries() {
+    let f = fixture();
+    let source = SourceId::ModelsDev;
+    let first = run(&f, body(FIXTURE, Some("first")), 1_000);
+    let version = f.store.catalog_version().unwrap();
+    let second = body_with_extra_model(true);
+    let db = rusqlite::Connection::open(f.store.path()).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER fail_era BEFORE INSERT ON era BEGIN SELECT RAISE(ABORT,'era write failed'); END",
+    )
+    .unwrap();
+    let error = apply(
+        &f.store,
+        &f.signals,
+        source,
+        body(&second, Some("second")),
+        2_000,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("era write failed"), "{error}");
+    db.execute_batch("DROP TRIGGER fail_era").unwrap();
+    assert_eq!(
+        f.store.latest_observation_id().unwrap(),
+        first.observation_id
+    );
+    assert_eq!(f.store.last_etag(source).unwrap().as_deref(), Some("first"));
+    assert_eq!(f.store.catalog_version().unwrap(), version);
+
+    let retry = run(&f, body(&second, Some("second")), 3_000);
+    assert!(matches!(retry.outcome, TickOutcome::Changed { .. }));
+    assert!(retry.eras_written > 0);
+    let era = f
+        .store
+        .recorded_value_at(
+            source,
+            "anthropic",
+            "health-count-model",
+            &fusiform_store::FactKey::existence(),
+            Timestamp(3_000),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(era.prior_observation_at, Some(Timestamp(1_000)));
+    assert_eq!(era.observation_id, Some(retry.observation_id));
+}
+
 /// The first tick against an empty store writes a SEED, not an observed
 /// boundary.
 ///

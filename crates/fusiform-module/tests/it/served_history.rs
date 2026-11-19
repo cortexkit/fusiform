@@ -6,6 +6,132 @@ use fusiform_protocol::{HistoryRefusalReason, HistorySegment, HistoryState};
 use fusiform_store::CatalogStore;
 use serde_json::{json, Value};
 
+fn provider_label_fixture() -> (CatalogStore, tempfile::TempDir) {
+    use fusiform_core::{BoundaryKind, Timestamp};
+    use fusiform_store::{FactKey, NewEra};
+
+    let (store, dir) = super::golden_payload::store();
+    let row = |key: &str, value: &str, at| NewEra {
+        source: SourceId::ModelsDev,
+        provider_id: "fixture-label".into(),
+        model_id: "upstream".into(),
+        fact_key: FactKey::from_stored(key.into()),
+        value_json: value.into(),
+        boundary_at: Timestamp(at),
+        boundary_kind: BoundaryKind::Asserted,
+        observation_id: None,
+    };
+    store
+        .append_eras(&[
+            row("existence", "\"present\"", BOOT),
+            row("provider.name", "\"Fixture\"", BOOT),
+            row("existence", "\"absent\"", BOOT + 100),
+        ])
+        .unwrap();
+    (store, dir)
+}
+
+fn label_card() -> fusiform_store::NewCuratedModel {
+    fusiform_store::NewCuratedModel {
+        provider_id: "fixture-label".into(),
+        model_id: "curated".into(),
+        facts: [("limit.context".into(), json!(100))].into(),
+        auth_methods: Vec::new(),
+        source_ref: "https://example.test/card".into(),
+        established_by: None,
+        established_at_ms: BOOT,
+        review_by_ms: BOOT + 1_000,
+    }
+}
+
+#[test]
+fn served_history_ends_provider_label_when_donor_disappears() {
+    let (store, _dir) = provider_label_fixture();
+    store
+        .append_curated_models(&[label_card()], &[], BOOT)
+        .unwrap();
+    let response = serve_history(&store, br#"{"provider_id":"fixture-label","model_id":"curated","fact_key":"provider.name","served":true}"#).unwrap();
+    let segments = response.served.unwrap();
+    let label = segments
+        .iter()
+        .find(|segment| segment.value == Some(json!("Fixture")))
+        .unwrap();
+    assert_eq!(label.from_ms, BOOT);
+    assert_eq!(label.until_ms, Some(BOOT + 100));
+    assert_eq!(segments.last().unwrap().state, HistoryState::Absent);
+}
+
+#[test]
+fn served_history_partitions_provider_label_at_donor_correction_endpoints() {
+    use fusiform_core::{BoundaryKind, Correction, FieldId, Timestamp};
+    use fusiform_store::{FactKey, NewEra};
+
+    let (store, _dir) = provider_label_fixture();
+    store
+        .append_curated_models(&[label_card()], &[], BOOT)
+        .unwrap();
+    store
+        .append_eras(&[NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "fixture-label".into(),
+            model_id: "upstream".into(),
+            fact_key: FactKey::existence(),
+            value_json: "\"absent\"".into(),
+            boundary_at: Timestamp(BOOT + 110),
+            boundary_kind: BoundaryKind::Corrected(Correction {
+                fields: vec![FieldId::Existence],
+                affected_from: Timestamp(BOOT + 20),
+                affected_until: Timestamp(BOOT + 30),
+                reason: "invalid donor presence record".into(),
+            }),
+            observation_id: None,
+        }])
+        .unwrap();
+    let response = serve_history(&store, br#"{"provider_id":"fixture-label","model_id":"curated","fact_key":"provider.name","served":true}"#).unwrap();
+    let segments = response.served.unwrap();
+    let at = |instant| segments.iter().find(|s| s.from_ms == instant).unwrap();
+    assert_eq!(at(BOOT).until_ms, Some(BOOT + 20));
+    assert_eq!(at(BOOT + 20).state, HistoryState::Absent);
+    assert_eq!(at(BOOT + 20).until_ms, Some(BOOT + 31));
+    assert_eq!(at(BOOT + 31).value, Some(json!("Fixture")));
+}
+
+#[test]
+fn served_history_refuses_typos_but_covers_removed_curated_models() {
+    let (store, _dir) = provider_label_fixture();
+    store
+        .append_curated_models(&[label_card()], &[], BOOT)
+        .unwrap();
+    store.append_curated_models(&[], &[], BOOT + 200).unwrap();
+
+    for selector in [
+        json!({"fact_key":"limit.context","served":true}),
+        json!({"fact_prefix":"limit.","served":true}),
+        json!({"fact_prefix":"limit."}),
+    ] {
+        let request = |model: &str| {
+            let mut args = selector.clone();
+            args["provider_id"] = json!("fixture-label");
+            args["model_id"] = json!(model);
+            serde_json::to_vec(&args).unwrap()
+        };
+        assert_eq!(
+            serve_history(&store, &request("typo")).unwrap_err().code,
+            "no_coverage"
+        );
+        let removed = serve_history(&store, &request("curated")).unwrap();
+        if let Some(keys) = removed.fact_keys {
+            assert_eq!(keys, ["limit.context"]);
+        } else {
+            assert!(removed
+                .served
+                .unwrap()
+                .iter()
+                .any(|segment| segment.value == Some(json!(100))));
+        }
+    }
+}
+
 const BOOT: i64 = 1_800_000_000_000;
 
 // Use the shipped catalog as background load: a tiny store hides queries that

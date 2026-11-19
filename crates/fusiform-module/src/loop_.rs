@@ -4,20 +4,9 @@
 //! advance — and the ORDER of the last two is the only interesting decision in
 //! this file.
 //!
-//! # Why the observation is written first
-//!
-//! A tick writes its observation row before its eras, in that order, and the
-//! two are separate transactions. The alternative — one transaction for both —
-//! is tempting and wrong: an era's observation window is derived from the
-//! store's observation history, so the observation must already be visible
-//! when the eras are appended.
-//!
-//! The cost is a crash window between them, and the shape of that window is
-//! what makes it acceptable: an observation with no eras reads as "we looked
-//! and nothing had changed", which is a survivable lie that the next tick
-//! corrects (it will diff against the same unchanged state and write the eras
-//! then). The reverse — eras with no observation — would be unrecoverable,
-//! because the window they were computed against would not exist.
+//! A changed poll commits its observation, eras and catalog version together.
+//! Otherwise a retry could trust the new digest or validator even though the
+//! facts it identifies never reached the store.
 //!
 //! # Why a failed tick writes anything at all
 //!
@@ -31,8 +20,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use fusiform_core::normalize::normalize_models_dev_with;
-use fusiform_core::{BoundaryKind, FailureClass, ObservationOutcome, SourceId, Timestamp};
-use fusiform_store::ingest::{catalog_digest_with_conflicts, plan_ingest};
+use fusiform_core::{FailureClass, ObservationOutcome, SourceId, Timestamp};
+use fusiform_store::ingest::catalog_digest_with_conflicts;
 use fusiform_store::{CatalogError, CatalogStore, NewObservation};
 
 use crate::fetch::{hash_bytes, FetchOutcome, Fetcher, SourceEndpoint};
@@ -151,7 +140,8 @@ pub async fn tick(ctx: &PollContext, now_ms: i64) -> Result<TickReport, TickErro
     // The cost is one full download (about 4 MB) per process start, and only
     // until the first body arrives: a failed first poll leaves the next one
     // unconditional too.
-    let etag = if ctx.document_read.load(Ordering::Acquire) {
+    let document_read = ctx.document_read.load(Ordering::Acquire);
+    let etag = if document_read {
         ctx.store
             .last_etag(ctx.endpoint.source)
             .map_err(TickError::Store)?
@@ -163,10 +153,19 @@ pub async fn tick(ctx: &PollContext, now_ms: i64) -> Result<TickReport, TickErro
     let store = ctx.store.clone();
     let signals = ctx.signals.clone();
     let source = ctx.endpoint.source;
-    let report =
-        tokio::task::spawn_blocking(move || apply(&store, &signals, source, outcome, now_ms))
-            .await
-            .map_err(TickError::ApplyTask)??;
+    let report = tokio::task::spawn_blocking(move || {
+        apply_with_count_reader(
+            &store,
+            &signals,
+            source,
+            outcome,
+            now_ms,
+            document_read,
+            |store, source| store.catalog_counts(source, None),
+        )
+    })
+    .await
+    .map_err(TickError::ApplyTask)??;
     if matches!(
         report.outcome,
         TickOutcome::Changed { .. } | TickOutcome::Unchanged
@@ -190,8 +189,8 @@ struct ApplyCtx<'a> {
 /// Split from [`tick`] so the decisions can be tested against a real store
 /// without a network: every branch below turns on what arrived, and a test that
 /// has to stand up an HTTP server to reach the parse-failure branch will not be
-/// written. The fetch half has no decisions in it — it classifies a response and
-/// returns.
+/// written. Without a process context, validate full bodies against the eras
+/// rather than assuming a persisted digest describes them.
 pub fn apply(
     store: &CatalogStore,
     signals: &Signals,
@@ -199,9 +198,15 @@ pub fn apply(
     outcome: FetchOutcome,
     now_ms: i64,
 ) -> Result<TickReport, TickError> {
-    apply_with_count_reader(store, signals, source, outcome, now_ms, |store, source| {
-        store.catalog_counts(source, None)
-    })
+    apply_with_count_reader(
+        store,
+        signals,
+        source,
+        outcome,
+        now_ms,
+        false,
+        |store, source| store.catalog_counts(source, None),
+    )
 }
 
 fn apply_with_count_reader(
@@ -210,6 +215,7 @@ fn apply_with_count_reader(
     source: SourceId,
     outcome: FetchOutcome,
     now_ms: i64,
+    trust_saved_hash: bool,
     mut read_counts: impl FnMut(&CatalogStore, SourceId) -> Result<(usize, usize), CatalogError>,
 ) -> Result<TickReport, TickError> {
     let ctx = ApplyCtx {
@@ -304,7 +310,10 @@ fn apply_with_count_reader(
             // A 200 whose facts match what we already hold. The bytes may
             // differ — a reformat, a reordered key — and none of that is a
             // change to anything fusiform serves.
-            if previous.as_deref() == Some(digest.as_str()) {
+            let matching_hash = previous.as_deref() == Some(digest.as_str());
+            // The first full body also reconciles stores left by an older
+            // writer: even an `unchanged` row could repeat an unapplied digest.
+            if trust_saved_hash && matching_hash {
                 let id = ctx
                     .store
                     .record_observation(&NewObservation {
@@ -353,56 +362,33 @@ fn apply_with_count_reader(
                 );
             }
 
-            // Something moved. The observation is written first so the eras
-            // appended below can derive their windows from a history that
-            // already contains this tick.
-            let observation_id = ctx
+            let (observation_id, plan, next_version) = ctx
                 .store
-                .record_observation(&NewObservation {
-                    source: ctx.source,
-                    observed_at: Timestamp(now_ms),
-                    outcome: ObservationOutcome::Changed { snapshot_seq: 0 },
-                    normalized_hash: Some(digest),
-                    raw_hash: Some(raw_hash),
-                    etag,
-                    duration_ms: Some(duration.as_millis() as i64),
-                    detail: None,
-                })
+                .commit_polled_document(
+                    &NewObservation {
+                        source: ctx.source,
+                        observed_at: Timestamp(now_ms),
+                        outcome: ObservationOutcome::Changed { snapshot_seq: 0 },
+                        normalized_hash: Some(digest),
+                        raw_hash: Some(raw_hash),
+                        etag,
+                        duration_ms: Some(duration.as_millis() as i64),
+                        detail: None,
+                    },
+                    &catalog,
+                    matching_hash,
+                )
                 .map_err(TickError::Store)?;
             ctx.signals.observed(now_ms);
 
-            // The first ingest into an empty store is a SEED, not an
-            // observation: there is no prior observation to bound it against,
-            // so claiming an observed boundary would be claiming a window that
-            // does not exist.
-            let boundary_kind = if ctx
-                .store
-                .last_confirming_observation_before(ctx.source, Timestamp(now_ms))
-                .map_err(TickError::Store)?
-                .is_some()
-            {
-                BoundaryKind::Observed
-            } else {
-                BoundaryKind::Seed
+            let Some(next_version) = next_version else {
+                return Ok(TickReport {
+                    outcome: TickOutcome::Unchanged,
+                    observation_id,
+                    eras_written: 0,
+                    composition: EraComposition::default(),
+                });
             };
-            let era_observation = match boundary_kind {
-                BoundaryKind::Seed => None,
-                _ => Some(observation_id),
-            };
-
-            let plan = plan_ingest(
-                ctx.store,
-                &catalog,
-                Timestamp(now_ms),
-                boundary_kind,
-                era_observation,
-            )
-            .map_err(TickError::Store)?;
-
-            let (eras_written, next_version) = ctx
-                .store
-                .append_poll_eras(&plan.eras, observation_id, Timestamp(now_ms))
-                .map_err(TickError::Store)?;
             // This count only refreshes health telemetry; its failure must not
             // turn an already-appended ingest into a failed poll.
             match read_counts(ctx.store, ctx.source) {
@@ -422,7 +408,7 @@ fn apply_with_count_reader(
                     new_version: next_version,
                 },
                 observation_id,
-                eras_written,
+                eras_written: plan.eras.len(),
                 composition: EraComposition {
                     models_arrived: plan.new_models,
                     models_withdrawn: plan.disappeared_models,
@@ -570,6 +556,7 @@ mod tests {
                 duration: Duration::from_millis(10),
             },
             1_000,
+            true,
             |store, source| {
                 assert!(
                     store.era_count(source).unwrap() > 0,

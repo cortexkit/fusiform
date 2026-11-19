@@ -259,9 +259,22 @@ impl CatalogSnapshot {
     pub fn priced_model_count(&self) -> usize {
         self.models
             .iter()
-            .filter(|m| m.facts.keys().any(|k| k.as_str().starts_with(prefix::RATE)))
+            .filter(|m| {
+                m.facts.iter().any(|(key, value)| {
+                    key.as_str().starts_with(prefix::RATE)
+                        && serde_json::from_str::<RateState>(value).is_ok_and(|rate| {
+                            matches!(rate.state.as_ref(), "priced" | "stated_zero")
+                        })
+                })
+            })
             .count()
     }
+}
+
+#[derive(serde::Deserialize)]
+struct RateState<'a> {
+    #[serde(borrow)]
+    state: std::borrow::Cow<'a, str>,
 }
 
 /// The point-in-time read, as one statement.
@@ -350,7 +363,9 @@ impl CatalogStore {
             "SELECT COUNT(*), COALESCE(SUM(EXISTS (SELECT 1 FROM era r \
                 WHERE r.source = e.source AND r.provider_id = e.provider_id \
                   AND r.model_id = e.model_id AND r.fact_key >= 'rate.' \
-                  AND r.fact_key < 'rate/' AND {})), 0) \
+                   AND r.fact_key < 'rate/' AND {} \
+                   AND CASE WHEN json_valid(r.value_json) THEN \
+                       json_extract(r.value_json, '$.state') IN ('priced', 'stated_zero') END)), 0) \
              FROM era e WHERE e.source = ?1 AND e.fact_key = 'existence' \
                AND e.value_json = '\"present\"' AND {}",
             visible("r"),
@@ -443,6 +458,16 @@ impl CatalogStore {
     }
 
     fn read_catalog_scoped(
+        &self,
+        query: &CatalogQuery,
+        provider: Option<&str>,
+        after: Option<&str>,
+        through: Option<&str>,
+    ) -> Result<CatalogSnapshot, CatalogError> {
+        self.with_read_snapshot(|| self.read_catalog_snapshot(query, provider, after, through))?
+    }
+
+    fn read_catalog_snapshot(
         &self,
         query: &CatalogQuery,
         provider: Option<&str>,
@@ -647,6 +672,16 @@ impl CatalogStore {
     /// rather than by a second SQL statement: two statements that must agree
     /// about what "current" means is two places for that meaning to drift.
     pub fn read_model(
+        &self,
+        source: SourceId,
+        provider_id: &str,
+        model_id: &str,
+        at: Option<Timestamp>,
+    ) -> Result<(Option<ModelFacts>, Vec<WithheldFact>), CatalogError> {
+        self.with_read_snapshot(|| self.read_model_snapshot(source, provider_id, model_id, at))?
+    }
+
+    fn read_model_snapshot(
         &self,
         source: SourceId,
         provider_id: &str,

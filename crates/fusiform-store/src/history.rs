@@ -40,7 +40,8 @@ impl CatalogStore {
         })
     }
 
-    /// Every instant at which a dated model read can change, across all facts.
+    /// Boundaries belonging to the requested model, not its provider's other
+    /// models. Provider-label joins have their own boundary inventory.
     /// Correction extents are closed, so the first readable instant is end + 1.
     pub fn model_history_boundaries(
         &self,
@@ -52,8 +53,6 @@ impl CatalogStore {
             let mut stmt = conn.prepare(
                 "SELECT boundary_at_ms, 0 FROM era
                  WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3
-                 UNION SELECT boundary_at_ms, 0 FROM era
-                 WHERE source = ?1 AND provider_id = ?2 AND fact_key = 'provider.name'
                  UNION SELECT boundary_at_ms, 0 FROM fact_override_era
                  WHERE provider_id = ?2 AND model_id = ?3
                  UNION SELECT boundary_at_ms, 0 FROM curated_model_era
@@ -67,17 +66,30 @@ impl CatalogStore {
                  WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3
                    AND affected_until_ms IS NOT NULL",
             )?;
-            let rows = stmt.query_map(params![source.as_str(), provider, model], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?))
-            })?;
-            let mut boundaries = BTreeSet::new();
-            for row in rows {
-                let (at, closed_end) = row?;
-                if let Some(at) = at.checked_add(i64::from(closed_end)) {
-                    boundaries.insert(at);
-                }
-            }
-            Ok(boundaries)
+            collect_boundaries(&mut stmt, params![source.as_str(), provider, model])
+        })
+    }
+
+    /// A curated card can inherit the label of the first present model under
+    /// its provider. Either the donor's presence or its readable label can
+    /// change that answer, including retroactive corrections to either fact.
+    pub fn provider_label_boundaries(
+        &self,
+        source: SourceId,
+        provider: &str,
+    ) -> Result<BTreeSet<i64>, CatalogError> {
+        self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT boundary_at_ms, 0 FROM era
+                 WHERE source = ?1 AND provider_id = ?2 AND fact_key IN ('existence', 'provider.name')
+                 UNION SELECT affected_from_ms, 0 FROM era
+                 WHERE source = ?1 AND provider_id = ?2 AND fact_key IN ('existence', 'provider.name')
+                   AND boundary_kind = 'corrected'
+                 UNION SELECT affected_until_ms, 1 FROM era
+                 WHERE source = ?1 AND provider_id = ?2 AND fact_key IN ('existence', 'provider.name')
+                   AND boundary_kind = 'corrected'",
+            )?;
+            collect_boundaries(&mut stmt, params![source.as_str(), provider])
         })
     }
 
@@ -103,4 +115,21 @@ impl CatalogStore {
             rows.collect()
         })
     }
+}
+
+fn collect_boundaries(
+    stmt: &mut rusqlite::Statement<'_>,
+    params: impl rusqlite::Params,
+) -> rusqlite::Result<BTreeSet<i64>> {
+    let rows = stmt.query_map(params, |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?))
+    })?;
+    let mut boundaries = BTreeSet::new();
+    for row in rows {
+        let (at, closed_end) = row?;
+        if let Some(at) = at.checked_add(i64::from(closed_end)) {
+            boundaries.insert(at);
+        }
+    }
+    Ok(boundaries)
 }

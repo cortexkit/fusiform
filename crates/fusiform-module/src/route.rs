@@ -245,7 +245,9 @@ pub fn serve_tool_call(store: &CatalogStore, body: &[u8]) -> Result<ToolResponse
 
 /// Serve `catalog.history`: every era for one fact.
 pub fn serve_history(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse, RouteError> {
-    history::serve(store, body)
+    store
+        .with_read_snapshot(|| history::serve(store, body))
+        .map_err(|e| store_error(&e))?
 }
 
 fn upstream_history(
@@ -899,6 +901,30 @@ fn serve_catalog_get_request(
 
 fn serve_catalog_get_prepared(
     store: &CatalogStore,
+    request: CatalogGetRequest,
+    page_budget: usize,
+    frame_limit: usize,
+    oversized: &Mutex<Option<OversizedCatalog>>,
+    range: Option<&ProviderRange>,
+    prepared: Option<&dated_model::DatedModel>,
+) -> Result<CatalogGetResponse, RouteError> {
+    store
+        .with_read_snapshot(|| {
+            serve_catalog_get_snapshot(
+                store,
+                request,
+                page_budget,
+                frame_limit,
+                oversized,
+                range,
+                prepared,
+            )
+        })
+        .map_err(|e| store_error(&e))?
+}
+
+fn serve_catalog_get_snapshot(
+    store: &CatalogStore,
     mut request: CatalogGetRequest,
     page_budget: usize,
     frame_limit: usize,
@@ -1137,14 +1163,7 @@ fn serve_catalog_get_prepared(
         // a curated row stands aside wherever models.dev had the model present
         // then, exactly as a current read stands aside while it is present now.
         let eras = match prepared {
-            Some(prepared) => prepared
-                .curated
-                .iter()
-                .rev()
-                .find(|era| era.boundary_at_ms <= at.0)
-                .cloned()
-                .into_iter()
-                .collect(),
+            Some(prepared) => prepared.curated_era_at(at).cloned().into_iter().collect(),
             None => store
                 .curated_models_at(at.0, request.provider_id.as_deref())
                 .map_err(|e| store_error(&e))?,

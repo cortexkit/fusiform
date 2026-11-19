@@ -769,7 +769,7 @@ fn sql_catalog_counts_match_snapshot_with_withholding_and_withdrawal() {
         .unwrap();
     assert_eq!(
         (snapshot.model_count(), snapshot.priced_model_count()),
-        (5, 3)
+        (5, 2)
     );
     for provider in ["counts", "missing"] {
         let scoped = f
@@ -799,6 +799,58 @@ fn sql_catalog_counts_match_snapshot_with_withholding_and_withdrawal() {
                 .unwrap(),
             (snapshot.model_count(), snapshot.priced_model_count()),
             "at {at}"
+        );
+    }
+}
+
+#[test]
+fn counts_distinguish_never_priced_withdrawn_and_stated_zero() {
+    use fusiform_store::NewEra;
+
+    let f = fixture();
+    let source = SourceId::ModelsDev;
+    let row = |model: &str, key: &str, value: &str, at| NewEra {
+        source,
+        provider_id: "counts".into(),
+        model_id: model.into(),
+        fact_key: FactKey::from_stored(key.into()),
+        value_json: value.into(),
+        boundary_at: Timestamp(at),
+        boundary_kind: BoundaryKind::Asserted,
+        observation_id: None,
+    };
+    f.store
+        .append_eras(&[
+            row("never", "existence", "\"present\"", 1_000),
+            row("withdrawn", "existence", "\"present\"", 1_000),
+            row("zero", "existence", "\"present\"", 1_000),
+            row(
+                "withdrawn",
+                "rate.input",
+                r#"{"state":"priced","units":1,"exponent":9,"currency":"USD"}"#,
+                1_000,
+            ),
+            row("zero", "rate.input", r#"{"state":"stated_zero"}"#, 1_000),
+            row(
+                "withdrawn",
+                "rate.input",
+                r#"{"state":"unpriced","reason":"missing_rate"}"#,
+                2_000,
+            ),
+        ])
+        .unwrap();
+    for (at, priced) in [(1_999, 2), (2_000, 1)] {
+        let at = Timestamp(at);
+        assert_eq!(
+            f.store.catalog_counts(source, Some(at)).unwrap(),
+            (3, priced)
+        );
+        assert_eq!(
+            f.store
+                .read_catalog(&CatalogQuery::at(source, at))
+                .unwrap()
+                .priced_model_count(),
+            priced
         );
     }
 }

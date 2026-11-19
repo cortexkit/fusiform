@@ -173,6 +173,28 @@ fn refusals(f: &Fixture, fields: &[FieldId], from: i64, until: i64) -> Vec<Corre
     .expect_err("this correction must be refused")
 }
 
+#[test]
+fn transient_bad_value_can_be_marked_from_a_conservative_lower_bound() {
+    let f = fixture();
+    let correction = plan(&f, &rates(), BAD_FROM - 1, FIXED_AT - 1);
+    assert_eq!(
+        apply_correction(&f.store, SourceId::ModelsDev, &correction, Timestamp(NOW)).unwrap(),
+        2
+    );
+    assert!(matches!(
+        f.store
+            .value_at(
+                SourceId::ModelsDev,
+                "anthropic",
+                "claude-sonnet-4-5",
+                &FactKey::rate(TokenClass::Input),
+                Timestamp(BAD_FROM)
+            )
+            .unwrap(),
+        PointInTime::Corrected { .. }
+    ));
+}
+
 /// The plan carries the value already in force, read from the store.
 #[test]
 fn a_plan_takes_its_value_from_the_store() {

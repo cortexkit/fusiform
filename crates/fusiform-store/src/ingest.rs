@@ -76,14 +76,23 @@ pub fn plan_ingest(
     boundary_kind: BoundaryKind,
     observation_id: Option<i64>,
 ) -> Result<IngestPlan, CatalogError> {
-    let source = catalog.source;
-    let current = store.current_values(source)?;
+    store.raw_conn(|conn| plan_ingest_in(conn, catalog, at, boundary_kind, observation_id))
+}
+
+pub(crate) fn plan_ingest_in(
+    conn: &rusqlite::Connection,
+    catalog: &NormalizedCatalog,
+    at: Timestamp,
+    boundary_kind: BoundaryKind,
+    observation_id: Option<i64>,
+) -> rusqlite::Result<IngestPlan> {
+    let current = current_values_in(conn, catalog.source)?;
     let models = catalog.models().map(|model| {
         let identity = (model.key.provider_id.clone(), model.key.model_id.clone());
         (identity, facts_of(model).values)
     });
     Ok(plan_model_eras(
-        source,
+        catalog.source,
         &current,
         models,
         at,
@@ -558,23 +567,26 @@ impl CatalogStore {
     /// Resolve each per-fact maximum in SQL and insert rows directly into the
     /// model maps; a second catalog-sized row buffer would only be discarded.
     pub fn current_values(&self, source: SourceId) -> Result<CurrentValues, CatalogError> {
-        let mut out: CurrentValues = BTreeMap::new();
-        self.raw_conn(|conn| {
-            let sql =
-                format!("{CURRENT_VALUES_SQL} ORDER BY e.provider_id, e.model_id, e.fact_key");
-            let mut stmt = conn.prepare(&sql)?;
-            let mut rows = stmt.query(rusqlite::params![source.as_str()])?;
-            while let Some(row) = rows.next()? {
-                crate::serve::insert_streamed_fact(
-                    &mut out,
-                    crate::serve::row_text(row, 0)?,
-                    crate::serve::row_text(row, 1)?,
-                    FactKey::from_stored(row.get(2)?),
-                    row.get(3)?,
-                );
-            }
-            Ok(())
-        })?;
-        Ok(out)
+        self.raw_conn(|conn| current_values_in(conn, source))
     }
+}
+
+fn current_values_in(
+    conn: &rusqlite::Connection,
+    source: SourceId,
+) -> rusqlite::Result<CurrentValues> {
+    let mut out = BTreeMap::new();
+    let sql = format!("{CURRENT_VALUES_SQL} ORDER BY e.provider_id, e.model_id, e.fact_key");
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query(rusqlite::params![source.as_str()])?;
+    while let Some(row) = rows.next()? {
+        crate::serve::insert_streamed_fact(
+            &mut out,
+            crate::serve::row_text(row, 0)?,
+            crate::serve::row_text(row, 1)?,
+            FactKey::from_stored(row.get(2)?),
+            row.get(3)?,
+        );
+    }
+    Ok(out)
 }

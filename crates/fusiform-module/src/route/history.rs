@@ -85,14 +85,31 @@ pub(super) fn serve(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse
             (request.served == Some(true) && request.fact_prefix.is_some()).then(BTreeMap::new);
         return Ok(response);
     };
+    if prepared.curated.iter().any(|era| {
+        era.claim
+            .as_ref()
+            .is_some_and(|claim| !claim.facts.contains_key("provider.name"))
+    }) {
+        boundaries.extend(
+            store
+                .provider_label_boundaries(source, provider)
+                .map_err(|e| store_error(&e))?,
+        );
+    }
     boundaries.retain(|at| *at >= begin.0);
     boundaries.insert(begin.0);
     let mut reads = Vec::new();
     let identity = format!("{provider}/{model}");
+    let selected = |key: &str| match (&request.fact_key, &request.fact_prefix) {
+        (Some(exact), _) => key == exact,
+        (_, Some(prefix)) => key.starts_with(prefix),
+        _ => false,
+    };
+    let with_timeline = request.fact_key.is_some() || request.served == Some(true);
     for at in boundaries {
         // Keep the full row for override guards and TTL rate derivation, and
         // use the dated-get resolver with inputs owned only by this request.
-        let request = CatalogGetRequest {
+        let dated_request = CatalogGetRequest {
             source: Some(source.as_str().into()),
             provider_id: Some(provider.clone()),
             model_id: Some(model.clone()),
@@ -101,7 +118,7 @@ pub(super) fn serve(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse
         };
         let read = match serve_catalog_get_prepared(
             store,
-            request,
+            dated_request,
             CATALOG_PAGE_BYTES,
             REPLY_FRAME_LIMIT_BYTES,
             &OVERSIZED_CATALOG,
@@ -112,27 +129,50 @@ pub(super) fn serve(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse
             Err(error) if error.code == fusiform_protocol::CODE_NO_COVERAGE => None,
             Err(error) => return Err(error),
         };
-        if let Some(facts) = read.as_ref().and_then(|read| read.models.get(&identity)) {
-            keys.extend(facts.keys().cloned());
+        let mut matching = BTreeSet::new();
+        if let Some(read) = &read {
+            if let Some(facts) = read.models.get(&identity) {
+                matching.extend(facts.keys().filter(|key| selected(key)).map(String::as_str));
+                keys.extend(matching.iter().map(|key| (*key).to_owned()));
+            }
+            if with_timeline {
+                matching.extend(
+                    read.withheld
+                        .iter()
+                        .filter(|w| w.model == identity && selected(&w.fact_key))
+                        .map(|w| w.fact_key.as_str()),
+                );
+            }
         }
-        reads.push((at, read));
+        if with_timeline {
+            let projection = read
+                .as_ref()
+                .map(|read| {
+                    matching
+                        .into_iter()
+                        .map(|key| {
+                            Ok((
+                                key.to_owned(),
+                                segment_at(
+                                    store, source, provider, &identity, key, at, read, &prepared,
+                                )?,
+                            ))
+                        })
+                        .collect::<Result<_, RouteError>>()
+                })
+                .transpose()?;
+            reads.push((at, projection));
+        }
     }
     if let Some(key) = &request.fact_key {
-        response.served = Some(timeline(
-            store, source, provider, model, key, &reads, &prepared,
-        )?);
+        response.served = Some(timeline(key, &reads));
     } else {
         keys.retain(|key| key.starts_with(request.fact_prefix.as_deref().unwrap()));
         if request.served == Some(true) {
             response.served_by_key = Some(
                 keys.iter()
-                    .map(|key| {
-                        Ok((
-                            key.clone(),
-                            timeline(store, source, provider, model, key, &reads, &prepared)?,
-                        ))
-                    })
-                    .collect::<Result<_, RouteError>>()?,
+                    .map(|key| (key.clone(), timeline(key, &reads)))
+                    .collect(),
             );
         }
         response.fact_keys = Some(keys.into_iter().collect());
@@ -151,89 +191,103 @@ fn envelope(request: &HistoryRequest, source: SourceId) -> HistoryResponse {
     }
 }
 
-fn timeline(
+fn default_segment(at: i64, covered: bool) -> HistorySegment {
+    HistorySegment {
+        from_ms: at,
+        until_ms: None,
+        state: if covered {
+            HistoryState::Absent
+        } else {
+            HistoryState::Refused
+        },
+        value: None,
+        source: None,
+        override_detail: None,
+        reason: (!covered).then_some(HistoryRefusalReason::NoCoverage),
+        correction: None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn segment_at(
     store: &CatalogStore,
     source: SourceId,
     provider: &str,
-    model: &str,
+    identity: &str,
     key: &str,
-    reads: &[(i64, Option<CatalogGetResponse>)],
+    at: i64,
+    read: &CatalogGetResponse,
     prepared: &dated_model::DatedModel,
-) -> Result<Vec<HistorySegment>, RouteError> {
-    let identity = format!("{provider}/{model}");
+) -> Result<HistorySegment, RouteError> {
+    let mut segment = default_segment(at, true);
+    if let Some(withheld) = read
+        .withheld
+        .iter()
+        .find(|w| w.model == identity && w.fact_key == key)
+    {
+        segment.state = HistoryState::Refused;
+        segment.reason = Some(HistoryRefusalReason::Correction);
+        segment.correction = withheld.corrections.first().cloned();
+    } else if let Some(value) = read.models.get(identity).and_then(|facts| facts.get(key)) {
+        segment.state = HistoryState::Value;
+        segment.value = Some(value.clone());
+        if let Some(claim) = read
+            .fact_overrides
+            .iter()
+            .find(|o| o.model == identity && o.fact_key == key && &o.value == value)
+        {
+            segment.source = Some(HistorySource::Override);
+            segment.override_detail = Some(HistoryOverride {
+                source_ref: claim.source_ref.clone(),
+                replaces: claim.replaces.clone(),
+            });
+        } else {
+            let curated = if read.curated.iter().any(|row| row.model == identity) {
+                prepared
+                    .curated_at(Timestamp(at))
+                    .and_then(|row| row.facts.get(key).cloned())
+            } else {
+                None
+            };
+            let mut upstream = prepared
+                .raw(&FactKey::from_stored(key.into()), Timestamp(at))
+                .map(|raw| {
+                    let mut value = fact_for_the_wire(raw);
+                    name_the_provenance_of_a_pre_0_11_row(&mut value);
+                    value
+                });
+            if key == "provider.name" && curated.is_none() {
+                upstream = store
+                    .provider_display_name_at(source, provider, Timestamp(at))
+                    .map_err(|e| store_error(&e))?
+                    .map(serde_json::Value::from);
+            }
+            // The resolver discloses which override or curated row it
+            // chose. Compare that claim and the rendered upstream value
+            // with the final value; the only remaining dated derivation
+            // is the cache-lifetime rule. No precedence is decided here.
+            segment.source = Some(if curated.as_ref() == Some(value) {
+                HistorySource::Curated
+            } else if upstream.as_ref() == Some(value) {
+                HistorySource::Upstream
+            } else {
+                HistorySource::CacheLifetime
+            });
+        }
+    }
+    Ok(segment)
+}
+
+type ProjectedRead = (i64, Option<BTreeMap<String, HistorySegment>>);
+
+fn timeline(key: &str, reads: &[ProjectedRead]) -> Vec<HistorySegment> {
     let mut segments: Vec<HistorySegment> = Vec::new();
     for (at, read) in reads {
-        let mut segment = HistorySegment {
-            from_ms: *at,
-            until_ms: None,
-            state: HistoryState::Absent,
-            value: None,
-            source: None,
-            override_detail: None,
-            reason: None,
-            correction: None,
-        };
-        if let Some(read) = read {
-            if let Some(withheld) = read
-                .withheld
-                .iter()
-                .find(|w| w.model == identity && w.fact_key == key)
-            {
-                segment.state = HistoryState::Refused;
-                segment.reason = Some(HistoryRefusalReason::Correction);
-                segment.correction = withheld.corrections.first().cloned();
-            } else if let Some(value) = read.models.get(&identity).and_then(|facts| facts.get(key))
-            {
-                segment.state = HistoryState::Value;
-                segment.value = Some(value.clone());
-                if let Some(claim) = read
-                    .fact_overrides
-                    .iter()
-                    .find(|o| o.model == identity && o.fact_key == key && &o.value == value)
-                {
-                    segment.source = Some(HistorySource::Override);
-                    segment.override_detail = Some(HistoryOverride {
-                        source_ref: claim.source_ref.clone(),
-                        replaces: claim.replaces.clone(),
-                    });
-                } else {
-                    let curated = if read.curated.iter().any(|row| row.model == identity) {
-                        prepared
-                            .curated_at(Timestamp(*at))
-                            .and_then(|row| row.facts.get(key).cloned())
-                    } else {
-                        None
-                    };
-                    let mut upstream = prepared
-                        .raw(&FactKey::from_stored(key.into()), Timestamp(*at))
-                        .map(|raw| {
-                            let mut value = fact_for_the_wire(raw);
-                            name_the_provenance_of_a_pre_0_11_row(&mut value);
-                            value
-                        });
-                    if key == "provider.name" && curated.is_none() {
-                        upstream = store
-                            .provider_display_name_at(source, provider, Timestamp(*at))
-                            .map_err(|e| store_error(&e))?
-                            .map(serde_json::Value::from);
-                    }
-                    // The resolver discloses which override or curated row it
-                    // chose. Compare that claim and the rendered upstream value
-                    // with the final value; the only remaining dated derivation
-                    // is the cache-lifetime rule. No precedence is decided here.
-                    segment.source = Some(if curated.as_ref() == Some(value) {
-                        HistorySource::Curated
-                    } else if upstream.as_ref() == Some(value) {
-                        HistorySource::Upstream
-                    } else {
-                        HistorySource::CacheLifetime
-                    });
-                }
-            }
-        } else {
-            segment.state = HistoryState::Refused;
-            segment.reason = Some(HistoryRefusalReason::NoCoverage);
-        }
+        let segment = read
+            .as_ref()
+            .and_then(|facts| facts.get(key))
+            .cloned()
+            .unwrap_or_else(|| default_segment(*at, read.is_some()));
         if let Some(last) = segments.last_mut() {
             let mut comparable = segment.clone();
             comparable.from_ms = last.from_ms;
@@ -244,5 +298,5 @@ fn timeline(
         }
         segments.push(segment);
     }
-    Ok(segments)
+    segments
 }

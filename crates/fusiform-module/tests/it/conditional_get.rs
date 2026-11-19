@@ -43,6 +43,7 @@ async fn tick(
 enum Answer {
     /// 200 with a body and an ETag.
     Body,
+    BodyWithModel,
     /// 304 with an ETag and no body, as models.dev really answers.
     NotModified,
     /// 304 with NO ETag header, which a proxy may produce.
@@ -126,8 +127,12 @@ fn serve_one(mut stream: TcpStream, answer: Answer, heads: &Arc<Mutex<Vec<String
         .push(String::from_utf8_lossy(&buf[..n]).to_string());
 
     match answer {
-        Answer::Body => {
-            let body = br#"{"anthropic":{"id":"anthropic","name":"A","models":{}}}"#;
+        Answer::Body | Answer::BodyWithModel => {
+            let body: &[u8] = if answer == Answer::Body {
+                br#"{"anthropic":{"id":"anthropic","name":"A","models":{}}}"#
+            } else {
+                br#"{"anthropic":{"id":"anthropic","name":"A","models":{"m":{"id":"m","name":"M"}}}}"#
+            };
             let head = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
                  ETag: \"v1\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -432,5 +437,81 @@ async fn a_new_process_reads_the_document_before_trusting_a_stored_validator() {
         header_line(third, "if-none-match").is_some_and(|v| v.contains("\"v1\"")),
         "after reading a body the process must poll conditionally again. Head \
          was:\n{third}"
+    );
+}
+
+#[tokio::test]
+async fn first_full_poll_repairs_a_legacy_hash_ahead_of_its_eras() {
+    use fusiform_core::{ObservationOutcome, SourceId, Timestamp};
+    use fusiform_module::{
+        loop_::{PollContext, TickOutcome},
+        signals::Signals,
+    };
+    use fusiform_store::{CatalogStore, NewObservation};
+
+    let upstream = Upstream::start(Answer::Body);
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        CatalogStore::open(&cortexkit_store_types::StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: cortexkit_store_types::Isolation::Module,
+            backend: cortexkit_store_types::StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().into(),
+            },
+        })
+        .unwrap(),
+    );
+    let process = || {
+        PollContext::new(
+            store.clone(),
+            Fetcher::new().unwrap(),
+            upstream.endpoint(),
+            Arc::new(Signals::new()),
+        )
+    };
+    tick(&process(), 1_000).await.unwrap();
+
+    // Simulate an interrupted old writer, including a later retry that trusted
+    // the dangling hash and incorrectly marked the document unchanged.
+    let doc =
+        br#"{"anthropic":{"id":"anthropic","name":"A","models":{"m":{"id":"m","name":"M"}}}}"#;
+    let catalog = fusiform_core::normalize_models_dev(doc).unwrap().catalog;
+    let digest = fusiform_store::ingest::catalog_digest(&catalog);
+    for (at, outcome) in [
+        (2_000, ObservationOutcome::Changed { snapshot_seq: 0 }),
+        (3_000, ObservationOutcome::Unchanged),
+    ] {
+        store
+            .record_observation(&NewObservation {
+                source: SourceId::ModelsDev,
+                observed_at: Timestamp(at),
+                outcome,
+                detail: None,
+                normalized_hash: Some(digest.clone()),
+                raw_hash: None,
+                etag: Some("\"v1\"".into()),
+                duration_ms: None,
+            })
+            .unwrap();
+    }
+    assert_eq!(
+        store.last_normalized_hash(SourceId::ModelsDev).unwrap(),
+        Some(digest)
+    );
+    assert!(!store
+        .model_is_known(SourceId::ModelsDev, "anthropic", "m")
+        .unwrap());
+    upstream.set(Answer::BodyWithModel);
+    let after = process();
+    let repaired = tick(&after, 4_000).await.unwrap();
+    assert!(matches!(repaired.outcome, TickOutcome::Changed { .. }));
+    assert!(repaired.eras_written > 0);
+    assert!(store
+        .model_is_known(SourceId::ModelsDev, "anthropic", "m")
+        .unwrap());
+    assert_eq!(
+        tick(&after, 5_000).await.unwrap().outcome,
+        TickOutcome::Unchanged
     );
 }
