@@ -745,9 +745,10 @@ const REPLY_FRAME_LIMIT_BYTES: usize = 4 * 1024 * 1024;
 // Only refusals are remembered, never served responses. Curated models, aliases,
 // creators, canonical links, wire corrections and billing rules are include_str!
 // inputs fixed for this process.
-// Low-level era appends can change dated reads without issuing a version, so
-// the era watermark also invalidates refusals. The current timestamp can
-// change its serialized width without a write, so its width is part of the key.
+// Not every era write advances `catalog_version`, yet any new era can change
+// what a dated read serves, so the key also holds the newest era id: a new era
+// makes a remembered refusal stale. The current timestamp's serialized
+// width can change without a write, so that width is part of the key too.
 static OVERSIZED_CATALOG: Mutex<Option<OversizedCatalog>> = Mutex::new(None);
 
 #[cfg(test)]

@@ -208,7 +208,8 @@ and the current value is never uncertain
 `catalog_version` is a single row. Each poll that writes eras advances it to
 `max(now_ms, current + 1)` in the transaction that writes the eras. Committed
 corrections, quality grades and withdrawals use the same advancement function
-in the transaction that appends their rows. Previews and the v8 import do not
+in the transaction that appends their rows. Previews, and the one-time import
+of compiled-in grades when schema v8 first moved grades into the store, do not
 advance it. The version row's `observation_id` is null for corrections and
 grade writes, which have no poll.
 Because the next value
