@@ -170,12 +170,17 @@ must be listed there or it will open eras and move the digest
 (`ingest::a_producer_annotation_moves_neither_the_digest_nor_the_diff`,
 `ingest::the_digest_moves_exactly_when_the_diff_does`).
 
-Store mode applies the same model diff to the verified release state for
-models touched by the release. Release operations reconstruct that state;
-they are not era boundaries. The diff uses earlier stored eras, including
-ones written by previous releases in the same transaction, so a returning
-model does not get new eras for unchanged facts. Polls between two releases
-can record intermediate changes that the later release does not contain.
+Store mode, where fusiform reads signed releases from the curated store instead
+of polling models.dev, decides eras with the same planner a poll uses (it
+compares each fact with the era in force, through `upstream_claim_of`). It runs
+that planner over the verified state the release produces, for the models the
+release touches. The release's individual operations rebuild that state; they
+are not era boundaries. The comparison sees earlier stored eras, including those
+written by previous releases in the same transaction, so a model that returns
+with unchanged facts gets no new eras for them, and a withdrawn model gets one
+`existence: absent` era, as a poll would write. A release covers the net change
+since the previous release, so polls in between can record intermediate values
+that the release does not.
 
 Order matters only where the upstream's order is meaningful: reordering a
 modality list is not a change, reordering reasoning option values is
