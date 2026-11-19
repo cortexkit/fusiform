@@ -206,10 +206,11 @@ and the current value is never uncertain
 ## 4. The catalog version
 
 `catalog_version` is a single row. Each poll that writes eras advances it to
-`max(now_ms, current + 1)` after the eras are durable. Each committed quality
-grade or withdrawal uses the same store advancement function in the transaction
-that appends its grade row. Previews and the v8 import do not advance it.
-The version row's `observation_id` is null for a grade write, which has no poll.
+`max(now_ms, current + 1)` in the transaction that writes the eras. Committed
+corrections, quality grades and withdrawals use the same advancement function
+in the transaction that appends their rows. Previews and the v8 import do not
+advance it. The version row's `observation_id` is null for corrections and
+grade writes, which have no poll.
 Because the next value
 is at least the wall clock, restoring an older copy of the database cannot make
 the version go backwards (`history::a_restore_cannot_rewind_the_catalog_version`,

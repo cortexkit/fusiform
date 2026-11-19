@@ -671,7 +671,7 @@ mod admission_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn only_bulk_catalog_gets_need_admission() {
+    fn catalog_get_admission_depends_on_scope() {
         for body in [b"".as_slice(), br#"{"name":"catalog.get","arguments":{}}"#,
             br#"{"name":"catalog.get","arguments":{"paged":true}}"#,
             br#"{"name":"catalog.get","arguments":{"provider_id":"openai","auth_method":"chatgpt"}}"#] {
@@ -683,8 +683,40 @@ mod admission_tests {
             br#"{"name":"catalog.history","arguments":{}}"#,
             br#"{"name":"catalog.status","arguments":{}}"#,
             br#"{"name":"plan.prices","arguments":{}}"#,
+            br#"{"name":"quality.grades","arguments":{}}"#,
+            br#"{"name":"quality.marks","arguments":{}}"#,
         ] {
             assert!(!route::needs_catalog_permit(body));
+        }
+    }
+
+    #[test]
+    fn quality_writes_and_previews_that_render_the_catalog_need_admission() {
+        use serde_json::json;
+
+        for (name, args) in [
+            ("quality.decommission", json!({})),
+            ("quality.restore", json!({})),
+            ("quality.grade", json!({"elo":1200,"eq":1300})),
+            ("quality.withdraw", json!({})),
+            (
+                "quality.grade",
+                json!({"elo":1200,"eq":1300,"effort_grade":"high"}),
+            ),
+            ("quality.withdraw", json!({"effort_grade":"high"})),
+            (
+                "quality.workload",
+                json!({"workload":"code","effort_default":"high"}),
+            ),
+        ] {
+            for dry_run in [true, false] {
+                let mut args = args.clone();
+                args["model"] = json!("lab/model");
+                args["reason"] = json!("review");
+                args["dry_run"] = json!(dry_run);
+                let body = serde_json::to_vec(&json!({"name": name, "arguments": args})).unwrap();
+                assert!(route::needs_catalog_permit(&body), "{name} {args}");
+            }
         }
     }
 

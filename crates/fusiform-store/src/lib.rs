@@ -462,7 +462,7 @@ impl CatalogStore {
         observation_id: i64,
         now: Timestamp,
     ) -> Result<(usize, i64), CatalogError> {
-        let (count, issued) = self.append_eras_inner(eras, Some((observation_id, now)))?;
+        let (count, issued) = self.append_eras_inner(eras, Some((Some(observation_id), now)))?;
         let issued = issued.expect("appending poll eras always issues a catalog version");
         if eras
             .iter()
@@ -474,10 +474,25 @@ impl CatalogStore {
         Ok((count, issued))
     }
 
+    /// Corrections change what dated reads serve, even when current rates stay
+    /// unchanged. Invalidate page tokens in the same transaction as the eras.
+    pub(crate) fn append_correction_eras(
+        &self,
+        eras: &[NewEra],
+        now: Timestamp,
+    ) -> Result<usize, CatalogError> {
+        if eras.is_empty() {
+            return Ok(0);
+        }
+        let (count, _) = self.append_eras_inner(eras, Some((None, now)))?;
+        self.signal_catalog_changed();
+        Ok(count)
+    }
+
     fn append_eras_inner(
         &self,
         eras: &[NewEra],
-        poll: Option<(i64, Timestamp)>,
+        advance: Option<(Option<i64>, Timestamp)>,
     ) -> Result<(usize, Option<i64>), CatalogError> {
         // Resolve the window's near edge per (source, boundary instant), before
         // the write transaction. Keyed on the boundary as well as the source
@@ -634,10 +649,8 @@ impl CatalogStore {
                 )?;
                 count += 1;
             }
-            let issued = poll
-                .map(|(observation_id, now)| {
-                    advance_catalog_version_in(tx, Some(observation_id), now)
-                })
+            let issued = advance
+                .map(|(observation_id, now)| advance_catalog_version_in(tx, observation_id, now))
                 .transpose()?;
             Ok((count, issued))
         })?;
@@ -1117,6 +1130,18 @@ impl CatalogStore {
         model_id: &str,
         fact_key: &FactKey,
     ) -> Result<Option<Timestamp>, CatalogError> {
+        self.last_changed_at_or_before(source, provider_id, model_id, fact_key, Timestamp(i64::MAX))
+    }
+
+    /// Like `last_changed_at`, but only consider eras in force by the snapshot instant.
+    pub fn last_changed_at_or_before(
+        &self,
+        source: SourceId,
+        provider_id: &str,
+        model_id: &str,
+        fact_key: &FactKey,
+        at: Timestamp,
+    ) -> Result<Option<Timestamp>, CatalogError> {
         // Per ERA, not per observation — measured, and the measurement changed
         // this design.
         //
@@ -1145,11 +1170,17 @@ impl CatalogStore {
                             AND ev.action = 'marked')) \
                  FROM era e \
                  WHERE e.source = ?1 AND e.provider_id = ?2 AND e.model_id = ?3 \
-                   AND e.fact_key = ?4 \
+                   AND e.fact_key = ?4 AND e.boundary_at_ms <= ?5 \
                  ORDER BY e.boundary_at_ms DESC",
             )?;
             let mapped = stmt.query_map(
-                params![source.as_str(), provider_id, model_id, fact_key.as_str()],
+                params![
+                    source.as_str(),
+                    provider_id,
+                    model_id,
+                    fact_key.as_str(),
+                    at.0
+                ],
                 |r| {
                     Ok((
                         r.get::<_, i64>(0)?,

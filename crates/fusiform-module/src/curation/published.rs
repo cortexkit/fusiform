@@ -7,6 +7,11 @@ use serde_json::{json, Value};
 
 type Documents = BTreeMap<String, Value>;
 
+#[cfg(test)]
+thread_local! {
+    static PUBLISHED_LOAD_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(crate) struct PublishedCuration {
     aliases: curate::aliases::Aliases,
     retired_aliases: BTreeMap<(String, String), curate::aliases::RetiredAlias>,
@@ -35,6 +40,8 @@ impl PublishedCuration {
         if !store.is_store_mode() {
             return Ok(None);
         }
+        #[cfg(test)]
+        PUBLISHED_LOAD_COUNT.with(|count| count.set(count.get() + 1));
         let docs = store
             .store_documents_at(at)
             .map_err(|err| err.to_string())?;
@@ -409,6 +416,81 @@ mod tests {
     use super::*;
     use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
     use fusiform_store::{CatalogStore, ReleaseArrival, StoreRelease};
+
+    #[test]
+    fn cold_page_only_loads_published_curation_once() {
+        use fusiform_core::{BoundaryKind, SourceId, Timestamp};
+        use fusiform_store::{FactKey, NewEra};
+        use std::time::Instant;
+
+        let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+        let docs: Documents = VendorDocument::ALL
+            .iter()
+            .map(|&(_, name)| {
+                let bytes = std::fs::read(data.join(format!("{name}.json"))).unwrap();
+                (name.to_owned(), serde_json::from_slice(&bytes).unwrap())
+            })
+            .collect();
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open_for_store(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_str().unwrap().into(),
+            },
+        })
+        .unwrap();
+        let at = 1_795_017_199_166;
+        let mut rows = ImportedTables::new();
+        document_rows(&mut rows, Some(&Documents::new()), &docs, at).unwrap();
+        store
+            .apply_store_releases(
+                Some(&ImportedTables::new()),
+                &[ReleaseArrival {
+                    published_at_ms: at,
+                    release: StoreRelease {
+                        release: 1,
+                        state_hash: "a".repeat(64),
+                        curation_hash: "b".repeat(64),
+                        applied_at_ms: at,
+                    },
+                    rows,
+                    upstream: None,
+                }],
+            )
+            .unwrap();
+        let eras: Vec<_> = (0..64)
+            .map(|i| NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: format!("synthetic-{i:02}"),
+                model_id: "model".into(),
+                fact_key: FactKey::existence(),
+                value_json: json!("present").to_string(),
+                boundary_at: Timestamp(at),
+                boundary_kind: BoundaryKind::Seed,
+                observation_id: None,
+            })
+            .collect();
+        store.append_eras(&eras).unwrap();
+
+        let timed = |args: &[u8]| {
+            PUBLISHED_LOAD_COUNT.with(|count| count.set(0));
+            let start = Instant::now();
+            let result = crate::route::serve_catalog_get(&store, args).unwrap();
+            let loads = PUBLISHED_LOAD_COUNT.with(|count| count.get());
+            (result, start.elapsed(), loads)
+        };
+        let (plain, unpaged, _) = timed(br#"{"fact_prefixes":["existence"]}"#);
+        let args = br#"{"paged":true,"fact_prefixes":["existence"]}"#;
+        let (first, cold, cold_loads) = timed(args);
+        let (second, warm, _) = timed(args);
+        eprintln!("64 upstream providers, {} served models: unpaged={unpaged:?}, cold={cold:?}, warm={warm:?}, cold loads={cold_loads}", first.models.len());
+        assert_eq!(first.models, plain.models);
+        assert_eq!(first.models, second.models);
+        assert!(first.next_page_token.is_none());
+        assert_eq!(cold_loads, 1);
+    }
 
     #[test]
     fn published_provider_vector_is_accepted_but_unknown_document_refused() {

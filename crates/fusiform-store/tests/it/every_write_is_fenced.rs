@@ -207,6 +207,7 @@ fn version_helper_range(text: &str) -> Option<(usize, usize)> {
 #[test]
 fn version_helper_callers_are_all_named_and_fenced() {
     let mut callers = BTreeSet::new();
+    let mut era_append_callers = BTreeSet::new();
     let mut definitions = Vec::new();
     for file in STORE_SOURCES {
         let text = source(file);
@@ -222,6 +223,11 @@ fn version_helper_callers_are_all_named_and_fenced() {
             }
             if let Some((_, rest)) = trimmed.split_once("fn ") {
                 function = rest.split('(').next().unwrap();
+            }
+            // Name every entry point that uses the shared era-append
+            // transaction so a new version writer cannot escape review.
+            if line.contains(".append_eras_inner(") {
+                assert!(era_append_callers.insert(format!("{file}:{function}")));
             }
             if !line.contains(&format!("{VERSION_HELPER}("))
                 || line.contains(&format!("fn {VERSION_HELPER}("))
@@ -246,6 +252,14 @@ fn version_helper_callers_are_all_named_and_fenced() {
         definitions,
         ["lib.rs"],
         "only the named shared helper may contain the version UPDATE"
+    );
+    assert_eq!(
+        era_append_callers,
+        BTreeSet::from([
+            "lib.rs:append_eras".into(),
+            "lib.rs:append_poll_eras".into(),
+            "lib.rs:append_correction_eras".into(),
+        ])
     );
     assert_eq!(
         callers,

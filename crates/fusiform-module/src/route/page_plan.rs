@@ -16,6 +16,13 @@ impl ProviderRange {
     }
 }
 
+/// The curation shared by every range render in one paging attempt.
+#[derive(Clone, Copy)]
+pub(super) struct PageRender<'a> {
+    pub range: &'a ProviderRange,
+    pub tables: &'a curate::CurationSet<'a>,
+}
+
 struct PagePlan {
     key: WholeCatalogKey,
     budget: usize,
@@ -98,6 +105,12 @@ pub(super) fn serve_planned_page(
     if let Some(cursor) = cursor {
         key.timestamp_width = cursor.resolved_at_ms.to_string().len();
     }
+    let published = crate::curation::PublishedCuration::load(store, request.at_ms)
+        .map_err(RouteError::unavailable)?;
+    let tables = published
+        .as_ref()
+        .map(|data| data.tables())
+        .unwrap_or_else(|| crate::curation::embedded());
     let plan = {
         // Hold the lock while building the small plan so concurrent misses do
         // not duplicate that work. Rendered providers are dropped during the
@@ -113,11 +126,11 @@ pub(super) fn serve_planned_page(
                 let plan = Arc::new(build_plan(
                     store,
                     &request,
-                    source,
                     key.clone(),
                     budget,
                     frame_limit,
                     oversized,
+                    &tables,
                 )?);
                 check_page_version(
                     store.catalog_version().map_err(|e| store_error(&e))?,
@@ -129,8 +142,8 @@ pub(super) fn serve_planned_page(
                 )?;
                 let latest = store.latest_era_id().map_err(|e| store_error(&e))?;
                 if latest != key.latest_era_id {
-                    // A correction can change sizes without advancing the catalog
-                    // version. Do not publish a plan measured across that write.
+                    // Low-level era appends need not issue a version. Do not
+                    // publish a plan measured across such a write.
                     key.latest_era_id = latest;
                     continue;
                 }
@@ -146,7 +159,10 @@ pub(super) fn serve_planned_page(
         budget,
         frame_limit,
         oversized,
-        Some(&range),
+        Some(PageRender {
+            range: &range,
+            tables: &tables,
+        }),
     )?;
     let rendered = PageCursor {
         catalog_version: response.catalog_version,
@@ -204,9 +220,12 @@ pub(super) fn serve_planned_page(
             budget,
             frame_limit,
             oversized,
-            Some(&ProviderRange {
-                after: range.after.clone(),
-                through: Some(last.clone()),
+            Some(PageRender {
+                range: &ProviderRange {
+                    after: range.after.clone(),
+                    through: Some(last.clone()),
+                },
+                tables: &tables,
             }),
         )?;
         if let Some(cursor) = cursor {
@@ -233,23 +252,30 @@ fn retain_range(response: &mut CatalogGetResponse, range: &ProviderRange) {
 fn build_plan(
     store: &CatalogStore,
     request: &CatalogGetRequest,
-    source: SourceId,
     key: WholeCatalogKey,
     budget: usize,
     frame_limit: usize,
     oversized: &Mutex<Option<OversizedCatalog>>,
+    tables: &curate::CurationSet<'_>,
 ) -> Result<PagePlan, RouteError> {
+    let source = key.source;
     let mut identities: BTreeSet<String> = store
         .catalog_providers(source)
         .map_err(|e| store_error(&e))?
         .into_iter()
         .collect();
-    let published = crate::curation::PublishedCuration::load(store, request.at_ms)
-        .map_err(RouteError::unavailable)?;
-    let tables = published
-        .as_ref()
-        .map(|data| data.tables())
-        .unwrap_or_else(|| crate::curation::embedded());
+    if let Some(at) = request.at_ms.filter(|_| !store.is_store_mode()) {
+        // The embedded table cannot name an older claim that was withdrawn.
+        // Discover the same live curated claims a dated range render uses.
+        for era in store
+            .curated_models_at(at, None)
+            .map_err(|e| store_error(&e))?
+        {
+            if era.claim.is_some() {
+                identities.insert(era.provider_id);
+            }
+        }
+    }
     for (provider, _) in tables
         .aliases
         .keys()
@@ -279,7 +305,10 @@ fn build_plan(
             budget,
             frame_limit,
             oversized,
-            Some(&range),
+            Some(PageRender {
+                range: &range,
+                tables,
+            }),
         )?;
         retain_range(&mut response, &range);
         if let Some(disclosure) = &response.quality_scores {
