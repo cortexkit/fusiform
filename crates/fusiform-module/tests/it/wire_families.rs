@@ -37,6 +37,7 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
         ("google", "gemini-4-argon", ""),
         ("google", "gemini-4-carbon", ""),
         ("google", "gemini-4-hydrogen", ""),
+        ("google", "gemini-4-neon", ""),
         ("google", "gemini-3.1-flash-image", ""),
         ("anthropic", "claude-opus-5-5", ""),
     ];
@@ -61,9 +62,12 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
         },
     })
     .unwrap();
-    let catalog = fusiform_core::normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
-        .unwrap()
-        .catalog;
+    let catalog = fusiform_core::normalize_models_dev_with(
+        &serde_json::to_vec(&upstream).unwrap(),
+        &fusiform_module::input_audio::evidence(),
+    )
+    .unwrap()
+    .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     (store, dir)
@@ -168,6 +172,57 @@ fn code_assist_is_the_alias_own_protocol_and_retired_aliases_have_none() {
         named.models["google/antigravity-claude-sonnet-5-5"],
         std::collections::BTreeMap::from([("wire.family".into(), json!("google.code_assist"))])
     );
+}
+
+#[test]
+fn neon_alias_serves_code_assist_with_borrowed_prices_and_its_own_limits() {
+    let (store, _dir) = store();
+    let response = get(
+        &store,
+        json!({"provider_id":"google","model_id":"antigravity-gemini-4-neon"}),
+    );
+    let alias = response
+        .models
+        .get("google/antigravity-gemini-4-neon")
+        .expect("Neon must be served through its seeded target");
+    let response = get(
+        &store,
+        json!({"provider_id":"google","model_id":"gemini-4-neon"}),
+    );
+    let target = &response.models["google/gemini-4-neon"];
+
+    assert_eq!(alias["limit.context"], target["limit.context"]);
+    assert_eq!(alias["limit.context"], 1_048_576);
+    assert_eq!(alias["limit.output"], 262_144);
+    assert_eq!(target["limit.output"], 65_536);
+    assert_eq!(alias["wire.family"], "google.code_assist");
+    assert_eq!(alias["route.reasoning_default"], "high");
+    assert_eq!(
+        alias["capability.reasoning_options"],
+        json!([{"type":"effort","values":["low","medium","high","xhigh"]}])
+    );
+    assert_eq!(
+        alias["route.reasoning_wire_ids"],
+        json!({
+            "low": "gemini-4-neon-low",
+            "medium": "gemini-4-neon-medium",
+            "high": "gemini-4-neon-high",
+            "xhigh": "gemini-4-neon-xhigh"
+        })
+    );
+    for key in [
+        "rate.input",
+        "rate.output",
+        "rate.cache_read",
+        "rate.input_audio",
+    ] {
+        let mut borrowed = alias[key].as_object().unwrap().clone();
+        let origin = borrowed.remove("inherited_from").unwrap();
+        assert_eq!(origin["basis"], "alias", "{key}");
+        assert_eq!(origin["provider_id"], "google", "{key}");
+        assert_eq!(origin["model_id"], "gemini-4-neon", "{key}");
+        assert_eq!(&borrowed, target[key].as_object().unwrap(), "{key}");
+    }
 }
 
 #[test]

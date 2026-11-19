@@ -517,23 +517,19 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
     assert_eq!(plan.new_models, 0);
     assert_eq!(plan.disappeared_models, 0);
     // The count a deploy should expect, pinned so a reviewer sees it move:
-    // Google's 15 eligible input rows, plus two Google output rows and one
-    // OpenAI output row. Realtime 2.1 adds one OpenAI input era. Live Preview
-    // carries both independent audio facts.
-    // Gemini 4 Carbon and Hydrogen each have an eligible input audio rate.
-    assert_eq!(plan.eras.len(), 19, "{:?}", written.keys());
+    // Google has 16 eligible input rows, including Gemini 4 Neon, and two
+    // output rows. OpenAI Realtime 2.1 contributes one row in each direction.
+    assert_eq!(plan.eras.len(), 20, "{:?}", written.keys());
     assert_eq!(
         written
             .keys()
             .filter(|(_, _, key)| key == "rate.input_audio")
             .count(),
-        16
+        17
     );
-    assert!(written.contains_key(&(
-        "google".into(),
-        "gemini-4-hydrogen".into(),
-        "rate.input_audio".into()
-    )));
+    for model in ["gemini-4-hydrogen", "gemini-4-neon"] {
+        assert!(written.contains_key(&("google".into(), model.into(), "rate.input_audio".into())));
+    }
     assert_eq!(
         written
             .keys()
