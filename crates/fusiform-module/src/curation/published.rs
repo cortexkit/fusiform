@@ -169,7 +169,8 @@ impl PublishedCuration {
     }
 }
 
-pub(crate) fn validate_published(documents: &Documents, upstream: &Upstream) -> Result<(), String> {
+/// Check all vendor documents as the consumer would on receiving a new curation set.
+pub fn validate_published(documents: &Documents, upstream: &Upstream) -> Result<(), String> {
     use VendorDocument::*;
 
     let models = Value::Object(

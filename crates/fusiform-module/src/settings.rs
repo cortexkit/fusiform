@@ -32,6 +32,12 @@ pub struct PinnedKey {
     public_key: String,
 }
 
+impl PinnedKey {
+    pub fn new(kid: String, public_key: String) -> Self {
+        Self { kid, public_key }
+    }
+}
+
 pub type ReleaseKeys = BTreeMap<String, VerifyingKey>;
 
 pub fn validate_store(url: &str, keys: &[PinnedKey]) -> Result<(Url, ReleaseKeys), String> {

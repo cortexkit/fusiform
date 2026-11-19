@@ -55,6 +55,51 @@ maintainer tools.
 - `scripts/refresh-seed.sh` refreshes the embedded copy of the upstream
   catalog.
 
+## Prepare signed-store curation requests
+
+`curation-write` is a maintainer example, separate from `ck models` and its
+local overrides. It reads the public HTTPS feed, verifies the signed head,
+snapshot, and subsequent releases, then writes request bodies to disk. Pin
+the release key ID and unpadded base64url Ed25519 public key from a trusted
+source. The example has no write token and never sends a request to the
+curation API.
+
+```sh
+curation_write() {
+  cargo run --locked -p fusiform-publish --example curation-write -- \
+    --url "$STORE_URL" --key-id "$STORE_KID" --public-key "$STORE_PUBLIC_KEY" "$@"
+}
+
+curation_write vendor model-aliases --file crates/fusiform-module/data/model-aliases.json \
+  --note "$NOTE" --source "$SOURCE" --review-by "$REVIEW_DATE" --out requests/aliases
+curation_write draft grades "$MODEL_KEY" --value "$GRADE_JSON" \
+  --note "$NOTE" --out requests/grade
+curation_write from-local --model "$MODEL_KEY" --local-json local-judgments.json \
+  --out requests/local
+```
+
+- `vendor` validates the whole replacement with the other signed documents
+  and the verified upstream catalog. It reports row additions, removals, and
+  changes, and copies the file's JSON verbatim into `request.json`. The
+  comparison is against the last published copy, not any unpublished edit.
+- `draft` accepts `grades`, `effort_grades`, `kind_grades`, `workload_efforts`,
+  and `decommissioned`. Pass the whole value for one model key as `--value`,
+  or use `--remove`. The example shows the signed value beside the proposal
+  and checks the model and any named efforts against the verified catalog.
+- `from-local` accepts a hand-prepared JSON object with a `note` and zero or
+  more of the five draft-family keys, each containing the value for the
+  selected model. Use `null` for an explicit removal; omit a family to leave
+  it alone. For example:
+  `{"note":"Record a reviewed grade","grades":{"elo":2050,"eq":1980,"graded_effort":"high"}}`.
+  `ck models grades --model KEY --json` and `ck models marks --json` can help
+  gather values, but there is no single JSON export of local judgments with
+  workload efforts. Changed proposals go to `<out>/<family>/request.json`.
+
+Review the body and the printed `PUT` path before sending them separately via
+the authenticated maintainer workflow. A vendor replacement takes effect
+immediately; judgment drafts wait for approval. Existing request files are
+never overwritten.
+
 ## Documentation
 
 Start with [`docs/architecture.md`](docs/architecture.md). Contracts, the data

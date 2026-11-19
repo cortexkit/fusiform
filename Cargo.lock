@@ -624,6 +624,7 @@ dependencies = [
  "flate2",
  "fusiform-core",
  "fusiform-curate",
+ "fusiform-module",
  "fusiform-release",
  "fusiform-store",
  "reqwest",

@@ -19,6 +19,14 @@ pub(super) fn verify_snapshot(snapshot: &Snapshot, keys: &ReleaseKeys) -> Result
 }
 
 impl Verified {
+    pub(super) fn from_snapshot(snapshot: Snapshot, keys: &ReleaseKeys) -> Result<Self, String> {
+        verify_snapshot(&snapshot, keys)?;
+        Ok(Self {
+            envelope: snapshot.envelope,
+            state: snapshot.state,
+        })
+    }
+
     pub(super) fn first(release: Release, keys: &ReleaseKeys) -> Result<Self, String> {
         let name = format!("verify release {}", release.envelope.release);
         step(
@@ -204,7 +212,8 @@ fn apply_ops(
     Ok(())
 }
 
-fn validate_judgments(set: &CurationSet) -> Result<(), String> {
+/// Check the keys, grade values and workload names in a curation set.
+pub fn validate_judgments(set: &CurationSet) -> Result<(), String> {
     let model_keys = set
         .grades
         .keys()

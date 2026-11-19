@@ -1,5 +1,6 @@
 //! Fetch and verify the published chain before offering it to the history store.
 
+mod current;
 mod state;
 #[cfg(test)]
 mod tests;
@@ -22,6 +23,8 @@ use serde::{de::DeserializeOwned, Deserialize};
 use sha2::{Digest as _, Sha256};
 
 use crate::{fetch::Fetcher, settings::ReleaseKeys, signals::Signals};
+pub use current::VerifiedStoreHead;
+pub use state::validate_judgments;
 use state::Verified;
 
 const HEAD_PATH: &str = "v1/head";
@@ -86,6 +89,16 @@ pub struct StorePoller {
 
 fn step<T, E: std::fmt::Display>(name: &str, value: Result<T, E>) -> Result<T, String> {
     value.map_err(|err| format!("{name}: {err}"))
+}
+
+fn check_head(envelope: &ReleaseEnvelope, head: &HeadBody) -> Result<(), String> {
+    if envelope.release != head.release.get()
+        || envelope.state_hash != head.state_hash
+        || envelope.published_at_ms != head.published_at_ms
+    {
+        return Err(format!("verified release does not match {HEAD_PATH}"));
+    }
+    Ok(())
 }
 
 fn day_name(path: &str) -> Option<&str> {
@@ -360,12 +373,7 @@ impl StorePoller {
             current = Some(next);
         }
         let current = current.ok_or("published chain did not yield a release")?;
-        if current.envelope.release != head.release.get()
-            || current.envelope.state_hash != head.state_hash
-            || current.envelope.published_at_ms != head.published_at_ms
-        {
-            return Err(format!("verified release does not match {HEAD_PATH}"));
-        }
+        check_head(&current.envelope, &head)?;
         let retained = Retained::encode(current)?;
         step(
             "commit verified store history",

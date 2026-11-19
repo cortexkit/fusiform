@@ -4,8 +4,9 @@
 use fusiform_curate::CurationSet;
 
 mod published;
+pub(crate) use published::document_rows;
+pub use published::validate_published;
 pub(crate) use published::PublishedCuration;
-pub(crate) use published::{document_rows, validate_published};
 
 pub fn embedded() -> CurationSet<'static> {
     CurationSet {

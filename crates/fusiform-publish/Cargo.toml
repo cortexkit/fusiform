@@ -18,6 +18,7 @@ fusiform-curate = { path = "../fusiform-curate" }
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 async-compression = { version = "0.4", features = ["gzip", "tokio"] }
 flate2 = "1"
+fusiform-module = { path = "../fusiform-module" }
 fusiform-store = { path = "../fusiform-store" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rusqlite.workspace = true
