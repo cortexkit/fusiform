@@ -1205,6 +1205,7 @@ fn render_local_override() -> serde_json::Value {
                     applied_at_ms: 2000,
                 },
                 rows: ImportedTables::new(),
+                upstream: None,
             }],
         )
         .unwrap();

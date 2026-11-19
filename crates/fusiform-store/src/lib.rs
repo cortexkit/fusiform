@@ -29,7 +29,9 @@ mod readers;
 pub mod schema;
 pub mod serve;
 mod store_consumer;
-pub use store_consumer::{ImportedTables, ReleaseArrival, StoreRelease, STORE_HISTORY_TABLES};
+pub use store_consumer::{
+    ImportedTables, ReleaseArrival, ReleaseObservation, StoreRelease, STORE_HISTORY_TABLES,
+};
 
 #[cfg(test)]
 #[path = "tests/read_connections.rs"]

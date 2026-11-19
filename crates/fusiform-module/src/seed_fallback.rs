@@ -154,6 +154,7 @@ mod tests {
                         applied_at_ms: i64::MAX / 2,
                     },
                     rows: fusiform_store::ImportedTables::new(),
+                    upstream: None,
                 }],
             )
             .unwrap();

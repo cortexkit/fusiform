@@ -487,6 +487,7 @@ mod tests {
                         applied_at_ms: at,
                     },
                     rows,
+                    upstream: None,
                 }],
             )
             .unwrap();
@@ -625,6 +626,7 @@ mod tests {
                     applied_at_ms: at,
                 },
                 rows,
+                upstream: None,
             }
         };
         let read = |store: &CatalogStore, at: Option<i64>| {

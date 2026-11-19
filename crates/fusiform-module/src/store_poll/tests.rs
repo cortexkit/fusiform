@@ -72,6 +72,240 @@ fn model_name_at(store: &CatalogStore, at_ms: i64) -> Value {
         .clone()
 }
 
+#[test]
+fn store_poll_writes_the_same_model_eras_as_direct_ingest() {
+    use fusiform_core::{
+        normalize_models_dev, BoundaryKind, ChargeUnitEvidence, ObservationOutcome, SourceId,
+        Timestamp,
+    };
+    use fusiform_publish::{publish_step, FactIndex};
+    use fusiform_release::{state_hash, Change};
+    use fusiform_store::{ingest::plan_ingest, ImportedTables, NewObservation};
+
+    let dir = tempfile::tempdir().unwrap();
+    let poll_path = dir.path().join("poll.db");
+    let store_path = dir.path().join("store.db");
+    let descriptor = |path: &std::path::Path, namespace: &str| StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: namespace.into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: path.to_string_lossy().into_owned(),
+        },
+    };
+    let direct = CatalogStore::open(&descriptor(&poll_path, "poll")).unwrap();
+    let published = CatalogStore::open_for_store(&descriptor(&store_path, "store")).unwrap();
+    let curation: fusiform_release::CurationSet = serde_json::from_value(json!({
+        "version": 1, "approved_at_ms": null, "approved_drafts": [], "grades": {},
+        "effort_grades": {}, "kind_grades": {}, "workload_efforts": {},
+        "decommissioned": {}, "vendor_facts": {},
+    }))
+    .unwrap();
+    let key = SigningKey::from_bytes(&[42; 32]);
+    let keys = BTreeMap::from([(KID.into(), key.verifying_key())]);
+    let mut index = FactIndex::from_snapshot_upstream(&Default::default()).unwrap();
+    let mut previous: Option<Verified> = None;
+    let mut last_observation = 1;
+
+    let mut document = json!({
+        "p": {"name": "P", "models": {
+            "m": {"name": "Model", "cost": {"input": 1, "output": 2}, "limit": {"context": 100}},
+            "other": {"name": "Other"},
+        }},
+        "q": {"name": "Q", "models": {"untouched": {"name": "Untouched"}}},
+    });
+    let rows_at = |path: &std::path::Path, at| {
+        let conn =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT provider_id, model_id, fact_key, value_json, boundary_kind
+            FROM era WHERE source = 'models.dev' AND boundary_at_ms = ?1
+            ORDER BY provider_id, model_id, fact_key",
+            )
+            .unwrap();
+        stmt.query_map([at], |row| {
+            let value: String = row.get(3)?;
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                serde_json::from_str::<Value>(&value).unwrap(),
+                row.get::<_, String>(4)?,
+            ))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+    };
+    let mut held = Value::Null;
+    let mut arrival_checks = Vec::new();
+    for (i, (label, expected)) in [
+        ("seed", vec![]),
+        ("fact change", vec![("m", "rate.input")]),
+        ("fact removal", vec![("m", "limit.context")]),
+        ("whole-model withdrawal", vec![("m", "existence")]),
+        ("unchanged reappearance", vec![("m", "existence")]),
+        ("second withdrawal", vec![("m", "existence")]),
+        (
+            "changed reappearance",
+            vec![
+                ("m", "existence"),
+                ("m", "rate.input"),
+                ("m", "rate.output"),
+            ],
+        ),
+        (
+            "provider removal",
+            vec![("m", "existence"), ("other", "existence")],
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        match i {
+            0 => {}
+            1 => document["p"]["models"]["m"]["cost"]["input"] = json!(3),
+            2 => {
+                document["p"]["models"]["m"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("limit");
+            }
+            3 | 5 => {
+                held = document["p"]["models"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("m")
+                    .unwrap()
+            }
+            4 => document["p"]["models"]["m"] = held.clone(),
+            6 => {
+                document["p"]["models"]["m"] = held.clone();
+                document["p"]["models"]["m"]["cost"] = json!({"input": 4});
+            }
+            7 => {
+                document.as_object_mut().unwrap().remove("p");
+            }
+            _ => unreachable!(),
+        }
+        let at = 1000 * (i as i64 + 1);
+        let body = serde_json::to_vec(&document).unwrap();
+        let step = publish_step(&body, &index, &ChargeUnitEvidence::default()).unwrap();
+        index = step.index;
+        let change = Change {
+            upstream: step.ops,
+            curation_set: (i == 0).then(|| curation.clone()),
+        };
+        let curation_hash = curation.curation_hash();
+        let envelope = ReleaseEnvelope {
+            format: fusiform_release::ReleaseFormat::V1,
+            release: i as u64 + 1,
+            parent: previous.as_ref().map(|previous| previous.envelope.release),
+            published_at_ms: at,
+            upstream_observed_at_ms: at,
+            upstream_hash: step.upstream_hash,
+            curation_version: curation.version,
+            curation_hash,
+            state_hash: state_hash(curation_hash, step.upstream_hash),
+            change_hash: change.change_hash(),
+        };
+        let release = Release {
+            signatures: sign_envelope(&envelope, KID, &key).unwrap(),
+            envelope,
+            change,
+        };
+        let next = if let Some(previous) = &previous {
+            Verified::advance(previous, &release, &keys).unwrap()
+        } else {
+            Verified::first(release.clone(), &keys).unwrap()
+        };
+        let arrival = translate::arrival(
+            previous.as_ref(),
+            &next,
+            &release.change.upstream,
+            i == 0,
+            &mut last_observation,
+        )
+        .unwrap();
+        previous = Some(next);
+
+        let observation = direct
+            .record_observation(&NewObservation {
+                source: SourceId::ModelsDev,
+                observed_at: Timestamp(at),
+                outcome: if i == 0 {
+                    ObservationOutcome::Seeded
+                } else {
+                    ObservationOutcome::Changed { snapshot_seq: 1 }
+                },
+                normalized_hash: None,
+                raw_hash: None,
+                etag: None,
+                duration_ms: None,
+                detail: None,
+            })
+            .unwrap();
+        let catalog = normalize_models_dev(&body).unwrap().catalog;
+        let plan = plan_ingest(
+            &direct,
+            &catalog,
+            Timestamp(at),
+            if i == 0 {
+                BoundaryKind::Seed
+            } else {
+                BoundaryKind::Observed
+            },
+            (i != 0).then_some(observation),
+        )
+        .unwrap();
+        if i == 0 {
+            direct.append_eras(&plan.eras).unwrap();
+            let seed_rows = plan.eras.iter().enumerate().map(|(n, era)| {
+                json!({"id": n+1, "source": "models.dev", "provider_id": era.provider_id,
+                    "model_id": era.model_id, "fact_key": era.fact_key.as_str(), "value_json": era.value_json,
+                    "boundary_at_ms": at, "boundary_kind": "seed"}).as_object().unwrap().clone()
+            }).collect();
+            let seed_observation = json!({"id": observation, "source": "models.dev", "observed_at_ms": at, "outcome": "seeded"});
+            let base = ImportedTables::from([
+                (
+                    "observation".into(),
+                    vec![seed_observation.as_object().unwrap().clone()],
+                ),
+                ("era".into(), seed_rows),
+            ]);
+            published
+                .apply_store_releases(Some(&base), &[arrival])
+                .unwrap();
+        } else {
+            direct
+                .append_poll_eras(&plan.eras, observation, Timestamp(at))
+                .unwrap();
+            arrival_checks.push((label, at, expected, arrival));
+        }
+    }
+
+    // Apply several verified observations in one transaction, as on catch-up.
+    let (checks, arrivals): (Vec<_>, Vec<_>) = arrival_checks
+        .into_iter()
+        .map(|(label, at, expected, arrival)| ((label, at, expected), arrival))
+        .unzip();
+    published.apply_store_releases(None, &arrivals).unwrap();
+    for (label, at, expected) in checks {
+        let poll_rows = rows_at(&poll_path, at);
+        assert_eq!(
+            poll_rows
+                .iter()
+                .map(|r| (r.1.as_str(), r.2.as_str()))
+                .collect::<Vec<_>>(),
+            expected,
+            "poll fixture: {label}"
+        );
+        assert_eq!(rows_at(&store_path, at), poll_rows, "{label}");
+    }
+}
+
 #[tokio::test]
 async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     let key = SigningKey::from_bytes(&[42; 32]);

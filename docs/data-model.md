@@ -118,10 +118,10 @@ The store never updates or deletes a row in `era`, `observation`,
   fact begins.
 - There is no `is_current` flag. The value in force at instant T is the era
   with the greatest `boundary_at_ms` not exceeding T.
-- A model that disappears gets an `existence` era with value `"absent"`; a
-  rate that disappears gets an era whose value is unpriced with reason
-  `missing_rate`; a limit or capability that disappears gets `null`. The old
-  value stays readable
+- A model that disappears gets only an `existence` era with value `"absent"`.
+  If the model is still present, a rate that disappears gets an era whose
+  value is unpriced with reason `missing_rate`; a limit or capability that
+  disappears gets `null`. The old value stays readable
   (`ingest::a_disappeared_model_is_tombstoned_and_stays_readable`,
   `ingest::a_withdrawn_rate_is_tombstoned_rather_than_left_current`,
   `ingest::a_withdrawn_limit_becomes_null`).
@@ -169,6 +169,13 @@ fusiform attaches to a stored value, rather than one the upstream published,
 must be listed there or it will open eras and move the digest
 (`ingest::a_producer_annotation_moves_neither_the_digest_nor_the_diff`,
 `ingest::the_digest_moves_exactly_when_the_diff_does`).
+
+Store mode applies the same model diff to the verified release state for
+models touched by the release. Release operations reconstruct that state;
+they are not era boundaries. The diff uses earlier stored eras, including
+ones written by previous releases in the same transaction, so a returning
+model does not get new eras for unchanged facts. Polls between two releases
+can record intermediate changes that the later release does not contain.
 
 Order matters only where the upstream's order is meaningful: reordering a
 modality list is not a change, reordering reasoning option values is

@@ -78,17 +78,77 @@ pub fn plan_ingest(
 ) -> Result<IngestPlan, CatalogError> {
     let source = catalog.source;
     let current = store.current_values(source)?;
+    let models = catalog.models().map(|model| {
+        let identity = (model.key.provider_id.clone(), model.key.model_id.clone());
+        (identity, facts_of(model).values)
+    });
+    Ok(plan_model_eras(
+        source,
+        &current,
+        models,
+        at,
+        boundary_kind,
+        observation_id,
+    ))
+}
 
+type ModelIdentity = (String, String);
+type ProjectedFacts = Vec<(FactKey, String)>;
+
+/// Complete facts for models touched by a release. `None` means the model is
+/// absent; models outside the map were not observed to change in this release.
+pub type TouchedModels = BTreeMap<ModelIdentity, Option<ProjectedFacts>>;
+
+pub(crate) fn plan_release_ingest(
+    conn: &rusqlite::Connection,
+    models: &TouchedModels,
+    at: Timestamp,
+    observation_id: i64,
+) -> rusqlite::Result<IngestPlan> {
+    let source = SourceId::ModelsDev;
+    let mut current = CurrentValues::new();
+    let sql = format!("{CURRENT_VALUES_SQL} AND e.provider_id = ?2 AND e.model_id = ?3");
+    let mut stmt = conn.prepare_cached(&sql)?;
+    for identity in models.keys() {
+        let mut rows = stmt.query(rusqlite::params![source.as_str(), identity.0, identity.1])?;
+        while let Some(row) = rows.next()? {
+            current
+                .entry(identity.clone())
+                .or_default()
+                .insert(FactKey::from_stored(row.get(2)?), row.get(3)?);
+        }
+    }
+    let present = models.iter().filter_map(|(identity, facts)| {
+        facts
+            .as_ref()
+            .map(|facts| (identity.clone(), facts.clone()))
+    });
+    Ok(plan_model_eras(
+        source,
+        &current,
+        present,
+        at,
+        BoundaryKind::Observed,
+        Some(observation_id),
+    ))
+}
+
+fn plan_model_eras(
+    source: SourceId,
+    current: &CurrentValues,
+    models: impl IntoIterator<Item = (ModelIdentity, ProjectedFacts)>,
+    at: Timestamp,
+    boundary_kind: BoundaryKind,
+    observation_id: Option<i64>,
+) -> IngestPlan {
     let mut eras = Vec::new();
     let mut new_models = 0usize;
     let mut changed_facts = 0usize;
     let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
 
-    for model in catalog.models() {
-        let identity = (model.key.provider_id.clone(), model.key.model_id.clone());
+    for (identity, facts) in models {
         seen.insert(identity.clone());
 
-        let facts = facts_of(model).values;
         let published: BTreeSet<FactKey> = facts.iter().map(|(k, _)| k.clone()).collect();
         let known = current.get(&identity);
 
@@ -182,7 +242,7 @@ pub fn plan_ingest(
 
     // Models the store knows as present that this document does not describe.
     let mut disappeared_models = 0usize;
-    for (identity, facts) in &current {
+    for (identity, facts) in current {
         if seen.contains(identity) {
             continue;
         }
@@ -208,12 +268,12 @@ pub fn plan_ingest(
         });
     }
 
-    Ok(IngestPlan {
+    IngestPlan {
         eras,
         new_models,
         disappeared_models,
         changed_facts,
-    })
+    }
 }
 
 /// A digest over exactly the facts this module would store.

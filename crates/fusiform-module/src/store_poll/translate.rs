@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use fusiform_core::Timestamp;
 use fusiform_release::{ChangeOp, CurationSet};
-use fusiform_store::{ImportedTables, ReleaseArrival, StoreRelease};
+use fusiform_store::{FactKey, ImportedTables, ReleaseArrival, ReleaseObservation, StoreRelease};
 use serde_json::{json, Value};
 
 use super::state::Verified;
@@ -21,6 +22,7 @@ pub(super) fn arrival(
     last_observation: &mut i64,
 ) -> Result<ReleaseArrival, String> {
     let mut rows = ImportedTables::new();
+    let mut upstream = None;
     let before = previous.map(|p| &p.state.curation_set);
     let release = &next.envelope;
     if let Some(previous) = previous {
@@ -34,12 +36,17 @@ pub(super) fn arrival(
                 json!({"id":last_observation,"source":"models.dev","outcome":"changed",
                 "observed_at_ms":release.upstream_observed_at_ms,"normalized_hash":release.upstream_hash.to_string()}),
             );
+            let mut touched = BTreeSet::new();
             for op in operations {
                 let (provider, model, fact) = op.key();
+                if let Some(model) = model {
+                    touched.insert((provider, model));
+                    continue;
+                }
+                // Provider-scoped facts have no counterpart in direct polling.
+                // Keep their release-defined history separate from model ingest.
                 let value = match op {
-                    ChangeOp::Set { value, .. } | ChangeOp::SetProvider { value, .. } => {
-                        value.to_string()
-                    }
+                    ChangeOp::SetProvider { value, .. } => value.to_string(),
                     _ if fact == "existence" => r#""absent""#.to_owned(),
                     _ if fact.starts_with("rate.") => {
                         json!({"state":"unpriced","reason":"missing_rate"}).to_string()
@@ -49,11 +56,42 @@ pub(super) fn arrival(
                 add(
                     &mut rows,
                     "era",
-                    json!({"source":"models.dev","provider_id":provider,"model_id":model.unwrap_or(""),
+                    json!({"source":"models.dev","provider_id":provider,"model_id":"",
                     "fact_key":fact,"value_json":value,"boundary_at_ms":release.upstream_observed_at_ms,
                     "boundary_kind":"observed","observation_id":last_observation,
                     "prior_observation_at_ms":previous.envelope.upstream_observed_at_ms}),
                 );
+            }
+            if !touched.is_empty() {
+                // The signed operations reconstruct the state, not the eras.
+                // A model's absence is represented by its missing state entry;
+                // for a present model, ingest decides the existence era itself.
+                let models = touched
+                    .into_iter()
+                    .map(|(provider, model)| {
+                        let facts = next
+                            .state
+                            .upstream
+                            .get(provider)
+                            .and_then(|provider| provider.models.get(model))
+                            .map(|facts| {
+                                facts
+                                    .iter()
+                                    .filter(|(fact, _)| fact.as_str() != "existence")
+                                    .map(|(fact, value)| {
+                                        (FactKey::from_stored(fact.clone()), value.to_string())
+                                    })
+                                    .collect()
+                            });
+                        ((provider.to_owned(), model.to_owned()), facts)
+                    })
+                    .collect();
+                upstream = Some(ReleaseObservation {
+                    id: *last_observation,
+                    at: Timestamp(release.upstream_observed_at_ms),
+                    prior_at: Timestamp(previous.envelope.upstream_observed_at_ms),
+                    models,
+                });
             }
         }
     }
@@ -79,6 +117,7 @@ pub(super) fn arrival(
             applied_at_ms: crate::route::now_ms(),
         },
         rows,
+        upstream,
     })
 }
 

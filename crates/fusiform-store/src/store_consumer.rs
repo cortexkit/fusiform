@@ -5,9 +5,10 @@ use std::{
 
 use fusiform_core::Timestamp;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use crate::history_base::{self, Tables};
+use crate::ingest::{plan_release_ingest, TouchedModels};
 use crate::{advance_catalog_version_in, is_rate_relevant_fact, CatalogError, CatalogStore};
 
 /// Dependency order matters: eras and artifact events refer to observations.
@@ -47,6 +48,14 @@ pub struct ReleaseArrival {
     pub published_at_ms: i64,
     pub release: StoreRelease,
     pub rows: ImportedTables,
+    pub upstream: Option<ReleaseObservation>,
+}
+
+pub struct ReleaseObservation {
+    pub id: i64,
+    pub at: Timestamp,
+    pub prior_at: Timestamp,
+    pub models: TouchedModels,
 }
 
 pub type PlanMetadata = (Option<String>, Option<String>, Option<String>);
@@ -123,6 +132,41 @@ fn write_tables(
         }
     }
     Ok(())
+}
+
+fn write_upstream_eras(
+    writer: &mut RowWriter<'_>,
+    arrival: &ReleaseArrival,
+) -> rusqlite::Result<bool> {
+    let Some(observation) = &arrival.upstream else {
+        return Ok(false);
+    };
+    // Compare with the history in this transaction, including the imported
+    // base and any earlier releases in the batch. A model's last published
+    // facts stay in force for the comparison if it returns after a withdrawal.
+    let plan = plan_release_ingest(
+        writer.tx,
+        &observation.models,
+        observation.at,
+        observation.id,
+    )?;
+    let mut rates_changed = false;
+    for era in plan.eras {
+        let fact = era.fact_key.as_str();
+        rates_changed |= is_rate_relevant_fact(fact);
+        let row = json!({
+            "source": era.source.as_str(), "provider_id": era.provider_id, "model_id": era.model_id,
+            "fact_key": fact, "value_json": era.value_json, "boundary_at_ms": era.boundary_at.0,
+            "boundary_kind": "observed", "observation_id": era.observation_id,
+            "prior_observation_at_ms": observation.prior_at.0,
+        });
+        writer.write(
+            "era",
+            row.as_object().expect("era row is an object"),
+            Some(arrival),
+        )?;
+    }
+    Ok(rates_changed)
 }
 
 type InsertRow<'a> = &'a dyn Fn(&str, &[&str], &[rusqlite::types::Value]) -> rusqlite::Result<()>;
@@ -351,12 +395,13 @@ impl CatalogStore {
                     return Err(invalid(format!("release {} does not follow {previous}", release.release)));
                 }
                 write_tables(&mut writer, &arrival.rows, Some(arrival))?;
+                let upstream_rates_changed = write_upstream_eras(&mut writer, arrival)?;
                 tx.execute("INSERT INTO store_release (release, state_hash, curation_hash, applied_at_ms) VALUES (?1, ?2, ?3, ?4)",
                     params![release.release, release.state_hash, release.curation_hash, release.applied_at_ms])?;
                 let issued = advance_catalog_version_in(tx, None, Timestamp(release.applied_at_ms))?;
-                // Translation emits one upstream era for each set or removal.
-                // Release one has no prior curation hash and installs the base.
+                // Release one installs the base and has no prior curation hash.
                 if previous_curation != Some(release.curation_hash.as_str())
+                    || upstream_rates_changed
                     || arrival.rows.get("era").into_iter().flatten().any(|row| {
                         row.get("fact_key").and_then(Value::as_str).is_some_and(is_rate_relevant_fact)
                     })
@@ -427,6 +472,7 @@ mod tests {
                     applied_at_ms: 2000,
                 },
                 rows,
+                upstream: None,
             }
         };
         store
@@ -498,6 +544,7 @@ mod tests {
                 applied_at_ms: 2000,
             },
             rows: ImportedTables::new(),
+            upstream: None,
         };
         let input = |value: &Value| std::io::Cursor::new(serde_json::to_vec(value).unwrap());
         let assert_empty = || {
@@ -597,6 +644,7 @@ mod tests {
                 applied_at_ms: 2000,
             },
             rows: ImportedTables::new(),
+            upstream: None,
         };
         assert!(store
             .apply_store_releases(Some(&base), &[arrival(1), arrival(3)])

@@ -215,6 +215,7 @@ fn load_and_compare(
                     applied_at_ms: current,
                 },
                 rows: documents,
+                upstream: None,
             }],
         )
         .unwrap();
@@ -315,6 +316,7 @@ fn dated_store_release_keeps_era_facts_but_not_current_layers() {
                     applied_at_ms: published_at,
                 },
                 rows,
+                upstream: None,
             }],
         )
         .unwrap();
