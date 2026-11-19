@@ -1884,6 +1884,45 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+fn is_known_switch(token: &str) -> bool {
+    token.starts_with("--reason=")
+        || matches!(
+            token,
+            "--provider"
+                | "--auth-method"
+                | "--model"
+                | "--kind"
+                | "--effort"
+                | "--effort-grade"
+                | "--default"
+                | "--minimum"
+                | "--exclude"
+                | "--withdraw"
+                | "--prefix"
+                | "--elo"
+                | "--eq"
+                | "--grade"
+                | "--fact"
+                | "--fact-prefix"
+                | "--served"
+                | "--at"
+                | "--polls"
+                | "--field"
+                | "--from"
+                | "--until"
+                | "--reason"
+                | "--observation"
+                | "--commit"
+                | "--subc"
+                | "--rates"
+                | "--capabilities"
+                | "--include-retired"
+                | "--json"
+                | "--help"
+                | "-h"
+        )
+}
+
 fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> {
     let mut it = argv.into_iter().skip(1);
     let command = it
@@ -1932,10 +1971,19 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
 
     while let Some(flag) = it.next() {
         let flag = flag.to_string_lossy().into_owned();
+        if let Some(reason) = flag.strip_prefix("--reason=") {
+            args.reason = Some(reason.into());
+            continue;
+        }
         let mut value = || {
-            it.next()
+            let value = it
+                .next()
                 .map(|v| v.to_string_lossy().into_owned())
-                .ok_or_else(|| format!("{flag} needs a value"))
+                .ok_or_else(|| format!("{flag} needs a value"))?;
+            if is_known_switch(&value) {
+                return Err(format!("{flag} needs a value before {value:?}"));
+            }
+            Ok(value)
         };
         match flag.as_str() {
             "--provider" => args.provider = Some(value()?),
@@ -2516,6 +2564,40 @@ fn render_grades(response: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_write_reason_does_not_consume_a_switch() {
+        let request = |args: &[&str]| {
+            let args = super::parse_args(args.iter().map(std::ffi::OsString::from))?;
+            super::request_for(&args)
+        };
+        for switch in ["--commit", "--json"] {
+            let mut args = vec!["ck-models", "decommission", "zeta/mini", "--reason", switch];
+            if switch != "--commit" {
+                args.push("--commit");
+            }
+            let result = request(&args);
+            assert!(
+                result
+                    .as_ref()
+                    .is_err_and(|error| error.contains("--reason needs a value")),
+                "{result:?}"
+            );
+        }
+
+        let (_, literal) = request(&[
+            "ck-models",
+            "decommission",
+            "zeta/mini",
+            "--reason=--json",
+            "--commit",
+        ])
+        .unwrap();
+        assert_eq!(literal["reason"], "--json");
+        assert_eq!(literal["dry_run"], false);
+        let (_, negative) = request(&["ck-models", "get", "--at", "-10"]).unwrap();
+        assert_eq!(negative["at_ms"], -10);
+    }
+
     #[test]
     fn quality_effort_commands_select_the_exact_judgment() {
         use super::*;

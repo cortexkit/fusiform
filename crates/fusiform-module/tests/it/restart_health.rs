@@ -346,6 +346,7 @@ fn ticks_that_reach_no_verdict_are_reported_as_a_write_problem() {
     let cadence = fusiform_module::loop_::POLL_INTERVAL_MS;
     for i in 1..=3 {
         s.attempted(i * cadence);
+        s.poll_unpersisted();
     }
 
     let report = health::report(&s, 3 * cadence);
@@ -370,6 +371,7 @@ fn ticks_that_reach_no_verdict_are_reported_as_a_write_problem() {
     assert_eq!(m["process_poll_attempts"], 4);
     assert_eq!(m["process_polls_recorded"], 1);
     assert_eq!(m["process_polls_unrecorded"], 3);
+    assert_eq!(m["process_consecutive_unpersisted_polls"], 3);
 }
 
 /// One unrecorded tick is not a problem, because it is reachable while healthy.
@@ -385,10 +387,12 @@ fn a_single_in_flight_tick_is_not_a_write_problem() {
     s.attempted(0);
     s.observed(0);
 
-    // A tick starts and has not finished yet.
+    // One failed write followed by an in-flight poll is still one failure.
     s.attempted(1_000);
+    s.poll_unpersisted();
+    s.attempted(2_000);
 
-    let report = health::report(&s, 1_000);
+    let report = health::report(&s, 2_000);
     assert_eq!(
         report.status,
         HealthStatus::Ok,

@@ -24,6 +24,13 @@ const SNAPSHOT: &[u8] =
 const KID: &str = "release-format-v1-test-key";
 
 fn server(files: Arc<Mutex<BTreeMap<String, Vec<u8>>>>) -> Url {
+    server_with_requests(files, Arc::default())
+}
+
+fn server_with_requests(
+    files: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+    requests: Arc<Mutex<Vec<String>>>,
+) -> Url {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
     std::thread::spawn(move || {
@@ -34,6 +41,7 @@ fn server(files: Arc<Mutex<BTreeMap<String, Vec<u8>>>>) -> Url {
                 break;
             }
             let route = line.split_ascii_whitespace().nth(1).unwrap_or("");
+            requests.lock().unwrap().push(route.into());
             let body = files.lock().unwrap().get(route).cloned();
             while {
                 let mut header = String::new();
@@ -105,6 +113,148 @@ fn next_named_release(snapshot: &mut Snapshot, key: &SigningKey) -> Release {
         envelope: envelope.clone(),
         signatures: sign_envelope(envelope, KID, key).unwrap(),
         change,
+    }
+}
+
+fn publish_snapshot_day(
+    files: &mut BTreeMap<String, Vec<u8>>,
+    snapshot: &mut Snapshot,
+    key: &SigningKey,
+    day: &str,
+) -> Release {
+    use fusiform_release::{
+        history_day_bytes, sign_history_attestation, HistoryAttestation, HistoryFile,
+    };
+
+    // A quiet gap longer than one day must not force an already current
+    // consumer to replay older releases.
+    snapshot.envelope.published_at_ms += 2 * 86_400_000;
+    snapshot.envelope.upstream_observed_at_ms += 2 * 86_400_000;
+    let release = next_named_release(snapshot, key);
+    let mut line = serde_json::to_vec(&release).unwrap();
+    line.push(b'\n');
+    let bytes = history_day_bytes(day, &line).unwrap();
+    let file = format!("days/{day}.json");
+    let mut body = snapshot.history_attestation.as_ref().unwrap().body.clone();
+    body.release = NonZeroU64::new(release.envelope.release).unwrap();
+    body.state_hash = release.envelope.state_hash;
+    body.history.push(HistoryFile {
+        file: file.clone(),
+        sha256: sha256(&bytes),
+    });
+    snapshot.history_attestation = Some(HistoryAttestation {
+        signatures: sign_history_attestation(&body, KID, key),
+        body,
+    });
+    snapshot.signatures = release.signatures.clone();
+    let number = release.envelope.release;
+    files.insert(format!("/v1/history/{file}"), bytes);
+    files.insert(
+        format!("/v1/releases/{number}"),
+        serde_json::to_vec(&release).unwrap(),
+    );
+    files.insert(
+        format!("/v1/snapshots/{number}"),
+        serde_json::to_vec(snapshot).unwrap(),
+    );
+    files.insert("/v1/head".into(), signed_head(snapshot, number, key));
+    release
+}
+
+#[tokio::test]
+async fn store_poll_warm_catch_up_reads_only_the_missing_suffix() {
+    for prior_days in [0, 2] {
+        let key = SigningKey::from_bytes(&[42; 32]);
+        let mut snapshot: Snapshot = serde_json::from_slice(SNAPSHOT).unwrap();
+        let mut files = BTreeMap::from([
+            ("/v1/head".into(), signed_head(&snapshot, 2, &key)),
+            ("/v1/snapshots/2".into(), SNAPSHOT.to_vec()),
+            ("/v1/releases/1".into(), FIRST.to_vec()),
+            ("/v1/history/base.json".into(), BASE.to_vec()),
+            ("/v1/history/days/2026-11-19.json".into(), DAY.to_vec()),
+        ]);
+        let mut days = ["2026-11-21", "2026-11-23", "2026-11-25", "2026-11-27"].into_iter();
+        for day in days.by_ref().take(prior_days) {
+            publish_snapshot_day(&mut files, &mut snapshot, &key, day);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open_for_store(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().into_owned(),
+            },
+        })
+        .unwrap();
+        let files = Arc::new(Mutex::new(files));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let mut poller = StorePoller::new(
+            server_with_requests(files.clone(), requests.clone()),
+            BTreeMap::from([(KID.into(), key.verifying_key())]),
+        )
+        .unwrap();
+        let previous = poller.poll(&store).await.unwrap();
+        requests.lock().unwrap().clear();
+
+        let release = publish_snapshot_day(
+            &mut files.lock().unwrap(),
+            &mut snapshot,
+            &key,
+            days.next().unwrap(),
+        );
+        let next = previous + 1;
+        let next_path = format!("/v1/releases/{next}");
+        if prior_days == 0 {
+            let mut bad = release.clone();
+            bad.signatures.sig.clear();
+            files
+                .lock()
+                .unwrap()
+                .insert(next_path.clone(), serde_json::to_vec(&bad).unwrap());
+            assert!(poller.poll(&store).await.unwrap_err().contains("signature"));
+            assert_eq!(
+                store.latest_store_release().unwrap().unwrap().release,
+                previous
+            );
+            files
+                .lock()
+                .unwrap()
+                .insert(next_path.clone(), serde_json::to_vec(&release).unwrap());
+            requests.lock().unwrap().clear();
+        }
+        assert_eq!(poller.poll(&store).await.unwrap(), next);
+        assert_eq!(
+            *requests.lock().unwrap(),
+            ["/v1/head".into(), next_path],
+            "one newly applied release after {} published day files",
+            prior_days + 1
+        );
+
+        let archived = publish_snapshot_day(
+            &mut files.lock().unwrap(),
+            &mut snapshot,
+            &key,
+            days.next().unwrap(),
+        );
+        let number = archived.envelope.release;
+        if prior_days == 0 {
+            // The individual object is missing but the signed snapshot covers it.
+            files
+                .lock()
+                .unwrap()
+                .remove(&format!("/v1/releases/{number}"));
+        } else {
+            // Replay must reconstruct and verify the state at the local
+            // cursor if no matching state was retained.
+            poller.verified.as_mut().unwrap().envelope.curation_hash = Hash::from_bytes([0; 32]);
+        }
+        requests.lock().unwrap().clear();
+        assert_eq!(poller.poll(&store).await.unwrap(), number);
+        assert!(requests
+            .lock()
+            .unwrap()
+            .contains(&format!("/v1/snapshots/{number}")));
     }
 }
 
