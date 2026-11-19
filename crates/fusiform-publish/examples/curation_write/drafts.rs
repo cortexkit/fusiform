@@ -8,7 +8,7 @@ use fusiform_release::{
 use serde::de::DeserializeOwned;
 use serde_json::{Number, Value, value::RawValue};
 
-use super::{Request, Result, json, metadata, segment};
+use super::{Request, Result, draft_path, json, metadata};
 
 pub(super) struct Input {
     key: String,
@@ -63,7 +63,7 @@ impl Input {
         Ok((
             changed,
             Request {
-                path: format!("/v1/curation/drafts/{family}/{}", segment(&self.key)),
+                path: draft_path(family, &self.key),
                 body: json(serde_json::json!({ "value": value, "note": self.note })),
                 summary: format!(
                     "{family} {}:\n  Store: {current}\n  Proposed: {value}",

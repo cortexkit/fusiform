@@ -337,4 +337,8 @@ async fn from_local_emits_only_changed_drafts() {
         r#"{"note":"test note","value":{"code":{"default":"high"}}}"#
     );
     assert_eq!(segment("google/neon"), "google%2Fneon");
+    assert_eq!(
+        draft_path("grades", "google/neon"),
+        "/v1/curation/drafts/grades?key=google%2Fneon"
+    );
 }

@@ -179,6 +179,13 @@ fn segment(text: &str) -> String {
     encoded
 }
 
+/// The store takes the model key as a query parameter, not a path segment:
+/// every key contains `/`, and the secret proxy that adds the curation token
+/// refuses an encoded `/` anywhere in a path.
+fn draft_path(family: &str, key: &str) -> String {
+    format!("/v1/curation/drafts/{family}?key={}", segment(key))
+}
+
 fn metadata(field: &str, value: &str) -> Result<()> {
     if value.trim().is_empty() || value.len() > 4096 {
         return Err(format!("{field} must be nonempty and at most 4 KiB"));
