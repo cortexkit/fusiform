@@ -95,8 +95,11 @@ curation_write from-local --model "$MODEL_KEY" --local-json local-judgments.json
   gather values, but there is no single JSON export of local judgments with
   workload efforts. Changed proposals go to `<out>/<family>/request.json`.
 
-Review the body and the printed `PUT` path before sending them separately via
-the authenticated maintainer workflow. A vendor replacement takes effect
+Review the body and the printed `PUT` path, then send each body yourself to
+that path on the store, with the store's curation token as
+`Authorization: Bearer <token>` and `Content-Type: application/json`. The
+token is issued by the store's operator and is never stored in this
+repository. A vendor replacement takes effect
 immediately; judgment drafts wait for approval. Existing request files are
 never overwritten.
 
