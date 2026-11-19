@@ -8,6 +8,77 @@ use fusiform_release::{
 use serde_json::{Value, json};
 
 #[test]
+fn release_builder_checks_parent_chronology() {
+    use fusiform_release::build_release;
+
+    let first: Release = serde_json::from_slice(include_bytes!(
+        "../fixtures/release-format-v1/chain/release-1.json"
+    ))
+    .unwrap();
+    let second: Release = serde_json::from_slice(include_bytes!(
+        "../fixtures/release-format-v1/chain/release-2.json"
+    ))
+    .unwrap();
+    let parent = &first.envelope;
+    let parent_bytes = serde_json::to_vec(parent).unwrap();
+    let curation = second
+        .change
+        .curation_set
+        .clone()
+        .or(first.change.curation_set)
+        .unwrap();
+    let curation_bytes = serde_json::to_vec(&curation).unwrap();
+    let summary = serde_json::to_vec(&json!({
+        "ops": second.change.upstream,
+        "upstream_hash": second.envelope.upstream_hash,
+    }))
+    .unwrap();
+    let published = second.envelope.published_at_ms;
+    let observed = second.envelope.upstream_observed_at_ms;
+    let build = |published, observed| {
+        build_release(
+            &summary,
+            &curation_bytes,
+            &parent_bytes,
+            2,
+            published,
+            observed,
+        )
+    };
+    let unsigned = build(published, observed).unwrap();
+    assert_eq!(
+        unsigned,
+        canonical_json(&json!({"envelope": second.envelope, "change": second.change}))
+    );
+    for (published, observed) in [
+        (parent.published_at_ms - 1, observed),
+        (published, parent.upstream_observed_at_ms - 1),
+        (published, parent.upstream_observed_at_ms),
+    ] {
+        assert!(
+            build(published, observed).is_err(),
+            "builder accepted publication {published}, upstream observation {observed}"
+        );
+    }
+
+    let curation_only =
+        serde_json::to_vec(&json!({"ops": [], "upstream_hash": parent.upstream_hash})).unwrap();
+    let mut newer_curation = curation;
+    newer_curation.version = parent.curation_version + 1;
+    assert!(
+        build_release(
+            &curation_only,
+            &serde_json::to_vec(&newer_curation).unwrap(),
+            &parent_bytes,
+            2,
+            published,
+            parent.upstream_observed_at_ms
+        )
+        .is_ok()
+    );
+}
+
+#[test]
 fn canonical_json_orders_and_escapes_at_every_depth() {
     let input = br#" {"z":{"z":[],"a":{}},"\u00e9":"\u96ea\/","a":[{"x":1,"b":"\u0001\u0000\u000b\u0008\u000c\u000a\u000d\u0009\u0022\u005c"},null,true]} "#;
     assert_eq!(

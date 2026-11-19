@@ -123,14 +123,10 @@ fn verify_change(
     {
         return Err("upstream operations are not strictly sorted".into());
     }
-    if let Some(previous) = previous {
-        if envelope.published_at_ms < previous.envelope.published_at_ms
-            || envelope.upstream_observed_at_ms < previous.envelope.upstream_observed_at_ms
-            || !change.upstream.is_empty()
-                && envelope.upstream_observed_at_ms == previous.envelope.upstream_observed_at_ms
-        {
-            return Err("release times do not advance the verified chain".into());
-        }
+    if previous.is_some_and(|previous| {
+        !envelope.chronology_follows(&previous.envelope, !change.upstream.is_empty())
+    }) {
+        return Err("release times do not advance the verified chain".into());
     }
     Ok(())
 }

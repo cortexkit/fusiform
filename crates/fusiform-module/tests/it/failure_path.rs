@@ -40,6 +40,8 @@ enum Behaviour {
     ServeCatalog,
     /// HTTP 500.
     ServerError,
+    /// HTTP 304 even on an unconditional request.
+    NotModified,
     /// A 200 whose body is not a catalog.
     Garbage,
     /// Accept the connection and close it without writing a response.
@@ -116,7 +118,7 @@ fn serve_one(mut stream: TcpStream, behaviour: Behaviour) {
     let body: &[u8] = match behaviour {
         Behaviour::ServeCatalog => CATALOG,
         Behaviour::Garbage => b"this is not a catalog",
-        Behaviour::ServerError | Behaviour::HangUp => b"",
+        Behaviour::ServerError | Behaviour::NotModified | Behaviour::HangUp => b"",
     };
 
     match behaviour {
@@ -130,6 +132,12 @@ fn serve_one(mut stream: TcpStream, behaviour: Behaviour) {
                 b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\
                   Connection: close\r\n\r\n",
             );
+        }
+        Behaviour::NotModified => {
+            assert!(!String::from_utf8_lossy(&buf[..n])
+                .to_ascii_lowercase()
+                .contains("if-none-match:"));
+            let _ = stream.write_all(b"HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n");
         }
         _ => {
             let head = format!(
@@ -179,6 +187,99 @@ fn harness(url: &str) -> Harness {
         signals,
         _dir: dir,
     }
+}
+
+#[tokio::test]
+async fn unsolicited_304_is_not_a_confirming_observation() {
+    let upstream = Upstream::start(Behaviour::NotModified);
+    let h = harness(&upstream.url);
+    let report = tick(&h.ctx, 1_000).await.unwrap();
+    assert_eq!(
+        report.outcome,
+        TickOutcome::Failed {
+            class: FailureClass::HttpStatus
+        }
+    );
+    assert_eq!(h.signals.observation_age_ms(1_001), None);
+    let recent = h
+        .ctx
+        .store
+        .recent_observations(SourceId::ModelsDev, 1)
+        .unwrap();
+    assert!(recent[0].detail.as_deref().unwrap().contains("304"));
+}
+
+fn refuse_observations(h: &Harness) -> rusqlite::Connection {
+    let conn = rusqlite::Connection::open(h.ctx.store.path()).unwrap();
+    conn.execute_batch(
+        "CREATE TRIGGER refuse_observation BEFORE INSERT ON observation
+         BEGIN SELECT RAISE(ABORT, 'observation refused'); END;",
+    )
+    .unwrap();
+    conn
+}
+
+#[tokio::test]
+async fn a_failed_fetch_is_only_counted_as_recorded_if_its_observation_persists() {
+    let upstream = Upstream::start(Behaviour::ServerError);
+    let h = harness(&upstream.url);
+    let conn = refuse_observations(&h);
+    let error = tick(&h.ctx, 1_000).await.unwrap_err().to_string();
+    assert!(error.contains("observation refused"), "{error}");
+    assert!(h
+        .ctx
+        .store
+        .recent_observations(SourceId::ModelsDev, 10)
+        .unwrap()
+        .is_empty());
+    let metrics = health::report(&h.signals, 1_001).metrics.unwrap();
+    assert_eq!(metrics["last_failure_class"], "http_status");
+    assert_eq!(metrics["process_polls_recorded"], 0);
+    assert_eq!(metrics["process_polls_unrecorded"], 1);
+    assert!(error.contains("500 Internal Server Error"), "{error}");
+
+    conn.execute_batch("DROP TRIGGER refuse_observation")
+        .unwrap();
+    assert_eq!(
+        tick(&h.ctx, 2_000).await.unwrap().outcome,
+        TickOutcome::Failed {
+            class: FailureClass::HttpStatus
+        }
+    );
+    assert_eq!(h.signals.attempt_ledger(), (2, 1));
+}
+
+#[tokio::test]
+async fn health_recovers_after_transient_observation_write_failures() {
+    let upstream = Upstream::start(Behaviour::ServeCatalog);
+    let h = harness(&upstream.url);
+    tick(&h.ctx, 1_000).await.unwrap();
+    let conn = refuse_observations(&h);
+    for at in [2_000, 3_000] {
+        let error = tick(&h.ctx, at).await.unwrap_err().to_string();
+        assert!(error.contains("observation refused"), "{error}");
+    }
+    assert_eq!(
+        health::report(&h.signals, 3_001).status,
+        HealthStatus::Degraded
+    );
+    conn.execute_batch("DROP TRIGGER refuse_observation")
+        .unwrap();
+
+    // A persisted failure is a verdict too: it proves the store recovered
+    // even before the upstream answers successfully again.
+    upstream.set(Behaviour::ServerError);
+    assert_eq!(
+        tick(&h.ctx, 4_000).await.unwrap().outcome,
+        TickOutcome::Failed {
+            class: FailureClass::HttpStatus
+        }
+    );
+    let report = health::report(&h.signals, 4_001);
+    assert_eq!(report.status, HealthStatus::Ok, "{:?}", report.detail);
+    let metrics = report.metrics.unwrap();
+    assert_eq!(metrics["process_polls_unrecorded"], 2);
+    assert_eq!(metrics["process_consecutive_unpersisted_polls"], 0);
 }
 
 /// A failure streak is recorded, degrades health, and never narrows a window.

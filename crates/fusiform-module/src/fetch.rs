@@ -115,6 +115,13 @@ impl Fetcher {
         };
 
         let status = response.status();
+        if status == reqwest::StatusCode::NOT_MODIFIED && etag.is_none() {
+            return FetchOutcome::Failed {
+                class: FailureClass::HttpStatus,
+                detail: format!("upstream answered {status} to an unconditional request"),
+                duration: started.elapsed(),
+            };
+        }
         let etag = response
             .headers()
             .get(reqwest::header::ETAG)

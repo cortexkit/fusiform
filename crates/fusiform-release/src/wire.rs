@@ -35,6 +35,15 @@ impl ReleaseEnvelope {
             (release, parent) => Err(InvalidParent { release, parent }),
         }
     }
+
+    /// Publication time cannot go backwards. A release with new upstream
+    /// facts also needs a strictly newer upstream observation.
+    pub fn chronology_follows(&self, parent: &Self, has_upstream_changes: bool) -> bool {
+        self.published_at_ms >= parent.published_at_ms
+            && (self.upstream_observed_at_ms > parent.upstream_observed_at_ms
+                || (!has_upstream_changes
+                    && self.upstream_observed_at_ms == parent.upstream_observed_at_ms))
+    }
 }
 
 impl Serialize for ReleaseEnvelope {

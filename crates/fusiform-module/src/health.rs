@@ -56,15 +56,8 @@ pub const FAILURE_STREAK_DEGRADED: u64 = 4;
 /// not running" restarts the module.
 pub const LOOP_SILENT_AFTER_MS: i64 = 70 * 60 * 1_000;
 
-/// How many ticks may reach no verdict before the store is presumed broken.
-///
-/// Two, not one. A single unrecorded tick is reachable without anything being
-/// wrong — a probe reading health between the attempt stamp at the top of a
-/// tick and the observation write at the end sees a difference of one, every
-/// time, on a perfectly healthy module.
-///
-/// Two consecutive is not reachable that way: the second tick is thirty minutes
-/// later, so an in-flight tick can only ever account for one of them.
+/// Tolerate one transient persistence failure, but alert on a streak.
+/// In-flight polls have not reached a verdict and do not affect this threshold.
 pub const UNRECORDED_TICKS_DEGRADED: u64 = 2;
 
 /// What health says when the backup enrollment descriptor was not written.
@@ -146,33 +139,15 @@ fn serving_report(signals: &Signals, now_ms: i64) -> HealthReport {
     let age = signals.observation_age_ms(now_ms);
     let failures = signals.consecutive_failures();
 
-    // Ticks that started and recorded nothing.
-    //
-    // Checked before staleness for the same reason as a stopped loop: it is the
-    // CAUSE of the staleness that follows, and an operator told "the catalog is
-    // five hours old" goes to look at the upstream — which is fine. The disk is
-    // not.
-    //
-    // This state has no other signal. Every fetch result is an outcome and gets
-    // recorded, so a tick only returns Err when the STORE failed: no observation
-    // row is written, no failure streak advances, and the error goes to stderr
-    // where nothing reads it. Measured with a probe: eleven consecutive store
-    // failures reported Ok for two hours, then Degraded-because-stale for three
-    // more, never once mentioning writes.
-    //
-    // The identity is only worth anything because the two counters have
-    // INDEPENDENT sources — attempts stamped at the top of a tick before the
-    // store is touched, verdicts counted when one is recorded. A total derived
-    // from its own parts always balances and proves nothing.
-    let (attempts, recorded) = signals.attempt_ledger();
-    let unrecorded = attempts.saturating_sub(recorded);
-    if unrecorded >= UNRECORDED_TICKS_DEGRADED {
+    // A current persistence outage is more actionable than the staleness it
+    // causes. Lifetime counters cannot tell whether the store has recovered.
+    let unpersisted = signals.consecutive_unpersisted_polls();
+    if unpersisted >= UNRECORDED_TICKS_DEGRADED {
         return HealthReport {
             status: HealthStatus::Degraded,
             detail: Some(format!(
-                "{unrecorded} of {attempts} polls reached no verdict: the fetch \
-                 ran and the store could not record it. The upstream is not the \
-                 problem — check the disk, the lease, and the module's stderr"
+                "{unpersisted} consecutive polls reached no verdict in the store; \
+                 check the disk, the lease, and the module's stderr"
             )),
             metrics: Some(metrics(signals, now_ms)),
         };
@@ -372,9 +347,9 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
         // they count: ticks that started, and ticks that reached a verdict.
         "process_poll_attempts": attempts,
         "process_polls_recorded": recorded,
-        // Ticks that started and recorded nothing. Non-zero means writes are
-        // failing, and there is no other signal for that state.
+        // Lifetime difference, including a tick that may still be in flight.
         "process_polls_unrecorded": attempts.saturating_sub(recorded),
+        "process_consecutive_unpersisted_polls": signals.consecutive_unpersisted_polls(),
         // Deliberately process-scoped and deliberately NOT adopted: a restart
         // genuinely does clear the streak, because the new process has failed
         // nothing yet. The staleness clock is the signal that survives an

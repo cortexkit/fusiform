@@ -341,6 +341,7 @@ fn the_metric_names_are_pinned() {
         "process_bus_publish_failures",
         "process_bus_published_version",
         "process_consecutive_failures",
+        "process_consecutive_unpersisted_polls",
         "process_poll_attempts",
         "process_polls_recorded",
         "process_polls_unrecorded",

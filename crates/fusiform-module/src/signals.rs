@@ -84,6 +84,8 @@ pub struct Signals {
     /// that fails inside the store increments nothing here, and a probe caught
     /// it reading 1 after eleven attempts.
     polls_recorded: AtomicU64,
+    /// Completed ticks that consecutively failed to persist an observation.
+    consecutive_unpersisted_polls: AtomicU64,
     /// How many ticks STARTED.
     ///
     /// Independent of the counter above by construction: stamped at the top of
@@ -196,6 +198,7 @@ impl Signals {
             store_poll_error: arc_swap::ArcSwapOption::empty(),
             store_applied_release: AtomicU64::new(0),
             polls_recorded: AtomicU64::new(0),
+            consecutive_unpersisted_polls: AtomicU64::new(0),
             attempts: AtomicU64::new(0),
             last_attempt_ms: AtomicI64::new(NEVER),
             last_observation_ms: AtomicI64::new(NEVER),
@@ -274,7 +277,7 @@ impl Signals {
 
     /// Stamp a completed poll that observed something.
     pub fn observed(&self, at_ms: i64) {
-        self.polls_recorded.fetch_add(1, Ordering::Relaxed);
+        self.poll_recorded();
         self.last_attempt_ms.store(at_ms, Ordering::Relaxed);
         self.last_observation_ms.store(at_ms, Ordering::Relaxed);
         self.consecutive_failures.store(0, Ordering::Relaxed);
@@ -494,9 +497,8 @@ impl Signals {
         self.last_write_ms.store(at_ms, Ordering::Relaxed);
     }
 
-    /// Stamp a completed poll that observed nothing.
+    /// Stamp a poll that observed nothing, even if the store is unavailable.
     pub fn failed(&self, class: FailureClass) {
-        self.polls_recorded.fetch_add(1, Ordering::Relaxed);
         self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
         // The durable count advances with the streak and NEVER resets: a
         // recovered failure must stay readable after it has healed.
@@ -603,6 +605,22 @@ impl Signals {
         self.polls_recorded.load(Ordering::Relaxed)
     }
 
+    pub(crate) fn poll_recorded(&self) {
+        self.polls_recorded.fetch_add(1, Ordering::Relaxed);
+        self.consecutive_unpersisted_polls
+            .store(0, Ordering::Relaxed);
+    }
+
+    /// Stamp a completed poll whose observation could not be persisted.
+    pub fn poll_unpersisted(&self) {
+        self.consecutive_unpersisted_polls
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn consecutive_unpersisted_polls(&self) -> u64 {
+        self.consecutive_unpersisted_polls.load(Ordering::Relaxed)
+    }
+
     /// How many polls have ever failed, and how long ago the last one was.
     ///
     /// Survives recovery AND restart, which the streak does not. Reading
@@ -684,7 +702,10 @@ mod tests {
 
         s.failed(FailureClass::Network);
         s.failed(FailureClass::Network);
-        // The loop is demonstrably running: three attempts.
+        assert_eq!(s.polls_recorded(), 1);
+        s.poll_recorded();
+        s.poll_recorded();
+        // The failures count once their observations have persisted.
         assert_eq!(s.polls_recorded(), 3);
         // But knowledge is still as old as the last real observation, which is
         // the distinction that keeps a failing fetcher from looking healthy.

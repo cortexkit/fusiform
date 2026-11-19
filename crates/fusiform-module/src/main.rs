@@ -515,28 +515,9 @@ async fn run_poll_loop(store: Arc<CatalogStore>, signals: Arc<Signals>) {
                 }
             }
             Err(e) => {
-                // Named for WHERE it failed, not for who noticed.
-                //
-                // This arm is only reachable on a STORE error: every fetch
-                // result is an outcome and gets recorded, so a tick returning
-                // Err means the fetch worked and the write did not. The
-                // previous message was "tick failed", which is accurate about
-                // this function and sends an operator to look at the upstream —
-                // the one place that is definitely fine.
-                //
-                // ENGRAM's shape, reported 2026-08-13: their scheduler logged
-                // `publish_busy` for a refusal that happened two layers below
-                // it, and seven hours went into fixing arbitration that was
-                // already correct. A log line is evidence of an OBSERVATION,
-                // and what an operator needs is evidence of an OCCURRENCE.
-                //
-                // The loop continues deliberately: a transient write failure
-                // must not end polling, and a persistent one surfaces in health
-                // as polls_unrecorded, which already names the store.
-                eprintln!(
-                    "fusiform: the poll ran and the store could not record it \
-                     (the upstream is not the problem): {e}"
-                );
+                // A failed fetch is a normal outcome unless the store also
+                // fails to record it. In that case the error names both causes.
+                eprintln!("fusiform: poll could not complete: {e}");
             }
         }
     }
