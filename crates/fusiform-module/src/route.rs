@@ -38,6 +38,8 @@ mod paging_tests;
 mod publisher_tests;
 #[cfg(test)]
 mod release_import_tests;
+#[cfg(test)]
+mod serving_regression_tests;
 
 mod dated_model;
 mod history;
@@ -45,7 +47,7 @@ mod local_overrides;
 mod page_plan;
 mod quality;
 mod quality_efforts;
-use page_plan::{serve_planned_page, ProviderRange};
+use page_plan::{serve_planned_page, PageRender, ProviderRange};
 
 #[cfg(test)]
 #[path = "route/canonical_link_tests.rs"]
@@ -164,12 +166,21 @@ pub(crate) fn needs_catalog_permit(body: &[u8]) -> bool {
         return true;
     }
     serde_json::from_slice::<ToolCall>(body).is_ok_and(|call| {
-        call.name == TOOL_GET
-            && call
+        match call.name.as_str() {
+            TOOL_GET => call
                 .arguments
                 .get("model_id")
                 .and_then(serde_json::Value::as_str)
-                .is_none()
+                .is_none(),
+            // These tools count or validate the affected rows against a whole
+            // served catalog, including for a dry run.
+            TOOL_QUALITY_DECOMMISSION
+            | TOOL_QUALITY_RESTORE
+            | TOOL_QUALITY_GRADE
+            | TOOL_QUALITY_WITHDRAW
+            | fusiform_protocol::TOOL_QUALITY_WORKLOAD => true,
+            _ => false,
+        }
     })
 }
 
@@ -736,9 +747,10 @@ const REPLY_FRAME_LIMIT_BYTES: usize = 4 * 1024 * 1024;
 // Only refusals are remembered, never served responses. Curated models, aliases,
 // creators, canonical links, wire corrections and billing rules are include_str!
 // inputs fixed for this process.
-// Corrections can affect at_ms reads without advancing catalog_version, so the
-// append-only era watermark also invalidates refusals. The current timestamp can
-// change its serialized width without a write, so its width is part of the key.
+// Not every era write advances `catalog_version`, yet any new era can change
+// what a dated read serves, so the key also holds the newest era id: a new era
+// makes a remembered refusal stale. The current timestamp's serialized
+// width can change without a write, so that width is part of the key too.
 static OVERSIZED_CATALOG: Mutex<Option<OversizedCatalog>> = Mutex::new(None);
 
 #[cfg(test)]
@@ -886,7 +898,7 @@ fn serve_catalog_get_request(
     page_budget: usize,
     frame_limit: usize,
     oversized: &Mutex<Option<OversizedCatalog>>,
-    range: Option<&ProviderRange>,
+    page: Option<PageRender<'_>>,
 ) -> Result<CatalogGetResponse, RouteError> {
     serve_catalog_get_prepared(
         store,
@@ -894,7 +906,7 @@ fn serve_catalog_get_request(
         page_budget,
         frame_limit,
         oversized,
-        range,
+        page,
         None,
     )
 }
@@ -905,7 +917,7 @@ fn serve_catalog_get_prepared(
     page_budget: usize,
     frame_limit: usize,
     oversized: &Mutex<Option<OversizedCatalog>>,
-    range: Option<&ProviderRange>,
+    page: Option<PageRender<'_>>,
     prepared: Option<&dated_model::DatedModel>,
 ) -> Result<CatalogGetResponse, RouteError> {
     store
@@ -916,7 +928,7 @@ fn serve_catalog_get_prepared(
                 page_budget,
                 frame_limit,
                 oversized,
-                range,
+                page,
                 prepared,
             )
         })
@@ -929,7 +941,7 @@ fn serve_catalog_get_snapshot(
     page_budget: usize,
     frame_limit: usize,
     oversized: &Mutex<Option<OversizedCatalog>>,
-    range: Option<&ProviderRange>,
+    page: Option<PageRender<'_>>,
     prepared: Option<&dated_model::DatedModel>,
 ) -> Result<CatalogGetResponse, RouteError> {
     let source = parse_source(request.source.as_deref())?;
@@ -962,7 +974,7 @@ fn serve_catalog_get_snapshot(
         }
     }
 
-    if request.paged && range.is_none() {
+    if request.paged && page.is_none() {
         return serve_planned_page(
             store,
             request,
@@ -977,12 +989,20 @@ fn serve_catalog_get_snapshot(
     // Select the plane before reading rows. A subscription with no declared
     // billing claim must never receive the API card, even if its provider or
     // model would otherwise produce a different no-coverage refusal.
-    let published = crate::curation::PublishedCuration::load(store, request.at_ms)
-        .map_err(RouteError::unavailable)?;
-    let tables = published
-        .as_ref()
-        .map(|data| data.tables())
-        .unwrap_or_else(|| crate::curation::embedded());
+    let published;
+    let owned_tables;
+    let tables = if let Some(page) = page {
+        page.tables
+    } else {
+        published = crate::curation::PublishedCuration::load(store, request.at_ms)
+            .map_err(RouteError::unavailable)?;
+        owned_tables = published
+            .as_ref()
+            .map(|data| data.tables())
+            .unwrap_or_else(|| crate::curation::embedded());
+        &owned_tables
+    };
+    let range = page.map(|page| page.range);
     let plane = select_billing_plane(&request, tables.billing_planes)?;
     let requested_prefixes = request.fact_prefixes.clone();
     request.fact_prefixes = request.fact_prefixes.as_ref().map(|prefixes| {
@@ -997,15 +1017,27 @@ fn serve_catalog_get_snapshot(
             wide.push("rate.".to_string());
             wide.push("existence".to_string());
         }
-        if prefixes.iter().any(|p| curate::selects_effort_facts(p)) {
-            wide.extend(
-                [
-                    "model.canonical_id",
-                    "capability.reasoning_options",
-                    "existence",
-                ]
-                .map(str::to_owned),
-            );
+        let selects_effort = prefixes.iter().any(|p| curate::selects_effort_facts(p));
+        let selects_chat_score = prefixes
+            .iter()
+            .any(|p| "quality.elo".starts_with(p) || "quality.eq".starts_with(p));
+        let selects_judgment = selects_effort
+            || selects_chat_score
+            || prefixes.iter().any(|p| {
+                "quality.decommissioned".starts_with(p)
+                    || "quality.grade.".starts_with(p)
+                    || p.starts_with("quality.grade.")
+            });
+        // All judgments join on the served canonical key. Keep the supporting
+        // facts until the join, including when replaying a dated judgment.
+        if selects_judgment {
+            wide.extend(["model.canonical_id", "existence"].map(str::to_owned));
+        }
+        if selects_effort {
+            wide.push("capability.reasoning_options".to_string());
+        }
+        if selects_chat_score {
+            wide.push("model.type".to_string());
         }
         wide
     });
@@ -1027,22 +1059,6 @@ fn serve_catalog_get_snapshot(
             {
                 // The served acceptance flag, including replacements, gates ranges.
                 wide.push("capability.temperature".to_string());
-                wide.push("existence".to_string());
-            }
-            if [
-                "quality.elo",
-                "quality.eq",
-                "quality.grade.transcription",
-                "quality.grade.speech",
-                "quality.grade.image",
-                "quality.grade.video",
-                "quality.grade.search",
-            ]
-            .iter()
-            .any(|key| prefixes.iter().any(|p| key.starts_with(p)))
-            {
-                // Keep the served identity until quality grades have been joined.
-                wide.push("model.canonical_id".to_string());
                 wide.push("existence".to_string());
             }
             if prefixes.iter().any(|p| "model.lineage".starts_with(p)) {
@@ -1276,7 +1292,7 @@ fn serve_catalog_get_snapshot(
                 alias,
                 at,
                 request.fact_prefixes.as_ref(),
-                &tables,
+                tables,
             )?;
             return finish_plane_view(
                 store,
@@ -1286,7 +1302,7 @@ fn serve_catalog_get_snapshot(
                 requested_prefixes.as_ref(),
                 at,
                 prepared,
-                &tables,
+                tables,
             );
         }
     }
@@ -1397,7 +1413,7 @@ fn serve_catalog_get_snapshot(
         Some((store, tables.creators)),
         request.fact_prefixes.as_ref(),
         historical_overrides.as_ref(),
-        at.is_none().then_some(&tables),
+        at.is_none().then_some(tables),
     );
     if !named {
         // Widening for an absent identity can fetch only existence. Preserve the
@@ -1419,7 +1435,7 @@ fn serve_catalog_get_snapshot(
             request.provider_id.as_deref(),
             request.fact_prefixes.as_ref(),
             range,
-            &tables,
+            tables,
         )?;
     }
     if let Some(range) = range {
@@ -1463,7 +1479,7 @@ fn serve_catalog_get_snapshot(
         requested_prefixes.as_ref(),
         at,
         prepared,
-        &tables,
+        tables,
     )?;
     // Observed plane rows keep their envelope when billing rules remove all
     // selected rates. Curated rows and plain bulk rows require a selected fact.
@@ -2365,14 +2381,14 @@ fn single_model_snapshot(
                 // because a poll that restated existence without the upstream
                 // changing it would otherwise report today.
                 retired_at_ms: store
-                    .last_changed_at(
+                    .last_changed_at_or_before(
                         source,
                         &model.provider_id,
                         &model.model_id,
                         &fusiform_store::FactKey::existence(),
+                        resolved_at,
                     )
-                    .ok()
-                    .flatten()
+                    .map_err(|e| store_error(&e))?
                     .map(|t| t.0)
                     .unwrap_or(resolved_at.0),
             });

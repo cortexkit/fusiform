@@ -467,5 +467,5 @@ pub fn apply_correction(
     // single defect and leave the rest reading clean, which is worse than
     // marking none: a consumer partitioning on the extent would believe the
     // unmarked facts were checked and found good.
-    store.append_eras(&eras)
+    store.append_correction_eras(&eras, now)
 }

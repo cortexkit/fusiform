@@ -527,8 +527,10 @@ pub struct CatalogGetResponse {
     /// is told to check is a property of the source, not of the system.
     pub resolved_at_ms: i64,
     /// The monotonic catalog version at the time of the read.
-    /// Advances on a poll that writes and on each committed quality grade or
-    /// withdrawal, never on previews or the one-time grade import.
+    /// Advances on a poll that writes, a committed correction, and committed
+    /// quality judgments or withdrawals, never on previews or the one-time
+    /// grade import. A correction invalidates outstanding page tokens even
+    /// when it only changes a past window.
     ///
     /// Carried on a pull as well as a push, so a consumer can tell whether a
     /// read it just made is newer than the last push it applied without

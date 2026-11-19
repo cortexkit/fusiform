@@ -172,7 +172,7 @@ pub struct NewEra {
 enum PollWrite<'a> {
     Observation(&'a NewObservation),
     Existing {
-        observation_id: i64,
+        observation_id: Option<i64>,
         now: Timestamp,
     },
     Document {
@@ -452,7 +452,7 @@ impl CatalogStore {
         let written = self.append_eras_inner(
             eras,
             Some(PollWrite::Existing {
-                observation_id,
+                observation_id: Some(observation_id),
                 now,
             }),
         )?;
@@ -499,6 +499,27 @@ impl CatalogStore {
             self.record_rates_version(issued);
         }
         self.signal_catalog_changed();
+    }
+
+    /// Corrections change what dated reads serve, even when current rates stay
+    /// unchanged. Invalidate page tokens in the same transaction as the eras.
+    pub(crate) fn append_correction_eras(
+        &self,
+        eras: &[NewEra],
+        now: Timestamp,
+    ) -> Result<usize, CatalogError> {
+        if eras.is_empty() {
+            return Ok(0);
+        }
+        let written = self.append_eras_inner(
+            eras,
+            Some(PollWrite::Existing {
+                observation_id: None,
+                now,
+            }),
+        )?;
+        self.signal_catalog_changed();
+        Ok(written.count)
     }
 
     fn append_eras_inner(
@@ -588,6 +609,28 @@ impl CatalogStore {
         }
 
         let written = self.inner.with_conn_fenced(|tx| {
+            // Validate explicit observed eras before making any changes. Read
+            // each distinct window here so it shares the writer transaction.
+            let mut prior_by_key = BTreeMap::new();
+            for era in eras
+                .iter()
+                .filter(|era| matches!(era.boundary_kind, BoundaryKind::Observed))
+            {
+                let key = (era.source, era.boundary_at.0);
+                if let std::collections::btree_map::Entry::Vacant(slot) = prior_by_key.entry(key) {
+                    let Some(prior) = last_confirming_before_in(tx, era.source, era.boundary_at)?
+                    else {
+                        return Ok(Err(CatalogError::Invariant(format!(
+                            "{}/{} {}: an observed boundary needs a prior confirming observation; \
+                             the first era for a source is a seed",
+                            era.provider_id,
+                            era.model_id,
+                            era.fact_key.as_str()
+                        ))));
+                    };
+                    slot.insert(prior);
+                }
+            }
             let insert_observation =
                 |obs: &NewObservation, outcome: &ObservationOutcome| -> rusqlite::Result<i64> {
                     let (outcome, failure_class) = outcome_columns(outcome);
@@ -619,7 +662,7 @@ impl CatalogStore {
                 Some(PollWrite::Existing {
                     observation_id,
                     now,
-                }) => (Some(observation_id), Some(now)),
+                }) => (observation_id, Some(now)),
                 Some(PollWrite::Document {
                     observation,
                     catalog,
@@ -650,9 +693,6 @@ impl CatalogStore {
                 }
             };
             let eras = document.as_ref().map_or(eras, |(plan, _)| &plan.eras);
-            // A batch can carry observed eras for more than one source or
-            // instant. Resolve each distinct window on the writer transaction.
-            let mut prior_by_key = BTreeMap::new();
             let mut count = 0usize;
             for era in eras {
                 let (kind, correction) = boundary_columns(&era.boundary_kind);
@@ -661,13 +701,7 @@ impl CatalogStore {
                         let prior = if let Some((_, prior)) = &document {
                             *prior
                         } else {
-                            let key = (era.source, era.boundary_at.0);
-                            match prior_by_key.entry(key) {
-                                std::collections::btree_map::Entry::Occupied(slot) => *slot.get(),
-                                std::collections::btree_map::Entry::Vacant(slot) => *slot.insert(
-                                    last_confirming_before_in(tx, era.source, era.boundary_at)?,
-                                ),
-                            }
+                            prior_by_key.get(&(era.source, era.boundary_at.0)).copied()
                         };
                         prior.map(|t| t.0)
                     }
@@ -701,15 +735,15 @@ impl CatalogStore {
             let version = version_at
                 .map(|now| advance_catalog_version_in(tx, observation_id, now))
                 .transpose()?;
-            Ok(EraWrite {
+            Ok(Ok(EraWrite {
                 count,
                 version,
                 observation_id,
                 plan: document.map(|(plan, _)| plan),
-            })
+            }))
         })?;
 
-        Ok(written)
+        written
     }
 
     /// The value a fact held at an instant, with the boundary that established
@@ -1191,6 +1225,18 @@ impl CatalogStore {
         model_id: &str,
         fact_key: &FactKey,
     ) -> Result<Option<Timestamp>, CatalogError> {
+        self.last_changed_at_or_before(source, provider_id, model_id, fact_key, Timestamp(i64::MAX))
+    }
+
+    /// Like `last_changed_at`, but only consider eras in force by the snapshot instant.
+    pub fn last_changed_at_or_before(
+        &self,
+        source: SourceId,
+        provider_id: &str,
+        model_id: &str,
+        fact_key: &FactKey,
+        at: Timestamp,
+    ) -> Result<Option<Timestamp>, CatalogError> {
         // Per ERA, not per observation — measured, and the measurement changed
         // this design.
         //
@@ -1219,14 +1265,15 @@ impl CatalogStore {
                             AND ev.action = 'marked')) \
                  FROM era e \
                  WHERE e.source = ?1 AND e.provider_id = ?2 AND e.model_id = ?3 \
-                   AND e.fact_key = ?4 \
+                   AND e.fact_key = ?4 AND e.boundary_at_ms <= ?5 \
                  ORDER BY e.boundary_at_ms DESC",
             )?;
             let mut rows = stmt.query(params![
                 source.as_str(),
                 provider_id,
                 model_id,
-                fact_key.as_str()
+                fact_key.as_str(),
+                at.0
             ])?;
             let Some(mut row) = rows.next()? else {
                 return Ok(None);

@@ -126,6 +126,17 @@ pub async fn tick(ctx: &PollContext, now_ms: i64) -> Result<TickReport, TickErro
     // unreachable from the test suite is a signal that can be silently removed.
     ctx.signals.attempted(now_ms);
 
+    let recorded_before = ctx.signals.polls_recorded();
+    let result = fetch_and_apply(ctx, now_ms).await;
+    // The single poll loop owns both stamps. An error after persisting the
+    // observation must not count as a missed observation.
+    if result.is_err() && ctx.signals.polls_recorded() == recorded_before {
+        ctx.signals.poll_unpersisted();
+    }
+    result
+}
+
+async fn fetch_and_apply(ctx: &PollContext, now_ms: i64) -> Result<TickReport, TickError> {
     // No validator until this process has read a full document.
     //
     // A 304 says the upstream's BYTES have not changed since the stored ETag.
@@ -471,23 +482,29 @@ fn record_failure(
 ) -> Result<TickReport, TickError> {
     ctx.signals.failed(class);
 
+    let observation = NewObservation {
+        source: ctx.source,
+        observed_at: Timestamp(now_ms),
+        outcome: ObservationOutcome::Failed { class },
+        normalized_hash: None,
+        raw_hash,
+        // Never carried forward from a previous observation: this row must
+        // not look like it learned an ETag it never received, and the next
+        // poll must not send a conditional request claiming to hold a
+        // document this one could not read.
+        etag: None,
+        duration_ms: Some(duration.as_millis() as i64),
+        detail: Some(detail),
+    };
     let id = ctx
         .store
-        .record_observation(&NewObservation {
-            source: ctx.source,
-            observed_at: Timestamp(now_ms),
-            outcome: ObservationOutcome::Failed { class },
-            normalized_hash: None,
-            raw_hash,
-            // Never carried forward from a previous observation: this row must
-            // not look like it learned an ETag it never received, and the next
-            // poll must not send a conditional request claiming to hold a
-            // document this one could not read.
-            etag: None,
-            duration_ms: Some(duration.as_millis() as i64),
-            detail: Some(detail),
-        })
-        .map_err(TickError::Store)?;
+        .record_observation(&observation)
+        .map_err(|store| TickError::FailureNotRecorded {
+            class,
+            detail: observation.detail.unwrap_or_default(),
+            store,
+        })?;
+    ctx.signals.poll_recorded();
     Ok(TickReport {
         outcome: TickOutcome::Failed { class },
         observation_id: id,
@@ -500,6 +517,11 @@ fn record_failure(
 pub enum TickError {
     Store(fusiform_store::CatalogError),
     ApplyTask(tokio::task::JoinError),
+    FailureNotRecorded {
+        class: FailureClass,
+        detail: String,
+        store: CatalogError,
+    },
 }
 
 impl std::fmt::Display for TickError {
@@ -507,6 +529,14 @@ impl std::fmt::Display for TickError {
         match self {
             TickError::Store(e) => write!(f, "store: {e}"),
             TickError::ApplyTask(e) => write!(f, "poll apply task did not complete: {e}"),
+            TickError::FailureNotRecorded {
+                class,
+                detail,
+                store,
+            } => write!(
+                f,
+                "poll failed ({class:?}): {detail}; store could not record the failure: {store}"
+            ),
         }
     }
 }

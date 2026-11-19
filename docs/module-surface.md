@@ -57,7 +57,11 @@ not fetch `{base}/.well-known/models-keys.json`; that endpoint is for operators.
 Before the first verified release, the daemon can serve the built-in snapshot
 read-only and reports Degraded. A later fetch failure, including a 404 for an
 object named by a verified head, leaves the last verified release in force and
-is retried on the next poll.
+is retried on the next poll. A consumer whose retained state matches its local
+cursor fetches only the missing releases. If a missing release is absent from
+its individual URL but covered by the latest snapshot, the consumer verifies
+it through the attested history instead. Full replay also reconstructs and
+verifies the state at the local cursor if no matching state was retained.
 
 In store mode, `grade`, `workload`, `decommission`, and `restore` record local
 judgments. They preview by default; add `--commit` to write and `--withdraw`
@@ -207,7 +211,7 @@ The health report is computed from in-memory signals only: no lock, no disk.
 | Status | When |
 | --- | --- |
 | `failing` | no store is open, so no read can be answered (`health.rs`: `no_store_is_failing_regardless_of_everything_else`) |
-| `degraded` | two or more ticks started and recorded nothing: the store cannot write (`restart_health::ticks_that_reach_no_verdict_are_reported_as_a_write_problem`) |
+| `degraded` | two or more consecutive completed polls left no observation in the store (`restart_health::ticks_that_reach_no_verdict_are_reported_as_a_write_problem`) |
 | `degraded` | the loop has not attempted a fetch in 70 minutes: it is not running (`restart_health::a_stopped_loop_is_named_rather_than_reported_as_staleness`) |
 | `degraded` | the startup read of the store failed, so the catalog's age is unknown (`health.rs`: `a_failed_startup_read_is_not_a_fresh_install`) |
 | `degraded` | the last successful observation is more than 2 hours old; the detail names the failure class if polls are failing (`health_detail::a_stale_catalog_names_its_cause`) |
@@ -238,6 +242,7 @@ started; catalog-history metrics survive a restart, while `store_open` and
 | --- | --- |
 | `process_poll_attempts`, `process_polls_recorded`, `process_polls_unrecorded` | process |
 | `process_consecutive_failures` | process |
+| `process_consecutive_unpersisted_polls` | process; reset when an observation is persisted, even for a failed fetch |
 | `process_attempt_age_ms` | process |
 | `failures_ever`, `last_failure_age_ms`, `last_failure_class` | catalog |
 | `observation_age_ms`, `last_write_age_ms`, `model_count`, `models_priced` | catalog |

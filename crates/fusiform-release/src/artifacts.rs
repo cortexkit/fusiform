@@ -102,6 +102,15 @@ pub fn build_release(
     envelope
         .validate_parent()
         .map_err(|err| ArtifactRefusal::new("invalid_parent", err))?;
+    if parent
+        .as_ref()
+        .is_some_and(|prior| !envelope.chronology_follows(prior, !summary.ops.is_empty()))
+    {
+        return Err(ArtifactRefusal::new(
+            "invalid_release_times",
+            "release times do not advance the verified chain",
+        ));
+    }
 
     let unchanged = parent
         .as_ref()

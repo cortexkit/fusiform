@@ -17,8 +17,8 @@ use fusiform_release::{
     sha256, verify_head, verify_history_attestation, Hash, Head, HeadBody, HistoryFile, Release,
     ReleaseEnvelope, Snapshot,
 };
-use fusiform_store::CatalogStore;
-use reqwest::Url;
+use fusiform_store::{CatalogStore, StoreRelease};
+use reqwest::{StatusCode, Url};
 use serde::{de::DeserializeOwned, Deserialize};
 use sha2::{Digest as _, Sha256};
 
@@ -29,7 +29,6 @@ use state::Verified;
 
 const HEAD_PATH: &str = "v1/head";
 const HISTORY_BASE_PATH: &str = "v1/history/base.json";
-const DAY_MS: i64 = 86_400_000;
 const INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Deserialize)]
@@ -55,6 +54,12 @@ struct Retained {
 }
 
 impl Retained {
+    fn matches_cursor(&self, cursor: &StoreRelease) -> bool {
+        self.envelope.release == cursor.release
+            && self.envelope.state_hash.to_string() == cursor.state_hash
+            && self.envelope.curation_hash.to_string() == cursor.curation_hash
+    }
+
     fn encode(Verified { envelope, state }: Verified) -> Result<Self, String> {
         let bytes =
             step("encode verified store state", serde_json::to_vec(&state))?.into_boxed_slice();
@@ -175,6 +180,35 @@ impl StorePoller {
         Ok(head)
     }
 
+    async fn suffix(&self, from: u64, head: &HeadBody) -> Result<Option<Vec<Release>>, String> {
+        let mut releases = Vec::new();
+        for number in from + 1..=head.release.get() {
+            let file = format!("v1/releases/{number}");
+            let url = step(&file, self.url.join(&file))?;
+            let response = self.fetcher.store_response(url).await;
+            // Only an absent object covered by the snapshot can use the
+            // archive. Malformed releases and other fetch failures stay errors.
+            if number <= head.latest_snapshot
+                && response.as_ref().is_err_and(|error| {
+                    matches!(
+                        error.status(),
+                        Some(StatusCode::NOT_FOUND | StatusCode::GONE)
+                    )
+                })
+            {
+                return Ok(None);
+            }
+            let response = step(&file, response)?;
+            let bytes = step(&file, response.bytes().await)?;
+            let release: Release = step(&file, serde_json::from_slice(&bytes))?;
+            if release.envelope.release != number {
+                return Err(format!("{file}: wrong release number"));
+            }
+            releases.push(release);
+        }
+        Ok(Some(releases))
+    }
+
     async fn history(&self, snapshot_number: u64, bootstrap: bool) -> Result<History, String> {
         let path = format!("v1/snapshots/{snapshot_number}");
         let snapshot: Snapshot = self.json(&path).await?;
@@ -247,6 +281,13 @@ impl StorePoller {
             previous_day = day;
             later.extend(document.releases);
         }
+        if later
+            .last()
+            .map_or(first.envelope.release, |last| last.envelope.release)
+            != snapshot_number
+        {
+            return Err("snapshot history does not end at the attested release".into());
+        }
         Ok(History {
             snapshot: envelope,
             base: tables,
@@ -274,22 +315,33 @@ impl StorePoller {
                 "{HEAD_PATH}: same release has a different state hash"
             ));
         }
-        let catch_up = self.verified.as_ref().is_some_and(|old| {
-            head.published_at_ms
-                .saturating_sub(old.envelope.published_at_ms)
-                > DAY_MS
-                && head.latest_snapshot > applied
-        });
-        let (snapshot, mut base, first, mut releases) = if self.verified.is_none() || catch_up {
-            let history = self.history(head.latest_snapshot, applied == 0).await?;
-            (
-                Some(history.snapshot),
-                history.base,
-                Some(history.first),
-                history.later,
-            )
+        let (mut current, suffix) = if let Some(retained) = self.verified.as_ref().filter(|old| {
+            cursor
+                .as_ref()
+                .is_some_and(|cursor| old.matches_cursor(cursor))
+        }) {
+            let suffix = self.suffix(applied, &head).await?;
+            let current = suffix.as_ref().map(|_| retained.decode()).transpose()?;
+            (current, suffix)
         } else {
-            (None, None, None, Vec::new())
+            (None, None)
+        };
+        let (snapshot, mut base, first, releases) = match suffix {
+            Some(releases) => (None, None, None, releases),
+            None => {
+                let History {
+                    snapshot,
+                    base,
+                    first,
+                    mut later,
+                } = self.history(head.latest_snapshot, applied == 0).await?;
+                later.extend(
+                    self.suffix(snapshot.release, &head)
+                        .await?
+                        .ok_or("release beyond the snapshot is missing")?,
+                );
+                (Some(snapshot), base, Some(first), later)
+            }
         };
         let mut last_observation = match &mut base {
             Some(spool) => step(
@@ -300,31 +352,6 @@ impl StorePoller {
                 "read upstream observation watermark",
                 store.latest_observation_id(),
             )?,
-        };
-        let first_individual = snapshot
-            .as_ref()
-            .map_or(applied, |snapshot| snapshot.release);
-        if releases
-            .last()
-            .map(|last| last.envelope.release)
-            .or_else(|| first.as_ref().map(|first| first.envelope.release))
-            .is_some_and(|last| last != first_individual)
-        {
-            return Err("snapshot history does not end at the attested release".into());
-        }
-        for number in first_individual + 1..=head.release.get() {
-            let file = format!("v1/releases/{number}");
-            let release: Release = self.json(&file).await?;
-            if release.envelope.release != number {
-                return Err(format!("{file}: wrong release number"));
-            }
-            releases.push(release);
-        }
-
-        let mut current = if snapshot.is_none() {
-            self.verified.as_ref().map(Retained::decode).transpose()?
-        } else {
-            None
         };
         let mut arrivals = Vec::new();
         for entry in first

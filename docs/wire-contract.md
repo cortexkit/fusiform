@@ -82,15 +82,16 @@ different questions (`catalog.status` carries only the second).
    instant "now" resolved to, and sending that instant back as `at_ms` returns
    the same values (`served_corrections::a_read_can_be_replayed_by_the_instant_it_resolved`).
 2. `catalog_version` is `max(now_ms, previous + 1)` at each poll that writes,
-   each committed quality grade or withdrawal, each decommission mark or
-   restoration, and each start of the module
-   process. The start covers data compiled into the build (aliases, curated
+   each committed correction, each committed quality grade or withdrawal, each
+   decommission mark or restoration, and each start of the module process.
+   The start covers data compiled into the build (aliases, curated
    rows, overrides, billing planes), which changes only with a deploy
    (`history::a_process_start_advances_the_catalog_version_without_a_poll`).
    Seed ingestion also advances it to the snapshot's fetch instant. Previews,
-   the one-time grade import, corrections, and artifact marks or retractions do
-   not advance it. Corrections affect only a past window; artifact marks change
-   history's `last_changed_at`, not current catalog values.
+   the one-time grade import, and artifact marks or retractions do not advance
+   it. Corrections invalidate outstanding page tokens even when only a past
+   window changes. Artifact marks can change `last_changed_at_ms` in history
+   and `retired_at_ms` on named reads, but not paged catalog replies or fact values.
    It never goes backwards, even across a restore of the
    database ([`data-model.md`](data-model.md) §4). It describes the store at
    read time: a point-in-time read of old values carries today's version. It
