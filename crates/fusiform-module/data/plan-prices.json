@@ -24,8 +24,8 @@
       "established_by": "fusiform",
       "established_at_ms": 1789776000000,
       "review_by_ms": 1797552000000,
-      "source_ref": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan",
-      "note": "'Max 20x: $200 per month', read from the page rather than from what everyone knows. This row was a refusal for an hour on the grounds that anthropic.com/pricing does not publish the 20x figure \u2014 true of that page, and the wrong conclusion about the fact. Max is monthly-only, so no billing-basis ambiguity applies."
+      "source_ref": "https://support.claude.com/en/articles/17728952-what-is-the-ultra-plan",
+      "note": "Anthropic renamed this plan Ultra on 2026-10-30. The Ultra article says 'The Max 20x plan is now called the Ultra plan. Existing Max 20x subscribers move to Ultra automatically, with no price change' and 'The Ultra plan is available for $200 per month' (read 2026-11-22). The key stays max_20x because it is the plan the vault records, not the display name. Originally sourced as 'Max 20x: $200 per month' from the Max article, read from the page rather than from what everyone knows. This row was a refusal for an hour on the grounds that anthropic.com/pricing does not publish the 20x figure \u2014 true of that page, and the wrong conclusion about the fact. Max is monthly-only, so no billing-basis ambiguity applies."
     },
     {
       "provider_id": "anthropic",
@@ -46,7 +46,7 @@
       "established_at_ms": 1789776000000,
       "review_by_ms": 1797552000000,
       "source_ref": "https://support.claude.com/en/articles/11049741-what-is-the-max-plan",
-      "note": "anthropic.com/pricing publishes only the family floor ('From $100 per month') and never attributes it to a tier, so this row was briefly a refusal. The help centre article states 'Max 5x: $100 per month' outright. The refusal was evidence about the first page, not about the fact \u2014 exhaust a publisher's own surfaces before recording one. Max is monthly-only per the same page, so the plane's monthly-billed convention is a FACT here rather than a choice."
+      "note": "Anthropic renamed this plan Max on 2026-10-30; the article now says 'The Max plan is available for $100 per month' and gives it five times the Pro plan's usage (read 2026-11-22). The key stays max_5x because before the rename 'Max' named both plans. Originally: anthropic.com/pricing publishes only the family floor ('From $100 per month') and never attributes it to a tier, so this row was briefly a refusal. The help centre article stated 'Max 5x: $100 per month' outright. The refusal was evidence about the first page, not about the fact \u2014 exhaust a publisher's own surfaces before recording one. Max is monthly-only per the same page, so the plane's monthly-billed convention is a FACT here rather than a choice."
     },
     {
       "provider_id": "anthropic",
