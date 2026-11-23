@@ -824,20 +824,25 @@ stored fact nor its history changes. Sources and review rules are in
 `provider/model` identities for `model` and `twin`. It is omitted when no
 speed-twin fact survives filtering. It never appears on `at_ms` reads.
 
-For `kimi-code-plan-global/k3.1-pro`, `route.mode_wire_ids.fast` is
-`k3.1-pro-highspeed` and `route.mode_labels.fast` is `Highspeed`. The twin
-retains all its facts and gains `model.mode_of`. Routing selects `fast` from
+`route.mode_wire_ids.fast` is `k3.1-pro-highspeed` for
+`kimi-code-plan-global/k3.1-pro` and `kimi-k3.1-pro-highspeed` for
+`moonshotai/kimi-k3.1-pro`. Both serve `route.mode_labels.fast: "Highspeed"`.
+Each twin retains its own rates and gains `model.mode_of`. Routing selects `fast` from
 the base's `rate.<dimension>.mode.fast` and the plan's `service_tiers`, omits
 the twin from pickers, and sends the mapped wire id. Calls already made with
 the twin id are priced from the twin row, not from the base.
 
-Each derived mode rate copies the twin's served value in the same read context,
+On current reads, each derived mode rate copies the twin's served value in the same read context,
 including `inherited_from`. Plain reads copy the twin's own rates; apikey
 billing-plane reads copy its Moonshot Highspeed proxy card. Context selectors
 follow the mode selector (`rate.input.mode.fast.above_context.<n>`). Other API
 mode rates remain stripped from quota proxies. Fact filters widen internally
 to obtain the twin rates, then narrow back to exactly the requested keys.
-No pairing or derived rate is written to the store.
+On dated reads, the current pairing selects the twin, but the rate comes
+from the twin's stored era in force at `at_ms`. There is no projected key for
+a dimension before its first rate or while the rate or twin is withdrawn;
+the base rate is never substituted. Routing facts and `speed_twins` stay
+current-only. The projection creates no upstream eras on the base.
 
 ### 5.8 Fact overrides
 
@@ -1133,7 +1138,9 @@ With `served: true`, `served` is an ordered, contiguous, gap-free timeline from
 the same `history_begins_at_ms` reported by `catalog.status`. Each segment has
 `from_ms`, `until_ms` (`null` means still in force), and `state`: `value`,
 `absent`, or `refused`. A value segment also has `value` and `source`:
-`upstream`, `override`, `curated`, or `cache_lifetime`. Override segments carry
+`upstream`, `override`, `curated`, `cache_lifetime`, or `speed_twin`. A
+`speed_twin` segment derives from the paired twin's stored rate in force at
+that instant. Override segments carry
 `override: {source_ref, replaces}`. Refused segments have `reason: "correction"`
 and `correction` with the same extent and reason as a dated read, or
 `reason: "no_coverage"` without a correction when the dated read refuses because
@@ -1145,8 +1152,9 @@ and quality are not historical. For an alias, `served` is empty and
 `inherited_from.mapping: "current"` identifies the target as today's mapping.
 
 For `fact_prefix`, `fact_keys` lists, in sorted order, all matching keys ever
-recorded in upstream eras, overrides, curated rows or cache-lifetime rules for
-the model. This includes historical keys no longer present on current reads.
+recorded in upstream eras, overrides or curated rows for the model, or derived
+from cache-lifetime rules or speed-twin rate eras. This includes historical
+keys no longer present on current reads.
 With `served: true`, `served_by_key` maps each listed key to its timeline. The
 resolver snapshots are shared across keys, so listing timelines does not repeat
 the dated catalog reads for every key. Alias ids list no historical keys.

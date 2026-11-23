@@ -2288,6 +2288,7 @@ pub enum HistorySource {
     Override,
     Curated,
     CacheLifetime,
+    SpeedTwin,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

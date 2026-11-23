@@ -11,7 +11,7 @@ that keep them honest.
 | --- | --- | --- |
 | `model-creators.json` | which provider published an open-weight family | at read time |
 | `model-aliases.json` | route-specific ids and the published row each one is | at read time, current reads only |
-| `speed-twins.json` | separately named speed servings of the same model, their wire ids and exact API proxy cards | at read time, current reads only; never stored |
+| `speed-twins.json` | separately named speed servings of the same model, their wire ids and exact API proxy cards | current pairing on all reads; dated mode rates use the twin's stored eras |
 | `curated-models.json` | provider rows models.dev does not carry | at read time on current reads; written to `curated_model_era` at start, which point-in-time reads serve (§4) |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
 | store quality grades | operator-assigned ELO/EQ and per-kind media judgments for routing selection | at read time, current reads only (§11) |
@@ -1360,8 +1360,9 @@ a vendor display `label`, the twin's exact quota-proxy `api_card`,
 `source_ref`, verbatim `quote`, `established_at_ms` and `review_by_ms` exactly
 60 days later. The table is loaded and validated once per process.
 
-Only `kimi-code-plan-global/k3.1-pro` and `k3.1-pro-highspeed` are paired.
-Moonshot's quickstart states “We are also releasing Kimi K3.1 Pro Highspeed,
+The pairs are `moonshotai/kimi-k3.1-pro` with `kimi-k3.1-pro-highspeed` and
+`kimi-code-plan-global/k3.1-pro` with `k3.1-pro-highspeed`.
+Moonshot's API quickstart states “We are also releasing Kimi K3.1 Pro Highspeed,
 which delivers 2-3× the speed of K3.1 Pro for more responsive interactions.”
 Kimi's models page states “identical model capabilities” and “approximately
 2–3× speed, 2× quota usage”. Its membership page establishes HighSpeed on
@@ -1383,7 +1384,13 @@ Current serving copies each non-mode twin rate to the base's mode selector,
 including its inherited-price marker, and adds `route.mode_wire_ids` and
 `route.mode_labels`. The twin gains `model.mode_of` without losing any fact.
 The `speed_twins` response array discloses the claim whenever a derived fact
-survives filtering. Named, provider-wide and paged reads agree; `at_ms` reads
-and stored history are unchanged. Billing-plane reads derive the base mode
+survives filtering. Named, provider-wide and paged reads agree.
+Billing-plane reads derive the base mode
 only after projecting the twin onto its own sourced API card, preserving the
 rule that unrelated API mode rates are stripped from quota proxies.
+
+Dated reads and served history apply today's pairing over the twin's stored
+history. Only the mode rates project: the routing facts and `speed_twins`
+disclosure are current-only. For each dimension, no key is served before the
+twin has a rate or while the rate or twin is withdrawn. The pairing and
+projected values do not create upstream rate eras on the base row.

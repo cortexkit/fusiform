@@ -33,6 +33,27 @@ pub(crate) struct PublishedCuration {
 }
 
 impl PublishedCuration {
+    pub(crate) fn current_speed_twins(
+        store: &fusiform_store::CatalogStore,
+    ) -> Result<std::borrow::Cow<'static, curate::speed_twins::SpeedTwins>, String> {
+        if !store.is_store_mode() {
+            return Ok(std::borrow::Cow::Borrowed(crate::speed_twins::rows()));
+        }
+        let docs = store
+            .store_documents_at(None)
+            .map_err(|err| err.to_string())?;
+        let rows = docs.get("speed-twins").map_or_else(
+            || Ok(curate::speed_twins::SpeedTwins::new()),
+            |doc| {
+                accepted(
+                    "speed-twins",
+                    curate::speed_twins::load_reporting_rejects(doc),
+                )
+            },
+        )?;
+        Ok(std::borrow::Cow::Owned(rows))
+    }
+
     pub(crate) fn load(
         store: &fusiform_store::CatalogStore,
         at: Option<i64>,

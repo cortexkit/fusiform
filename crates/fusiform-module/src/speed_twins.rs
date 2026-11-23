@@ -28,7 +28,7 @@ mod tests {
     fn shipped_speed_twins_load_and_match_the_seed() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 1);
+        assert_eq!(rows.len(), 2);
         let seed = serde_json::from_str(include_str!("../data/models-dev-seed.json")).unwrap();
         assert!(missing_seed_rows(&rows, &seed).is_empty());
         assert!(native_mode_collisions(&rows, &crate::seed::catalog().unwrap()).is_empty());
@@ -90,7 +90,8 @@ mod tests {
         let mut doc = document();
         doc["speed_twins"][0]["mode"] = json!("highspeed");
         let (rows, rejects) = load_reporting_rejects(&doc.to_string());
-        assert!(rows.is_empty());
+        assert_eq!(rows.len(), 1);
+        assert!(rows.values().all(|row| row.provider_id == "moonshotai"));
         assert_eq!(rejects.len(), 1);
         assert!(rejects[0].contains("fast or ultrafast"));
         doc["speed_twins"][0]["mode"] = json!("ultrafast");
@@ -132,11 +133,13 @@ mod tests {
 
     #[test]
     fn planted_overdue_claim_names_the_source_and_remedy() {
-        let row = rows().values().next().unwrap();
-        assert!(overdue_at(rows(), row.review_by_ms).is_empty());
-        let overdue = overdue_at(rows(), row.review_by_ms + 1);
-        assert_eq!(overdue.len(), 1);
-        assert!(overdue[0].contains(&row.source_ref));
-        assert!(overdue[0].contains("60 days later"));
+        for (key, row) in rows() {
+            let pair = SpeedTwins::from([(key.clone(), row.clone())]);
+            assert!(overdue_at(&pair, row.review_by_ms).is_empty());
+            let overdue = overdue_at(&pair, row.review_by_ms + 1);
+            assert_eq!(overdue.len(), 1);
+            assert!(overdue[0].contains(&row.source_ref));
+            assert!(overdue[0].contains("60 days later"));
+        }
     }
 }

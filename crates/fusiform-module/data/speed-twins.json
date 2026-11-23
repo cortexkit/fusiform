@@ -1,6 +1,6 @@
 {
   "schema": "speed-twins/v1",
-  "purpose": "Separately named servings of the same model, mapped to the closed fast/ultrafast speed tiers on current reads only. The vendor's speed name is a display label; the twin remains served and priced under its own id.",
+  "purpose": "Separately named servings of the same model, mapped to the closed fast/ultrafast speed tiers. Mode rates follow the twin's rates on current reads and its stored eras on dated reads and served history. The vendor's speed name is a display label; the twin remains served and priced under its own id.",
   "note": "Do not pair kimi-for-coding with kimi-for-coding-highspeed: the models page identifies them as K2.8 Preview and K2.7 Code Highspeed respectively, not the same model.",
   "speed_twins": [
     {
@@ -12,6 +12,18 @@
       "api_card": "moonshotai/kimi-k3.1-pro-highspeed",
       "source_ref": "https://platform.moonshot.ai/docs/guide/kimi-k3-1-pro-quickstart ; https://www.kimi.com/code/docs/en/kimi-code/models.html ; https://www.kimi.com/code/docs/en/kimi-code/membership.html ; https://www.kimi.ai/resources/kimi-k3-1-pro-pricing",
       "quote": "We are also releasing Kimi K3.1 Pro Highspeed, which delivers 2-3× the speed of K3.1 Pro for more responsive interactions. | identical model capabilities | approximately 2–3× speed, 2× quota usage | Pro and above | HighSpeed access (including K3.1 Pro Highspeed and K2.7 Code HighSpeed) | Allegretto and above | Pro and above | Highspeed doubles the listed regular-input, output, and cache-write rates. Its cached-input rate stays at $0.20 per million tokens",
+      "established_at_ms": 1794700800000,
+      "review_by_ms": 1799884800000
+    },
+    {
+      "provider_id": "moonshotai",
+      "base_model_id": "kimi-k3.1-pro",
+      "twin_model_id": "kimi-k3.1-pro-highspeed",
+      "mode": "fast",
+      "label": "Highspeed",
+      "api_card": "moonshotai/kimi-k3.1-pro-highspeed",
+      "source_ref": "https://platform.moonshot.ai/docs/guide/kimi-k3-1-pro-quickstart ; https://www.kimi.ai/resources/kimi-k3-1-pro-pricing",
+      "quote": "We are also releasing Kimi K3.1 Pro Highspeed, which delivers 2-3× the speed of K3.1 Pro for more responsive interactions. | Choose kimi-k3.1-pro-highspeed when faster output matters | Highspeed doubles the listed regular-input, output, and cache-write rates. Its cached-input rate stays at $0.20 per million tokens",
       "established_at_ms": 1794700800000,
       "review_by_ms": 1799884800000
     }

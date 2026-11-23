@@ -207,18 +207,9 @@ pub fn apply_speed_twin(row: &SpeedTwin, base: &str, card: Facts, response: &mut
         return;
     };
     for (key, value) in card {
-        let Some(dimension) = key.strip_prefix("rate.") else {
-            continue;
-        };
-        if is_mode_rate(&key) {
-            continue;
+        if let Some(key) = crate::speed_twins::mode_rate_key(&key, &row.mode) {
+            facts.insert(key, value);
         }
-        let (dimension, suffix) = dimension
-            .split_once('.')
-            .map_or((dimension, String::new()), |(dimension, suffix)| {
-                (dimension, format!(".{suffix}"))
-            });
-        facts.insert(format!("rate.{dimension}.mode.{}{suffix}", row.mode), value);
     }
     for (key, value) in [
         ("route.mode_wire_ids", &row.twin_model_id),

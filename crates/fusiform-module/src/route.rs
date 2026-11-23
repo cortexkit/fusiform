@@ -1097,6 +1097,12 @@ fn serve_catalog_get_snapshot(
             }
             wide
         });
+    } else if let Some(prefixes) = &mut request.fact_prefixes {
+        if admits_rates(prefixes) {
+            // A base can match a mode-rate filter without any matching rate
+            // of its own. Keep it through the bulk renderer for the twin join.
+            prefixes.push("existence".to_string());
+        }
     }
     let curated_prefixes = request.fact_prefixes.clone();
     if plane.is_some() {
@@ -2123,7 +2129,20 @@ fn finish_plane_view(
             &cards,
         );
     }
-    if at.is_none() {
+    if let Some(at) = at {
+        if requested_prefixes.is_none_or(|prefixes| admits_rates(prefixes)) {
+            if let Some(prepared) = prepared {
+                prepared.speed_twins.apply(at, &mut response);
+            } else {
+                let twins = dated_model::DatedSpeedTwins::load(store, source, |row| {
+                    response
+                        .models
+                        .contains_key(&format!("{}/{}", row.provider_id, row.base_model_id))
+                })?;
+                twins.apply(at, &mut response);
+            }
+        }
+    } else {
         let method = response
             .plane
             .as_ref()

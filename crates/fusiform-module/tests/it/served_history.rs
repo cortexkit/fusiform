@@ -653,6 +653,7 @@ fn assert_parity(
 pub(super) fn golden_cases() -> serde_json::Map<String, Value> {
     let (ordinary, _ordinary_dir) = super::golden_payload::store();
     let (cache, _cache_dir) = super::cache_lifetimes::store(None);
+    let (speed, _speed_dir) = super::golden_payload::speed_twin_store();
     overlays(&cache);
     let mut cases = serde_json::Map::new();
     for (label, store, arguments) in [
@@ -675,6 +676,11 @@ pub(super) fn golden_cases() -> serde_json::Map<String, Value> {
             "catalog.history — historical rate keys",
             &cache,
             json!({"provider_id":"openai", "model_id":"gpt-realtime-2.1", "fact_prefix":"rate.cached_", "served":true}),
+        ),
+        (
+            "catalog.history — served Moonshot Highspeed rate",
+            &speed,
+            json!({"provider_id":"moonshotai", "model_id":"kimi-k3.1-pro", "fact_key":"rate.input.mode.fast", "served":true}),
         ),
     ] {
         let request = json!({"name":"catalog.history", "arguments":arguments});

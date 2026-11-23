@@ -453,32 +453,46 @@ fn seed_speed_twins(store: &CatalogStore) {
 fn speed_twins_plain_named_bulk_and_paged_reads_agree() {
     let (store, _dir) = store();
     seed_speed_twins(&store);
-    let provider = "kimi-code-plan-global";
-    let bulk = get(&store, json!({"provider_id":provider})).unwrap();
     let whole = get(&store, json!({})).unwrap();
     let paged = get(&store, json!({"paged":true})).unwrap();
-    for id in ["k3.1-pro", "k3.1-pro-highspeed"] {
-        let identity = format!("{provider}/{id}");
-        let named = get(&store, json!({"provider_id":provider,"model_id":id})).unwrap();
-        for other in [&bulk, &whole, &paged] {
-            assert_eq!(named.models[&identity], other.models[&identity]);
-            assert_eq!(named.speed_twins, other.speed_twins);
+    assert_eq!(whole.speed_twins.len(), 2);
+    assert_eq!(whole.speed_twins, paged.speed_twins);
+    for (provider, base, twin, expected_rate) in [
+        (
+            "kimi-code-plan-global",
+            "k3.1-pro",
+            "k3.1-pro-highspeed",
+            json!({"state":"stated_zero"}),
+        ),
+        (
+            "moonshotai",
+            "kimi-k3.1-pro",
+            "kimi-k3.1-pro-highspeed",
+            priced(200),
+        ),
+    ] {
+        let bulk = get(&store, json!({"provider_id":provider})).unwrap();
+        for id in [base, twin] {
+            let identity = format!("{provider}/{id}");
+            let named = get(&store, json!({"provider_id":provider,"model_id":id})).unwrap();
+            for other in [&bulk, &whole, &paged] {
+                assert_eq!(named.models[&identity], other.models[&identity]);
+            }
+            assert_eq!(named.speed_twins.len(), 1);
+            assert_eq!(named.speed_twins, bulk.speed_twins);
+            assert!(whole.speed_twins.contains(&named.speed_twins[0]));
         }
-        assert_eq!(named.speed_twins.len(), 1);
+        let base_facts = &bulk.models[&format!("{provider}/{base}")];
+        assert_eq!(base_facts["route.mode_wire_ids"], json!({"fast":twin}));
+        assert_eq!(base_facts["route.mode_labels"], json!({"fast":"Highspeed"}));
+        assert_eq!(base_facts["rate.input.mode.fast"], expected_rate);
+        assert_eq!(
+            bulk.models[&format!("{provider}/{twin}")]["model.mode_of"],
+            json!({"model_id":base,"mode":"fast"})
+        );
     }
-    let base = &bulk.models["kimi-code-plan-global/k3.1-pro"];
-    assert_eq!(
-        base["route.mode_wire_ids"],
-        json!({"fast":"k3.1-pro-highspeed"})
-    );
-    assert_eq!(base["route.mode_labels"], json!({"fast":"Highspeed"}));
-    assert_eq!(base["rate.input.mode.fast"], json!({"state":"stated_zero"}));
-    assert_eq!(
-        bulk.models["kimi-code-plan-global/k3.1-pro-highspeed"]["model.mode_of"],
-        json!({"model_id":"k3.1-pro","mode":"fast"})
-    );
     for id in ["kimi-for-coding", "kimi-for-coding-highspeed"] {
-        let facts = &bulk.models[&format!("{provider}/{id}")];
+        let facts = &whole.models[&format!("kimi-code-plan-global/{id}")];
         assert!(!facts.contains_key("model.mode_of"));
         assert!(!facts.contains_key("route.mode_wire_ids"));
     }
@@ -573,10 +587,129 @@ fn speed_twins_preserve_plain_inherited_rates_and_stored_history() {
         assert!(!facts.contains_key("model.mode_of"));
         assert!(!facts.contains_key("route.mode_wire_ids"));
         assert!(!facts.contains_key("route.mode_labels"));
-        assert!(!facts.contains_key("rate.input.mode.fast"));
     }
+    assert_eq!(
+        replay.models["kimi-code-plan-global/k3.1-pro"]["rate.input.mode.fast"],
+        json!({"state":"stated_zero"})
+    );
     assert_eq!(store.era_count(SourceId::ModelsDev).unwrap(), before);
     assert_eq!(store.catalog_version().unwrap(), version);
+}
+
+#[test]
+fn speed_twins_dated_api_rates_follow_twin_eras() {
+    const LAUNCH: i64 = 1_792_782_357_000; // 2026-10-23 19:05:57 UTC
+    let (store, _dir) = store();
+    let provider = "moonshotai";
+    let base = "kimi-k3.1-pro";
+    let twin = "kimi-k3.1-pro-highspeed";
+    let input_key = "rate.input.mode.fast";
+    let output_key = "rate.output.mode.fast";
+    let input = priced(4_000_000_000);
+    let output = priced(20_000_000_000);
+    let model = format!("{provider}/{base}");
+    store
+        .record_observation(&fusiform_store::NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(1_000),
+            outcome: fusiform_core::ObservationOutcome::Seeded,
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: None,
+            detail: None,
+        })
+        .unwrap();
+    seed(
+        &store,
+        provider,
+        base,
+        vec![("rate.input", priced(2_000_000_000))],
+    );
+    let append = |at, model_id: &str, key: &str, value: &Value| {
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: provider.into(),
+                model_id: model_id.into(),
+                fact_key: FactKey::from_stored(key.into()),
+                value_json: value.to_string(),
+                boundary_at: Timestamp(at),
+                boundary_kind: BoundaryKind::Seed,
+                observation_id: None,
+            }])
+            .unwrap();
+    };
+    append(LAUNCH, twin, "existence", &json!("present"));
+    append(LAUNCH, twin, "rate.input", &input);
+    append(LAUNCH, twin, "rate.output", &output);
+    append(LAUNCH + 1, base, "rate.input", &priced(3_000_000_000));
+    let read = |at, named| {
+        let mut args =
+            json!({"provider_id":provider,"at_ms":at,"fact_prefixes":[input_key,output_key]});
+        if named {
+            args["model_id"] = json!(base);
+        }
+        get(&store, args).unwrap().models.remove(&model).unwrap()
+    };
+    let history = |selector: Value| {
+        let mut args = json!({"provider_id":provider,"model_id":base});
+        args.as_object_mut()
+            .unwrap()
+            .extend(selector.as_object().unwrap().clone());
+        let body = json!({"name":"catalog.history", "arguments":args});
+        match serve_tool_call(&store, body.to_string().as_bytes()).unwrap() {
+            ToolResponse::History(response) => serde_json::to_value(response).unwrap(),
+            other => panic!("catalog.history must return a history, got {other:?}"),
+        }
+    };
+    let before = read(LAUNCH - 1, true);
+    assert!(!before.contains_key(input_key));
+    assert!(!before.contains_key(output_key));
+    let dated = read(LAUNCH, true);
+    assert_eq!(dated.get(input_key), Some(&input));
+    assert_eq!(dated.get(output_key), Some(&output));
+    assert_eq!(dated, read(LAUNCH, false));
+
+    let served = history(json!({"fact_key":input_key,"served":true}));
+    assert_eq!(served["eras"], json!([]));
+    assert_eq!(
+        served["served"],
+        json!([
+            {"from_ms":1000,"until_ms":LAUNCH,"state":"absent"},
+            {"from_ms":LAUNCH,"until_ms":null,"state":"value","value":input,"source":"speed_twin"},
+        ])
+    );
+    let listed = history(json!({"fact_prefix":"rate.input.mode"}));
+    assert_eq!(listed["fact_keys"], json!([input_key]));
+    let listed_served = history(json!({"fact_prefix":"rate.input.mode","served":true}));
+    assert_eq!(listed_served["served_by_key"][input_key], served["served"]);
+
+    let input_withdrawn = LAUNCH + 60_000;
+    let twin_withdrawn = LAUNCH + 120_000;
+    append(
+        input_withdrawn,
+        twin,
+        "rate.input",
+        &json!({"state":"unpriced","reason":"missing_rate"}),
+    );
+    append(twin_withdrawn, twin, "existence", &json!("absent"));
+    let dated = read(input_withdrawn, true);
+    assert!(!dated.contains_key(input_key));
+    assert_eq!(dated.get(output_key), Some(&output));
+    assert!(read(twin_withdrawn, true).is_empty());
+    let served = history(json!({"fact_key":input_key,"served":true}));
+    assert_eq!(served["served"][1]["until_ms"], input_withdrawn);
+    assert_eq!(
+        served["served"][2],
+        json!({"from_ms":input_withdrawn,"until_ms":null,"state":"absent"})
+    );
+    let served = history(json!({"fact_key":output_key,"served":true}));
+    assert_eq!(served["served"][1]["until_ms"], twin_withdrawn);
+    assert_eq!(
+        served["served"][2],
+        json!({"from_ms":twin_withdrawn,"until_ms":null,"state":"absent"})
+    );
 }
 
 #[test]

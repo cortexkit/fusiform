@@ -7251,6 +7251,312 @@
       ]
     }
   },
+  "catalog.get — speed twin kimi-k3.1-pro plain": {
+    "request": {
+      "arguments": {
+        "model_id": "kimi-k3.1-pro",
+        "provider_id": "moonshotai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794960000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.reasoning_default",
+          "model": "moonshotai/kimi-k3.1-pro",
+          "model_id": "kimi-k3.1-pro",
+          "notes": "Served only on this first-party row: resellers and alias routes reaching the model another way may apply a different default.",
+          "provider_id": "moonshotai",
+          "quote": "Reasoning Effort guide: \"Kimi K3.1 Pro always reasons and configures reasoning effort with the top-level `reasoning_effort` request field. It supports `\"low\"`, `\"high\"`, and `\"max\"`, with `\"max\"` as the default.\"",
+          "reason": "models.dev publishes no default reasoning effort. Moonshot documents the reasoning_effort its API applies to this model when a request omits it, so a runner can send it explicitly.",
+          "replaces": null,
+          "review_by_ms": 1800144000000,
+          "source_ref": "https://platform.moonshot.ai/docs/guide/use-reasoning-effort (accessed 2026-11-18)",
+          "value": {
+            "type": "effort",
+            "value": "max"
+          }
+        }
+      ],
+      "models": {
+        "moonshotai/kimi-k3.1-pro": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_default": {
+            "type": "effort",
+            "value": "max"
+          },
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "high",
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.temperature": false,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": 1048576,
+          "model.canonical_id": "moonshotai/kimi-k3.1-pro",
+          "model.family": "kimi-k3",
+          "model.lineage": "kimi",
+          "model.name": "Kimi K3.1 Pro",
+          "model.open_weights": true,
+          "model.status": null,
+          "provider.name": "Moonshot AI",
+          "quality.elo": 1813,
+          "quality.eq": 1829,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 200000000
+          },
+          "rate.cache_read.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 200000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2000000000
+          },
+          "rate.cache_write.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4000000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2000000000
+          },
+          "rate.input.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 10000000000
+          },
+          "rate.output.mode.fast": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 20000000000
+          },
+          "route.mode_labels": {
+            "fast": "Highspeed"
+          },
+          "route.mode_wire_ids": {
+            "fast": "kimi-k3.1-pro-highspeed"
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.moonshot.ai/v1"
+          },
+          "wire.family": "openai.chat_completions",
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
+          }
+        }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794404263242,
+        "graded_by": "operator"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev",
+      "speed_twins": [
+        {
+          "label": "Highspeed",
+          "mode": "fast",
+          "model": "moonshotai/kimi-k3.1-pro",
+          "review_by_ms": 1799884800000,
+          "source_ref": "https://platform.moonshot.ai/docs/guide/kimi-k3-1-pro-quickstart ; https://www.kimi.ai/resources/kimi-k3-1-pro-pricing",
+          "twin": "moonshotai/kimi-k3.1-pro-highspeed"
+        }
+      ]
+    }
+  },
+  "catalog.get — speed twin kimi-k3.1-pro-highspeed plain": {
+    "request": {
+      "arguments": {
+        "model_id": "kimi-k3.1-pro-highspeed",
+        "provider_id": "moonshotai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "moonshotai/kimi-k3.1-pro-highspeed": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "high",
+                "max"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.temperature": false,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 1048576,
+          "limit.output": 1048576,
+          "model.canonical_id": "moonshotai/kimi-k3.1-pro",
+          "model.family": "kimi-k3",
+          "model.lineage": "kimi",
+          "model.mode_of": {
+            "mode": "fast",
+            "model_id": "kimi-k3.1-pro"
+          },
+          "model.name": "Kimi K3.1 Pro Highspeed",
+          "model.open_weights": true,
+          "model.status": null,
+          "provider.name": "Moonshot AI",
+          "quality.elo": 1813,
+          "quality.eq": 1829,
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 200000000
+          },
+          "rate.cache_write": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4000000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 20000000000
+          },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://api.moonshot.ai/v1"
+          },
+          "wire.family": "openai.chat_completions",
+          "wire.npm": {
+            "from": "provider",
+            "value": "@ai-sdk/openai-compatible"
+          }
+        }
+      },
+      "quality_scores": {
+        "graded_at_ms": 1794404263242,
+        "graded_by": "operator"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev",
+      "speed_twins": [
+        {
+          "label": "Highspeed",
+          "mode": "fast",
+          "model": "moonshotai/kimi-k3.1-pro",
+          "review_by_ms": 1799884800000,
+          "source_ref": "https://platform.moonshot.ai/docs/guide/kimi-k3-1-pro-quickstart ; https://www.kimi.ai/resources/kimi-k3-1-pro-pricing",
+          "twin": "moonshotai/kimi-k3.1-pro-highspeed"
+        }
+      ]
+    }
+  },
   "catalog.get — synthetic canonical link": {
     "request": {
       "arguments": {
@@ -8188,6 +8494,47 @@
           }
         ]
       },
+      "source": "models.dev"
+    }
+  },
+  "catalog.history — served Moonshot Highspeed rate": {
+    "request": {
+      "arguments": {
+        "fact_key": "rate.input.mode.fast",
+        "model_id": "kimi-k3.1-pro",
+        "provider_id": "moonshotai",
+        "served": true
+      },
+      "name": "catalog.history"
+    },
+    "response": {
+      "eras": [],
+      "fact_key": "rate.input.mode.fast",
+      "model_id": "kimi-k3.1-pro",
+      "provider_id": "moonshotai",
+      "served": [
+        {
+          "from_ms": 1000,
+          "state": "absent",
+          "until_ms": 1792782357000
+        },
+        {
+          "from_ms": 1792782357000,
+          "source": "speed_twin",
+          "state": "value",
+          "until_ms": null,
+          "value": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4000000000
+          }
+        }
+      ],
       "source": "models.dev"
     }
   },

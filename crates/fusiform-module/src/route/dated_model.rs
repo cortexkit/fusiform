@@ -11,6 +11,7 @@ pub(super) struct DatedModel {
     pub(super) curated: Vec<fusiform_store::CuratedModelEra>,
     overrides: BTreeMap<String, Vec<fusiform_store::FactOverrideEra>>,
     lifetimes: Vec<(i64, crate::cache_lifetimes::Rules)>,
+    pub(super) speed_twins: DatedSpeedTwins,
     provider_known: bool,
     model_known: bool,
 }
@@ -62,15 +63,14 @@ impl DatedModel {
             curated,
             overrides,
             lifetimes,
+            speed_twins: DatedSpeedTwins::load(store, source, |row| {
+                row.provider_id == provider && row.base_model_id == model
+            })?,
         })
     }
 
     pub(super) fn raw(&self, key: &FactKey, at: Timestamp) -> Option<&str> {
-        let eras = &self.facts.get(key)?.eras;
-        let index = eras.partition_point(|era| era.boundary_at <= at);
-        index
-            .checked_sub(1)
-            .map(|index| eras[index].value_json.as_str())
+        self.facts.get(key)?.raw_at(at)
     }
 
     pub(super) fn curated_at(&self, at: Timestamp) -> Option<&fusiform_store::NewCuratedModel> {
@@ -174,6 +174,115 @@ impl DatedModel {
     }
 }
 
+pub(super) struct DatedSpeedTwins(Vec<DatedSpeedTwin>);
+
+struct DatedSpeedTwin {
+    base: String,
+    existence: FactHistory,
+    rates: BTreeMap<String, FactHistory>,
+}
+
+impl DatedSpeedTwins {
+    pub(super) fn load(
+        store: &CatalogStore,
+        source: SourceId,
+        matches_base: impl Fn(&curate::speed_twins::SpeedTwin) -> bool,
+    ) -> Result<Self, RouteError> {
+        // The current pairing identifies the serving variant, regardless of
+        // when the catalog first learned to describe it as a mode.
+        let rows = crate::curation::PublishedCuration::current_speed_twins(store)
+            .map_err(RouteError::unavailable)?;
+        let mut twins = Vec::new();
+        for row in rows.values().filter(|row| matches_base(row)) {
+            let mut facts = store
+                .model_fact_histories(source, &row.provider_id, &row.twin_model_id)
+                .map_err(|err| store_error(&err))?;
+            let Some(existence) = facts.remove(&FactKey::existence()) else {
+                continue;
+            };
+            let rates = facts
+                .into_iter()
+                .filter_map(|(key, eras)| {
+                    curate::speed_twins::mode_rate_key(key.as_str(), &row.mode)
+                        .map(|key| (key, FactHistory::new(eras)))
+                })
+                .collect();
+            twins.push(DatedSpeedTwin {
+                base: format!("{}/{}", row.provider_id, row.base_model_id),
+                existence: FactHistory::new(existence),
+                rates,
+            });
+        }
+        Ok(Self(twins))
+    }
+
+    pub(super) fn extend_boundaries(&self, boundaries: &mut BTreeSet<i64>) {
+        for twin in &self.0 {
+            for history in std::iter::once(&twin.existence).chain(twin.rates.values()) {
+                for era in &history.eras {
+                    boundaries.insert(era.boundary_at.0);
+                    if let Some(correction) = &era.correction {
+                        boundaries.insert(correction.affected_from.0);
+                        boundaries.extend(correction.affected_until.0.checked_add(1));
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn has_rate_at(&self, base: &str, key: &str, at: Timestamp) -> bool {
+        self.0.iter().any(|twin| {
+            twin.base == base
+                && twin.present_at(at)
+                && twin
+                    .rates
+                    .get(key)
+                    .and_then(|rate| dated_rate(rate, at))
+                    .is_some()
+        })
+    }
+
+    pub(super) fn apply(&self, at: Timestamp, response: &mut CatalogGetResponse) {
+        for twin in &self.0 {
+            let Some(facts) = response.models.get_mut(&twin.base) else {
+                continue;
+            };
+            if !twin.present_at(at) {
+                continue;
+            }
+            for (key, rate) in &twin.rates {
+                if response
+                    .withheld
+                    .iter()
+                    .any(|w| w.model == twin.base && w.fact_key == *key)
+                {
+                    continue;
+                }
+                if let Some(value) = dated_rate(rate, at) {
+                    facts.insert(key.clone(), value);
+                }
+            }
+        }
+    }
+}
+
+impl DatedSpeedTwin {
+    fn present_at(&self, at: Timestamp) -> bool {
+        self.existence.readable_at(at) == Some("\"present\"")
+    }
+}
+
+fn dated_rate(rate: &FactHistory, at: Timestamp) -> Option<serde_json::Value> {
+    let mut value = fact_for_the_wire(rate.readable_at(at)?);
+    // Ingest writes missing_rate as the tombstone when a published rate
+    // disappears. The mode key advertises only rates held by the twin.
+    if value["state"] == "unpriced" && value["reason"] == "missing_rate" {
+        return None;
+    }
+    name_the_provenance_of_a_pre_0_11_row(&mut value);
+    Some(value)
+}
+
 struct FactHistory {
     eras: Vec<HistoryRow>,
     corrections: IntervalIndex,
@@ -181,6 +290,20 @@ struct FactHistory {
 }
 
 impl FactHistory {
+    fn raw_at(&self, at: Timestamp) -> Option<&str> {
+        let index = self.eras.partition_point(|era| era.boundary_at <= at);
+        index
+            .checked_sub(1)
+            .map(|index| self.eras[index].value_json.as_str())
+    }
+
+    fn readable_at(&self, at: Timestamp) -> Option<&str> {
+        let raw = self.raw_at(at)?;
+        let mut withheld = false;
+        self.corrections.visit(at.0, |_| withheld = true);
+        (!withheld).then_some(raw)
+    }
+
     fn new(eras: Vec<HistoryRow>) -> Self {
         let mut corrections = Vec::new();
         let mut uncertainty = Vec::new();

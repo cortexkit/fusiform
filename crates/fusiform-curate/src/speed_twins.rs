@@ -25,6 +25,19 @@ pub struct SpeedTwin {
 /// `(provider, base model, mode)` identifies one separately served speed tier.
 pub type SpeedTwins = BTreeMap<(String, String, String), SpeedTwin>;
 
+pub fn mode_rate_key(key: &str, mode: &str) -> Option<String> {
+    let dimension = key.strip_prefix("rate.")?;
+    if crate::is_mode_rate(key) {
+        return None;
+    }
+    let (dimension, suffix) = dimension
+        .split_once('.')
+        .map_or((dimension, String::new()), |(dimension, suffix)| {
+            (dimension, format!(".{suffix}"))
+        });
+    Some(format!("rate.{dimension}.mode.{mode}{suffix}"))
+}
+
 pub fn load_reporting_rejects(doc: &str) -> (SpeedTwins, Vec<String>) {
     #[derive(serde::Deserialize)]
     struct Doc {

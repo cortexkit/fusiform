@@ -546,7 +546,7 @@ fn render_all() -> String {
     text
 }
 
-pub(super) fn render_speed_twins() -> serde_json::Map<String, serde_json::Value> {
+pub(super) fn speed_twin_store() -> (CatalogStore, tempfile::TempDir) {
     let mut seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
     seed.as_object_mut().unwrap().retain(|provider, row| {
         let ids: &[&str] = match provider.as_str() {
@@ -560,12 +560,42 @@ pub(super) fn render_speed_twins() -> serde_json::Map<String, serde_json::Value>
             .retain(|id, _| ids.contains(&id.as_str()));
         true
     });
-    let (store, _dir) = super::temperature::store(seed);
+    let mut before_launch = seed.clone();
+    before_launch["moonshotai"]["models"]
+        .as_object_mut()
+        .unwrap()
+        .remove("kimi-k3.1-pro-highspeed")
+        .unwrap();
+    let (store, dir) = super::temperature::store(before_launch);
+    let catalog = normalize_models_dev(&serde_json::to_vec(&seed).unwrap())
+        .unwrap()
+        .catalog;
+    let launch = Timestamp(1_792_782_357_000); // 2026-10-23 19:05:57 UTC
+    let plan = plan_ingest(&store, &catalog, launch, BoundaryKind::Seed, None).unwrap();
+    store.append_eras(&plan.eras).unwrap();
+    (store, dir)
+}
+
+pub(super) fn render_speed_twins() -> serde_json::Map<String, serde_json::Value> {
+    let (store, _dir) = speed_twin_store();
     let mut cases = serde_json::Map::new();
-    for model in ["k3.1-pro", "k3.1-pro-highspeed"] {
-        for method in [None, Some("apikey")] {
+    for (provider, model, methods) in [
+        (
+            "kimi-code-plan-global",
+            "k3.1-pro",
+            &[None, Some("apikey")][..],
+        ),
+        (
+            "kimi-code-plan-global",
+            "k3.1-pro-highspeed",
+            &[None, Some("apikey")][..],
+        ),
+        ("moonshotai", "kimi-k3.1-pro", &[None][..]),
+        ("moonshotai", "kimi-k3.1-pro-highspeed", &[None][..]),
+    ] {
+        for &method in methods {
             let mut request = serde_json::json!({"name":"catalog.get","arguments":{
-                "provider_id":"kimi-code-plan-global", "model_id":model
+                "provider_id":provider, "model_id":model
             }});
             if let Some(method) = method {
                 request["arguments"]["auth_method"] = method.into();
@@ -1815,7 +1845,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         .values()
         .filter(|case| case["request"]["arguments"].get("auth_method").is_none())
         .count();
-    assert_eq!(plain_speed_twins, 2);
+    assert_eq!(plain_speed_twins, 4);
     let plain_login_cases = login_methods
         .values()
         .filter(|case| case["request"]["arguments"].get("auth_method").is_none())
@@ -1863,7 +1893,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
             1,
         ),
         (serde_json::to_string(&render_cache_lifetimes()).unwrap(), 4),
-        (serde_json::to_string(&served_history).unwrap(), 4),
+        (serde_json::to_string(&served_history).unwrap(), 5),
         (
             serde_json::to_string(&render_attachment_limits()).unwrap(),
             2,

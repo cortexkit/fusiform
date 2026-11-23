@@ -96,6 +96,7 @@ pub(super) fn serve(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse
                 .map_err(|e| store_error(&e))?,
         );
     }
+    prepared.speed_twins.extend_boundaries(&mut boundaries);
     boundaries.retain(|at| *at >= begin.0);
     boundaries.insert(begin.0);
     let mut reads = Vec::new();
@@ -231,7 +232,12 @@ fn segment_at(
     } else if let Some(value) = read.models.get(identity).and_then(|facts| facts.get(key)) {
         segment.state = HistoryState::Value;
         segment.value = Some(value.clone());
-        if let Some(claim) = read
+        if prepared
+            .speed_twins
+            .has_rate_at(identity, key, Timestamp(at))
+        {
+            segment.source = Some(HistorySource::SpeedTwin);
+        } else if let Some(claim) = read
             .fact_overrides
             .iter()
             .find(|o| o.model == identity && o.fact_key == key && &o.value == value)
@@ -264,8 +270,8 @@ fn segment_at(
             }
             // The resolver discloses which override or curated row it
             // chose. Compare that claim and the rendered upstream value
-            // with the final value; the only remaining dated derivation
-            // is the cache-lifetime rule. No precedence is decided here.
+            // with the final value. After checking speed twins above, the
+            // remaining dated rate derivation is the cache-lifetime rule.
             segment.source = Some(if curated.as_ref() == Some(value) {
                 HistorySource::Curated
             } else if upstream.as_ref() == Some(value) {
