@@ -197,16 +197,56 @@ impl PublishedCuration {
     }
 }
 
-/// Check all vendor documents as the consumer would on receiving a new curation set.
+/// Check all vendor documents before writing them to the store.
+///
+/// Strict: every login allowlist must name a row upstream publishes now, so a
+/// writer cannot publish a typo, and a row upstream has since withdrawn must be
+/// removed by the next write that touches the store.
 pub fn validate_published(documents: &Documents, upstream: &Upstream) -> Result<(), String> {
+    validate(documents, upstream, false)
+}
+
+/// Check all vendor documents as a consumer receiving a new curation set.
+///
+/// A consumer replays every release in order, so refusing one would stop it
+/// for good. Upstream withdrawing a model that a login allowlist names is not
+/// a defect of the curation set: the allowlist then restricts a row that is no
+/// longer served. So identities are checked against upstream plus the
+/// document's own rows, the same leniency [`PublishedCuration::load`] applies
+/// on reload. The writer's [`validate_published`] stays strict.
+pub fn validate_received(documents: &Documents, upstream: &Upstream) -> Result<(), String> {
+    validate(documents, upstream, true)
+}
+
+fn validate(
+    documents: &Documents,
+    upstream: &Upstream,
+    tolerate_withdrawn: bool,
+) -> Result<(), String> {
     use VendorDocument::*;
 
-    let models = Value::Object(
+    let mut models = Value::Object(
         upstream
             .iter()
             .map(|(provider, facts)| (provider.clone(), json!({"models": facts.models})))
             .collect(),
     );
+    if tolerate_withdrawn {
+        for row in documents
+            .get("login-methods")
+            .and_then(|doc| doc["models"].as_array())
+            .into_iter()
+            .flatten()
+        {
+            if let (Some(provider), Some(model)) =
+                (row["provider_id"].as_str(), row["model_id"].as_str())
+            {
+                if !models[provider]["models"][model].is_object() {
+                    models[provider]["models"][model] = json!({});
+                }
+            }
+        }
+    }
     let curated = documents
         .get("curated-models")
         .map(curated)
@@ -524,6 +564,42 @@ mod tests {
         assert!(validate_published(&unknown, &Upstream::new())
             .unwrap_err()
             .contains("unrecognized published vendor document"));
+    }
+
+    #[test]
+    fn a_consumer_keeps_a_login_allowlist_whose_row_upstream_withdrew() {
+        let row = |model: &str| {
+            json!({
+                "provider_id": "openai", "model_id": model, "auth_methods": ["apikey"],
+                "source_ref": "https://example.test/codex", "quote": "Synthetic listing",
+                "established_at_ms": 1, "review_by_ms": 1 + 60 * 86_400_000_i64,
+            })
+        };
+        let documents = BTreeMap::from([(
+            "login-methods".into(),
+            json!({"models": [row("served"), row("withdrawn")]}),
+        )]);
+        let mut upstream = Upstream::new();
+        upstream.insert(
+            "openai".into(),
+            fusiform_release::ProviderFacts {
+                provider: BTreeMap::new(),
+                models: BTreeMap::from([("served".into(), BTreeMap::new())]),
+            },
+        );
+        // A release that only changes something else still carries this
+        // allowlist, so refusing it would stop the consumer for good.
+        validate_received(&documents, &upstream).unwrap();
+        // The writer still has to remove the withdrawn row before it publishes.
+        assert!(validate_published(&documents, &upstream)
+            .unwrap_err()
+            .contains("openai/withdrawn: row is missing from the embedded seed"));
+        // Leniency covers only identities the allowlist itself names.
+        let typo = BTreeMap::from([(
+            "login-methods".into(),
+            json!({"models": [row("served"), {"provider_id": "openai"}]}),
+        )]);
+        assert!(validate_received(&typo, &upstream).is_err());
     }
 
     #[test]

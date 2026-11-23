@@ -28,7 +28,7 @@ mod tests {
     fn shipped_login_methods_load_without_rejects_and_cover_the_documented_models() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 13);
+        assert_eq!(rows.len(), 12);
         for model in [
             "gpt-6.2-astra",
             "gpt-6.2-sol",
@@ -49,7 +49,6 @@ mod tests {
             "gpt-5.4-mini",
             "gpt-5.2",
             "gpt-5.3-codex",
-            "gpt-5.3-codex-spark",
         ] {
             assert_eq!(
                 rows[&("openai".into(), model.into())].auth_methods,
@@ -73,10 +72,10 @@ mod tests {
         let rows = load_reporting_rejects(DOCUMENT).0;
         let first_deadline = rows.values().map(|row| row.review_by_ms).min().unwrap();
         assert!(overdue_at(&rows, first_deadline).is_empty());
-        assert_eq!(overdue_at(&rows, first_deadline + 1).len(), 11);
+        assert_eq!(overdue_at(&rows, first_deadline + 1).len(), 10);
         let last_deadline = rows.values().map(|row| row.review_by_ms).max().unwrap();
         let overdue = overdue_at(&rows, last_deadline + 1);
-        assert_eq!(overdue.len(), 13);
+        assert_eq!(overdue.len(), 12);
         assert!(overdue
             .iter()
             .all(|message| message.contains("re-verify https://")
@@ -88,7 +87,7 @@ mod tests {
         let mut doc = document();
         doc["models"][0]["model_id"] = json!("not-in-the-seed");
         let (rows, rejects) = load_reporting_rejects(&doc.to_string());
-        assert_eq!(rows.len(), 12);
+        assert_eq!(rows.len(), 11);
         assert_eq!(rejects.len(), 1);
         assert!(rejects[0].contains("openai/not-in-the-seed"));
         assert!(rejects[0].contains("missing from the embedded seed"));
@@ -121,14 +120,14 @@ mod tests {
             let mut doc = document();
             doc["models"][0][field] = value;
             let (rows, rejects) = load_reporting_rejects(&doc.to_string());
-            assert_eq!(rows.len(), 12, "{field}: {rejects:?}");
+            assert_eq!(rows.len(), 11, "{field}: {rejects:?}");
             assert_eq!(rejects.len(), 1, "{field}: {rejects:?}");
         }
         let mut doc = document();
         let duplicate = doc["models"][0].clone();
         doc["models"].as_array_mut().unwrap().push(duplicate);
         let (rows, rejects) = load_reporting_rejects(&doc.to_string());
-        assert_eq!(rows.len(), 13);
+        assert_eq!(rows.len(), 12);
         assert_eq!(rejects.len(), 1);
         assert!(rejects[0].contains("duplicate login methods identity"));
     }

@@ -110,15 +110,6 @@
       "quote": "The `gpt-5.2` and `gpt-5.3-codex` models are already deprecated in Codex when you sign in with ChatGPT. Update scripts, configuration files, and `codex exec --model` commands that still reference those models.",
       "established_at_ms": 1794528000000,
       "review_by_ms": 1799712000000
-    },
-    {
-      "provider_id": "openai",
-      "model_id": "gpt-5.3-codex-spark",
-      "auth_methods": ["apikey"],
-      "source_ref": "https://developers.openai.com/codex/models",
-      "quote": "GPT-5.3-Codex-Spark retired on September 14, 2026, and is no longer available in the ChatGPT desktop app, Codex CLI, or IDE extension.",
-      "established_at_ms": 1794528000000,
-      "review_by_ms": 1799712000000
     }
   ]
 }

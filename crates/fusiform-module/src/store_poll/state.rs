@@ -90,7 +90,7 @@ impl Verified {
         check_state(&envelope, &state)?;
         if curation_changed {
             validate_judgments(&state.curation_set)?;
-            crate::curation::validate_published(&state.curation_set.vendor_facts, &state.upstream)?;
+            crate::curation::validate_received(&state.curation_set.vendor_facts, &state.upstream)?;
         }
         Ok(Self { envelope, state })
     }
