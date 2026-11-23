@@ -1456,6 +1456,38 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                ByteAffecting if a consumer renders it into requests.",
     },
     ServedFact {
+        key: "capability.allowed_fallback_models",
+        class: FactClass::Advisory,
+        note: "the vendor's list of model ids a classifier-refused request may \
+               be retried on, in the vendor's order: for anthropic rows, the \
+               Models API's allowed_fallback_models. An EMPTY LIST is a value: \
+               the vendor permits no fallback target. ABSENT MEANS NOT STATED, \
+               never empty. Ids are the vendor's own (anthropic model ids, \
+               which are also the anthropic row ids). Served on current reads \
+               of the vendor's own rows from sourced additions disclosed in \
+               fact_overrides (replaces null), and on dated reads from its \
+               recorded establishment; never projected onto reseller or alias \
+               rows, and suppressed once upstream records the key.",
+    },
+    ServedFact {
+        key: "route.refusal_fallback.bio",
+        class: FactClass::Advisory,
+        note: "the model id the vendor has announced as the retry target \
+               for a refusal whose stop_details.category is bio. Served only \
+               where the vendor publishes that route; ABSENT MEANS NO \
+               PUBLISHED ROUTE, and a consumer falls back to \
+               capability.allowed_fallback_models. Sourced additions \
+               disclosed in fact_overrides, on the vendor's own rows only, \
+               never projected onto alias rows. A category with no announced \
+               route anywhere has no key.",
+    },
+    ServedFact {
+        key: "route.refusal_fallback.cyber",
+        class: FactClass::Advisory,
+        note: "as route.refusal_fallback.bio, for a refusal whose \
+               stop_details.category is cyber",
+    },
+    ServedFact {
         key: "capability.mid_conversation_system",
         class: FactClass::Advisory,
         note: "whether the Claude API accepts persistent role: \"system\" messages \

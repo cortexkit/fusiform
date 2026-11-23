@@ -995,6 +995,8 @@ an addition is always written as one. Each fact key has its own rule:
 | `limit.context`, `limit.output` | replacement only | positive integer | a different positive integer |
 | `capability.server_side_fallback` | addition only | `true` or `false` | `null` |
 | `capability.mid_conversation_system` | addition only | `true` or `false` | `null` |
+| `capability.allowed_fallback_models` | addition only | array of distinct nonempty model ids, possibly empty | `null` |
+| `route.refusal_fallback.bio`, `route.refusal_fallback.cyber` | addition only | one nonempty model id other than the row's own | `null` |
 | `capability.reasoning_default` | addition only | exactly `{"type": "effort", "value": <nonempty effort>}` | `null` |
 | `capability.temperature` | replacement only | boolean | a different published boolean |
 | `model.status` | replacement of the stored `null` only | `"deprecated"` | `null` |
@@ -1008,7 +1010,8 @@ or serve-time derivation (other rates: inheritance and billing planes; `wire.*`:
 served value depend on which ran last. Limits cannot be added: an unpublished
 limit is stored as `null`, so a limit is absent only when a correction
 withholds it, and an addition must never undo a withholding.
-`capability.server_side_fallback`, `capability.mid_conversation_system` and
+`capability.server_side_fallback`, `capability.mid_conversation_system`,
+`capability.allowed_fallback_models`, the `route.refusal_fallback.*` keys and
 `capability.reasoning_default` can only be added, because models.dev has no
 such fields. Ingest stores
 `model.status` on every row, as `null` when
@@ -1039,7 +1042,8 @@ disclosed in the response's `fact_overrides` list
 ([wire contract](wire-contract.md) §5.8). Alias entries are built from their
 target's served facts, so an alias of an overridden row serves the overridden
 value, disclosed under the alias id. `capability.server_side_fallback`,
-`capability.mid_conversation_system` and `capability.reasoning_default` are not
+`capability.mid_conversation_system`, `capability.allowed_fallback_models`,
+the `route.refusal_fallback.*` keys and `capability.reasoning_default` are not
 projected onto aliases, because they describe what the vendor's own API
 accepts or applies and an alias route reaches the model another way. Curated model rows (§4) are
 fusiform's own data and are never overridden.
@@ -1065,6 +1069,30 @@ cap for a non-streaming request, while a streaming request returns up to
 Its alias `google/antigravity-gemini-4-argon` serves 65,536 through the target,
 which matches the route's own declaration in the Antigravity plugin's
 [`model-registry.ts`](https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts).
+
+Fifteen addition rows serve `capability.allowed_fallback_models` on
+`anthropic` rows: the models a classifier-refused request may be retried on,
+in Anthropic's order. The source is Anthropic's Models API, which the
+[refusals and fallback page](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)
+names as where the list is published (`allowed_fallback_models` with the
+`server-side-fallback-2026-07-01` beta header), read from a capture of
+`GET /v1/models` on a Claude subscription login on 2026-11-23. Fable 5,
+5.1, 5.2 and Opus 5.5 list `claude-opus-4-8` then `claude-opus-5`; Opus 5
+lists `claude-opus-4-8`; Sonnet 5.5 lists `claude-sonnet-5`. Haiku 5.5,
+Sonnet 5, Opus 4.8 and the 4.x models the capture names serve `[]`, which
+is the vendor stating that no target is permitted. Undated ids the capture
+does not name (such as `claude-opus-4-5`) carry no fact.
+
+Anthropic publishes no table of retry targets per refusal category; its
+API chooses one server-side and says the choice changes. Two routes are
+announced in its launch articles, and only these are served:
+`anthropic/claude-fable-5` `route.refusal_fallback.bio` = `claude-opus-5`
+("biology-related requests that are blocked on Fable 5 will now route to
+Opus 5", [Opus 5 launch](https://www.anthropic.com/news/claude-opus-5)),
+and `anthropic/claude-opus-5` `route.refusal_fallback.cyber` =
+`claude-opus-4-8` ("any flagged requests will fall back to Opus 4.8 by
+default", same article). Neither is copied to Fable 5.1 or 5.2, which the
+articles do not name.
 
 Five addition rows serve `capability.server_side_fallback` on `anthropic`
 rows, from Anthropic's

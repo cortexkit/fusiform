@@ -184,7 +184,7 @@ mod tests {
     fn shipped_overrides_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 72);
+        assert_eq!(rows.len(), 89);
         let row = argon();
         assert_eq!(row.value, json!(65_536));
         assert_eq!(row.replaces, json!(32_768));
@@ -512,15 +512,26 @@ mod tests {
                     .find(|row| row["fact_key"] == key)
                     .unwrap()
                     .clone();
+                // A route names a model id, so the string case is a valid
+                // value there; a blank id is the malformed string instead.
+                let value = if key.starts_with("route.") && value.is_string() {
+                    json!(" ")
+                } else {
+                    value
+                };
                 row[field] = value;
                 let (rows, rejects) =
                     load_reporting_rejects(&json!({"overrides": [row]}).to_string());
-                assert!(rows.is_empty(), "{field}");
-                assert_eq!(rejects.len(), 1, "{field}");
+                assert!(rows.is_empty(), "{key} {field}");
+                assert_eq!(rejects.len(), 1, "{key} {field}");
                 let reason = if key.starts_with("rate.") && matches!(field, "value" | "replaces") {
                     "must add a sourced token rate"
                 } else if key == "capability.reasoning_default" && field == "value" {
                     "reasoning default value must be exactly"
+                } else if key == "capability.allowed_fallback_models" && field == "value" {
+                    "must be a list of distinct nonempty model ids"
+                } else if key.starts_with("route.") && field == "value" {
+                    "must name one nonempty model id"
                 } else {
                     reason
                 };

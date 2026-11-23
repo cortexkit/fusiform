@@ -783,6 +783,24 @@
       "catalog_version": 0,
       "fact_overrides": [
         {
+          "established_at_ms": 1795392000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.allowed_fallback_models",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "claude-opus-5-5",
+          "notes": "Vendor order is preserved. Only this exact anthropic row is covered: the capture names no reseller, alias or undated id, and the list describes the Claude API, so it is not projected onto alias routes. Refresh from a new Models API capture at review.",
+          "provider_id": "anthropic",
+          "quote": "Docs: \"Each entry must be one of the requested model's permitted targets. With the beta header set, that list is published as `allowed_fallback_models` on the model's entry in the Models API.\" Models API: GET /v1/models?limit=100 with anthropic-beta server-side-fallback-2026-07-01, captured 2026-11-23T11:15:52Z on a Claude subscription login, returned for this model allowed_fallback_models = [\"claude-opus-4-8\", \"claude-opus-5\"].",
+          "reason": "models.dev publishes no fallback-target field. Anthropic publishes each model's permitted fallback targets in its Models API; an empty list is the vendor stating that no target is permitted, which is different from not knowing.",
+          "replaces": null,
+          "review_by_ms": 1800576000000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-11-23)",
+          "value": [
+            "claude-opus-4-8",
+            "claude-opus-5"
+          ]
+        },
+        {
           "established_at_ms": 1793404800000,
           "established_by": "fusiform",
           "fact_key": "capability.mid_conversation_system",
@@ -833,6 +851,10 @@
       ],
       "models": {
         "anthropic/claude-opus-5-5": {
+          "capability.allowed_fallback_models": [
+            "claude-opus-4-8",
+            "claude-opus-5"
+          ],
           "capability.attachment": true,
           "capability.cache_lifetimes": [
             "5m",
@@ -3218,6 +3240,24 @@
       "catalog_version": 0,
       "fact_overrides": [
         {
+          "established_at_ms": 1795392000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.allowed_fallback_models",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "claude-opus-5-5",
+          "notes": "Vendor order is preserved. Only this exact anthropic row is covered: the capture names no reseller, alias or undated id, and the list describes the Claude API, so it is not projected onto alias routes. Refresh from a new Models API capture at review.",
+          "provider_id": "anthropic",
+          "quote": "Docs: \"Each entry must be one of the requested model's permitted targets. With the beta header set, that list is published as `allowed_fallback_models` on the model's entry in the Models API.\" Models API: GET /v1/models?limit=100 with anthropic-beta server-side-fallback-2026-07-01, captured 2026-11-23T11:15:52Z on a Claude subscription login, returned for this model allowed_fallback_models = [\"claude-opus-4-8\", \"claude-opus-5\"].",
+          "reason": "models.dev publishes no fallback-target field. Anthropic publishes each model's permitted fallback targets in its Models API; an empty list is the vendor stating that no target is permitted, which is different from not knowing.",
+          "replaces": null,
+          "review_by_ms": 1800576000000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-11-23)",
+          "value": [
+            "claude-opus-4-8",
+            "claude-opus-5"
+          ]
+        },
+        {
           "established_at_ms": 1793404800000,
           "established_by": "fusiform",
           "fact_key": "capability.mid_conversation_system",
@@ -3268,6 +3308,10 @@
       ],
       "models": {
         "anthropic/claude-opus-5-5": {
+          "capability.allowed_fallback_models": [
+            "claude-opus-4-8",
+            "claude-opus-5"
+          ],
           "capability.attachment": true,
           "capability.cache_lifetimes": [
             "5m",
@@ -6487,6 +6531,128 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — refusal fallbacks anthropic/claude-fable-5": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "capability.allowed_fallback_models",
+          "route.refusal_fallback."
+        ],
+        "model_id": "claude-fable-5",
+        "provider_id": "anthropic"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795392000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.allowed_fallback_models",
+          "model": "anthropic/claude-fable-5",
+          "model_id": "claude-fable-5",
+          "notes": "Vendor order is preserved. Only this exact anthropic row is covered: the capture names no reseller, alias or undated id, and the list describes the Claude API, so it is not projected onto alias routes. Refresh from a new Models API capture at review.",
+          "provider_id": "anthropic",
+          "quote": "Docs: \"Each entry must be one of the requested model's permitted targets. With the beta header set, that list is published as `allowed_fallback_models` on the model's entry in the Models API.\" Models API: GET /v1/models?limit=100 with anthropic-beta server-side-fallback-2026-07-01, captured 2026-11-23T11:15:52Z on a Claude subscription login, returned for this model allowed_fallback_models = [\"claude-opus-4-8\", \"claude-opus-5\"].",
+          "reason": "models.dev publishes no fallback-target field. Anthropic publishes each model's permitted fallback targets in its Models API; an empty list is the vendor stating that no target is permitted, which is different from not knowing.",
+          "replaces": null,
+          "review_by_ms": 1800576000000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-11-23)",
+          "value": [
+            "claude-opus-4-8",
+            "claude-opus-5"
+          ]
+        },
+        {
+          "established_at_ms": 1795392000000,
+          "established_by": "fusiform",
+          "fact_key": "route.refusal_fallback.bio",
+          "model": "anthropic/claude-fable-5",
+          "model_id": "claude-fable-5",
+          "notes": "The category is the refusal's stop_details.category value `bio`. The articles name Fable 5 only, so the route is not copied to Fable 5.1 or 5.2.",
+          "provider_id": "anthropic",
+          "quote": "\"As part of this launch, biology-related requests that are blocked on Fable 5 will now route to Opus 5 rather than Opus 4.8.\" \"Today, Fable still falls back to Opus 5 for requests we consider dual-use\"",
+          "reason": "Anthropic's launch articles state where Fable 5's biology refusals go. Anthropic publishes no complete table of retry targets per refusal category, so only this announced route is served.",
+          "replaces": null,
+          "review_by_ms": 1800576000000,
+          "source_ref": "https://www.anthropic.com/news/claude-opus-5 (accessed 2026-11-23); https://www.anthropic.com/news/improving-fable-5-s-biology-safeguards (accessed 2026-11-23)",
+          "value": "claude-opus-5"
+        }
+      ],
+      "models": {
+        "anthropic/claude-fable-5": {
+          "capability.allowed_fallback_models": [
+            "claude-opus-4-8",
+            "claude-opus-5"
+          ],
+          "route.refusal_fallback.bio": "claude-opus-5"
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — refusal fallbacks anthropic/claude-opus-5": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "capability.allowed_fallback_models",
+          "route.refusal_fallback."
+        ],
+        "model_id": "claude-opus-5",
+        "provider_id": "anthropic"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795392000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.allowed_fallback_models",
+          "model": "anthropic/claude-opus-5",
+          "model_id": "claude-opus-5",
+          "notes": "Vendor order is preserved. Only this exact anthropic row is covered: the capture names no reseller, alias or undated id, and the list describes the Claude API, so it is not projected onto alias routes. Refresh from a new Models API capture at review.",
+          "provider_id": "anthropic",
+          "quote": "Docs: \"Each entry must be one of the requested model's permitted targets. With the beta header set, that list is published as `allowed_fallback_models` on the model's entry in the Models API.\" Models API: GET /v1/models?limit=100 with anthropic-beta server-side-fallback-2026-07-01, captured 2026-11-23T11:15:52Z on a Claude subscription login, returned for this model allowed_fallback_models = [\"claude-opus-4-8\"].",
+          "reason": "models.dev publishes no fallback-target field. Anthropic publishes each model's permitted fallback targets in its Models API; an empty list is the vendor stating that no target is permitted, which is different from not knowing.",
+          "replaces": null,
+          "review_by_ms": 1800576000000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-11-23)",
+          "value": [
+            "claude-opus-4-8"
+          ]
+        },
+        {
+          "established_at_ms": 1795392000000,
+          "established_by": "fusiform",
+          "fact_key": "route.refusal_fallback.cyber",
+          "model": "anthropic/claude-opus-5",
+          "model_id": "claude-opus-5",
+          "notes": "The category is the refusal's stop_details.category value `cyber`. The sentence covers Opus 5's cyber classifiers only.",
+          "provider_id": "anthropic",
+          "quote": "\"In Claude.ai, Claude Code, and Claude Cowork, any flagged requests will fall back to Opus 4.8 by default. Fallbacks to Opus 4.8 can also be enabled on the API.\"",
+          "reason": "Anthropic's Opus 5 launch article states where its cybersecurity refusals go. Anthropic publishes no complete table of retry targets per refusal category, so only this announced route is served.",
+          "replaces": null,
+          "review_by_ms": 1800576000000,
+          "source_ref": "https://www.anthropic.com/news/claude-opus-5 (accessed 2026-11-23)",
+          "value": "claude-opus-4-8"
+        }
+      ],
+      "models": {
+        "anthropic/claude-opus-5": {
+          "capability.allowed_fallback_models": [
+            "claude-opus-4-8"
+          ],
+          "route.refusal_fallback.cyber": "claude-opus-4-8"
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — refused ChatGPT plane row": {
     "request": {
       "arguments": {
@@ -6592,6 +6758,24 @@
       "catalog_version": 0,
       "fact_overrides": [
         {
+          "established_at_ms": 1795392000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.allowed_fallback_models",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "claude-opus-5-5",
+          "notes": "Vendor order is preserved. Only this exact anthropic row is covered: the capture names no reseller, alias or undated id, and the list describes the Claude API, so it is not projected onto alias routes. Refresh from a new Models API capture at review.",
+          "provider_id": "anthropic",
+          "quote": "Docs: \"Each entry must be one of the requested model's permitted targets. With the beta header set, that list is published as `allowed_fallback_models` on the model's entry in the Models API.\" Models API: GET /v1/models?limit=100 with anthropic-beta server-side-fallback-2026-07-01, captured 2026-11-23T11:15:52Z on a Claude subscription login, returned for this model allowed_fallback_models = [\"claude-opus-4-8\", \"claude-opus-5\"].",
+          "reason": "models.dev publishes no fallback-target field. Anthropic publishes each model's permitted fallback targets in its Models API; an empty list is the vendor stating that no target is permitted, which is different from not knowing.",
+          "replaces": null,
+          "review_by_ms": 1800576000000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-11-23)",
+          "value": [
+            "claude-opus-4-8",
+            "claude-opus-5"
+          ]
+        },
+        {
           "established_at_ms": 1793404800000,
           "established_by": "fusiform",
           "fact_key": "capability.mid_conversation_system",
@@ -6642,6 +6826,10 @@
       ],
       "models": {
         "anthropic/claude-opus-5-5": {
+          "capability.allowed_fallback_models": [
+            "claude-opus-4-8",
+            "claude-opus-5"
+          ],
           "capability.attachment": true,
           "capability.cache_lifetimes": [
             "5m",
@@ -8842,6 +9030,9 @@
         "capability.temperature",
         "capability.tool_call",
         "capability.server_side_fallback",
+        "capability.allowed_fallback_models",
+        "route.refusal_fallback.bio",
+        "route.refusal_fallback.cyber",
         "capability.mid_conversation_system",
         "capability.reasoning_default",
         "capability.attachment",
@@ -8948,6 +9139,9 @@
         "capability.temperature",
         "capability.tool_call",
         "capability.server_side_fallback",
+        "capability.allowed_fallback_models",
+        "route.refusal_fallback.bio",
+        "route.refusal_fallback.cyber",
         "capability.mid_conversation_system",
         "capability.reasoning_default",
         "capability.attachment",

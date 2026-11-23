@@ -1754,3 +1754,151 @@ fn an_at_ms_read_serves_the_reasoning_default_only_from_its_recorded_establishme
         }
     }
 }
+
+const ALLOWED_FALLBACKS: &str = "capability.allowed_fallback_models";
+const BIO_ROUTE: &str = "route.refusal_fallback.bio";
+const CYBER_ROUTE: &str = "route.refusal_fallback.cyber";
+
+/// Seeded Claude rows for the refusal-fallback additions, with one reseller
+/// copy of Haiku 5.5 and the Antigravity alias of Opus 5.5 as boundaries.
+fn refusal_fallback_store() -> (CatalogStore, tempfile::TempDir) {
+    let seed: Value =
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+    let mut upstream = json!({});
+    for (provider, ids) in [
+        (
+            "anthropic",
+            vec![
+                "claude-fable-5",
+                "claude-fable-5-1",
+                "claude-opus-5",
+                "claude-opus-5-5",
+                "claude-haiku-5-5",
+                // Undated id: the vendor's capture names only the dated one.
+                "claude-opus-4-5",
+            ],
+        ),
+        ("google", vec!["gemini-3.8-flash"]),
+        ("opencode-go", vec!["claude-haiku-5-5"]),
+    ] {
+        upstream[provider] = seed[provider].clone();
+        upstream[provider]["models"] = json!({});
+        for id in ids {
+            let row = seed[provider]["models"][id].clone();
+            assert!(row.is_object(), "the seed must carry {provider}/{id}");
+            upstream[provider]["models"][id] = row;
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(1_000),
+            outcome: ObservationOutcome::Changed {
+                snapshot_seq: 1_000,
+            },
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: None,
+            detail: None,
+        })
+        .unwrap();
+    let catalog = normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
+        .unwrap()
+        .catalog;
+    let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
+    store.append_eras(&plan.eras).unwrap();
+    (store, dir)
+}
+
+#[test]
+fn refusal_fallback_facts_are_served_as_anthropic_publishes_them() {
+    let (store, _dir) = refusal_fallback_store();
+    let plain = get(&store, json!({}));
+    let oauth = get(
+        &store,
+        json!({"provider_id":"anthropic","auth_method":"oauth"}),
+    );
+    let filtered = get(
+        &store,
+        json!({"fact_prefixes":[ALLOWED_FALLBACKS, "route.refusal_fallback."]}),
+    );
+    for (label, response) in [
+        ("plain", &plain),
+        ("oauth plane", &oauth),
+        ("filtered", &filtered),
+    ] {
+        let row = |id: &str| {
+            response
+                .models
+                .get(&format!("anthropic/{id}"))
+                .unwrap_or_else(|| panic!("{label}: no anthropic/{id} row"))
+        };
+        assert_eq!(
+            row("claude-opus-5-5")[ALLOWED_FALLBACKS],
+            json!(["claude-opus-4-8", "claude-opus-5"]),
+            "{label}: the vendor's order is kept"
+        );
+        assert_eq!(
+            row("claude-opus-5")[ALLOWED_FALLBACKS],
+            json!(["claude-opus-4-8"]),
+            "{label}"
+        );
+        // An empty list is the vendor saying no target is permitted, so it is
+        // served, not dropped as if it were unknown.
+        assert_eq!(
+            row("claude-haiku-5-5").get(ALLOWED_FALLBACKS),
+            Some(&json!([])),
+            "{label}"
+        );
+        assert_eq!(
+            row("claude-fable-5")[BIO_ROUTE],
+            json!("claude-opus-5"),
+            "{label}"
+        );
+        assert_eq!(
+            row("claude-opus-5")[CYBER_ROUTE],
+            json!("claude-opus-4-8"),
+            "{label}"
+        );
+        // The articles name Fable 5 only.
+        assert!(!row("claude-fable-5-1").contains_key(BIO_ROUTE), "{label}");
+        assert!(!row("claude-fable-5").contains_key(CYBER_ROUTE), "{label}");
+        // The capture names only the dated 4.5 id; the undated one is not
+        // guessed. A filtered read drops the row entirely, having no fact.
+        assert!(
+            response
+                .models
+                .get("anthropic/claude-opus-4-5")
+                .is_none_or(|facts| !facts.contains_key(ALLOWED_FALLBACKS)),
+            "{label}"
+        );
+        let routes = disclosed_fact(response, "anthropic/claude-fable-5", BIO_ROUTE);
+        assert_eq!(routes.len(), 1, "{label}: {:?}", response.fact_overrides);
+        assert!(routes[0]
+            .source_ref
+            .contains("https://www.anthropic.com/news/claude-opus-5"));
+        assert_eq!(routes[0].replaces, Value::Null, "{label}");
+    }
+    // A reseller copy and the Antigravity alias reach the model another way.
+    for other in ["opencode-go/claude-haiku-5-5", OPUS_ALIAS] {
+        let facts = &plain.models[other];
+        assert!(!facts.contains_key(ALLOWED_FALLBACKS), "{other}");
+        assert!(
+            !facts
+                .keys()
+                .any(|key| key.starts_with("route.refusal_fallback.")),
+            "{other}"
+        );
+    }
+}

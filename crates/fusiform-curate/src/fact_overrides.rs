@@ -40,6 +40,14 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 /// are vendor-documented request features that models.dev has no fields for,
 /// so they can only arrive as additions.
 ///
+/// `capability.allowed_fallback_models` is the vendor's list of models a
+/// refused request may be retried on, in the vendor's order, and
+/// `route.refusal_fallback.<category>` is a retry target the vendor has
+/// announced for one refusal category. models.dev publishes neither, so both
+/// are additions. An empty list is a value: the vendor permits no target.
+/// Only categories with an announced target have a key here; a category
+/// without one has no fact, which a consumer reads as unknown.
+///
 /// `capability.reasoning_default` is the reasoning effort a vendor documents
 /// its own API applying when a request names none. models.dev publishes no
 /// default, so it too can only arrive as an addition, and it is served only
@@ -56,11 +64,14 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 /// replacement and an image-rate addition, before alias and plane projection.
 /// `capability.temperature` replaces only a published boolean when the vendor
 /// documents different acceptance; it never fills an unknown upstream claim.
-pub const OVERRIDABLE_FACTS: [&str; 10] = [
+pub const OVERRIDABLE_FACTS: [&str; 13] = [
     "limit.context",
     "limit.output",
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
+    "capability.allowed_fallback_models",
+    "route.refusal_fallback.bio",
+    "route.refusal_fallback.cyber",
     "capability.reasoning_default",
     "capability.temperature",
     "model.status",
@@ -72,9 +83,12 @@ pub const OVERRIDABLE_FACTS: [&str; 10] = [
 /// The facts only an addition row can serve, because models.dev publishes no
 /// value for them. A read filtered to one of these must still reach the rows
 /// an addition applies to, even though the store holds no matching fact.
-pub const ADDED_FACTS: [&str; 5] = [
+pub const ADDED_FACTS: [&str; 8] = [
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
+    "capability.allowed_fallback_models",
+    "route.refusal_fallback.bio",
+    "route.refusal_fallback.cyber",
     "capability.reasoning_default",
     "rate.output_image",
     "rate.cached_input_audio",
@@ -143,6 +157,26 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
+        "capability.allowed_fallback_models" => {
+            if !model_id_list(&row.value) {
+                Some("allowed fallback models must be a list of distinct nonempty model ids, possibly empty")
+            } else if !row.replaces.is_null() {
+                Some("capability rows must be additions: models.dev publishes no such field, so replaces must be null")
+            } else {
+                None
+            }
+        }
+        "route.refusal_fallback.bio" | "route.refusal_fallback.cyber" => {
+            if row.value.as_str().is_none_or(|id| id.trim().is_empty()) {
+                Some("a refusal fallback route must name one nonempty model id")
+            } else if row.value.as_str() == Some(row.model_id.as_str()) {
+                Some("a refusal fallback route cannot name the refused model itself")
+            } else if !row.replaces.is_null() {
+                Some("route rows must be additions: models.dev publishes no such field, so replaces must be null")
+            } else {
+                None
+            }
+        }
         "capability.reasoning_default" => {
             if default_effort(&row.value).is_none()
                 || row.value.as_object().is_none_or(|object| object.len() != 2)
@@ -167,8 +201,20 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
-        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system, capability.reasoning_default, capability.temperature, model.status, rate.output, rate.output_image and rate.cached_input_audio may be overridden"),
+        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system, capability.allowed_fallback_models, route.refusal_fallback.bio, route.refusal_fallback.cyber, capability.reasoning_default, capability.temperature, model.status, rate.output, rate.output_image and rate.cached_input_audio may be overridden"),
     }
+}
+
+/// Whether a value is a list of distinct nonempty model ids. The vendor's
+/// order is kept as given, and an empty list is allowed.
+fn model_id_list(value: &serde_json::Value) -> bool {
+    value.as_array().is_some_and(|ids| {
+        let mut seen = std::collections::BTreeSet::new();
+        ids.iter().all(|id| {
+            id.as_str()
+                .is_some_and(|id| !id.trim().is_empty() && seen.insert(id))
+        })
+    })
 }
 
 /// The effort a `capability.reasoning_default` value names, when it has the

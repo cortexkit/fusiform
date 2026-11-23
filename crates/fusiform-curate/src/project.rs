@@ -118,6 +118,9 @@ fn omit_route_dependent_alias_facts(facts: &mut BTreeMap<String, serde_json::Val
     // model through another serving path, such as Antigravity's Google-managed
     // Vertex backend, is not established to accept the `fallbacks` parameter.
     facts.remove("capability.server_side_fallback");
+    // The vendor's permitted fallback targets describe its own API. Route-level
+    // refusal targets are already dropped with every other `route.` fact above.
+    facts.remove("capability.allowed_fallback_models");
     // Claude API message support does not establish what a Code Assist alias
     // accepts, even when it routes to the same model.
     facts.remove("capability.mid_conversation_system");

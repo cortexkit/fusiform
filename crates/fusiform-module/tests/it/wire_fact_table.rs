@@ -392,6 +392,9 @@ pub(crate) const ADDITION_ONLY: &[&str] = &[
     "rate.cached_input_audio",
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
+    "capability.allowed_fallback_models",
+    "route.refusal_fallback.bio",
+    "route.refusal_fallback.cyber",
     "capability.reasoning_default",
 ];
 

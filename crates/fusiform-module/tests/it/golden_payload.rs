@@ -462,6 +462,10 @@ fn render_all() -> String {
     ordinary
         .as_object_mut()
         .unwrap()
+        .extend(render_refusal_fallbacks());
+    ordinary
+        .as_object_mut()
+        .unwrap()
         .extend(render_speed_twins());
     ordinary.as_object_mut().unwrap().insert(
         "catalog.get — Hydrogen alias with its own output limit".into(),
@@ -672,8 +676,10 @@ fn current_cache_lifetime_models_keep_the_original_golden_bytes() {
         (
             "anthropic/claude-opus-5-5",
             // Re-pinned when current reads began serving the sourced
-            // `capability.reasoning_default` addition and its disclosure.
-            "0298f6726782f2f0ad1030706d32aab899fe790f689060fb666265180e5ba862",
+            // `capability.reasoning_default` addition and its disclosure, and
+            // again for the sourced `capability.allowed_fallback_models`
+            // addition and its disclosure.
+            "2871dbeb576fe0814c821492490dc279619674497dba006f82c7925ff324f2bf",
         ),
         (
             "openai/gpt-6.1-sol",
@@ -777,6 +783,39 @@ pub(super) fn render_temperature() -> serde_json::Map<String, serde_json::Value>
         response["resolved_at_ms"] = NOW_PLACEHOLDER.into();
         cases.insert(
             format!("catalog.get — {label}"),
+            serde_json::json!({"request":request,"response":response}),
+        );
+    }
+    cases
+}
+
+/// The two Claude rows that carry Anthropic's announced per-category refusal
+/// routes, with their permitted fallback lists, so readers pin both shapes.
+pub(super) fn render_refusal_fallbacks() -> serde_json::Map<String, serde_json::Value> {
+    let mut seed: serde_json::Value =
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+    seed.as_object_mut().unwrap().retain(|provider, row| {
+        if provider != "anthropic" {
+            return false;
+        }
+        row["models"]
+            .as_object_mut()
+            .unwrap()
+            .retain(|id, _| ["claude-fable-5", "claude-opus-5"].contains(&id.as_str()));
+        true
+    });
+    let (store, _dir) = super::temperature::store(seed);
+    let mut cases = serde_json::Map::new();
+    for model in ["claude-fable-5", "claude-opus-5"] {
+        let request = serde_json::json!({"name":"catalog.get","arguments":{
+            "provider_id":"anthropic","model_id":model,
+            "fact_prefixes":["capability.allowed_fallback_models", "route.refusal_fallback."]
+        }});
+        let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+        let mut response = serde_json::to_value(response).unwrap();
+        response["resolved_at_ms"] = NOW_PLACEHOLDER.into();
+        cases.insert(
+            format!("catalog.get — refusal fallbacks anthropic/{model}"),
             serde_json::json!({"request":request,"response":response}),
         );
     }
@@ -1869,6 +1908,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
                 + served_history.len()
                 + render_attachment_limits().len()
                 + render_temperature().len()
+                + render_refusal_fallbacks().len()
                 + plain_speed_twins,
         ),
         (
@@ -1899,6 +1939,10 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
             2,
         ),
         (serde_json::to_string(&render_temperature()).unwrap(), 6),
+        (
+            serde_json::to_string(&render_refusal_fallbacks()).unwrap(),
+            2,
+        ),
         (
             serde_json::to_string(&speed_twins).unwrap(),
             plain_speed_twins,
