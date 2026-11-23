@@ -247,6 +247,14 @@
     {
       "provider_id": "kimi-code-plan-global",
       "tier": "allegro",
+      "service_tiers": {
+        "state": "established",
+        "tiers": [{"tier": "fast", "included_usage_rate": {"units": 2, "exponent": 0}}],
+        "source_ref": "https://www.kimi.com/code/docs/en/kimi-code/models.html: K3.1 Pro Highspeed has 'identical model capabilities' and 'approximately 2–3× speed, 2× quota usage'. https://www.kimi.com/code/docs/en/kimi-code/membership.html: 'HighSpeed access (including K3.1 Pro Highspeed and K2.7 Code HighSpeed) | Allegretto and above | Pro and above'. https://www.kimi.com/zh-hans/resources/kimi-k2-7-code-pricing: recorded first-party row 'Monthly price | Moderato: $19/month | Allegretto: $39/month | Allegro: $99/month | Vivace: $199/month'. https://www.kimi.com/en/help/membership/membership-pricing: 'Andante, Moderato, Allegretto, and Allegro are legacy plans.' Allegro's ordering above Allegretto rests on the recorded price row because the live pricing page now shows only the new plans. The fast entitlement and 2× quota usage apply to K3.1 Pro Highspeed; no purchased-credit rate is stated.",
+        "established_by": "fusiform",
+        "established_at_ms": 1794700800000,
+        "review_by_ms": 1799884800000
+      },
       "price": {"minor_units": 9900, "exponent": 2, "currency": "USD", "period": "month"},
       "quota_value": {
         "state": "not_established",

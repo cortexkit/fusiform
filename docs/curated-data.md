@@ -60,11 +60,15 @@ reason and review date. Unknown tier names, floats and missing provenance are
 counted rejects without losing the independently sourced price. These fields
 are never stored, so changing only service tiers writes no price era.
 OpenAI Plus, Pro 100, Pro 200 and Pro 500 have 30-day service-tier reviews
-because Pro 500 and the consumption rates are recent. Other providers remain
-unknown. A vendor that grants a tier without stating a purchased-credit rate
-gets its `credit_rate` omitted, never zero. Vendor display labels live on
-model `route.mode_labels`, not on the plan. Model availability stays on model
-rows.
+because Pro 500 and the consumption rates are recent. Kimi Code Allegro
+includes `fast` for K3.1 Pro Highspeed at 2× included quota usage, reviewed
+after 60 days. Its source quotes the recorded legacy price row, the Help
+Center's legacy names and the membership guide's “Allegretto and above”
+threshold. The original live pricing page now shows only new plan names;
+the recorded price row establishes Allegro above Allegretto. No Kimi
+purchased-credit rate is stated, so `credit_rate` is omitted, never zero.
+The vendor display label lives on `route.mode_labels`, not on the plan.
+Other providers remain unknown. Model availability stays on model rows.
 
 The optional `concurrency` field on a plan-price cell records a sourced cap on
 simultaneous requests. Absent means unknown, **never unlimited and never zero**.

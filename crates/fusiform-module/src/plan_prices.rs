@@ -840,21 +840,31 @@ mod tests {
         assert!(rows_for_test().iter().all(|r| r.service_tiers.is_none()));
     }
 
-    /// A vendor that grants a tier without stating a purchased-credit rate
-    /// (Kimi's Highspeed on legacy Allegro: "2× quota usage", no credit
-    /// figure) loads and round-trips with `credit_rate` omitted, never zero.
     #[test]
-    fn a_tier_without_a_stated_credit_rate_omits_it() {
-        let mut value = established_service_tiers();
-        value["tiers"] = serde_json::json!([{
-            "tier":"fast", "included_usage_rate":{"units":2,"exponent":0}
-        }]);
+    fn kimi_allegro_fast_tier_omits_an_unstated_credit_rate() {
+        let row = rows()
+            .iter()
+            .find(|row| row.provider_id == "kimi-code-plan-global" && row.tier == "allegro")
+            .unwrap();
+        let value = serde_json::to_value(row.service_tiers.as_ref().unwrap()).unwrap();
+        assert_eq!(
+            value["tiers"],
+            serde_json::json!([{
+                "tier":"fast", "included_usage_rate":{"units":2,"exponent":0}
+            }])
+        );
+        let source = value["source_ref"].as_str().unwrap();
+        assert!(source.contains("Allegro: $99/month"));
+        assert!(source.contains("Allegretto and above"));
+        assert!(source.contains("2× quota usage"));
+        assert!(source.contains("live pricing page now shows only the new plans"));
         let (rows, rejects) =
             load_reporting_rejects(&service_tiers_document(value.clone()).to_string());
         assert!(rejects.is_empty(), "{rejects:?}");
-        let served = serde_json::to_value(rows[0].service_tiers.as_ref().unwrap()).unwrap();
-        assert_eq!(served, value);
-        assert!(served["tiers"][0].get("credit_rate").is_none());
+        assert_eq!(
+            serde_json::to_value(rows[0].service_tiers.as_ref().unwrap()).unwrap(),
+            value
+        );
     }
 
     #[test]
