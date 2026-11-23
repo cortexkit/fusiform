@@ -48,6 +48,13 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 /// Only categories with an announced target have a key here; a category
 /// without one has no fact, which a consumer reads as unknown.
 ///
+/// `capability.effort_change_cache` says whether the vendor documents a way
+/// to change reasoning effort mid-conversation that keeps the cached prompt
+/// prefix. `true` obliges a runner to change effort that way, and is the
+/// only value that lets it skip telling the context manager the cache was
+/// lost. `false` and absent both mean an effort change loses the cache, and
+/// a `false` row exists only to record why.
+///
 /// `capability.reasoning_default` is the reasoning effort a vendor documents
 /// its own API applying when a request names none. models.dev publishes no
 /// default, so it too can only arrive as an addition, and it is served only
@@ -64,7 +71,7 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 /// replacement and an image-rate addition, before alias and plane projection.
 /// `capability.temperature` replaces only a published boolean when the vendor
 /// documents different acceptance; it never fills an unknown upstream claim.
-pub const OVERRIDABLE_FACTS: [&str; 13] = [
+pub const OVERRIDABLE_FACTS: [&str; 14] = [
     "limit.context",
     "limit.output",
     "capability.server_side_fallback",
@@ -72,6 +79,7 @@ pub const OVERRIDABLE_FACTS: [&str; 13] = [
     "capability.allowed_fallback_models",
     "route.refusal_fallback.bio",
     "route.refusal_fallback.cyber",
+    "capability.effort_change_cache",
     "capability.reasoning_default",
     "capability.temperature",
     "model.status",
@@ -83,12 +91,13 @@ pub const OVERRIDABLE_FACTS: [&str; 13] = [
 /// The facts only an addition row can serve, because models.dev publishes no
 /// value for them. A read filtered to one of these must still reach the rows
 /// an addition applies to, even though the store holds no matching fact.
-pub const ADDED_FACTS: [&str; 8] = [
+pub const ADDED_FACTS: [&str; 9] = [
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
     "capability.allowed_fallback_models",
     "route.refusal_fallback.bio",
     "route.refusal_fallback.cyber",
+    "capability.effort_change_cache",
     "capability.reasoning_default",
     "rate.output_image",
     "rate.cached_input_audio",
@@ -148,7 +157,9 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
-        "capability.server_side_fallback" | "capability.mid_conversation_system" => {
+        "capability.server_side_fallback"
+        | "capability.mid_conversation_system"
+        | "capability.effort_change_cache" => {
             if !row.value.is_boolean() {
                 Some("capability addition value must be a boolean")
             } else if !row.replaces.is_null() {
@@ -201,7 +212,7 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
-        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system, capability.allowed_fallback_models, route.refusal_fallback.bio, route.refusal_fallback.cyber, capability.reasoning_default, capability.temperature, model.status, rate.output, rate.output_image and rate.cached_input_audio may be overridden"),
+        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system, capability.allowed_fallback_models, route.refusal_fallback.bio, route.refusal_fallback.cyber, capability.effort_change_cache, capability.reasoning_default, capability.temperature, model.status, rate.output, rate.output_image and rate.cached_input_audio may be overridden"),
     }
 }
 

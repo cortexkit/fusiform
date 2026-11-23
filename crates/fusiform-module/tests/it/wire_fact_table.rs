@@ -395,6 +395,7 @@ pub(crate) const ADDITION_ONLY: &[&str] = &[
     "capability.allowed_fallback_models",
     "route.refusal_fallback.bio",
     "route.refusal_fallback.cyber",
+    "capability.effort_change_cache",
     "capability.reasoning_default",
 ];
 

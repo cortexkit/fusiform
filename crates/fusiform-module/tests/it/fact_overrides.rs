@@ -1902,3 +1902,40 @@ fn refusal_fallback_facts_are_served_as_anthropic_publishes_them() {
         );
     }
 }
+
+const EFFORT_CACHE: &str = "capability.effort_change_cache";
+
+#[test]
+fn effort_change_cache_follows_the_vendor_documentation() {
+    let (store, _dir) = refusal_fallback_store();
+    let plain = get(&store, json!({}));
+    let filtered = get(&store, json!({"fact_prefixes":[EFFORT_CACHE]}));
+    for (label, response) in [("plain", &plain), ("filtered", &filtered)] {
+        let fact = |id: &str| {
+            response
+                .models
+                .get(&format!("anthropic/{id}"))
+                .and_then(|facts| facts.get(EFFORT_CACHE))
+        };
+        // Anthropic's per-message effort page lists these models.
+        for id in [
+            "claude-fable-5-1",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-haiku-5-5",
+        ] {
+            assert_eq!(fact(id), Some(&json!(true)), "{label}: {id}");
+        }
+        // The page names Fable 5 as lacking per-message effort.
+        assert_eq!(fact("claude-fable-5"), Some(&json!(false)), "{label}");
+        // Not documented either way: absent, which the runner treats as false.
+        assert_eq!(fact("claude-opus-4-5"), None, "{label}");
+        let rows = disclosed_fact(response, "anthropic/claude-opus-5-5", EFFORT_CACHE);
+        assert_eq!(rows.len(), 1, "{label}: {:?}", response.fact_overrides);
+        assert!(rows[0].source_ref.contains("effort-per-message"));
+    }
+    // A reseller copy and an alias route reach the model another way.
+    for other in ["opencode-go/claude-haiku-5-5", OPUS_ALIAS] {
+        assert!(!plain.models[other].contains_key(EFFORT_CACHE), "{other}");
+    }
+}

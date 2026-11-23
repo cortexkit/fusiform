@@ -678,16 +678,18 @@ fn current_cache_lifetime_models_keep_the_original_golden_bytes() {
             // Re-pinned when current reads began serving the sourced
             // `capability.reasoning_default` addition and its disclosure, and
             // again for the sourced `capability.allowed_fallback_models`
-            // addition and its disclosure.
-            "2871dbeb576fe0814c821492490dc279619674497dba006f82c7925ff324f2bf",
+            // addition and its disclosure, and again for the sourced
+            // `capability.effort_change_cache` addition and its disclosure.
+            "913ac517cac45237cd90844ebedbeaffe0ce05957d60ff2e5c3114c3cb40fa81",
         ),
         (
             "openai/gpt-6.1-sol",
             // Re-pinned after the 2026-11-17 seed refresh: upstream added a
             // `flex` service mode to this model, which adds its own mode keys.
             // Re-pinned again when current reads began serving the sourced
-            // `capability.reasoning_default` addition and its disclosure.
-            "7645f92e2b7702d3a468cc7d66186b2e7140fd03a05362929d9681524f99838d",
+            // `capability.reasoning_default` addition and its disclosure, and
+            // for the sourced `capability.effort_change_cache` addition.
+            "3e1d184e9ab0e38ea1e3ee75263f59193f6370417b21ec70b2a9d6d35913a41e",
         ),
     ] {
         let label = format!("catalog.get — cache lifetimes {identity}");

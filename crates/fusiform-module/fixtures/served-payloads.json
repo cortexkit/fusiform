@@ -801,6 +801,21 @@
           ]
         },
         {
+          "established_at_ms": 1795392000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.effort_change_cache",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "claude-opus-5-5",
+          "notes": "true obliges the runner to send the change as a per-message output_config with the mid-conversation-output-config-2026-07-01 beta and keep the top-level effort at the conversation's baseline. Only this first-party row is covered.",
+          "provider_id": "anthropic",
+          "quote": "\"Prefer per-message effort over changing the top-level value between requests. A per-message change leaves everything before it unchanged, so the cached prefix still matches. A top-level change can invalidate all or part of the cache.\" The Availability table lists per-message effort on the Claude API for Claude Opus 5.5.",
+          "reason": "models.dev publishes no such field. Anthropic documents per-message effort for this model, which changes effort without invalidating the cached prefix.",
+          "replaces": null,
+          "review_by_ms": 1800576000000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/effort-per-message (accessed 2026-11-23)",
+          "value": true
+        },
+        {
           "established_at_ms": 1793404800000,
           "established_by": "fusiform",
           "fact_key": "capability.mid_conversation_system",
@@ -860,6 +875,7 @@
             "5m",
             "1h"
           ],
+          "capability.effort_change_cache": true,
           "capability.input_modalities": [
             "image",
             "pdf",
@@ -3258,6 +3274,21 @@
           ]
         },
         {
+          "established_at_ms": 1795392000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.effort_change_cache",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "claude-opus-5-5",
+          "notes": "true obliges the runner to send the change as a per-message output_config with the mid-conversation-output-config-2026-07-01 beta and keep the top-level effort at the conversation's baseline. Only this first-party row is covered.",
+          "provider_id": "anthropic",
+          "quote": "\"Prefer per-message effort over changing the top-level value between requests. A per-message change leaves everything before it unchanged, so the cached prefix still matches. A top-level change can invalidate all or part of the cache.\" The Availability table lists per-message effort on the Claude API for Claude Opus 5.5.",
+          "reason": "models.dev publishes no such field. Anthropic documents per-message effort for this model, which changes effort without invalidating the cached prefix.",
+          "replaces": null,
+          "review_by_ms": 1800576000000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/effort-per-message (accessed 2026-11-23)",
+          "value": true
+        },
+        {
           "established_at_ms": 1793404800000,
           "established_by": "fusiform",
           "fact_key": "capability.mid_conversation_system",
@@ -3317,6 +3348,7 @@
             "5m",
             "1h"
           ],
+          "capability.effort_change_cache": true,
           "capability.input_modalities": [
             "image",
             "pdf",
@@ -3985,6 +4017,21 @@
       "catalog_version": 0,
       "fact_overrides": [
         {
+          "established_at_ms": 1795392000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.effort_change_cache",
+          "model": "openai/gpt-6.1-sol",
+          "model_id": "gpt-6.1-sol",
+          "notes": "true obliges the runner to send the change as a configuration_update item and keep the request-level effort at the conversation's baseline. A probe on 2026-11-23 on the ChatGPT backend agreed for gpt-6.2-sol, gpt-6.1-sol and gpt-6-luna: the item kept the cache, a request-level change lost it. Only this first-party row is covered.",
+          "provider_id": "openai",
+          "quote": "\"Use `configuration_update` to increase reasoning effort for difficult work or reduce it for routine follow-ups. Add the update between responses while leaving the request-level `reasoning.effort` unchanged. This preserves the original prompt prefix for prompt caching.\" \"On supported GPT-6 and later models, you can update reasoning effort and response format in standard, single-agent mode.\"",
+          "reason": "models.dev publishes no such field. OpenAI documents an in-conversation effort change that keeps the cached prompt prefix on GPT-6 and later models.",
+          "replaces": null,
+          "review_by_ms": 1800576000000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-23)",
+          "value": true
+        },
+        {
           "established_at_ms": 1794960000000,
           "established_by": "fusiform",
           "fact_key": "capability.reasoning_default",
@@ -4021,6 +4068,7 @@
             "30m",
             "12h"
           ],
+          "capability.effort_change_cache": true,
           "capability.input_modalities": [
             "image",
             "pdf",
@@ -6117,6 +6165,21 @@
       "catalog_version": 0,
       "fact_overrides": [
         {
+          "established_at_ms": 1795392000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.effort_change_cache",
+          "model": "openai/gpt-6.1-sol",
+          "model_id": "gpt-6.1-sol",
+          "notes": "true obliges the runner to send the change as a configuration_update item and keep the request-level effort at the conversation's baseline. A probe on 2026-11-23 on the ChatGPT backend agreed for gpt-6.2-sol, gpt-6.1-sol and gpt-6-luna: the item kept the cache, a request-level change lost it. Only this first-party row is covered.",
+          "provider_id": "openai",
+          "quote": "\"Use `configuration_update` to increase reasoning effort for difficult work or reduce it for routine follow-ups. Add the update between responses while leaving the request-level `reasoning.effort` unchanged. This preserves the original prompt prefix for prompt caching.\" \"On supported GPT-6 and later models, you can update reasoning effort and response format in standard, single-agent mode.\"",
+          "reason": "models.dev publishes no such field. OpenAI documents an in-conversation effort change that keeps the cached prompt prefix on GPT-6 and later models.",
+          "replaces": null,
+          "review_by_ms": 1800576000000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-23)",
+          "value": true
+        },
+        {
           "established_at_ms": 1794960000000,
           "established_by": "fusiform",
           "fact_key": "capability.reasoning_default",
@@ -6153,6 +6216,7 @@
             "30m",
             "12h"
           ],
+          "capability.effort_change_cache": true,
           "capability.input_modalities": [
             "image",
             "pdf",
@@ -6776,6 +6840,21 @@
           ]
         },
         {
+          "established_at_ms": 1795392000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.effort_change_cache",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "claude-opus-5-5",
+          "notes": "true obliges the runner to send the change as a per-message output_config with the mid-conversation-output-config-2026-07-01 beta and keep the top-level effort at the conversation's baseline. Only this first-party row is covered.",
+          "provider_id": "anthropic",
+          "quote": "\"Prefer per-message effort over changing the top-level value between requests. A per-message change leaves everything before it unchanged, so the cached prefix still matches. A top-level change can invalidate all or part of the cache.\" The Availability table lists per-message effort on the Claude API for Claude Opus 5.5.",
+          "reason": "models.dev publishes no such field. Anthropic documents per-message effort for this model, which changes effort without invalidating the cached prefix.",
+          "replaces": null,
+          "review_by_ms": 1800576000000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/effort-per-message (accessed 2026-11-23)",
+          "value": true
+        },
+        {
           "established_at_ms": 1793404800000,
           "established_by": "fusiform",
           "fact_key": "capability.mid_conversation_system",
@@ -6835,6 +6914,7 @@
             "5m",
             "1h"
           ],
+          "capability.effort_change_cache": true,
           "capability.input_modalities": [
             "image",
             "pdf",
@@ -9031,6 +9111,7 @@
         "capability.tool_call",
         "capability.server_side_fallback",
         "capability.allowed_fallback_models",
+        "capability.effort_change_cache",
         "route.refusal_fallback.bio",
         "route.refusal_fallback.cyber",
         "capability.mid_conversation_system",
@@ -9140,6 +9221,7 @@
         "capability.tool_call",
         "capability.server_side_fallback",
         "capability.allowed_fallback_models",
+        "capability.effort_change_cache",
         "route.refusal_fallback.bio",
         "route.refusal_fallback.cyber",
         "capability.mid_conversation_system",

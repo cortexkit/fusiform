@@ -121,6 +121,10 @@ fn omit_route_dependent_alias_facts(facts: &mut BTreeMap<String, serde_json::Val
     // The vendor's permitted fallback targets describe its own API. Route-level
     // refusal targets are already dropped with every other `route.` fact above.
     facts.remove("capability.allowed_fallback_models");
+    // Whether an effort change keeps the cache depends on the route's own
+    // request form (an Antigravity level is its own wire model id), so a
+    // target's documented answer does not carry over.
+    facts.remove("capability.effort_change_cache");
     // Claude API message support does not establish what a Code Assist alias
     // accepts, even when it routes to the same model.
     facts.remove("capability.mid_conversation_system");

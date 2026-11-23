@@ -184,6 +184,7 @@ value would do to a consumer:
 | `capability.tool_call` | advisory | `true`, `false` or `null` |
 | `capability.server_side_fallback` | advisory | `true` or `false` on the `anthropic` rows Anthropic's documentation covers, from sourced additions disclosed in `fact_overrides` (§5.8), on current reads and on dated reads from the addition's recorded establishment; otherwise no fact, which means not stated, never `false` |
 | `capability.allowed_fallback_models` | advisory | array of the vendor's model ids a classifier-refused request may be retried on, in the vendor's order (Anthropic's Models API `allowed_fallback_models`); `[]` means the vendor permits no target; sourced additions on the vendor's own `anthropic` rows, disclosed in `fact_overrides` (§5.8), on current reads and on dated reads from the addition's recorded establishment, never on reseller or alias rows; otherwise no fact, which means not stated, never `[]` |
+| `capability.effort_change_cache` | byte-affecting | `true` when the vendor documents a mid-conversation reasoning-effort change that keeps the cached prompt prefix (OpenAI's `configuration_update` item on GPT-6 and later; Anthropic's per-message `output_config` on the models its effort-per-message page lists): a runner must change effort that way, keep the request-level effort at the session's baseline, and does not report a cache loss to the context manager. `false` or no fact: an effort change busts the cache, so the runner reports it as an `effort_change` cache loss (a compaction ride); `false` only records why. A thinking-mode change busts the cache whatever this says. Sourced additions on the vendor's own rows, disclosed in `fact_overrides` (§5.8), never on reseller or alias rows |
 | `route.refusal_fallback.bio`, `route.refusal_fallback.cyber` | advisory | the model id the vendor has announced as the retry target for a refusal whose `stop_details.category` names that category; served only where the vendor published the route (today `anthropic/claude-fable-5` `bio` → `claude-opus-5` and `anthropic/claude-opus-5` `cyber` → `claude-opus-4-8`), as sourced additions disclosed in `fact_overrides` (§5.8); otherwise no fact, which means no published route, and a consumer falls back to `capability.allowed_fallback_models` |
 | `capability.mid_conversation_system` | advisory | `true` or `false` for persistent `role: "system"` messages inside `messages`, without a beta header, not the beta turn-scoped `clear_at` variant; sourced additions on documented `anthropic` rows, disclosed in `fact_overrides` (§5.8), served on current reads and on dated reads from the addition's recorded establishment, never inherited by resellers, Bedrock, Vertex or Code Assist aliases; any upstream value wins; otherwise no fact, which means not stated, never `false` |
 | `capability.reasoning_default` | byte-affecting | `{"type":"effort","value":<effort>}`: the reasoning effort the vendor documents its own API applying when a request names none, so a runner can send it explicitly; sourced additions on the vendor's first-party rows, disclosed in `fact_overrides` (§5.8), served on current reads and on dated reads from the addition's recorded establishment, and only while the row's `capability.reasoning_options` lists the effort in an entry of type `effort`; never projected onto other rows sharing `model.canonical_id` or onto alias routes, which state `route.reasoning_default`; any upstream value wins; otherwise no fact, which means the vendor documents no default |
@@ -862,8 +863,8 @@ fact models.dev publishes no value for, sourced from the vendor's own
 documentation. The added facts are `capability.server_side_fallback`,
 `capability.mid_conversation_system`, `capability.allowed_fallback_models`,
 `route.refusal_fallback.bio`, `route.refusal_fallback.cyber`,
-`capability.reasoning_default`, `rate.output_image` and
-`rate.cached_input_audio`.
+`capability.effort_change_cache`, `capability.reasoning_default`,
+`rate.output_image` and `rate.cached_input_audio`.
 
 For example, a current `google/gemini-4-argon` read serves
 `limit.output: 65536` where models.dev publishes 32,768, Google's cap for a
@@ -925,8 +926,9 @@ Absence means the vendor documents no default, as for `openai/gpt-6.2-sol`.
    alias id in `model` and the target in `provider_id`/`model_id`
    (`fact_overrides::the_antigravity_alias_serves_the_overridden_value`).
    `capability.server_side_fallback`, `capability.mid_conversation_system`,
-   `capability.allowed_fallback_models`, the `route.refusal_fallback.*` keys
-   and `capability.reasoning_default` are exceptions: they describe what the
+   `capability.allowed_fallback_models`, the `route.refusal_fallback.*` keys,
+   `capability.effort_change_cache` and `capability.reasoning_default` are
+   exceptions: they describe what the
    vendor's own API accepts or applies, so an alias route reaching the model
    another way never carries them
    (`fact_overrides::the_antigravity_route_to_opus_does_not_carry_server_side_fallback`).

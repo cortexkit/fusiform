@@ -1470,6 +1470,22 @@ pub const SERVED_FACTS: &[ServedFact] = &[
                rows, and suppressed once upstream records the key.",
     },
     ServedFact {
+        key: "capability.effort_change_cache",
+        class: FactClass::ByteAffecting,
+        note: "true: the vendor documents a mid-conversation reasoning-effort \
+               change that keeps the cached prompt prefix (OpenAI's \
+               configuration_update item, Anthropic's per-message \
+               output_config), and a runner on this row must change effort \
+               that way, keep the request-level effort at the session's \
+               baseline, and not report a cache loss to the context manager. \
+               false or ABSENT: an effort change busts the cache, so the runner \
+               reports an effort_change cache loss (a compaction ride); false \
+               only records why. A thinking-mode change \
+               always busts the cache whatever this says. Sourced additions \
+               disclosed in fact_overrides, on the vendor's own rows only, \
+               never projected onto reseller or alias rows.",
+    },
+    ServedFact {
         key: "route.refusal_fallback.bio",
         class: FactClass::Advisory,
         note: "the model id the vendor has announced as the retry target \

@@ -997,6 +997,7 @@ an addition is always written as one. Each fact key has its own rule:
 | `capability.mid_conversation_system` | addition only | `true` or `false` | `null` |
 | `capability.allowed_fallback_models` | addition only | array of distinct nonempty model ids, possibly empty | `null` |
 | `route.refusal_fallback.bio`, `route.refusal_fallback.cyber` | addition only | one nonempty model id other than the row's own | `null` |
+| `capability.effort_change_cache` | addition only | `true` or `false` | `null` |
 | `capability.reasoning_default` | addition only | exactly `{"type": "effort", "value": <nonempty effort>}` | `null` |
 | `capability.temperature` | replacement only | boolean | a different published boolean |
 | `model.status` | replacement of the stored `null` only | `"deprecated"` | `null` |
@@ -1011,8 +1012,9 @@ served value depend on which ran last. Limits cannot be added: an unpublished
 limit is stored as `null`, so a limit is absent only when a correction
 withholds it, and an addition must never undo a withholding.
 `capability.server_side_fallback`, `capability.mid_conversation_system`,
-`capability.allowed_fallback_models`, the `route.refusal_fallback.*` keys and
-`capability.reasoning_default` can only be added, because models.dev has no
+`capability.allowed_fallback_models`, the `route.refusal_fallback.*` keys,
+`capability.effort_change_cache` and `capability.reasoning_default` can only
+be added, because models.dev has no
 such fields. Ingest stores
 `model.status` on every row, as `null` when
 models.dev publishes none, so a `model.status` row replaces that stored `null`
@@ -1043,8 +1045,8 @@ disclosed in the response's `fact_overrides` list
 target's served facts, so an alias of an overridden row serves the overridden
 value, disclosed under the alias id. `capability.server_side_fallback`,
 `capability.mid_conversation_system`, `capability.allowed_fallback_models`,
-the `route.refusal_fallback.*` keys and `capability.reasoning_default` are not
-projected onto aliases, because they describe what the vendor's own API
+the `route.refusal_fallback.*` keys, `capability.effort_change_cache` and
+`capability.reasoning_default` are not projected onto aliases, because they describe what the vendor's own API
 accepts or applies and an alias route reaches the model another way. Curated model rows (§4) are
 fusiform's own data and are never overridden.
 
@@ -1069,6 +1071,20 @@ cap for a non-streaming request, while a streaming request returns up to
 Its alias `google/antigravity-gemini-4-argon` serves 65,536 through the target,
 which matches the route's own declaration in the Antigravity plugin's
 [`model-registry.ts`](https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts).
+
+`capability.effort_change_cache` is `true` only where the vendor documents a
+mid-conversation effort change that keeps the cached prompt prefix, since
+`true` is the only value that lets a runner change effort without losing
+the cached prefix:
+
+| Rows | Value | Source |
+| --- | --- | --- |
+| `openai/gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6.2-sol`, `gpt-6.2-astra` | `true` | OpenAI's [reasoning guide](https://developers.openai.com/api/docs/guides/reasoning): a `configuration_update` item "preserves the original prompt prefix for prompt caching" "on supported GPT-6 and later models" |
+| `anthropic/claude-fable-5-1`, `claude-fable-5-2`, `claude-opus-5`, `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` | `true` | Anthropic's [per-message effort page](https://platform.claude.com/docs/en/build-with-claude/effort-per-message) lists them; "A per-message change leaves everything before it unchanged, so the cached prefix still matches." Sonnet 5.5 needs adaptive thinking and Haiku 5.5 thinking enabled. |
+| `anthropic/claude-fable-5` | `false` | The same page names it as lacking per-message effort. |
+| `openai/gpt-5.6-sol` | `false` | Outside OpenAI's GPT-6-and-later scope; a request-level change was measured to lose the cache on 2026-11-23. |
+
+Every other row has no fact, which a runner treats like `false`.
 
 Fifteen addition rows serve `capability.allowed_fallback_models` on
 `anthropic` rows: the models a classifier-refused request may be retried on,
