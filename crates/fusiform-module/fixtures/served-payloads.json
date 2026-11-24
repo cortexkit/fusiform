@@ -2239,6 +2239,14 @@
           "model": "typesafe/jev-1.13.0",
           "review_by_ms": 1797724800000,
           "source_ref": "Display names confirmed 2026-10-26 at https://docs.typesafe.ai/models: the table labels model id jev-1.13.0 as 'Jev 1.13'; 'Jev is TypeSafe's flagship model'. Read 2026-10-21. https://docs.typesafe.ai/models: \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\"; \"Price: You pay per input token. Output tokens are free. A Btok is a billion tokens and an Mtok is a million tokens.\"; \"| `jev-latest` | `jev-1.13.0` | The most recent stable, official release.\"; \"| Context length | 64k per-request / 32k per-question |\". https://docs.typesafe.ai/concepts/system-one: \"It returns typed decisions and probabilities rather than generated text.\"; \"System One models do not write replies, produce code, or generate explanations of their reasoning.\" No limit.context: the docs give only \"64k\", and neither https://docs.typesafe.ai/api/list-models nor https://api.typesafe.ai/openapi.json states an exact token count. No capability.attachment: the models page lists \"| Input | Text | Text |\" while https://docs.typesafe.ai/images says \"Jev 1.13 and Jev 1.14 both accept images.\" Provider typesafe is not in https://models.dev/api.json (embedded seed fetched 2026-10-13)."
+        },
+        {
+          "auth_methods": [
+            "apikey"
+          ],
+          "model": "typesafe/jev-1.14.0",
+          "review_by_ms": 1800662400000,
+          "source_ref": "Read 2026-11-24 at https://docs.typesafe.ai/models: the current-models table lists \"| Model ID | `jev-1.14.0` | `jev-1.13.0` |\", \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\", \"| Context length | 64k per-request / 32k per-question | 64k per-request / 32k per-question |\" and \"Jev 1.14 is the newest Jev release, available from October 14, 2026.\"; \"Price: You pay per input token. Output tokens are free.\" Both versions are served by the same endpoint, POST https://api.typesafe.ai/v1/systemone. No limit.context: the docs give only \"64k\", the same gap as the Jev 1.13 row. Provider typesafe is not in https://models.dev/api.json."
         }
       ],
       "models": {
@@ -2246,6 +2254,24 @@
           "existence": "present",
           "model.kind": "decision",
           "model.name": "Jev 1.13",
+          "provider.name": "TypeSafe",
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "stated"
+            },
+            "units": 42000000
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          }
+        },
+        "typesafe/jev-1.14.0": {
+          "existence": "present",
+          "model.kind": "decision",
+          "model.name": "Jev 1.14",
           "provider.name": "TypeSafe",
           "rate.input": {
             "currency": "USD",
@@ -2691,6 +2717,14 @@
           "model": "typesafe/jev-1.13.0",
           "review_by_ms": 1797724800000,
           "source_ref": "Display names confirmed 2026-10-26 at https://docs.typesafe.ai/models: the table labels model id jev-1.13.0 as 'Jev 1.13'; 'Jev is TypeSafe's flagship model'. Read 2026-10-21. https://docs.typesafe.ai/models: \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\"; \"Price: You pay per input token. Output tokens are free. A Btok is a billion tokens and an Mtok is a million tokens.\"; \"| `jev-latest` | `jev-1.13.0` | The most recent stable, official release.\"; \"| Context length | 64k per-request / 32k per-question |\". https://docs.typesafe.ai/concepts/system-one: \"It returns typed decisions and probabilities rather than generated text.\"; \"System One models do not write replies, produce code, or generate explanations of their reasoning.\" No limit.context: the docs give only \"64k\", and neither https://docs.typesafe.ai/api/list-models nor https://api.typesafe.ai/openapi.json states an exact token count. No capability.attachment: the models page lists \"| Input | Text | Text |\" while https://docs.typesafe.ai/images says \"Jev 1.13 and Jev 1.14 both accept images.\" Provider typesafe is not in https://models.dev/api.json (embedded seed fetched 2026-10-13)."
+        },
+        {
+          "auth_methods": [
+            "apikey"
+          ],
+          "model": "typesafe/jev-1.14.0",
+          "review_by_ms": 1800662400000,
+          "source_ref": "Read 2026-11-24 at https://docs.typesafe.ai/models: the current-models table lists \"| Model ID | `jev-1.14.0` | `jev-1.13.0` |\", \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\", \"| Context length | 64k per-request / 32k per-question | 64k per-request / 32k per-question |\" and \"Jev 1.14 is the newest Jev release, available from October 14, 2026.\"; \"Price: You pay per input token. Output tokens are free.\" Both versions are served by the same endpoint, POST https://api.typesafe.ai/v1/systemone. No limit.context: the docs give only \"64k\", the same gap as the Jev 1.13 row. Provider typesafe is not in https://models.dev/api.json."
         }
       ],
       "models": {
@@ -2698,6 +2732,24 @@
           "existence": "present",
           "model.kind": "decision",
           "model.name": "Jev 1.13",
+          "provider.name": "TypeSafe",
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "stated"
+            },
+            "units": 42000000
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          }
+        },
+        "typesafe/jev-1.14.0": {
+          "existence": "present",
+          "model.kind": "decision",
+          "model.name": "Jev 1.14",
           "provider.name": "TypeSafe",
           "rate.input": {
             "currency": "USD",
@@ -12639,6 +12691,26 @@
           "review_by_ms": 1797811200000,
           "source_ref": "https://opencode.ai/v2/docs/console/go/",
           "tier": "go"
+        },
+        {
+          "boundary_at_ms": 1795478400000,
+          "established_at_ms": 1795478400000,
+          "established_by": "fusiform",
+          "price": {
+            "currency": "USD",
+            "exponent": 2,
+            "minor_units": 3000,
+            "period": "month"
+          },
+          "provider_id": "xai",
+          "quota_value": {
+            "refusal_reason": "No xAI subscription account is measured yet; astrocyte has no Grok readings. The operator can state a figure.",
+            "review_by_ms": 1800662400000,
+            "state": "not_established"
+          },
+          "review_by_ms": 1800662400000,
+          "source_ref": "https://docs.x.ai/x-subscription/pricing",
+          "tier": "premium"
         }
       ],
       "resolved_at_ms": -1,

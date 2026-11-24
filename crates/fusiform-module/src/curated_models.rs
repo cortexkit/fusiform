@@ -59,15 +59,17 @@ impl Drop for Planted {
     }
 }
 
-/// The four System One rows, as (provider, model): the rows the held tests
-/// hold. They were held in the shipped file from 2026-10-21 until broca's
-/// catalog assembly accepted rows missing a context or capability fact.
+/// The System One rows, as (provider, model): the rows the held tests hold.
+/// The first four were held in the shipped file from 2026-10-21 until broca's
+/// catalog assembly accepted rows missing a context or capability fact; Jev
+/// 1.14 joined later and is held with them so every TypeSafe row is held.
 #[cfg(test)]
 pub(crate) const TEST_HELD: &[(&str, &str)] = &[
     ("cloudflare-workers-ai", "@cf/cloudflare/clairic"),
     ("cloudflare-workers-ai", "@cf/cloudflare/clef"),
     ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
     ("typesafe", "jev-1.13.0"),
+    ("typesafe", "jev-1.14.0"),
 ];
 
 /// The `held_since_ms` the held tests use, 2026-10-21T20:30:00Z.
@@ -202,6 +204,7 @@ mod tests {
         ("openai", "gpt-transcribe"),
         ("tavily", "search"),
         ("typesafe", "jev-1.13.0"),
+        ("typesafe", "jev-1.14.0"),
     ];
 
     /// The shipped document with one edit applied to the row of that identity.
@@ -308,7 +311,7 @@ mod tests {
         assert_eq!(table.held.len(), SHIPPED_HELD.len() - 1);
         assert!(!table
             .held
-            .contains_key(&("typesafe".to_string(), "jev-1.13.0".to_string())));
+            .contains_key(&("typesafe".to_string(), "jev-1.14.0".to_string())));
     }
 
     /// Load a planted document and return its single reject, after checking

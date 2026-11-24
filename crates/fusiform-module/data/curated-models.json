@@ -485,6 +485,35 @@
       "established_by": "fusiform",
       "established_at_ms": 1792540800000,
       "review_by_ms": 1797724800000
+    },
+    {
+      "provider_id": "typesafe",
+      "model_id": "jev-1.14.0",
+      "auth_methods": [
+        "apikey"
+      ],
+      "facts": {
+        "existence": "present",
+        "model.name": "Jev 1.14",
+        "provider.name": "TypeSafe",
+        "model.kind": "decision",
+        "rate.input": {
+          "state": "priced",
+          "units": 42000000,
+          "exponent": 9,
+          "currency": "USD",
+          "unit_provenance": {
+            "kind": "stated"
+          }
+        },
+        "rate.output": {
+          "state": "stated_zero"
+        }
+      },
+      "source_ref": "Read 2026-11-24 at https://docs.typesafe.ai/models: the current-models table lists \"| Model ID | `jev-1.14.0` | `jev-1.13.0` |\", \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\", \"| Context length | 64k per-request / 32k per-question | 64k per-request / 32k per-question |\" and \"Jev 1.14 is the newest Jev release, available from October 14, 2026.\"; \"Price: You pay per input token. Output tokens are free.\" Both versions are served by the same endpoint, POST https://api.typesafe.ai/v1/systemone. No limit.context: the docs give only \"64k\", the same gap as the Jev 1.13 row. Provider typesafe is not in https://models.dev/api.json.",
+      "established_by": "fusiform",
+      "established_at_ms": 1795478400000,
+      "review_by_ms": 1800662400000
     }
   ],
   "held": []

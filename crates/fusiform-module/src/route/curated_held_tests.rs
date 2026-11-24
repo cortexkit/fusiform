@@ -4,7 +4,7 @@
 //! its id is reported the way a retired alias is: absent on a retired-inclusive
 //! read and listed in `retired` on a named read, so a consumer that tracks
 //! identities never sees it vanish. These tests plant a copy of the shipped
-//! file that holds the four System One rows, whatever the shipped file holds
+//! file that holds the System One rows, whatever the shipped file holds
 //! today, against a store that knows none of them.
 //! `curated_withdrawn_tests` covers a held id the store holds as a withdrawn
 //! upstream row.
@@ -14,12 +14,7 @@ use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use serde_json::{json, Value};
 
 /// The held ids, as (provider, model).
-const HELD: &[(&str, &str)] = &[
-    ("cloudflare-workers-ai", "@cf/cloudflare/clef"),
-    ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
-    ("cloudflare-workers-ai", "@cf/cloudflare/clairic"),
-    ("typesafe", "jev-1.13.0"),
-];
+const HELD: &[(&str, &str)] = crate::curated_models::TEST_HELD;
 
 /// The planted `held_since_ms`, 2026-10-21T20:30:00Z.
 const HELD_SINCE_MS: i64 = crate::curated_models::TEST_HELD_SINCE_MS;
@@ -233,7 +228,7 @@ fn a_named_read_of_a_held_id_reports_it_retired() {
     }
 }
 
-/// With jev held, typesafe has no row to serve. It stays a known provider:
+/// With both Jev rows held, typesafe has no row to serve. It stays a known provider:
 /// a plain provider read answers with zero models, not a refusal.
 #[test]
 fn a_provider_whose_only_row_is_held_stays_known() {
@@ -247,10 +242,15 @@ fn a_provider_whose_only_row_is_held_stays_known() {
     );
     assert_eq!(
         all.models,
-        BTreeMap::from([(
-            "typesafe/jev-1.13.0".to_string(),
-            BTreeMap::from([("existence".to_string(), json!("absent"))])
-        )])
+        ["typesafe/jev-1.13.0", "typesafe/jev-1.14.0"]
+            .into_iter()
+            .map(|id| {
+                (
+                    id.to_string(),
+                    BTreeMap::from([("existence".to_string(), json!("absent"))]),
+                )
+            })
+            .collect::<BTreeMap<_, _>>()
     );
     // A model typesafe never carried is still an unknown model, not an
     // unknown provider.

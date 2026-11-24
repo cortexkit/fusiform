@@ -283,6 +283,27 @@
       "established_at_ms": 1794614400000,
       "review_by_ms": 1799798400000,
       "source_ref": "https://ollama.com/blog/transparent-pricing"
+    },
+    {
+      "provider_id": "xai",
+      "tier": "premium",
+      "price": {
+        "minor_units": 3000,
+        "exponent": 2,
+        "currency": "USD",
+        "period": "month"
+      },
+      "quota_value": {
+        "state": "not_established",
+        "refusal_reason": "No xAI subscription account is measured yet; astrocyte has no Grok readings. The operator can state a figure.",
+        "review_by_ms": 1800662400000
+      },
+      "note": "'Premium | $30/mo | $300/yr ($25/mo) | 4x', read 2026-11-24 from xAI's X Subscription pricing page (list prices excluding sales tax). The operator holds Premium billed monthly, so the monthly price is curated; the annual option is not. The older SuperGrok plan is also $30/month (grok.com/plans: 'Free trial for 7 days, then $30.00 per month') but is a different plan, so it is not this row. The vault's xAI login reports no plan, so the tier is the operator's statement.",
+      "boundary_at_ms": 1795478400000,
+      "established_by": "fusiform",
+      "established_at_ms": 1795478400000,
+      "review_by_ms": 1800662400000,
+      "source_ref": "https://docs.x.ai/x-subscription/pricing"
     }
   ],
   "why_this_basis": "US list price, MONTHLY-BILLED basis. Recorded rather than assumed, and the basis is chosen for its FAILURE DIRECTION rather than for consistency: a higher denominator produces a lower multiplier, so recording the monthly-billed price makes a subscription look WORSE than it is for an annual subscriber. Every other known residual in the consuming calculation biases toward 'keep paying', so the one term that errs pessimistic is the one pushing back. Do not 'correct' this to the annual figure: it would remove the only conservative term. anthropic/pro is $17 billed annually against $20 monthly, a 15% spread, and that difference is deliberately not modelled here \u2014 an operator on an annual term or a grandfathered rate overrides this plane on their own credential record, which is where a fact about one account belongs. WEB-SUBSCRIPTION prices, additionally: the Max help centre states 'these prices are for web subscriptions only. Mobile pricing may vary depending on your app platform.' An operator who subscribed through an app store may pay an app-store markup this plane cannot see, which is a third basis axis beyond country and billing term. Same remedy as the others \u2014 the credential override carries what one account actually pays.",
