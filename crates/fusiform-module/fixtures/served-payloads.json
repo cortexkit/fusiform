@@ -1323,110 +1323,44 @@
       "source": "models.dev"
     }
   },
-  "catalog.get — Gemini Flash Image alias split rates": {
+  "catalog.get — Gemini Flash Image alias included as retired": {
     "request": {
       "arguments": {
-        "fact_prefixes": [
-          "rate."
-        ],
+        "include_retired": true,
         "model_id": "antigravity-gemini-3.1-flash-image",
         "provider_id": "google"
       },
       "name": "catalog.get"
     },
     "response": {
-      "aliased": [
-        {
-          "model": "google/antigravity-gemini-3.1-flash-image",
-          "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, skipAlias and isImageModel); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
-          "target_model_id": "gemini-3.1-flash-image",
-          "target_provider_id": "google"
-        }
-      ],
       "catalog_version": 0,
-      "fact_overrides": [
-        {
-          "established_at_ms": 1794268800000,
-          "established_by": "fusiform",
-          "fact_key": "rate.output_image",
-          "model": "google/antigravity-gemini-3.1-flash-image",
-          "model_id": "gemini-3.1-flash-image",
-          "notes": "Addition only while upstream records no image-output role. Projected through the existing Antigravity alias mechanism, not onto Vertex.",
-          "provider_id": "google",
-          "quote": "Gemini 3.1 Flash Image, Paid Tier, per 1M tokens in USD: output \"$3 (text and thinking)\", \"$60.00 (images)\". Image output token counts: 747 at 0.5K, 1120 at 1K, 1680 at 2K, 2520 at 4K.",
-          "reason": "The image output price needs its own role so it is not confused with text output.",
-          "replaces": null,
-          "review_by_ms": 1799452800000,
-          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)",
-          "value": {
-            "currency": "USD",
-            "exponent": 9,
-            "inherited_from": {
-              "basis": "alias",
-              "family": "gemini-flash",
-              "model_id": "gemini-3.1-flash-image",
-              "provider_id": "google"
-            },
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 60000000000
-          }
-        }
-      ],
       "models": {
         "google/antigravity-gemini-3.1-flash-image": {
-          "rate.input": {
-            "currency": "USD",
-            "exponent": 9,
-            "inherited_from": {
-              "basis": "alias",
-              "family": "gemini-flash",
-              "model_id": "gemini-3.1-flash-image",
-              "provider_id": "google"
-            },
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 500000000
-          },
-          "rate.output": {
-            "currency": "USD",
-            "exponent": 9,
-            "inherited_from": {
-              "basis": "alias",
-              "family": "gemini-flash",
-              "model_id": "gemini-3.1-flash-image",
-              "provider_id": "google"
-            },
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 3000000000
-          },
-          "rate.output_image": {
-            "currency": "USD",
-            "exponent": 9,
-            "inherited_from": {
-              "basis": "alias",
-              "family": "gemini-flash",
-              "model_id": "gemini-3.1-flash-image",
-              "provider_id": "google"
-            },
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 60000000000
-          }
+          "existence": "absent"
         }
       },
       "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — Gemini Flash Image alias named retirement": {
+    "request": {
+      "arguments": {
+        "model_id": "antigravity-gemini-3.1-flash-image",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {},
+      "resolved_at_ms": -1,
+      "retired": [
+        {
+          "model": "google/antigravity-gemini-3.1-flash-image",
+          "retired_at_ms": 1795478400000
+        }
+      ],
       "source": "models.dev"
     }
   },
@@ -1887,7 +1821,7 @@
       "aliased": [
         {
           "model": "google/antigravity-gemini-3.8-flash",
-          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/df5124aba0d29bb8a20e20e2e55c4ad5496425fc/packages/core/src/model-registry.ts#L513-L520 (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts#L280-L287 (resolveModelWithTier) at the same revision; protocol: https://github.com/cortexkit/antigravity-auth/blob/df5124aba0d29bb8a20e20e2e55c4ad5496425fc/packages/core/src/engine/request.ts#L1469 constructs /v1internal:${rawAction} with ?alt=sse for streaming; test-fixtures/agy-cli-1.5.8/assert-identity.test.ts#L51 pins the six-key Antigravity envelope (project, requestId, request, model, userAgent, requestType)",
           "target_model_id": "gemini-3.8-flash",
           "target_provider_id": "google"
         }
@@ -2919,7 +2853,7 @@
       "aliased": [
         {
           "model": "google/antigravity-gemini-3.8-flash",
-          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/df5124aba0d29bb8a20e20e2e55c4ad5496425fc/packages/core/src/model-registry.ts#L513-L520 (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts#L280-L287 (resolveModelWithTier) at the same revision; protocol: https://github.com/cortexkit/antigravity-auth/blob/df5124aba0d29bb8a20e20e2e55c4ad5496425fc/packages/core/src/engine/request.ts#L1469 constructs /v1internal:${rawAction} with ?alt=sse for streaming; test-fixtures/agy-cli-1.5.8/assert-identity.test.ts#L51 pins the six-key Antigravity envelope (project, requestId, request, model, userAgent, requestType)",
           "target_model_id": "gemini-3.8-flash",
           "target_provider_id": "google"
         }
@@ -8155,7 +8089,7 @@
           "capability.temperature",
           "limit.temperature_"
         ],
-        "model_id": "antigravity-gemini-3.1-flash-image",
+        "model_id": "antigravity-gemini-4-hydrogen",
         "provider_id": "google"
       },
       "name": "catalog.get"
@@ -8163,15 +8097,15 @@
     "response": {
       "aliased": [
         {
-          "model": "google/antigravity-gemini-3.1-flash-image",
-          "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, skipAlias and isImageModel); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
-          "target_model_id": "gemini-3.1-flash-image",
+          "model": "google/antigravity-gemini-4-hydrogen",
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/packages/core/src/model-registry.ts#L107-L135 (native routes), #L323-L337 (public model), #L635-L648 (tier mapping); https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/test-fixtures/agy-cli-1.5.5/hydrogen-evidence.json (native xhigh request); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
+          "target_model_id": "gemini-4-hydrogen",
           "target_provider_id": "google"
         }
       ],
       "catalog_version": 0,
       "models": {
-        "google/antigravity-gemini-3.1-flash-image": {}
+        "google/antigravity-gemini-4-hydrogen": {}
       },
       "resolved_at_ms": -1,
       "source": "models.dev"

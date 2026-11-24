@@ -740,7 +740,7 @@ pub(super) fn render_temperature() -> serde_json::Map<String, serde_json::Value>
     seed.as_object_mut().unwrap().retain(|provider, row| {
         let models: &[&str] = match provider.as_str() {
             "openai" => &["gpt-4.1"],
-            "google" => &["gemini-4-carbon", "gemini-3.1-flash-image"],
+            "google" => &["gemini-4-carbon", "gemini-4-hydrogen"],
             "anthropic" => &["claude-sonnet-5-5"],
             _ => return false,
         };
@@ -750,6 +750,9 @@ pub(super) fn render_temperature() -> serde_json::Map<String, serde_json::Value>
             .retain(|id, _| models.contains(&id.as_str()));
         true
     });
+    // Give the live Hydrogen alias a target that accepts temperature so the
+    // fixture pins omission of an upstream true, not of a missing fact.
+    seed["google"]["models"]["gemini-4-hydrogen"]["temperature"] = serde_json::json!(true);
     let (store, _dir) = super::temperature::store(seed);
     let mut cases = serde_json::Map::new();
     for (label, provider, model) in [
@@ -773,7 +776,7 @@ pub(super) fn render_temperature() -> serde_json::Map<String, serde_json::Value>
         (
             "temperature true target omitted on alias",
             "google",
-            "antigravity-gemini-3.1-flash-image",
+            "antigravity-gemini-4-hydrogen",
         ),
     ] {
         let request = serde_json::json!({"name":"catalog.get","arguments":{
@@ -845,10 +848,12 @@ fn temperature_golden_cases_pin_acceptance_correction_and_safe_alias_projection(
         assert_eq!(facts["capability.temperature"], false);
         assert!(facts.get("limit.temperature_max").is_none());
     }
-    let alias = &cases["catalog.get — temperature true target omitted on alias"]["response"]
-        ["models"]["google/antigravity-gemini-3.1-flash-image"];
-    assert!(alias.get("capability.temperature").is_none());
-    assert!(alias.get("limit.temperature_max").is_none());
+    let alias = &cases["catalog.get — temperature true target omitted on alias"]["response"];
+    assert_eq!(
+        alias["models"],
+        serde_json::json!({"google/antigravity-gemini-4-hydrogen": {}})
+    );
+    assert_eq!(alias["aliased"][0]["target_model_id"], "gemini-4-hydrogen");
 }
 
 fn render_login_methods() -> serde_json::Map<String, serde_json::Value> {
@@ -914,8 +919,12 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
             serde_json::json!({"provider_id":"google","model_id":"gemini-3.1-flash-image","fact_prefixes":["rate."]}),
         ),
         (
-            "catalog.get — Gemini Flash Image alias split rates",
-            serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-3.1-flash-image","fact_prefixes":["rate."]}),
+            "catalog.get — Gemini Flash Image alias included as retired",
+            serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-3.1-flash-image","include_retired":true}),
+        ),
+        (
+            "catalog.get — Gemini Flash Image alias named retirement",
+            serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-3.1-flash-image"}),
         ),
         (
             "catalog.get — Gemini Flash TTS",
@@ -998,6 +1007,26 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
         );
     }
     cases
+}
+
+#[test]
+fn gemini_flash_image_retirement_golden_cases_pin_both_read_shapes() {
+    let cases = render_curated_wire();
+    let included = &cases["catalog.get — Gemini Flash Image alias included as retired"]["response"];
+    assert_eq!(
+        included["models"],
+        serde_json::json!({"google/antigravity-gemini-3.1-flash-image":{"existence":"absent"}})
+    );
+    assert!(included.get("retired").is_none());
+    assert!(included.get("aliased").is_none());
+
+    let named = &cases["catalog.get — Gemini Flash Image alias named retirement"]["response"];
+    assert_eq!(named["models"], serde_json::json!({}));
+    assert_eq!(
+        named["retired"],
+        serde_json::json!([{"model":"google/antigravity-gemini-3.1-flash-image","retired_at_ms":1795478400000i64}])
+    );
+    assert!(named.get("aliased").is_none());
 }
 
 /// A point-in-time read of a curated row, served from the history a boot

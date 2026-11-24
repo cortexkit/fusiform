@@ -177,7 +177,7 @@ Gates (`aliases.rs`):
 
 The live 3.8 Flash and Argon aliases carry tier maps for `low`, `medium` and
 `high`, defaulting to `medium`. The source is each alias's own plugin pin
-(Flash `44eb8fa0`, Argon `48919aa7`), not a consumer's routing table.
+(Flash `df5124ab`, Argon `48919aa7`), not a consumer's routing table.
 `reasoning_option_drift` checks every effort against the target's
 `capability.reasoning_options`; `planted_tier_effort_drift_is_reported` calls
 that same check with an unsupported effort. The loader rejects a missing or
@@ -218,9 +218,12 @@ An optional `successor` is a full `provider/model` identity, accompanied by
 The 3.6 and 3.7 Flash aliases name `google/antigravity-gemini-3.8-flash`, citing
 broca `2770908`'s record of AGAUTH's two `fetchAvailableModels` captures before
 2026-10-14T13:11Z (clients 1.3.3 and 1.3.5). No successor is established for
-`antigravity-claude-sonnet-4-6-thinking`. On current `include_retired` reads the
-absent row carries `successor`; a named read excluding the row carries it in
-the `retired` disclosure instead. Point-in-time reads do not apply this list.
+`antigravity-claude-sonnet-4-6-thinking` or `antigravity-gemini-3.1-flash-image`.
+The image alias was retired when antigravity-auth 3.2.0 removed image-generation
+models; the public Google API model is not affected. On current
+`include_retired` reads the absent row carries `successor` when established;
+a named read excluding the row carries it in the `retired` disclosure instead.
+Point-in-time reads do not apply this list.
 
 Serving rules are in [`wire-contract.md`](wire-contract.md) §5.5.
 
@@ -1058,8 +1061,8 @@ Gemini 3.1 Flash Image splits its published $60/M image-output price from
 $3/M text/thinking output. The embedded seed now publishes the correct $3/M
 `rate.output` itself, so the former text-rate replacement is retired.
 `rate.output_image` remains an addition and yields if upstream records that
-key. The split flows through its Antigravity alias, with borrowed-rate markers
-retained in the disclosed served values. Vertex is not overridden. Stored
+key. The split is served on the public Google API row; the retired Antigravity
+alias serves no prices, and Vertex is not overridden. Stored
 `fact_override_era` claims retain the former replacement for historical reads
 while it was in force; a removal recorded at boot ends that claim.
 The [Google pricing page](https://ai.google.dev/gemini-api/docs/pricing)

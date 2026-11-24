@@ -198,7 +198,7 @@ fn temperature_google_correction_is_dated_and_stops_when_upstream_moves() {
 fn temperature_aliases_inherit_only_safe_false_and_never_ranges() {
     let (store, _dir) = store(json!({
         "anthropic":{"models":{"claude-sonnet-5-5":{"temperature":false}, "claude-opus-5-5":{"temperature":false}}},
-        "google":{"models":{"gemini-4-carbon":{"temperature":true}, "gemini-4-argon":{"temperature":true}}}
+        "google":{"models":{"gemini-4-carbon":{"temperature":true}, "gemini-4-argon":{"temperature":true}, "gemini-4-hydrogen":{"temperature":true}}}
     }));
     for alias in [
         "antigravity-claude-sonnet-5-5",
@@ -210,16 +210,21 @@ fn temperature_aliases_inherit_only_safe_false_and_never_ranges() {
         assert_eq!(facts["capability.temperature"], false, "{alias}");
         assert!(facts.get("limit.temperature_max").is_none());
     }
-    ingest(
+    let target = get(
         &store,
-        json!({"google":{"models":{"gemini-3.1-flash-image":{"temperature":true}}}}),
-        ESTABLISHED,
+        json!({"provider_id":"google","model_id":"gemini-4-hydrogen"}),
+    );
+    assert_eq!(
+        target["models"]["google/gemini-4-hydrogen"]["capability.temperature"],
+        true
     );
     let response = get(
         &store,
-        json!({"provider_id":"google","model_id":"antigravity-gemini-3.1-flash-image"}),
+        json!({"provider_id":"google","model_id":"antigravity-gemini-4-hydrogen"}),
     );
-    let facts = &response["models"]["google/antigravity-gemini-3.1-flash-image"];
+    let facts = response["models"]["google/antigravity-gemini-4-hydrogen"]
+        .as_object()
+        .expect("the alias must serve the target");
     assert!(facts.get("capability.temperature").is_none());
     assert!(facts.get("limit.temperature_max").is_none());
 }

@@ -281,26 +281,58 @@ fn image_store(output: i64) -> (CatalogStore, tempfile::TempDir) {
 
 #[test]
 fn flash_image_split_is_guarded_inherited_and_current_only() {
+    const TARGET_ID: &str = "gemini-3.1-flash-image";
+    const ALIAS_ID: &str = "fixture-flash-image-alias";
     let (store, _dir) = image_store(3);
-    for model in [
-        "gemini-3.1-flash-image",
-        "antigravity-gemini-3.1-flash-image",
-    ] {
-        let response =
-            super::curated_wire::get(&store, json!({"provider_id":"google","model_id":model}));
-        let facts = &response.models[&format!("google/{model}")];
+    let direct =
+        super::curated_wire::get(&store, json!({"provider_id":"google","model_id":TARGET_ID}));
+
+    // No live alias targets this split price card. Project the served target
+    // through a fixture alias to check that both rates and the disclosure survive.
+    let doc = json!({"aliases":[{
+        "provider_id":"google", "model_id":ALIAS_ID,
+        "target":{"provider_id":"google", "model_id":TARGET_ID},
+        "basis":"Fixture for projecting split rates", "source_ref":"fixture",
+        "established_at_ms":1000, "review_by_ms":2000
+    }]});
+    let (aliases, rejects) = fusiform_curate::aliases::load_reporting_rejects(&doc.to_string());
+    assert!(rejects.is_empty(), "{rejects:?}");
+    let projected = fusiform_curate::project_alias(
+        direct.clone(),
+        "google",
+        ALIAS_ID,
+        &aliases[&("google".into(), ALIAS_ID.into())],
+        None,
+        None,
+    )
+    .unwrap();
+
+    for (model, response) in [(TARGET_ID, direct), (ALIAS_ID, projected)] {
+        let identity = format!("google/{model}");
+        let facts = &response.models[&identity];
         assert_eq!(facts["rate.output"]["units"], 3_000_000_000i64);
         assert_eq!(facts["rate.output_image"]["units"], 60_000_000_000i64);
+        for rate in ["rate.output", "rate.output_image"] {
+            if model == ALIAS_ID {
+                let borrowed = &facts[rate]["inherited_from"];
+                assert_eq!(borrowed["basis"], "alias");
+                assert_eq!(borrowed["provider_id"], "google");
+                assert_eq!(borrowed["model_id"], TARGET_ID);
+            } else {
+                assert!(facts[rate].get("inherited_from").is_none());
+            }
+        }
         assert_eq!(
             response.fact_overrides.len(),
             1,
             "{model}: only the image addition is curated; text is upstream"
         );
-        for row in &response.fact_overrides {
-            assert_eq!(row.value, facts[&row.fact_key]);
-            assert_eq!(row.fact_key, "rate.output_image");
-            assert!(row.replaces.is_null());
-        }
+        let row = &response.fact_overrides[0];
+        assert_eq!(row.model, identity);
+        assert_eq!(row.model_id, TARGET_ID);
+        assert_eq!(row.fact_key, "rate.output_image");
+        assert_eq!(row.value, facts[&row.fact_key]);
+        assert!(row.replaces.is_null());
     }
     let historical = super::curated_wire::get(
         &store,

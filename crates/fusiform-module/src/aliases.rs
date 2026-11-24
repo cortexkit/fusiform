@@ -165,14 +165,20 @@ mod tests {
     #[test]
     fn retired_aliases_parse_and_are_not_live() {
         let retired = retired_aliases();
-        assert_eq!(
-            retired.len(),
-            3,
-            "the three Code Assist ids withdrawn on 2026-10-14"
-        );
         let live = aliases();
-        for key in retired.keys() {
-            assert!(!live.contains_key(key), "{key:?} is both live and retired");
+        assert_eq!(retired.len(), 4);
+        for model in [
+            "antigravity-claude-sonnet-4-6-thinking",
+            "antigravity-gemini-3.1-flash-image",
+            "antigravity-gemini-3.6-flash",
+            "antigravity-gemini-3.7-flash",
+        ] {
+            let key = ("google".to_string(), model.to_string());
+            assert!(
+                retired.contains_key(&key),
+                "{model} vanished from the catalog"
+            );
+            assert!(!live.contains_key(&key), "{model} is both live and retired");
         }
     }
 

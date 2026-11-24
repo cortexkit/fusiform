@@ -152,29 +152,15 @@
         "model_id": "gemini-3.8-flash"
       },
       "basis": "The plugin resolves every tier of this id through GEMINI_38_FLASH_ROUTES: low, medium and high go to gemini-3.8-flash-low, -medium and -high, and a missing or unknown tier defaults to gemini-3.8-flash-medium. The suffix is how Code Assist spells a reasoning level, so every request reaches Google's gemini-3.8-flash.",
-      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/core/src/model-registry.ts (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
-      "established_at_ms": 1790294400000,
-      "review_by_ms": 1795478400000,
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/df5124aba0d29bb8a20e20e2e55c4ad5496425fc/packages/core/src/model-registry.ts#L513-L520 (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts#L280-L287 (resolveModelWithTier) at the same revision; protocol: https://github.com/cortexkit/antigravity-auth/blob/df5124aba0d29bb8a20e20e2e55c4ad5496425fc/packages/core/src/engine/request.ts#L1469 constructs /v1internal:${rawAction} with ?alt=sse for streaming; test-fixtures/agy-cli-1.5.8/assert-identity.test.ts#L51 pins the six-key Antigravity envelope (project, requestId, request, model, userAgent, requestType)",
+      "established_at_ms": 1795478400000,
+      "review_by_ms": 1800662400000,
       "reasoning_wire_ids": {
         "low": "gemini-3.8-flash-low",
         "medium": "gemini-3.8-flash-medium",
         "high": "gemini-3.8-flash-high"
       },
       "reasoning_default": "medium"
-    },
-    {
-      "provider_id": "google",
-      "model_id": "antigravity-gemini-3.1-flash-image",
-      "model_name": "Gemini 3.1 Flash Image (Antigravity)",
-      "wire_family": "google.code_assist",
-      "target": {
-        "provider_id": "google",
-        "model_id": "gemini-3.1-flash-image"
-      },
-      "basis": "The id defines no reasoning variants, and the resolver sends it unchanged: an explicit antigravity- Gemini 3 id skips the alias map, and image models get no tier suffix, so the backend model is gemini-3.1-flash-image.",
-      "source_ref": "antigravity-auth@44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, skipAlias and isImageModel); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
-      "established_at_ms": 1790294400000,
-      "review_by_ms": 1795478400000
     }
   ],
   "retired": [
@@ -199,6 +185,12 @@
       "reason": "Google withdrew the gemini-3.7-flash-low/-medium/-high routes on the daily Code Assist endpoint (absent from fetchAvailableModels just before 2026-10-14T13:11Z), so the alias stopped being served.",
       "successor": "google/antigravity-gemini-3.8-flash",
       "successor_source_ref": "https://github.com/cortexkit/broca/blob/2770908578e89807ccc19deeeb8f464b5687c078/crates/broca-catalog/src/live.rs#L92-L123 (AGAUTH fetchAvailableModels captures before 2026-10-14T13:11Z, clients 1.3.3 and 1.3.5)"
+    },
+    {
+      "provider_id": "google",
+      "model_id": "antigravity-gemini-3.1-flash-image",
+      "retired_at_ms": 1795478400000,
+      "reason": "antigravity-auth 3.2.0 removed image-generation models and rejects requests for this route before sending them."
     }
   ]
 }
