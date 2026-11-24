@@ -520,5 +520,5 @@ fn every_curated_task_row_passes_guard_over_the_embedded_catalog() {
             task_rows += 1;
         }
     }
-    assert_eq!((task_rows, decision_rows), (14, 4));
+    assert_eq!((task_rows, decision_rows), (14, 5));
 }
