@@ -579,25 +579,39 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
             },
         )]),
     );
+    curation_set.kind_grades.insert(
+        "zeta/mini".into(),
+        BTreeMap::from([("decision".into(), 83.into())]),
+    );
     snapshot.state.curation_set = curation_set.clone();
+    let decision_fact = fusiform_release::ChangeOp::Set {
+        provider: "zeta".into(),
+        model: "mini".into(),
+        fact: "model.kind".into(),
+        value: json!("decision"),
+    };
     let change = fusiform_release::Change {
-        upstream: vec![fusiform_release::ChangeOp::Set {
-            provider: "zeta".into(),
-            model: "mini".into(),
-            fact: "model.name".into(),
-            value: json!("Mini 3"),
-        }],
+        upstream: vec![
+            decision_fact,
+            fusiform_release::ChangeOp::Set {
+                provider: "zeta".into(),
+                model: "mini".into(),
+                fact: "model.name".into(),
+                value: json!("Mini 3"),
+            },
+        ],
         curation_set: Some(curation_set),
     };
-    snapshot
+    let model = snapshot
         .state
         .upstream
         .get_mut("zeta")
         .unwrap()
         .models
         .get_mut("mini")
-        .unwrap()
-        .insert("model.name".into(), json!("Mini 3"));
+        .unwrap();
+    model.insert("model.name".into(), json!("Mini 3"));
+    model.insert("model.kind".into(), json!("decision"));
     let envelope = &mut snapshot.envelope;
     envelope.parent = Some(2);
     envelope.release = 3;
@@ -637,6 +651,16 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
         "Mini 3"
     );
     assert_eq!(model_name_at(&store, at_release_two), "Mini 2");
+    let decision = crate::route::serve_catalog_get(
+        &store,
+        br#"{"provider_id":"zeta","model_id":"mini","fact_prefixes":["quality.grade.decision"]}"#,
+    )
+    .unwrap();
+    assert_eq!(decision.models["zeta/mini"]["quality.grade.decision"], 83);
+    assert_eq!(
+        decision.quality_scores.unwrap().graded_at_ms,
+        third.envelope.published_at_ms
+    );
     let get = |at_ms| {
         let args = json!({"provider_id":"zeta","model_id":"mini","fact_prefixes":["workload.","existence"],"at_ms":at_ms});
         crate::route::serve_catalog_get(&store, &serde_json::to_vec(&args).unwrap()).unwrap()

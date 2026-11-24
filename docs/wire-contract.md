@@ -168,6 +168,7 @@ value would do to a consumer:
 | `quality.grade.image` | advisory | operator-assigned image score, comparable only among image engines; current reads only (§5.9) |
 | `quality.grade.video` | advisory | operator-assigned video score, comparable only among video engines; current reads only (§5.9) |
 | `quality.grade.search` | advisory | operator-assigned search score, comparable only among search engines; current reads only (§5.9) |
+| `quality.grade.decision` | advisory | operator-assigned decision score, comparable only among decision models; current and dated reads (§5.9) |
 | `limit.context` | byte-affecting | integer token count, or `null` |
 | `limit.output` | byte-affecting | integer token count, or `null`; a sourced current-read override is disclosed in `fact_overrides` (§5.8) |
 | `limit.audio_tokens_per_second` | advisory | integer audio tokens per second of input audio, curated from the provider's documentation; provider defaults join only current rows serving `rate.input_audio`; a model-specific curated row may store its own sourced figure, also available in that row's history; otherwise no fact |
@@ -953,10 +954,12 @@ plain read's grades for the same row.
 
 Chat rows (absent `model.type` or `chat`) receive `quality.elo` (general quality)
 and `quality.eq` (writing and judgment). Every current row can also receive
-`quality.grade.transcription`, `quality.grade.speech`, `quality.grade.image`
+`quality.grade.transcription`, `quality.grade.speech`, `quality.grade.image`,
 `quality.grade.video` and `quality.grade.search` from its grade key, independently of its primary
-`model.type`. The bare `quality.grade` fact is retired. Higher media grades
-are better and compare only among engines doing the same task. All dimensions are
+`model.type`. Only rows with `model.kind=decision` at the read instant receive
+`quality.grade.decision`, even when other rows share the same grade key. The bare
+`quality.grade` fact is retired.
+Higher task grades are better and compare only among engines doing the same task. All dimensions are
 advisory judgments for routing selection, not upstream measurements or
 instructions changing request bytes. Withdrawn grades are absent facts. Numbers
 retain their decimal representation without a binary-float conversion.
@@ -1025,12 +1028,12 @@ cached catalog page plans notice live grade changes.
 
 `model` names a canonical id carried by a current served row, or the row's own
 `provider/model` id when it has no canonical id. An unknown catalog grade key
-refuses `bad_request`. ELO/EQ still requires chat rows. Media grades require a
-`kind` from `transcription`, `speech`, `image`, `video`, `search`, and at least one reached
-row with the matching capability: `capability.input_modalities` contains
+refuses `bad_request`. ELO/EQ still requires chat rows. Task grades require a
+`kind` from `transcription`, `speech`, `image`, `video`, `search`, or `decision`, and at least one reached
+row that meets that kind's rule. For media, `capability.input_modalities` contains
 `audio` for transcription; `capability.output_modalities` contains `audio`
 for speech, `image` for image, or `video` for video. Search instead requires
-`model.type=search` on at least one reached row, not a modality. Missing capabilities,
+`model.type=search`; decision requires `model.kind=decision`. Missing capabilities,
 mixed dimensions and incomplete grades refuse `bad_request`. All numbers must be finite and
 positive; invalid numbers and empty reasons refuse `bad_request`. Withdrawals
 without a current grade refuse `no_coverage`. Withdrawing a previously graded
@@ -1040,19 +1043,21 @@ key remains possible after its last served row disappears. Omitted withdrawal
 `local:<provider>/<model>` identifies an independent local engine. Both parts
 are nonempty, without whitespace or control characters; nested model paths
 are allowed. Local keys are validated syntactically, never looked up in the
-catalog, and never attach to catalog rows. They permit media/search grades with kind
+catalog, and never attach to catalog rows. They permit task grades with kind
 and withdrawals of those grades only; ELO/EQ and decommission marks refuse
 `bad_request`. Local writes advance the catalog version and notify the bus
 publisher just like catalog-key writes.
 
 Both write responses have `dry_run`, `model`, `current` (the current grade, or
 null), `new` (the proposed or committed record), `affected_count`, and
-`affected_ids` (up to ten served row ids in lexical order). A grade record has
+`affected_ids` (up to ten served row ids in lexical order). For decision writes
+and withdrawals, the count and ids include only reached rows with `model.kind=decision`.
+A grade record has
 `model`, `elo`, `eq`, `withdrawn`, `graded_by`, `reason`, and `recorded_at_ms`.
 Chat records carry numeric `elo` and `eq` and omit `grade`, retaining their
-existing wire shape. Media records add `kind` and numeric `grade`, and set `elo` and `eq`
+existing wire shape. Task records add `kind` and numeric `grade`, and set `elo` and `eq`
 null. Withdrawal records set `withdrawn: true`, both chat numbers null, and omit
-`grade`, retaining `kind` for a media withdrawal.
+`grade`, retaining `kind` for a task withdrawal.
 
 CLI equivalents are `ck models grade <model> --elo N --eq N --reason TEXT`
 and `ck models grade <key> --kind K --grade N --reason TEXT`; both preview unless

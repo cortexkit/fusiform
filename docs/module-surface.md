@@ -29,7 +29,7 @@ Tools, as served: `catalog.get`, `catalog.history`, `catalog.status`,
 | `catalog.mark_artifact` | mutating | mark one poll as a representation change of fusiform's own |
 | `catalog.retract_artifact` | mutating | take a mark back |
 | `plan.prices` | pure | curated subscription list prices |
-| `quality.grade` | mutating | preview or commit operator ELO/EQ, its measured effort, derived grades at another effort, or per-kind media grades |
+| `quality.grade` | mutating | preview or commit operator ELO/EQ, its measured effort, derived grades at another effort, or per-kind media, search and decision grades |
 | `quality.withdraw` | mutating | preview or commit a grade withdrawal, retaining history |
 | `quality.grades` | pure | current grades optionally filtered by prefix, or one key's full history newest first |
 | `quality.decommission` | mutating | preview or commit an operator routing veto |

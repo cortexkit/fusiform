@@ -1039,6 +1039,12 @@ fn serve_catalog_get_snapshot(
         if selects_chat_score {
             wide.push("model.type".to_string());
         }
+        if prefixes
+            .iter()
+            .any(|p| "quality.grade.decision".starts_with(p))
+        {
+            wide.push("model.kind".to_string());
+        }
         wide
     });
     if request.at_ms.is_none() {

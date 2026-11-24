@@ -1139,7 +1139,14 @@ fn quality_scores_pages_without_graded_rows_omit_disclosure() {
 
 #[test]
 fn quality_scores_page_estimate_charges_each_task_disclosure_once() {
-    for kind in ["transcription", "speech", "image", "video", "search"] {
+    for kind in [
+        "transcription",
+        "speech",
+        "image",
+        "video",
+        "search",
+        "decision",
+    ] {
         let rows = ProviderRows {
             models: BTreeMap::from([(
                 "test/model".into(),

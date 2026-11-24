@@ -250,7 +250,7 @@ pub fn validate_judgments(set: &CurationSet) -> Result<(), String> {
         if kinds.iter().any(|(kind, grade)| {
             !matches!(
                 kind.as_str(),
-                "transcription" | "speech" | "image" | "video" | "search"
+                "transcription" | "speech" | "image" | "video" | "search" | "decision"
             ) || !valid_number(grade)
         }) {
             return Err(format!("invalid task grade for {model}"));

@@ -422,6 +422,7 @@ const QUALITY_ONLY: &[&str] = &[
     "quality.grade.image",
     "quality.grade.video",
     "quality.grade.search",
+    "quality.grade.decision",
     "quality.decommissioned",
 ];
 

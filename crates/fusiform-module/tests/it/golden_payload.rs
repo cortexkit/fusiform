@@ -1673,6 +1673,18 @@ pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Valu
             126,
         )
         .unwrap();
+    store
+        .append_quality_grade(
+            "openai/gpt-6-luna-decisions",
+            Some("decision"),
+            Some(&fusiform_store::QualityGrade::NonChat {
+                grade: serde_json::from_str("83.00").unwrap(),
+            }),
+            "operator",
+            "synthetic decision evaluation",
+            127,
+        )
+        .unwrap();
     let mut cases = serde_json::Map::new();
     for (label, name, arguments) in [
         ("quality.grade — transcription commit", "quality.grade", serde_json::from_str::<serde_json::Value>(r#"{"model":"openai/gpt-transcribe","kind":"transcription","grade":87.500,"reason":"synthetic media evaluation","dry_run":false}"#).unwrap()),
@@ -1682,6 +1694,9 @@ pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Valu
         ("catalog.get — chat and per-kind media grades", "catalog.get", serde_json::json!({"provider_id":"openai","model_id":"synthetic-multimodal","fact_prefixes":["model.type","quality."]})),
         ("quality.grades — local prefix", "quality.grades", serde_json::json!({"prefix":"local:"})),
         ("catalog.get — operator search grade", "catalog.get", serde_json::json!({"provider_id":"exa","model_id":"search","fact_prefixes":["model.type","quality."]})),
+        ("catalog.get — operator decision grade", "catalog.get", serde_json::json!({"provider_id":"openai","model_id":"gpt-6-luna-decisions","fact_prefixes":["model.kind","limit.","quality."]})),
+        ("catalog.get — ungraded decision model", "catalog.get", serde_json::json!({"provider_id":"cloudflare-workers-ai","model_id":"@cf/cloudflare/clef-flash","fact_prefixes":["model.kind","limit.","quality."]})),
+        ("quality.grades — decision prefix", "quality.grades", serde_json::json!({"prefix":"openai/gpt-6-luna-decisions"})),
     ] {
         let request = serde_json::json!({"name":name,"arguments":arguments});
         let case = match serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()) {
@@ -1693,7 +1708,9 @@ pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Valu
                 if response.get("resolved_at_ms").is_some() {
                     response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
                     response["catalog_version"] = serde_json::json!(NOW_PLACEHOLDER);
-                    response["quality_scores"]["graded_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+                    if let Some(scores) = response.get_mut("quality_scores") {
+                        scores["graded_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
+                    }
                 }
                 serde_json::json!({"request":request,"response":response})
             }
@@ -1706,6 +1723,19 @@ pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Valu
             ["openai/gpt-transcribe"]["quality.grade.transcription"]
             .to_string(),
         "87.500"
+    );
+    let decision = &cases["catalog.get — operator decision grade"]["response"]["models"]
+        ["openai/gpt-6-luna-decisions"];
+    assert_eq!(decision["model.kind"], "decision");
+    assert_eq!(decision["quality.grade.decision"].to_string(), "83.00");
+    assert_eq!(
+        cases["catalog.get — ungraded decision model"]["response"]["models"]
+            ["cloudflare-workers-ai/@cf/cloudflare/clef-flash"],
+        serde_json::json!({"model.kind":"decision","limit.context":24576})
+    );
+    assert_eq!(
+        cases["quality.grades — decision prefix"]["response"]["grades"][0]["kind"],
+        "decision"
     );
     assert_eq!(
         cases["quality.grade — refuses missing kind"]["error"]["code"],

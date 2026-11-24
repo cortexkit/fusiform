@@ -335,11 +335,11 @@ fn write(
         Some("speech") => Some(("capability.output_modalities", "audio")),
         Some("image") => Some(("capability.output_modalities", "image")),
         Some("video") => Some(("capability.output_modalities", "video")),
-        Some("search") => None,
+        Some("search" | "decision") => None,
         None => None,
         Some(_) => {
             return Err(RouteError::bad_request(
-                "kind must be transcription, speech, image, video or search",
+                "kind must be transcription, speech, image, video, search or decision",
             ))
         }
     };
@@ -402,7 +402,7 @@ fn write(
             usize::MAX,
         )?)
     };
-    let affected: Vec<_> = catalog
+    let mut affected: Vec<_> = catalog
         .as_ref()
         .into_iter()
         .flat_map(|catalog| {
@@ -417,11 +417,18 @@ fn write(
             })
         })
         .collect();
+    if !withdraw && !local && affected.is_empty() {
+        return Err(RouteError::bad_request(format!("unknown quality grade key {model:?}; model.type is unavailable because no current served row matches; use a canonical model id carried by a current served row, or the provider/model row id when it has no canonical id")));
+    }
+    let decision = kind.as_deref() == Some("decision");
+    if let Some(catalog) = catalog.as_ref().filter(|_| decision) {
+        affected.retain(|id| curate::is_decision_row(&catalog.models[id]));
+        if !withdraw && affected.is_empty() {
+            return Err(RouteError::bad_request("quality grade kind decision requires model.kind=decision on at least one current row reached by the key"));
+        }
+    }
     if !withdraw && !local {
         let catalog = catalog.as_ref().expect("catalog keys resolve current rows");
-        if affected.is_empty() {
-            return Err(RouteError::bad_request(format!("unknown quality grade key {model:?}; model.type is unavailable because no current served row matches; use a canonical model id carried by a current served row, or the provider/model row id when it has no canonical id")));
-        }
         if let Some(effort) = &graded_effort {
             super::quality_efforts::require_effort(catalog, &affected, effort)?;
         }
@@ -448,12 +455,14 @@ fn write(
             }) {
                 return Err(RouteError::bad_request("quality grade kind search requires model.type=search on at least one current row reached by the key"));
             }
-        } else if affected.iter().any(|id| {
-            catalog.models[id]
-                .get("model.type")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|kind| kind != "chat")
-        }) {
+        } else if !decision
+            && affected.iter().any(|id| {
+                catalog.models[id]
+                    .get("model.type")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|kind| kind != "chat")
+            })
+        {
             return Err(RouteError::bad_request(
                 "ELO/EQ requires chat rows; media grades require kind and grade",
             ));

@@ -79,7 +79,7 @@ commands:
   grade <model> --elo N --eq N [--effort E | --effort-grade E] --reason TEXT [--commit]
                             set chat quality grades (previews by default)
   grade <key> --kind K --grade N --reason TEXT [--commit]
-                            grade transcription, speech, image, video or search engines
+                            grade transcription, speech, image, video, search or decision engines
   withdraw-grade <key> [--kind K | --effort-grade E] --reason TEXT [--commit]
   workload <model> <workload> (--default E [--minimum E] | --exclude | --withdraw) --reason TEXT [--commit]
                             withdraw that kind (or ELO/EQ), retaining history
@@ -395,10 +395,11 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
             if let Some(kind) = &args.kind {
                 if !matches!(
                     kind.as_str(),
-                    "transcription" | "speech" | "image" | "video" | "search"
+                    "transcription" | "speech" | "image" | "video" | "search" | "decision"
                 ) {
                     return Err(
-                        "--kind must be transcription, speech, image, video or search".into(),
+                        "--kind must be transcription, speech, image, video, search or decision"
+                            .into(),
                     );
                 }
                 if !matches!(args.command.as_str(), "grade" | "withdraw-grade") {
@@ -2902,19 +2903,21 @@ mod tests {
             let args = super::parse_args(words.iter().map(std::ffi::OsString::from))?;
             super::request_for(&args)
         };
-        let (_, body) = request(&[
-            "ck-fusiform",
-            "grade",
-            "exa/search",
-            "--kind",
-            "search",
-            "--grade",
-            "85",
-            "--reason",
-            "evaluation",
-        ])
-        .unwrap();
-        assert_eq!(body["kind"], "search");
+        for (key, kind) in [("exa/search", "search"), ("fixture/decision", "decision")] {
+            let (_, body) = request(&[
+                "ck-fusiform",
+                "grade",
+                key,
+                "--kind",
+                kind,
+                "--grade",
+                "85",
+                "--reason",
+                "evaluation",
+            ])
+            .unwrap();
+            assert_eq!(body["kind"], kind);
+        }
         let (tool, body) = request(&["ck-fusiform", "grades", "--prefix", "local:"]).unwrap();
         assert_eq!(tool, "quality.grades");
         assert_eq!(body, serde_json::json!({"prefix":"local:"}));
