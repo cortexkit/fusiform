@@ -163,11 +163,11 @@ value would do to a consumer:
 | `workload.<name>.excluded` | advisory | `true` means never select the model for this workload; otherwise absent; current and dated |
 | `quality.elo` | advisory | operator-assigned general quality score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
 | `quality.eq` | advisory | operator-assigned writing and judgment score as an exact JSON number; routing selection, not request bytes; current reads only (§5.9) |
-| `quality.grade.transcription` | advisory | operator-assigned transcription score, comparable only among transcription engines; current reads only (§5.9) |
-| `quality.grade.speech` | advisory | operator-assigned speech score, comparable only among speech engines; current reads only (§5.9) |
-| `quality.grade.image` | advisory | operator-assigned image score, comparable only among image engines; current reads only (§5.9) |
-| `quality.grade.video` | advisory | operator-assigned video score, comparable only among video engines; current reads only (§5.9) |
-| `quality.grade.search` | advisory | operator-assigned search score, comparable only among search engines; current reads only (§5.9) |
+| `quality.grade.transcription` | advisory | operator-assigned transcription score, comparable only among transcription engines; current and dated reads (§5.9) |
+| `quality.grade.speech` | advisory | operator-assigned speech score, comparable only among speech engines; current and dated reads (§5.9) |
+| `quality.grade.image` | advisory | operator-assigned image score, comparable only among image engines; current and dated reads (§5.9) |
+| `quality.grade.video` | advisory | operator-assigned video score, comparable only among video engines; current and dated reads (§5.9) |
+| `quality.grade.search` | advisory | operator-assigned search score, comparable only among search engines; current and dated reads (§5.9) |
 | `quality.grade.decision` | advisory | operator-assigned decision score, comparable only among decision models; current and dated reads (§5.9) |
 | `limit.context` | byte-affecting | integer token count, or `null` |
 | `limit.output` | byte-affecting | integer token count, or `null`; a sourced current-read override is disclosed in `fact_overrides` (§5.8) |
@@ -953,12 +953,13 @@ id, never through a target's provider/model key. Billing-plane reads keep the
 plain read's grades for the same row.
 
 Chat rows (absent `model.type` or `chat`) receive `quality.elo` (general quality)
-and `quality.eq` (writing and judgment). Every current row can also receive
-`quality.grade.transcription`, `quality.grade.speech`, `quality.grade.image`,
-`quality.grade.video` and `quality.grade.search` from its grade key, independently of its primary
-`model.type`. Only rows with `model.kind=decision` at the read instant receive
-`quality.grade.decision`, even when other rows share the same grade key. The bare
-`quality.grade` fact is retired.
+and `quality.eq` (writing and judgment). A task grade is served from the row's
+grade key only if the row meets the kind's rule at the read instant, even when
+other rows share the same key. Transcription requires audio input; speech,
+image, and video require the corresponding output modality (audio for speech).
+Search requires `model.type=search`; decision requires `model.kind=decision`.
+An ineligible row has no grade fact for that kind. The bare `quality.grade`
+fact is retired.
 Higher task grades are better and compare only among engines doing the same task. All dimensions are
 advisory judgments for routing selection, not upstream measurements or
 instructions changing request bytes. Withdrawn grades are absent facts. Numbers
@@ -1050,8 +1051,9 @@ publisher just like catalog-key writes.
 
 Both write responses have `dry_run`, `model`, `current` (the current grade, or
 null), `new` (the proposed or committed record), `affected_count`, and
-`affected_ids` (up to ten served row ids in lexical order). For decision writes
-and withdrawals, the count and ids include only reached rows with `model.kind=decision`.
+`affected_ids` (up to ten served row ids in lexical order). For task grade
+writes and withdrawals, the count and ids include only reached rows that
+currently meet the kind's rule.
 A grade record has
 `model`, `elo`, `eq`, `withdrawn`, `graded_by`, `reason`, and `recorded_at_ms`.
 Chat records carry numeric `elo` and `eq` and omit `grade`, retaining their

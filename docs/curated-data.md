@@ -1212,7 +1212,8 @@ and judgment. Task grades use `quality.grade.transcription`,
 `quality.grade.speech`, `quality.grade.image`, `quality.grade.video`,
 `quality.grade.search` and `quality.grade.decision`. They compare only within
 the same task, with higher values better. A row can carry several task grades
-alongside ELO/EQ. Only rows with `model.kind=decision` receive a decision grade.
+alongside ELO/EQ. Sharing a grade key is not enough: each row receives only
+the task grades whose eligibility rules it meets at the read instant.
 They guide routing selection, not request bytes. Grades live in the store's
 append-only `quality_grade_era` table and take effect immediately, without a
 build or restart. A binary upgrade never overwrites an operator judgment.
@@ -1270,9 +1271,9 @@ requires at least one reached row whose modality list contains audio input
 require `model.type=search` on at least one reached row, without a modality
 requirement. Decision grades require `model.kind=decision` on at least one
 reached row. Local keys skip catalog lookup. A preview shows the current and
-proposed grade and the affected row count plus up to ten row ids. Decision
-writes and withdrawals count only the reached decision rows. `quality.withdraw`
-refuses `no_coverage` without a current grade.
+proposed grade and the affected row count plus up to ten row ids. Task grade
+writes and withdrawals count only reached rows that meet the kind's rule.
+`quality.withdraw` refuses `no_coverage` without a current grade.
 Omitted `kind` on withdrawal targets ELO/EQ, while a supplied kind targets only
 that task grade. `quality.grades` lists all current grades; with `prefix`,
 it lists current grades whose key starts with that literal string (routing

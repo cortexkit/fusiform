@@ -1039,11 +1039,11 @@ fn serve_catalog_get_snapshot(
         if selects_chat_score {
             wide.push("model.type".to_string());
         }
-        if prefixes
-            .iter()
-            .any(|p| "quality.grade.decision".starts_with(p))
-        {
-            wide.push("model.kind".to_string());
+        // A grade-only projection still needs the row facts that make it eligible.
+        for fact in curate::TaskGradeRequirement::required_facts_for_prefixes(prefixes) {
+            if !wide.iter().any(|prefix| fact.starts_with(prefix)) {
+                wide.push(fact.to_owned());
+            }
         }
         wide
     });

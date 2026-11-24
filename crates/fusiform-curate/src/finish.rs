@@ -293,9 +293,65 @@ fn apply_model_lineage(
     }
 }
 
-/// Decision grades apply only to rows explicitly classified as decision models.
-pub fn is_decision_row(facts: &Facts) -> bool {
-    facts.get("model.kind").and_then(serde_json::Value::as_str) == Some("decision")
+/// The row fact required to apply a task grade, independent of its lookup key.
+pub enum TaskGradeRequirement {
+    Contains(&'static str, &'static str),
+    Equals(&'static str, &'static str),
+}
+
+impl TaskGradeRequirement {
+    const BY_GRADE_FACT: [(&str, Self); 6] = [
+        (
+            "quality.grade.transcription",
+            Self::Contains("capability.input_modalities", "audio"),
+        ),
+        (
+            "quality.grade.speech",
+            Self::Contains("capability.output_modalities", "audio"),
+        ),
+        (
+            "quality.grade.image",
+            Self::Contains("capability.output_modalities", "image"),
+        ),
+        (
+            "quality.grade.video",
+            Self::Contains("capability.output_modalities", "video"),
+        ),
+        ("quality.grade.search", Self::Equals("model.type", "search")),
+        (
+            "quality.grade.decision",
+            Self::Equals("model.kind", "decision"),
+        ),
+    ];
+
+    pub fn for_kind(kind: &str) -> Option<Self> {
+        Self::BY_GRADE_FACT.into_iter().find_map(|(key, rule)| {
+            (key.strip_prefix("quality.grade.") == Some(kind)).then_some(rule)
+        })
+    }
+
+    pub fn required_facts_for_prefixes(
+        prefixes: &[String],
+    ) -> impl Iterator<Item = &'static str> + '_ {
+        Self::BY_GRADE_FACT
+            .into_iter()
+            .filter(move |(key, _)| prefixes.iter().any(|prefix| key.starts_with(prefix)))
+            .map(|(_, rule)| match rule {
+                Self::Contains(fact, _) | Self::Equals(fact, _) => fact,
+            })
+    }
+
+    pub fn matches_row(&self, facts: &Facts) -> bool {
+        match *self {
+            Self::Contains(fact, required) => facts
+                .get(fact)
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|values| values.iter().any(|v| v.as_str() == Some(required))),
+            Self::Equals(fact, required) => {
+                facts.get(fact).and_then(serde_json::Value::as_str) == Some(required)
+            }
+        }
+    }
 }
 
 fn apply_quality_scores(
@@ -359,7 +415,9 @@ fn apply_quality_scores(
                 }
                 Grade::NonChat { grade } => {
                     let Some(kind) = &row.kind else { continue };
-                    if kind == "decision" && !is_decision_row(facts) {
+                    if !TaskGradeRequirement::for_kind(kind)
+                        .is_some_and(|requirement| requirement.matches_row(facts))
+                    {
                         continue;
                     }
                     vec![(format!("quality.grade.{kind}"), grade)]

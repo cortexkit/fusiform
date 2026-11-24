@@ -435,10 +435,11 @@ ELO/EQ remains a chat judgment. Media writes require the kind's capability on
 at least one current row reached by the key: audio input for transcription,
 audio output for speech, image output for image, and video output for video.
 Search grades instead require `model.type=search` on at least one reached row.
-Decision grades require `model.kind=decision` on at least one reached row and
-are served only on reached rows with that fact. Other task grades attach
-independently of the row's primary `model.type`, so a chat row can carry ELO/EQ
-and transcription quality together.
+Decision grades require `model.kind=decision` on at least one reached row.
+Each task grade is served only on reached rows that meet its rule at the read
+instant, and task writes and withdrawals count only currently eligible rows.
+Media eligibility does not depend on the row's primary `model.type`, so a chat
+row can carry ELO/EQ and transcription quality together.
 Local keys bypass catalog lookup, accept task grades and withdrawals only,
 and never attach to catalog rows. All numbers must be finite and positive;
 task grades compare only within a kind, with higher values better.

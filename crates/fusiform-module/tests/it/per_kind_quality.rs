@@ -54,6 +54,132 @@ fn grade(store: &CatalogStore, model: &str, kind: &str, n: i64) -> Value {
 }
 
 #[test]
+fn transcription_grade_reaches_only_audio_input_rows() {
+    let (store, _dir) = fixture();
+    let model = "lab/transcription-eligibility";
+    seed(
+        &store,
+        "test/audio-input",
+        vec![
+            ("model.canonical_id", json!(model)),
+            ("capability.input_modalities", json!(["text", "audio"])),
+        ],
+    );
+    seed(
+        &store,
+        "test/text-input",
+        vec![
+            ("model.canonical_id", json!(model)),
+            ("capability.input_modalities", json!(["text"])),
+        ],
+    );
+
+    let accepted = grade(&store, model, "transcription", 98);
+    for args in [
+        json!({"provider_id":"test"}),
+        json!({"provider_id":"test","at_ms":accepted["new"]["recorded_at_ms"]}),
+    ] {
+        let catalog = call(&store, "catalog.get", args).unwrap();
+        let rows = &catalog["models"];
+        assert_eq!(rows["test/audio-input"]["quality.grade.transcription"], 98);
+        assert_eq!(
+            rows["test/text-input"]["capability.input_modalities"],
+            json!(["text"])
+        );
+        assert_eq!(
+            rows["test/text-input"].get("quality.grade.transcription"),
+            None
+        );
+        assert_eq!(catalog["quality_scores"]["graded_by"], "operator");
+    }
+    let catalog = call(
+        &store,
+        "catalog.get",
+        json!({"provider_id":"test","model_id":"text-input"}),
+    )
+    .unwrap();
+    assert!(catalog.get("quality_scores").is_none());
+    assert_eq!(accepted["affected_ids"], json!(["test/audio-input"]));
+    assert_eq!(accepted["affected_count"], 1);
+    let withdrawn = call(
+        &store,
+        "quality.withdraw",
+        json!({"model":model,"kind":"transcription","reason":"withdraw evaluation","dry_run":false}),
+    )
+    .unwrap();
+    assert_eq!(withdrawn["affected_ids"], json!(["test/audio-input"]));
+    assert_eq!(withdrawn["affected_count"], 1);
+}
+
+fn assert_task_grade_split(kind: &str, fact: &str, eligible: Value, ineligible: Value) {
+    let (store, _dir) = fixture();
+    let model = "lab/task-eligibility";
+    for (id, value) in [("test/eligible", eligible), ("test/ineligible", ineligible)] {
+        seed(
+            &store,
+            id,
+            vec![("model.canonical_id", json!(model)), (fact, value)],
+        );
+    }
+    let accepted = grade(&store, model, kind, 80);
+    let grade_fact = format!("quality.grade.{kind}");
+    for args in [
+        json!({"provider_id":"test"}),
+        json!({"provider_id":"test","fact_prefixes":[grade_fact,"existence"]}),
+    ] {
+        let catalog = call(&store, "catalog.get", args).unwrap();
+        assert_eq!(catalog["models"]["test/eligible"][&grade_fact], 80);
+        let ineligible = catalog["models"]["test/ineligible"].as_object().unwrap();
+        assert!(!ineligible.contains_key(&grade_fact));
+    }
+    assert_eq!(accepted["affected_ids"], json!(["test/eligible"]));
+    assert_eq!(accepted["affected_count"], 1);
+    let withdrawn = call(
+        &store,
+        "quality.withdraw",
+        json!({"model":model,"kind":kind,"reason":"withdraw evaluation","dry_run":false}),
+    )
+    .unwrap();
+    assert_eq!(withdrawn["affected_ids"], json!(["test/eligible"]));
+    assert_eq!(withdrawn["affected_count"], 1);
+}
+
+#[test]
+fn speech_grade_reaches_only_audio_output_rows() {
+    assert_task_grade_split(
+        "speech",
+        "capability.output_modalities",
+        json!(["audio"]),
+        json!(["text"]),
+    );
+}
+
+#[test]
+fn image_grade_reaches_only_image_output_rows() {
+    assert_task_grade_split(
+        "image",
+        "capability.output_modalities",
+        json!(["image"]),
+        json!(["video"]),
+    );
+}
+
+#[test]
+fn video_grade_reaches_only_video_output_rows() {
+    assert_task_grade_split(
+        "video",
+        "capability.output_modalities",
+        json!(["video"]),
+        json!(["image"]),
+    );
+}
+
+#[test]
+fn search_grade_reaches_only_search_rows() {
+    assert_task_grade_split("search", "model.type", json!("search"), json!("chat"));
+}
+
+#[test]
 fn kind_guard_checks_the_matching_modality_on_at_least_one_reached_row() {
     let (store, _dir) = fixture();
     seed(
@@ -109,7 +235,8 @@ fn kind_guard_checks_the_matching_modality_on_at_least_one_reached_row() {
             ],
         );
         let accepted = grade(&store, &key, kind, 80);
-        assert_eq!(accepted["affected_count"], 2);
+        assert_eq!(accepted["affected_count"], 1);
+        assert_eq!(accepted["affected_ids"], json!([format!("capable/{kind}")]));
         assert_eq!(accepted["new"]["kind"], kind);
     }
 }

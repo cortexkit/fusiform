@@ -1,6 +1,7 @@
 //! Preview and record live operator judgments without changing upstream facts.
 
 use super::*;
+use curate::TaskGradeRequirement;
 use fusiform_protocol::{
     ModelMarkWire, QualityGradeRequest, QualityGradeWire, QualityGradesRequest,
     QualityGradesResponse, QualityMarkRequest, QualityMarkWriteResponse, QualityMarksRequest,
@@ -330,19 +331,18 @@ fn write(
     if reason.trim().is_empty() {
         return Err(RouteError::bad_request("reason must not be empty"));
     }
-    let modality = match kind.as_deref() {
-        Some("transcription") => Some(("capability.input_modalities", "audio")),
-        Some("speech") => Some(("capability.output_modalities", "audio")),
-        Some("image") => Some(("capability.output_modalities", "image")),
-        Some("video") => Some(("capability.output_modalities", "video")),
-        Some("search" | "decision") => None,
-        None => None,
-        Some(_) => {
-            return Err(RouteError::bad_request(
-                "kind must be transcription, speech, image, video, search or decision",
-            ))
-        }
-    };
+    let requirement = kind
+        .as_deref()
+        .map(|kind| {
+            TaskGradeRequirement::for_kind(kind)
+                .map(|requirement| (kind, requirement))
+                .ok_or_else(|| {
+                    RouteError::bad_request(
+                        "kind must be transcription, speech, image, video, search or decision",
+                    )
+                })
+        })
+        .transpose()?;
     let local = local_key(&model)?;
     if local && (kind.is_none() || matches!(&grade, Some(QualityGrade::Chat { .. }))) {
         return Err(RouteError::bad_request(
@@ -420,49 +420,30 @@ fn write(
     if !withdraw && !local && affected.is_empty() {
         return Err(RouteError::bad_request(format!("unknown quality grade key {model:?}; model.type is unavailable because no current served row matches; use a canonical model id carried by a current served row, or the provider/model row id when it has no canonical id")));
     }
-    let decision = kind.as_deref() == Some("decision");
-    if let Some(catalog) = catalog.as_ref().filter(|_| decision) {
-        affected.retain(|id| curate::is_decision_row(&catalog.models[id]));
+    if let (Some((kind, requirement)), Some(catalog)) = (requirement, &catalog) {
+        affected.retain(|id| requirement.matches_row(&catalog.models[id]));
         if !withdraw && affected.is_empty() {
-            return Err(RouteError::bad_request("quality grade kind decision requires model.kind=decision on at least one current row reached by the key"));
+            let message = match requirement {
+                TaskGradeRequirement::Contains(fact, required) => format!(
+                    "quality grade kind {kind:?} requires {fact} containing {required:?} on at least one current row reached by {model:?}"
+                ),
+                TaskGradeRequirement::Equals(fact, required) => format!(
+                    "quality grade kind {kind} requires {fact}={required} on at least one current row reached by the key"
+                ),
+            };
+            return Err(RouteError::bad_request(message));
         }
-    }
-    if !withdraw && !local {
+    } else if !withdraw && !local {
         let catalog = catalog.as_ref().expect("catalog keys resolve current rows");
         if let Some(effort) = &graded_effort {
             super::quality_efforts::require_effort(catalog, &affected, effort)?;
         }
-        if let Some((fact, required)) = modality {
-            let capable = affected.iter().any(|id| {
-                catalog.models[id]
-                    .get(fact)
-                    .and_then(serde_json::Value::as_array)
-                    .is_some_and(|values| {
-                        values.iter().any(|value| value.as_str() == Some(required))
-                    })
-            });
-            if !capable {
-                return Err(RouteError::bad_request(format!(
-                    "quality grade kind {:?} requires {fact} containing {required:?} on at least one current row reached by {model:?}", kind.as_deref().unwrap()
-                )));
-            }
-        } else if kind.as_deref() == Some("search") {
-            if !affected.iter().any(|id| {
-                catalog.models[id]
-                    .get("model.type")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("search")
-            }) {
-                return Err(RouteError::bad_request("quality grade kind search requires model.type=search on at least one current row reached by the key"));
-            }
-        } else if !decision
-            && affected.iter().any(|id| {
-                catalog.models[id]
-                    .get("model.type")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|kind| kind != "chat")
-            })
-        {
+        if affected.iter().any(|id| {
+            catalog.models[id]
+                .get("model.type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|kind| kind != "chat")
+        }) {
             return Err(RouteError::bad_request(
                 "ELO/EQ requires chat rows; media grades require kind and grade",
             ));

@@ -581,37 +581,45 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     );
     curation_set.kind_grades.insert(
         "zeta/mini".into(),
-        BTreeMap::from([("decision".into(), 83.into())]),
+        BTreeMap::from([
+            ("decision".into(), 83.into()),
+            ("transcription".into(), 98.into()),
+        ]),
     );
     snapshot.state.curation_set = curation_set.clone();
-    let decision_fact = fusiform_release::ChangeOp::Set {
-        provider: "zeta".into(),
-        model: "mini".into(),
-        fact: "model.kind".into(),
-        value: json!("decision"),
+    let mut set_fact = |provider: &str, model: &str, fact: &str, value: Value| {
+        snapshot
+            .state
+            .upstream
+            .get_mut(provider)
+            .unwrap()
+            .models
+            .get_mut(model)
+            .unwrap()
+            .insert(fact.into(), value.clone());
+        fusiform_release::ChangeOp::Set {
+            provider: provider.into(),
+            model: model.into(),
+            fact: fact.into(),
+            value,
+        }
     };
     let change = fusiform_release::Change {
         upstream: vec![
-            decision_fact,
-            fusiform_release::ChangeOp::Set {
-                provider: "zeta".into(),
-                model: "mini".into(),
-                fact: "model.name".into(),
-                value: json!("Mini 3"),
-            },
+            set_fact("alpha", "-", "capability.input_modalities", json!(["text"])),
+            set_fact("alpha", "-", "model.canonical_id", json!("zeta/mini")),
+            set_fact(
+                "zeta",
+                "mini",
+                "capability.input_modalities",
+                json!(["audio", "text"]),
+            ),
+            set_fact("zeta", "mini", "model.canonical_id", json!("zeta/mini")),
+            set_fact("zeta", "mini", "model.kind", json!("decision")),
+            set_fact("zeta", "mini", "model.name", json!("Mini 3")),
         ],
         curation_set: Some(curation_set),
     };
-    let model = snapshot
-        .state
-        .upstream
-        .get_mut("zeta")
-        .unwrap()
-        .models
-        .get_mut("mini")
-        .unwrap();
-    model.insert("model.name".into(), json!("Mini 3"));
-    model.insert("model.kind".into(), json!("decision"));
     let envelope = &mut snapshot.envelope;
     envelope.parent = Some(2);
     envelope.release = 3;
@@ -659,6 +667,23 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     assert_eq!(decision.models["zeta/mini"]["quality.grade.decision"], 83);
     assert_eq!(
         decision.quality_scores.unwrap().graded_at_ms,
+        third.envelope.published_at_ms
+    );
+    let transcription = crate::route::serve_catalog_get(
+        &store,
+        br#"{"fact_prefixes":["quality.grade.transcription","existence"]}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        transcription.models["zeta/mini"]["quality.grade.transcription"],
+        98
+    );
+    assert_eq!(
+        transcription.models["alpha/-"],
+        BTreeMap::from([("existence".into(), json!("present"))]),
+    );
+    assert_eq!(
+        transcription.quality_scores.unwrap().graded_at_ms,
         third.envelope.published_at_ms
     );
     let get = |at_ms| {
