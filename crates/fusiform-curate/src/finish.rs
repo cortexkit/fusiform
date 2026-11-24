@@ -293,6 +293,11 @@ fn apply_model_lineage(
     }
 }
 
+/// Decision grades apply only to rows explicitly classified as decision models.
+pub fn is_decision_row(facts: &Facts) -> bool {
+    facts.get("model.kind").and_then(serde_json::Value::as_str) == Some("decision")
+}
+
 fn apply_quality_scores(
     quality: &Quality,
     response: &mut CatalogGetResponse,
@@ -354,6 +359,9 @@ fn apply_quality_scores(
                 }
                 Grade::NonChat { grade } => {
                     let Some(kind) = &row.kind else { continue };
+                    if kind == "decision" && !is_decision_row(facts) {
+                        continue;
+                    }
                     vec![(format!("quality.grade.{kind}"), grade)]
                 }
                 _ => continue,

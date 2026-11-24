@@ -255,7 +255,7 @@ fn release_head_and_snapshot_round_trip() {
                 "version":4, "approved_at_ms":null, "approved_drafts":["draft-42"],
                 "grades":{"m":{"elo":13,"eq":14,"graded_effort":"low"},"legacy":{"elo":12,"eq":13}},
                 "effort_grades":{"m":{"high":{"elo":15,"eq":16}}},
-                "kind_grades":{"m":{"chat":12}},
+                "kind_grades":{"m":{"chat":12},"p/decision":{"decision":83}},
                 "workload_efforts":{"m":{"reason":{"default":"high","minimum":"low"}}},
                 "decommissioned":{"retired":{"reason":"withdrawn"}},
                 "vendor_facts":{"input-audio-per-token":{"schema":"input-audio-per-token/v1"}}

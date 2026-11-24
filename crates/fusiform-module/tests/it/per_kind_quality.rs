@@ -364,7 +364,110 @@ fn search_kind_requires_search_type_not_modalities_and_supports_local_keys() {
 }
 
 #[test]
-fn every_curated_media_and_search_row_passes_guard_over_the_embedded_catalog() {
+fn decision_grade_reaches_only_decision_rows() {
+    let (store, _dir) = fixture();
+    let model = "openai/gpt-6-luna-decisions";
+    seed(
+        &store,
+        "test/decision-reseller",
+        vec![
+            ("model.canonical_id", json!(model)),
+            ("model.kind", json!("decision")),
+        ],
+    );
+    seed(
+        &store,
+        "test/chat-reseller",
+        vec![
+            ("model.canonical_id", json!(model)),
+            ("model.type", json!("chat")),
+        ],
+    );
+
+    let accepted = grade(&store, model, "decision", 83);
+    let affected = json!([model, "test/decision-reseller"]);
+    assert_eq!(accepted["affected_ids"], affected);
+    assert_eq!(accepted["affected_count"], 2);
+    let chat = call(
+        &store,
+        "catalog.get",
+        json!({"provider_id":"test","model_id":"chat-reseller"}),
+    )
+    .unwrap();
+    assert_eq!(chat["models"]["test/chat-reseller"]["model.type"], "chat");
+    assert!(chat["models"]["test/chat-reseller"]
+        .get("quality.grade.decision")
+        .is_none());
+    for args in [
+        json!({"provider_id":"openai","model_id":"gpt-6-luna-decisions"}),
+        json!({"provider_id":"test","model_id":"decision-reseller"}),
+        json!({"provider_id":"test","fact_prefixes":["quality.grade.decision"]}),
+        json!({"paged":true,"fact_prefixes":["quality.grade.decision"]}),
+        json!({"provider_id":"test","model_id":"decision-reseller","fact_prefixes":["quality.grade.decision"],"at_ms":accepted["new"]["recorded_at_ms"]}),
+    ] {
+        let expected = if args["provider_id"] == "openai" {
+            model
+        } else {
+            "test/decision-reseller"
+        };
+        let catalog = call(&store, "catalog.get", args).unwrap();
+        assert_eq!(catalog["models"][expected]["quality.grade.decision"], 83);
+        assert!(catalog["models"]["test/chat-reseller"]
+            .get("quality.grade.decision")
+            .is_none());
+    }
+    let withdrawn = call(
+        &store,
+        "quality.withdraw",
+        json!({"model":model,"kind":"decision","reason":"withdraw test grade","dry_run":false}),
+    )
+    .unwrap();
+    assert_eq!(withdrawn["affected_ids"], affected);
+    assert_eq!(withdrawn["affected_count"], 2);
+    let catalog = call(
+        &store,
+        "catalog.get",
+        json!({"provider_id":"openai","model_id":"gpt-6-luna-decisions"}),
+    )
+    .unwrap();
+    assert!(catalog["models"][model]
+        .get("quality.grade.decision")
+        .is_none());
+}
+
+#[test]
+fn decision_kind_rejects_chat_and_search_and_supports_local_keys() {
+    let (store, _dir) = fixture();
+    seed(&store, "test/chat", vec![("model.type", json!("chat"))]);
+    seed(
+        &store,
+        "test/type-only",
+        vec![("model.type", json!("decision"))],
+    );
+    for model in [
+        "test/chat",
+        "exa/search",
+        "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        "test/type-only",
+    ] {
+        let error = call(
+            &store,
+            "quality.grade",
+            json!({"model":model,"kind":"decision","grade":50,"reason":"invalid","dry_run":false}),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "bad_request");
+        assert!(error.message.contains("model.kind=decision"), "{error:?}");
+    }
+    let accepted = grade(&store, "local:test/decision", "decision", 82);
+    assert_eq!(accepted["affected_count"], 0);
+    let local = call(&store, "quality.grades", json!({"prefix":"local:test/"})).unwrap();
+    assert_eq!(local["grades"][0]["kind"], "decision");
+    assert_eq!(local["grades"][0]["grade"], 82);
+}
+
+#[test]
+fn every_curated_task_row_passes_guard_over_the_embedded_catalog() {
     let (store, _dir) = fixture();
     let catalog = fusiform_core::normalize_models_dev_with(
         include_bytes!("../../data/models-dev-seed.json"),
@@ -383,14 +486,20 @@ fn every_curated_media_and_search_row_passes_guard_over_the_embedded_catalog() {
     store.append_eras(&plan.eras).unwrap();
     let curated: Value =
         serde_json::from_str(include_str!("../../data/curated-models.json")).unwrap();
-    let mut checked = 0;
+    let mut task_rows = 0;
+    let mut decision_rows = 0;
     for row in curated["models"].as_array().unwrap() {
-        let Some(kind) = row["facts"]["model.type"].as_str().filter(|kind| {
-            matches!(
-                *kind,
-                "transcription" | "speech" | "image" | "video" | "search"
-            )
-        }) else {
+        let kind = if row["facts"]["model.kind"] == "decision" {
+            Some("decision")
+        } else {
+            row["facts"]["model.type"].as_str().filter(|kind| {
+                matches!(
+                    *kind,
+                    "transcription" | "speech" | "image" | "video" | "search"
+                )
+            })
+        };
+        let Some(kind) = kind else {
             continue;
         };
         let model = format!(
@@ -405,7 +514,11 @@ fn every_curated_media_and_search_row_passes_guard_over_the_embedded_catalog() {
         )
         .unwrap_or_else(|error| panic!("curated engine {model} refused {kind}: {error:?}"));
         eprintln!("guard passes: {model} ({kind})");
-        checked += 1;
+        if kind == "decision" {
+            decision_rows += 1;
+        } else {
+            task_rows += 1;
+        }
     }
-    assert_eq!(checked, 14);
+    assert_eq!((task_rows, decision_rows), (14, 4));
 }

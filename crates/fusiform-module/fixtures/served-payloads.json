@@ -5601,6 +5601,48 @@
       ]
     }
   },
+  "catalog.get — operator decision grade": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "model.kind",
+          "limit.",
+          "quality."
+        ],
+        "model_id": "gpt-6-luna-decisions",
+        "provider_id": "openai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": -1,
+      "curated": [
+        {
+          "auth_methods": [
+            "apikey"
+          ],
+          "model": "openai/gpt-6-luna-decisions",
+          "review_by_ms": 1798934400000,
+          "source_ref": "OpenAI's Decisions API: POST /v1/decisions with model gpt-6-luna. This row is that endpoint, not the gpt-6-luna chat row. Read 2026-11-04 at https://developers.openai.com/api/docs/guides/decisions: \"Send requests to `POST /v1/decisions` using `gpt-6-luna`, the only currently supported model.\"; \"The Decisions API evaluates text, images, and JSON and returns typed answers\"; \"Files, audio, and item references aren't supported.\"; \"Provide images as inline base64 data URLs or publicly accessible HTTP or HTTPS URLs.\"; \"With `gpt-6-luna`, uncached input costs **$0.10 per 1M tokens**. Prompt cache hits receive discounted input pricing; cache writes are charged. Cache-read and cache-write rates match the standard `gpt-6-luna` prompt caching rates. Output tokens are not charged.\"; \"Regional processing premiums and long-context input pricing multipliers apply.\" https://developers.openai.com/api/docs/pricing, standard table, row gpt-6-luna: short context cached input $0.01, short context 30m write $0.125, 12h write $0.25. Served: the short-context rates and the 30-minute cache write. Not served: the 12-hour cache write, long-context rates above 272K input tokens, and regional premiums, so a long-context or regional request costs more than these rates. The page states no context window or image size limits."
+        }
+      ],
+      "models": {
+        "openai/gpt-6-luna-decisions": {
+          "limit.images_per_request": 1500,
+          "limit.temperature_max": 2,
+          "limit.temperature_min": 0,
+          "model.kind": "decision",
+          "quality.grade.decision": 83.00
+        }
+      },
+      "quality_scores": {
+        "graded_at_ms": -1,
+        "graded_by": "operator"
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — operator search grade": {
     "request": {
       "arguments": {
@@ -8158,6 +8200,41 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — ungraded decision model": {
+    "request": {
+      "arguments": {
+        "fact_prefixes": [
+          "model.kind",
+          "limit.",
+          "quality."
+        ],
+        "model_id": "@cf/cloudflare/clef-flash",
+        "provider_id": "cloudflare-workers-ai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": -1,
+      "curated": [
+        {
+          "auth_methods": [
+            "apikey"
+          ],
+          "model": "cloudflare-workers-ai/@cf/cloudflare/clef-flash",
+          "review_by_ms": 1797724800000,
+          "source_ref": "Display name 'Clef-flash' confirmed 2026-10-26 at https://developers.cloudflare.com/workers-ai/models/clef-flash/. Read 2026-10-21. https://developers.cloudflare.com/workers-ai/models/clef-flash/: \"Clef-flash is a fast 9B multimodal decision model that turns a state and a schema of typed questions into decisions. It reads the state as text, JSON, images, or video, and returns a probability for every allowed option of every question.\"; context window \"24,576 tokens\"; \"Optional embedded PNG, JPEG, or WebP images placed before the state (max 4; 4 MiB and 16 megapixels each, 8 MiB total decoded; whole request body max 13 MiB). Remote URLs are not accepted.\"; \"Clef models convert media inputs to input tokens and bill them at the model's input token rate. Clef models do not charge for output tokens.\" https://developers.cloudflare.com/workers-ai/platform/pricing/: \"| @cf/cloudflare/clef-flash | $0.038 per M input tokens | 3455 neurons per M input tokens |\". Not in https://models.dev/api.json (embedded seed fetched 2026-10-13)."
+        }
+      ],
+      "models": {
+        "cloudflare-workers-ai/@cf/cloudflare/clef-flash": {
+          "limit.context": 24576,
+          "model.kind": "decision"
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — upstream API-key-only login allowlist": {
     "request": {
       "arguments": {
@@ -9127,6 +9204,7 @@
         "quality.grade.image",
         "quality.grade.video",
         "quality.grade.search",
+        "quality.grade.decision",
         "model.name",
         "model.lineage",
         "provider.name",
@@ -9237,6 +9315,7 @@
         "quality.grade.image",
         "quality.grade.video",
         "quality.grade.search",
+        "quality.grade.decision",
         "model.name",
         "model.lineage",
         "provider.name",
@@ -12962,6 +13041,29 @@
         "recorded_at_ms": -1,
         "withdrawn": false
       }
+    }
+  },
+  "quality.grades — decision prefix": {
+    "request": {
+      "arguments": {
+        "prefix": "openai/gpt-6-luna-decisions"
+      },
+      "name": "quality.grades"
+    },
+    "response": {
+      "grades": [
+        {
+          "elo": null,
+          "eq": null,
+          "grade": 83.00,
+          "graded_by": "operator",
+          "kind": "decision",
+          "model": "openai/gpt-6-luna-decisions",
+          "reason": "synthetic decision evaluation",
+          "recorded_at_ms": 127,
+          "withdrawn": false
+        }
+      ]
     }
   },
   "quality.grades — history": {

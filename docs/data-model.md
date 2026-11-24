@@ -53,11 +53,12 @@ does not create.
 | 12 | `cache_lifetime_era`, with a frozen first-served history of prompt-cache rules |
 | 13 | `quality_grade_era.kind`, separating media judgments and withdrawals by task |
 | 14 | `quality_grade_era.graded_effort`, effort grade and workload judgment eras (including exclusion), local override eras, consumer cursors and document eras, and nullable plan metadata |
+| 15 | `decision` kind in `quality_grade_era` and `override_grade_era`, with all existing grade rows and ids preserved |
 
 A store whose recorded schema version is newer than the running binary's chain
 is refused at open, and the error names the store's version
 (`schema_doc::a_store_written_by_a_newer_binary_is_refused`). Migrations 4, 6,
-7, 8, 9, 10, 11, 12 and 13 are tested against stores that already hold rows
+7, 8, 9, 10, 11, 12, 13 and 15 are tested against stores that already hold rows
 (`schema_doc::the_artifact_table_arrives_on_a_populated_store`,
 `schema_doc::the_plan_price_table_arrives_on_a_populated_store`,
 `schema_doc::the_curated_model_table_arrives_on_a_populated_store`,
@@ -65,7 +66,8 @@ is refused at open, and the error names the store's version
 `schema_doc::fact_override_v9_migrates_populated_v8_and_older_binaries_refuse_it`,
 `schema_doc::quality_grade_v10_preserves_populated_v8_and_checks_exclusive_dimensions`,
 `schema_doc::cache_lifetime_v12_backfills_populated_v11_and_reopen_preserves_history`,
-`quality_kind_migration::v13_preserves_every_old_column_and_checks_kinds`).
+`quality_kind_migration::v13_preserves_every_old_column_and_checks_kinds`,
+`quality_kind_migration::v15_preserves_v14_grade_rows_and_accepts_decision`).
 
 ## 2. Observations
 
@@ -366,7 +368,7 @@ of clock order. Columns:
 | `elo`, `eq` | exact JSON number tokens stored as TEXT, both present for a chat judgment, otherwise both null |
 | `grade` | exact JSON number token stored as TEXT for a task judgment, otherwise null |
 | `graded_effort` | effort at which the chat row's ELO and EQ were measured, or null when unknown |
-| `kind` | `transcription`, `speech`, `image`, `video` or `search` for a task judgment or its withdrawal; null for ELO/EQ or its withdrawal |
+| `kind` | `transcription`, `speech`, `image`, `video`, `search` or `decision` for a task judgment or its withdrawal; null for ELO/EQ or its withdrawal |
 | `withdrawn` | 1 for a withdrawal with all numbers null, 0 for a complete judgment |
 | `graded_by` | operator attribution |
 | `reason` | why the grade was assigned or withdrawn |
@@ -433,11 +435,13 @@ ELO/EQ remains a chat judgment. Media writes require the kind's capability on
 at least one current row reached by the key: audio input for transcription,
 audio output for speech, image output for image, and video output for video.
 Search grades instead require `model.type=search` on at least one reached row.
-Serving attaches every live kind's grade independently of the row's primary
-`model.type`, so a chat row can carry ELO/EQ and transcription quality together.
-Local keys bypass catalog lookup, accept media/search grades and withdrawals only,
+Decision grades require `model.kind=decision` on at least one reached row and
+are served only on reached rows with that fact. Other task grades attach
+independently of the row's primary `model.type`, so a chat row can carry ELO/EQ
+and transcription quality together.
+Local keys bypass catalog lookup, accept task grades and withdrawals only,
 and never attach to catalog rows. All numbers must be finite and positive;
-media grades compare only within a kind, with higher values better.
+task grades compare only within a kind, with higher values better.
 
 ### Operator decommission marks
 

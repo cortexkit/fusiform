@@ -119,6 +119,54 @@ fn v13_refuses_one_legacy_media_grade_without_changing_the_store() {
     );
 }
 
+#[test]
+fn v15_preserves_v14_grade_rows_and_accepts_decision() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("migration.db");
+    let descriptor = descriptor(&path);
+    let tables = ["quality_grade_era", "override_grade_era"];
+    {
+        let old = cortexkit_store::open_sqlite(&descriptor).unwrap();
+        let outcome = old
+            .migrate(schema::NAMESPACE, &schema::MIGRATIONS[..14])
+            .unwrap();
+        assert_eq!(outcome.recorded, 14);
+        old.with_conn_fenced(|conn| {
+            for table in tables {
+                conn.execute_batch(&format!(
+                    "INSERT INTO {table} (id, model, elo, eq, withdrawn, graded_by, reason, recorded_at_ms, grade, kind, graded_effort)
+                     VALUES (10001,'test/chat','1599.800','1200.00',0,'operator','résumé',9100,NULL,NULL,'high'),
+                            (10003,'test/task',NULL,NULL,0,'operator','transcription',9300,'87.500','transcription',NULL),
+                            (10004,'test/task',NULL,NULL,0,'operator','speech',9300,'86.50','speech',NULL),
+                            (10005,'test/task',NULL,NULL,0,'operator','image',9300,'85.500','image',NULL),
+                            (10006,'test/task',NULL,NULL,0,'operator','video',9300,'84.5','video',NULL),
+                            (10007,'test/task',NULL,NULL,0,'operator','search',9300,'83.5','search',NULL),
+                            (10010,'test/task',NULL,NULL,1,'operator','withdrawal',9300,NULL,'search',NULL);"
+                ))?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    let conn = Connection::open(&path).unwrap();
+    let before = tables.map(|table| snapshot(&conn, table, "rowid, *"));
+    let _store = CatalogStore::open(&descriptor).unwrap();
+    for (table, before) in tables.into_iter().zip(before) {
+        assert_eq!(snapshot(&conn, table, "rowid, *"), before, "{table}");
+        let insert = format!(
+            "INSERT INTO {table} (model, kind, grade, withdrawn, graded_by, reason, recorded_at_ms)
+             VALUES ('test/decision',?1,'75.500',0,'operator','new kind',9400)"
+        );
+        assert_eq!(conn.execute(&insert, ["decision"]).unwrap(), 1);
+        assert!(conn.execute(&insert, ["unknown"]).is_err());
+    }
+    let check: String = conn
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(check, "ok");
+}
+
 fn row_counts(conn: &Connection) -> Vec<(&'static str, i64)> {
     [
         "quality_grade_era",

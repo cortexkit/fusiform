@@ -488,7 +488,7 @@ pub fn manifest() -> ModuleManifest {
             },
             Tool {
                 name: route::TOOL_QUALITY_GRADE.to_string(),
-                description: Some("Set live operator quality: elo and eq for chat, or kind and grade for media or search engines. Catalog keys require the matching modality, or model.type=search for search; local:provider/model keys accept task grades only and never join catalog rows. Previews unless dry_run is false.".into()),
+                description: Some("Set live operator quality: elo and eq for chat, or kind and grade for media, search or decision engines. Catalog keys require the matching modality, model.type=search for search, or model.kind=decision for decision; local:provider/model keys accept task grades only and never join catalog rows. Previews unless dry_run is false.".into()),
                 execution_mode: ExecutionMode::Mutating,
                 schema: serde_json::json!({
                     "type":"object",
@@ -498,7 +498,7 @@ pub fn manifest() -> ModuleManifest {
                         "grade":{"type":"number", "exclusiveMinimum":0},
                         "graded_effort":{"type":"string", "minLength":1},
                         "effort_grade":{"type":"string", "minLength":1},
-                        "kind":{"type":"string", "enum":["transcription","speech","image","video","search"]},
+                        "kind":{"type":"string", "enum":["transcription","speech","image","video","search","decision"]},
                         "dry_run":{"type":"boolean", "default":true}
                     },
                     "required":["model","reason"], "additionalProperties":false,
@@ -516,7 +516,7 @@ pub fn manifest() -> ModuleManifest {
                     "type":"object",
                     "properties": {
                         "model":{"type":"string"}, "reason":{"type":"string"},
-                        "kind":{"type":"string", "enum":["transcription","speech","image","video","search"]},
+                        "kind":{"type":"string", "enum":["transcription","speech","image","video","search","decision"]},
                         "effort_grade":{"type":"string", "minLength":1},
                         "dry_run":{"type":"boolean", "default":true}
                     },

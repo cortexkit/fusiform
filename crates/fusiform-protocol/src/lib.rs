@@ -1204,6 +1204,11 @@ pub const SERVED_FACTS: &[ServedFact] = &[
         note: "operator-assigned search quality score, comparable only among search engines; higher is better. Current reads only, disclosed in quality_scores.",
     },
     ServedFact {
+        key: "quality.grade.decision",
+        class: FactClass::Advisory,
+        note: "operator-assigned decision quality score, comparable only among decision models; higher is better. Current and dated reads, disclosed in quality_scores.",
+    },
+    ServedFact {
         key: "model.name",
         class: FactClass::Advisory,
         note: "human display label, verbatim upstream or sourced curation. Absent when missing or empty; aliases use only their own sourced route label, never the target's name. Consumer display only.",

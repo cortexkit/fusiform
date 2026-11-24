@@ -14,7 +14,7 @@ that keep them honest.
 | `speed-twins.json` | separately named speed servings of the same model, their wire ids and exact API proxy cards | current pairing on all reads; dated mode rates use the twin's stored eras |
 | `curated-models.json` | provider rows models.dev does not carry | at read time on current reads; written to `curated_model_era` at start, which point-in-time reads serve (§4) |
 | `canonical-links.json` | sourced lab identities missing from upstream provider rows | at read time, current reads only |
-| store quality grades | operator-assigned ELO/EQ and per-kind media judgments for routing selection | at read time, current reads only (§11) |
+| store quality grades | operator-assigned ELO/EQ and per-kind task judgments for routing selection | at read time, current reads only (§11) |
 | `model-lineage.json` | curated routing diversity and cost-fallback groups | computed per row at read time, current reads only (§12) |
 | `wire-corrections.json` | sourced per-model endpoint corrections or withholding, and providers whose routed list is complete | at read time, current reads only (§9) |
 | `wire-families.json` | verified package-and-shape request protocols | at read time, current reads only (§13) |
@@ -1205,11 +1205,11 @@ historical, upstream-moved and upstream-published reads.
 
 These grades are the operator's judgments, not upstream facts or benchmark
 measurements. On chat rows, ELO describes general quality; EQ describes writing
-and judgment. Media grades use `quality.grade.transcription`,
-`quality.grade.speech`, `quality.grade.image`, `quality.grade.video` and
-`quality.grade.search`,
-comparable only within the same task, with higher values better. A row can
-carry several media grades alongside ELO/EQ, whatever its primary `model.type`.
+and judgment. Task grades use `quality.grade.transcription`,
+`quality.grade.speech`, `quality.grade.image`, `quality.grade.video`,
+`quality.grade.search` and `quality.grade.decision`. They compare only within
+the same task, with higher values better. A row can carry several task grades
+alongside ELO/EQ. Only rows with `model.kind=decision` receive a decision grade.
 They guide routing selection, not request bytes. Grades live in the store's
 append-only `quality_grade_era` table and take effect immediately, without a
 build or restart. A binary upgrade never overwrites an operator judgment.
@@ -1236,16 +1236,17 @@ TEXT, never SQLite REAL. The positivity/finite check does not rewrite the
 number: fractional trailing zeros survive storage and serving. A withdrawal
 stores null in every numeric column. Migration v10 preserves every v8 row while
 adding `grade`; a CHECK requires either the chat pair or the non-chat grade on
-an active era, and no numbers on a withdrawal. No media values are seeded.
+an active era, and no numbers on a withdrawal. No task grades are seeded.
 Migration v13 adds `kind` and requires one of the five task kinds for a task
 grade, and null for ELO/EQ. A legacy non-null `grade` refuses migration with
 its row count instead of inventing a kind; all old columns otherwise remain
-unchanged.
+unchanged. Migration v15 adds the `decision` kind to both published and local
+override grades, preserving every existing row and id.
 
 Local engines use `local:<provider>/<model>` instead of catalog keys. Both
 parts must be nonempty, with no whitespace or control characters; extra slashes
 inside the model part are allowed. Local keys need no catalog row and never
-attach to one, even if its provider/model matches. Only media/search grades and their
+attach to one, even if its provider/model matches. Only task grades and their
 kind-scoped withdrawals are allowed; ELO/EQ and decommission marks are refused.
 
 Operator commands (preview by default; `--commit` appends one row):
@@ -1258,18 +1259,19 @@ ck models grades [--model <key> | --prefix <prefix>]
 ```
 
 `quality.grade` validates that a catalog key reaches a current served row.
-ELO/EQ requires chat rows (absent `model.type` means chat). A media/search `kind`
+ELO/EQ requires chat rows (absent `model.type` means chat). A media kind
 requires at least one reached row whose modality list contains audio input
 (transcription), audio output (speech), image output (image), or video output
 (video). The lists are `capability.input_modalities` and
 `capability.output_modalities`, not the primary type. Search grades instead
 require `model.type=search` on at least one reached row, without a modality
-requirement. Local keys skip catalog
-lookup. A preview
-shows the current and proposed grade and the affected row count plus up to ten
-row ids. `quality.withdraw` refuses `no_coverage` without a current grade.
+requirement. Decision grades require `model.kind=decision` on at least one
+reached row. Local keys skip catalog lookup. A preview shows the current and
+proposed grade and the affected row count plus up to ten row ids. Decision
+writes and withdrawals count only the reached decision rows. `quality.withdraw`
+refuses `no_coverage` without a current grade.
 Omitted `kind` on withdrawal targets ELO/EQ, while a supplied kind targets only
-that media grade. `quality.grades` lists all current grades; with `prefix`,
+that task grade. `quality.grades` lists all current grades; with `prefix`,
 it lists current grades whose key starts with that literal string (routing
 uses `local:`). `prefix` and `model` are exclusive. With `model`, it returns that key's
 full history newest first, including times, reasons and withdrawals. A key with

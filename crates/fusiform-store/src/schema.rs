@@ -90,6 +90,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 14,
         statements: include_str!("schema-v14.sql"),
     },
+    Migration {
+        version: 15,
+        statements: include_str!("schema-v15.sql"),
+    },
 ];
 
 pub(crate) fn migrations_without_embedded_data() -> Vec<Migration> {

@@ -53,6 +53,22 @@ fn publish_index_and_replayed_index_agree_by_hash() {
 }
 
 #[test]
+fn replay_accepts_a_change_with_a_decision_grade() {
+    let mut snapshot: Snapshot = serde_json::from_slice(SNAPSHOT).unwrap();
+    let index = index_from_snapshot(SNAPSHOT).unwrap();
+    snapshot
+        .state
+        .curation_set
+        .kind_grades
+        .entry("fixture/decision".into())
+        .or_default()
+        .insert("decision".into(), 83.into());
+    let change =
+        canonical_json(&json!({"upstream": [], "curation_set": snapshot.state.curation_set}));
+    assert_eq!(index_apply_change(&index, &change).unwrap(), index);
+}
+
+#[test]
 fn zero_length_index_is_not_bootstrap() {
     let (summary, index) = publish_step(MODELS, &[], EVIDENCE).unwrap();
     assert!(index.is_none());
