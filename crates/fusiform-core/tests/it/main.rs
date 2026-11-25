@@ -8,3 +8,4 @@
 mod full_payload;
 mod measured_fields_are_read_or_declared;
 mod models_dev_normalization;
+mod models_dev_v2_normalization;

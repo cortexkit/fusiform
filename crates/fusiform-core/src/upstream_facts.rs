@@ -358,23 +358,44 @@ pub fn facts_of(model: &NormalizedModel) -> ModelFacts {
         }
     }
 
-    // Rates, keyed per token class and condition. A rate row's key carries
-    // every discriminator needed to select it, so a consumer never joins
-    // capability rows to price rows.
+    // A rate's key carries every discriminator needed to select it, so a
+    // consumer never joins capability rows to price rows.
+    use crate::{ChargeBasis, MediaTokenClass, RateCondition};
     for rate in &model.rates {
-        if let crate::ChargeBasis::PerMillionTokens { class } = rate.basis {
-            let key = match rate.condition {
-                crate::RateCondition::Always => FactKey::rate(class),
-                crate::RateCondition::MinContextTokens { tokens } => {
-                    FactKey::rate_above_context(class, tokens)
+        let key = match (&rate.basis, &rate.condition) {
+            (ChargeBasis::PerMillionTokens { class }, condition) => match *condition {
+                RateCondition::Always => FactKey::rate(*class),
+                RateCondition::MinContextTokens { tokens } => {
+                    FactKey::rate_above_context(*class, tokens)
                 }
-                // A mode's price, under the upstream's mode name. Only the
-                // rate schedule reaches here; the request bytes that select
-                // the mode were dropped when the document was parsed.
-                crate::RateCondition::Mode { ref name } => FactKey::rate_in_mode(class, name),
-            };
-            facts.push((key, json_rate(&rate.value)));
+                RateCondition::Mode { ref name } => FactKey::rate_in_mode(*class, name),
+            },
+            (ChargeBasis::PerMillionMediaTokens { class }, RateCondition::Always) => FactKey(
+                match class {
+                    MediaTokenClass::CachedInputAudio => "rate.cached_input_audio",
+                    MediaTokenClass::InputImage => "rate.input_image",
+                    MediaTokenClass::OutputImage => "rate.output_image",
+                    MediaTokenClass::OutputVideo => "rate.output_video",
+                }
+                .to_owned(),
+            ),
+            (ChargeBasis::PerCharacter, RateCondition::Always) => {
+                FactKey("rate.input.per_character".to_owned())
+            }
+            (ChargeBasis::PerSecond | ChargeBasis::PerMinute, RateCondition::Always) => {
+                FactKey("rate.input_audio.per_second".to_owned())
+            }
+            _ => continue,
+        };
+        let mut value = json_rate(&rate.value);
+        // A stated zero is not a priced amount, but a v2 unit rate still
+        // needs to say which published quantity the zero describes.
+        if let (RateValue::StatedZero { .. }, Some(per)) =
+            (&rate.value, rate.basis.unit_denominator())
+        {
+            value = format!(r#"{{"state":"stated_zero","per":{per}}}"#);
         }
+        facts.push((key, value));
     }
 
     if !model.refused.is_empty() {
@@ -568,18 +589,19 @@ pub fn json_rate(value: &RateValue) -> String {
         RateValue::Priced {
             amount,
             floor: _,
-            // Unit-billed claims belong in curated model history, not in
-            // models.dev's upstream observation history.
-            per: _,
+            per,
             increment: _,
             minimum_quantity: _,
             inherited_from: _,
-        } => format!(
-            r#"{{"state":"priced","units":{},"exponent":{},"currency":"{}"}}"#,
-            amount.units,
-            amount.exponent,
-            amount.currency.as_str()
-        ),
+        } => {
+            let denominator = per.map_or_else(String::new, |per| format!(r#","per":{per}"#));
+            format!(
+                r#"{{"state":"priced","units":{},"exponent":{},"currency":"{}"{denominator}}}"#,
+                amount.units,
+                amount.exponent,
+                amount.currency.as_str()
+            )
+        }
         // The marker is dropped on every state, for the reason given above.
         RateValue::StatedZero { inherited_from: _ } => r#"{"state":"stated_zero"}"#.to_string(),
         RateValue::Unpriced {

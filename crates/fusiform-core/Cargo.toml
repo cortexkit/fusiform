@@ -15,7 +15,7 @@ serde = { workspace = true }
 # decimals including IEEE-754 artifacts, and the money boundary scales the
 # DECIMAL STRING by powers of ten. Without this, every rate would round-trip
 # through binary floating point before fusiform ever saw it.
-serde_json = { workspace = true, features = ["arbitrary_precision"] }
+serde_json = { workspace = true, features = ["arbitrary_precision", "raw_value"] }
 
 [dev-dependencies]
 fusiform-testkit = { workspace = true }

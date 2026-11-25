@@ -11,3 +11,14 @@ Two snapshots of models.dev's public catalog, fetched minutes apart on
 They let tests compare how fusiform reads the two catalog versions on the same
 upstream state. The data is models.dev's, published under the MIT license
 (Copyright (c) 2025 models.dev).
+
+[`cost-units.md`](cost-units.md) records the basis and admission for every
+published v2 unit.
+
+`explained-differences.json.gz` records shared-model additions of
+`model.type: "chat"` only. Its rows are sorted by provider, model and fact; `old`
+and `new` carry storage JSON text, or `null` for absence. Each row refers to a
+quoted rule from the upstream's v1 translator in `causes`. The rows were
+generated from the v1 fixture and saved v2 input. Tests compare them with the
+actual normalized facts. This file does not yet account for other differences
+in the cutover.

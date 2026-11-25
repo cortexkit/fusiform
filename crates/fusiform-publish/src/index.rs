@@ -74,9 +74,10 @@ impl FactIndex {
 
     /// Encode an opaque, versioned blob. The host may split it for storage.
     pub fn to_bytes(&self) -> Vec<u8> {
-        // Keys are interned across models, and digests stay binary to avoid
-        // doubling their size in hex (the digests dominate the blob).
-        let mut out = Vec::with_capacity(self.fact_count() * (COUNT_SIZE + HASH_SIZE));
+        // Omitting counts and names from the reservation would make this
+        // multi-megabyte buffer grow while the publish summary is also live.
+        let encoded_len = self.encoded_len();
+        let mut out = Vec::with_capacity(encoded_len);
         out.extend_from_slice(HEADER);
         out.extend_from_slice(self.upstream_hash.as_bytes());
         put_count(&mut out, self.keys.len());
@@ -101,7 +102,27 @@ impl FactIndex {
                 }
             }
         }
+        debug_assert_eq!(out.len(), encoded_len);
         out
+    }
+
+    fn encoded_len(&self) -> usize {
+        let keys = self.keys.iter().map(|key| text_size(key)).sum::<usize>();
+        let providers = self
+            .providers
+            .iter()
+            .map(|provider| {
+                let models = provider.models.iter().map(|model| {
+                    1 + model.id.as_deref().map_or(0, text_size)
+                        + COUNT_SIZE
+                        + model.facts.len() * (COUNT_SIZE + HASH_SIZE)
+                });
+                text_size(&provider.id) + COUNT_SIZE + models.sum::<usize>()
+            })
+            .sum::<usize>();
+        // The header and hash precede the key and provider lists, each of
+        // which starts with its entry count.
+        HEADER.len() + HASH_SIZE + 2 * COUNT_SIZE + keys + providers
     }
 
     /// Refuse malformed indexes and indexes that do not reproduce their hash.
@@ -237,6 +258,10 @@ fn put_text(out: &mut Vec<u8>, text: &str) {
     out.extend_from_slice(text.as_bytes());
 }
 
+fn text_size(text: &str) -> usize {
+    COUNT_SIZE + text.len()
+}
+
 struct Reader<'a>(&'a [u8]);
 
 impl<'a> Reader<'a> {
@@ -322,5 +347,28 @@ impl<'a> Reader<'a> {
             });
         }
         Ok(facts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_bytes_does_not_grow_the_index_buffer() {
+        let hash = fusiform_release::fact_hash(&serde_json::Value::Null);
+        let mut builder = IndexBuilder::default();
+        builder.add_sorted(("aé", None, "provider.name"), hash);
+        builder.add_sorted(("aé", Some("α"), "existence"), hash);
+        builder.add_sorted(("aé", Some("α"), "model.name"), hash);
+        builder.add_sorted(("second", Some("β"), "existence"), hash);
+        let index = builder.finish();
+        let bytes = index.to_bytes();
+        assert_eq!(
+            bytes.capacity(),
+            bytes.len(),
+            "serialization needed spare capacity"
+        );
+        assert_eq!(FactIndex::from_bytes(&bytes).unwrap(), index);
     }
 }

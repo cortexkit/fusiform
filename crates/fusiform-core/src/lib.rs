@@ -31,8 +31,8 @@ use serde::{Deserialize, Serialize};
 
 pub use money::{Amount, CurrencyCode, MoneyError, PolicyId, UnitProvenance};
 pub use normalize::{
-    normalize_models_dev, normalize_models_dev_with, ChargeUnitEvidence, NormalizeError,
-    NormalizeOutcome, NormalizedCatalog,
+    normalize_models_dev, normalize_models_dev_v2_with, normalize_models_dev_with,
+    ChargeUnitEvidence, NormalizeError, NormalizeOutcome, NormalizeV2Outcome, NormalizedCatalog,
 };
 
 /// A declared upstream.
@@ -365,6 +365,16 @@ pub enum TokenClass {
     OutputAudio,
 }
 
+/// Media token rates with served keys but no legacy v1 token-class field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaTokenClass {
+    CachedInputAudio,
+    InputImage,
+    OutputImage,
+    OutputVideo,
+}
+
 /// A provider's named quality level for a generated artifact.
 ///
 /// Left as a source-declared string rather than an enum: normalising quality
@@ -384,6 +394,9 @@ pub enum ChargeBasis {
     PerMillionTokens {
         class: TokenClass,
     },
+    PerMillionMediaTokens {
+        class: MediaTokenClass,
+    },
     PerImage {
         width: u32,
         height: u32,
@@ -393,6 +406,17 @@ pub enum ChargeBasis {
     PerMinute,
     PerCharacter,
     PerRequest,
+}
+
+impl ChargeBasis {
+    pub(crate) fn unit_denominator(&self) -> Option<u64> {
+        match self {
+            Self::PerCharacter => Some(1_000_000),
+            Self::PerSecond => Some(1),
+            Self::PerMinute => Some(60),
+            _ => None,
+        }
+    }
 }
 
 /// A condition that selects between rates for the same model.

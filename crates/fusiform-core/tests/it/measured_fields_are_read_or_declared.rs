@@ -247,3 +247,139 @@ fn unread_values_do_not_acquire_typed_parser_fields() {
         );
     }
 }
+
+fn saved_catalog(version: &str) -> Vec<u8> {
+    saved_gzip(&format!("api-{version}-20261125.json.gz"))
+}
+
+fn saved_gzip(file: &str) -> Vec<u8> {
+    let path = format!(
+        "{}/tests/data/models-dev-v2/{file}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let output = std::process::Command::new("gzip")
+        .args(["-dc", &path])
+        .output()
+        .expect("gzip must be available to read the saved catalog");
+    assert!(output.status.success(), "gzip failed for {path}");
+    output.stdout
+}
+
+// The v2 inventory classifies both read and declared-unread keys in the
+// normalizer. The fence consumes that inventory so it cannot have a second
+// allowlist that falls out of sync with the keys accepted at runtime.
+fn v2_unaccounted(outcome: &fusiform_core::NormalizeV2Outcome) -> Vec<&str> {
+    use fusiform_core::normalize::v2::FindingKey;
+    outcome
+        .findings
+        .iter()
+        .filter_map(|finding| match &finding.key {
+            FindingKey::UnknownKey { path, .. } => Some(path.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn every_saved_v2_key_is_read_or_declared_and_v2_only_facts_are_admitted() {
+    use fusiform_core::upstream_facts::facts_of;
+    use fusiform_core::{normalize_models_dev_v2_with, ChargeUnitEvidence};
+    use fusiform_protocol::{served_fact_key_matches, SERVED_FACTS};
+
+    let saved = saved_catalog("v2");
+    let outcome = normalize_models_dev_v2_with(&saved, &ChargeUnitEvidence::none()).unwrap();
+    let violations = v2_unaccounted(&outcome);
+    assert!(
+        violations.is_empty(),
+        "v2 keys neither read nor declared unread: {violations:?}"
+    );
+    assert_eq!(outcome.catalog.model_count(), 10_913);
+
+    let old_bytes = saved_catalog("v1");
+    assert!(normalize_models_dev_v2_with(&old_bytes, &ChargeUnitEvidence::none()).is_err());
+    let old: Value = serde_json::from_slice(&saved_gzip("v1-fixture.json.gz")).unwrap();
+    let mut v2_only = 0;
+    let mut unit_examples = BTreeSet::new();
+    let mut chat_differences = Vec::new();
+    for provider in &outcome.catalog.providers {
+        let prior_models = old["providers"][&provider.provider_id]["models"].as_object();
+        for model in &provider.models {
+            let prior_model = prior_models.and_then(|rows| rows.get(&model.key.model_id));
+            let only_in_v2 = prior_model.is_none();
+            v2_only += usize::from(only_in_v2);
+            for (key, value) in facts_of(model).values {
+                let key = key.as_str();
+                let requires_unit = matches!(
+                    key,
+                    "rate.input.per_character" | "rate.input_audio.per_second"
+                );
+                if only_in_v2 {
+                    assert!(
+                        requires_unit
+                            || SERVED_FACTS
+                                .iter()
+                                .any(|fact| served_fact_key_matches(fact.key, key)),
+                        "unadmitted fact {key} on {}/{}",
+                        provider.provider_id,
+                        model.key.model_id
+                    );
+                    assert_ne!(key, "model.kind");
+                }
+                if requires_unit || key == "rate.output" {
+                    let json: Value = serde_json::from_str(&value).unwrap();
+                    if json["state"] == "priced" {
+                        unit_examples.insert((key.to_owned(), json["per"].as_u64()));
+                    }
+                }
+                if key == "model.type"
+                    && value == r#""chat""#
+                    && prior_model.is_some_and(|row| row.get(key).is_none())
+                {
+                    chat_differences.push(serde_json::json!({
+                        "provider": provider.provider_id,
+                        "model": model.key.model_id,
+                        "fact": key,
+                        "old": null,
+                        "new": value,
+                        "cause": "absent-authored-type",
+                    }));
+                }
+            }
+        }
+    }
+    assert_eq!(v2_only, 861);
+    let explained: Value =
+        serde_json::from_slice(&saved_gzip("explained-differences.json.gz")).unwrap();
+    let expected: Vec<_> = explained["differences"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["cause"] == "absent-authored-type")
+        .collect();
+    assert_eq!(chat_differences.len(), 9_611);
+    assert_eq!(chat_differences.len(), expected.len());
+    for (actual, expected) in chat_differences.iter().zip(expected) {
+        assert_eq!(actual, expected, "chat type difference");
+    }
+    assert_eq!(
+        unit_examples,
+        BTreeSet::from([
+            ("rate.output".to_owned(), None),
+            ("rate.input.per_character".to_owned(), Some(1_000_000)),
+            ("rate.input_audio.per_second".to_owned(), Some(1)),
+            ("rate.input_audio.per_second".to_owned(), Some(60)),
+        ])
+    );
+}
+
+#[test]
+fn v2_inventory_fence_detects_a_planted_key_in_an_unread_object() {
+    use fusiform_core::{normalize_models_dev_v2_with, ChargeUnitEvidence};
+
+    let bytes = br#"{"p":{"models":{"m":{"type":"chat","capabilities":{"cache":{"implicit":{"ttl":["1h"],"planted":1}}},"api":{}}}}}"#;
+    let outcome = normalize_models_dev_v2_with(bytes, &ChargeUnitEvidence::none()).unwrap();
+    assert_eq!(
+        v2_unaccounted(&outcome),
+        ["model.capabilities.cache.implicit.planted"]
+    );
+}
