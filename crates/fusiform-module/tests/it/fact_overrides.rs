@@ -83,184 +83,6 @@ fn get(store: &CatalogStore, args: Value) -> CatalogGetResponse {
     serve_catalog_get(store, &serde_json::to_vec(&args).unwrap()).unwrap()
 }
 
-const REALTIME: &str = "openai/gpt-realtime-2.1";
-const CACHED_AUDIO: &str = "rate.cached_input_audio";
-const CACHED_AUDIO_ESTABLISHED: i64 = 1_794_528_000_000;
-
-fn realtime_store() -> (CatalogStore, tempfile::TempDir) {
-    let (store, dir) = store_publishing(json!(32_768));
-    let model = json!({"name":"Realtime", "cost":{"input":4, "cache_read":0.4},
-        "limit":{"context":32000, "output":4096}});
-    let bytes = serde_json::to_vec(&json!({
-        "openai":{"name":"OpenAI", "models":{
-            "gpt-realtime-2.1":model, "gpt-realtime-2":model}},
-        "other":{"name":"Other", "models":{"gpt-realtime-2.1":model}}
-    }))
-    .unwrap();
-    ingest(&store, &bytes, 2_000);
-    fusiform_module::fact_overrides::apply_to_store(
-        &store,
-        fusiform_module::fact_overrides::overrides(),
-        CACHED_AUDIO_ESTABLISHED + 1,
-    )
-    .unwrap();
-    (store, dir)
-}
-
-fn cached_audio_price() -> Value {
-    json!({"state":"priced", "units":400_000_000, "exponent":9,
-        "currency":"USD", "unit_provenance":{"kind":"stated"}})
-}
-
-#[test]
-fn cached_audio_current_reads_serve_only_the_sourced_model_and_role() {
-    let (store, _dir) = realtime_store();
-    for args in [
-        json!({"provider_id":"openai", "model_id":"gpt-realtime-2.1"}),
-        json!({"provider_id":"openai"}),
-        json!({}),
-        json!({"fact_prefixes":["rate."]}),
-        json!({"fact_prefixes":[CACHED_AUDIO]}),
-        json!({"fact_prefixes":[CACHED_AUDIO], "paged":true}),
-    ] {
-        let response = if args["paged"] == true {
-            paged(&store, args.clone())
-        } else {
-            get(&store, args.clone())
-        };
-        assert_eq!(
-            response.models[REALTIME][CACHED_AUDIO],
-            cached_audio_price(),
-            "{args}"
-        );
-        let claims = disclosed_fact(&response, REALTIME, CACHED_AUDIO);
-        assert_eq!(claims.len(), 1, "{args}");
-        let claim = claims[0];
-        assert_eq!(claim.replaces, Value::Null);
-        assert_eq!(claim.established_at_ms, CACHED_AUDIO_ESTABLISHED);
-        assert_eq!(
-            claim.review_by_ms - claim.established_at_ms,
-            60 * 86_400_000
-        );
-        for url in [
-            "https://developers.openai.com/api/docs/pricing (accessed 2026-11-13)",
-            "https://developers.openai.com/api/docs/models/gpt-realtime-2.1 (accessed 2026-11-13)",
-        ] {
-            assert!(claim.source_ref.contains(url));
-        }
-        assert!(claim
-            .quote
-            .contains("| gpt-realtime-2.1 | Audio | $32.00 | $64.00 | $0.40 |"));
-        assert!(claim.quote.contains("Cached input | $0.4 | 1M tokens"));
-        for (identity, facts) in &response.models {
-            if identity != REALTIME {
-                assert!(!facts.contains_key(CACHED_AUDIO), "{identity}: {args}");
-            }
-        }
-    }
-    let all = get(&store, json!({"fact_prefixes":["rate."]}));
-    assert!(all.models.contains_key("openai/gpt-realtime-2"));
-    assert!(all.models.contains_key("other/gpt-realtime-2.1"));
-    assert_eq!(
-        all.models[REALTIME]["rate.cache_read"]["units"],
-        400_000_000
-    );
-    assert_eq!(
-        fusiform_module::fact_overrides::overrides()
-            .values()
-            .filter(|row| row.fact_key == CACHED_AUDIO)
-            .count(),
-        1
-    );
-}
-
-#[test]
-fn cached_audio_history_starts_at_the_first_claim_era() {
-    let (store, _dir) = realtime_store();
-    for at in [
-        CACHED_AUDIO_ESTABLISHED - 1,
-        CACHED_AUDIO_ESTABLISHED,
-        CACHED_AUDIO_ESTABLISHED + 1,
-    ] {
-        for mut args in [
-            json!({"provider_id":"openai", "model_id":"gpt-realtime-2.1"}),
-            json!({"fact_prefixes":["rate."]}),
-            json!({"fact_prefixes":[CACHED_AUDIO]}),
-        ] {
-            args["at_ms"] = json!(at);
-            let response = get(&store, args.clone());
-            if at < CACHED_AUDIO_ESTABLISHED {
-                assert!(
-                    response
-                        .models
-                        .values()
-                        .all(|facts| !facts.contains_key(CACHED_AUDIO)),
-                    "{args}"
-                );
-                assert!(response.fact_overrides.is_empty());
-            } else {
-                assert_eq!(
-                    response.models[REALTIME][CACHED_AUDIO],
-                    cached_audio_price(),
-                    "{args}"
-                );
-                assert_eq!(disclosed_fact(&response, REALTIME, CACHED_AUDIO).len(), 1);
-            }
-        }
-    }
-    let before = get(
-        &store,
-        json!({"provider_id":"openai", "model_id":"gpt-realtime-2.1",
-        "at_ms":CACHED_AUDIO_ESTABLISHED - 1}),
-    );
-    assert!(before.models[REALTIME].contains_key("rate.cache_read"));
-}
-
-#[test]
-fn cached_audio_quota_proxy_marks_the_added_rate() {
-    let (store, _dir) = realtime_store();
-    let response = get(
-        &store,
-        json!({"provider_id":"openai", "model_id":"gpt-realtime-2.1",
-        "auth_method":"chatgpt", "fact_prefixes":[CACHED_AUDIO]}),
-    );
-    let mut expected = cached_audio_price();
-    expected["inherited_from"] =
-        json!({"provider_id":"openai", "family":"", "basis":"quota_proxy"});
-    assert_eq!(response.models[REALTIME][CACHED_AUDIO], expected);
-    assert_eq!(response.plane.unwrap().kind, "quota_proxy");
-}
-
-#[test]
-fn cached_audio_upstream_values_win_over_the_addition() {
-    let mut changed_price = cached_audio_price();
-    changed_price["units"] = json!(900_000_000);
-    for published in [
-        changed_price,
-        cached_audio_price(),
-        json!({"state":"stated_zero"}),
-        Value::Null,
-    ] {
-        let (store, _dir) = realtime_store();
-        // Future upstream observations of this role must suppress the addition,
-        // even when they publish a null or agree with the curated price.
-        rusqlite::Connection::open(store.path()).unwrap().execute(
-            "INSERT INTO era (source, provider_id, model_id, fact_key, value_json,
-             boundary_at_ms, boundary_kind) VALUES ('models.dev','openai','gpt-realtime-2.1',?1,?2,?3,'seed')",
-            rusqlite::params![CACHED_AUDIO, published.to_string(), CACHED_AUDIO_ESTABLISHED],
-        ).unwrap();
-        for at in [None, Some(CACHED_AUDIO_ESTABLISHED)] {
-            let response = get(
-                &store,
-                json!({"provider_id":"openai", "model_id":"gpt-realtime-2.1",
-                "fact_prefixes":["rate."], "at_ms":at}),
-            );
-            assert_eq!(response.models[REALTIME][CACHED_AUDIO], published);
-            assert!(disclosed_fact(&response, REALTIME, CACHED_AUDIO).is_empty());
-        }
-    }
-}
-
 const FLASH: &str = "google/gemini-3.1-flash-image";
 const FLASH_MODEL: &str = "gemini-3.1-flash-image";
 
@@ -474,6 +296,18 @@ fn dated_overrides_diff_claims_not_provenance_and_tombstone_removals() {
     assert_eq!(override_era_count(&store), 4);
     let at_removal = store.fact_overrides_at(boundary + 200, None).unwrap();
     assert!(at_removal[0].claim.is_none());
+    let before_removal = get(
+        &store,
+        json!({"provider_id":"google", "model_id":FLASH_MODEL,"at_ms":boundary + 199}),
+    );
+    assert_eq!(
+        before_removal.models[FLASH]["rate.output"]["units"],
+        4_000_000_000i64
+    );
+    assert_eq!(
+        disclosed_fact(&before_removal, FLASH, "rate.output").len(),
+        1
+    );
     let response = get(
         &store,
         json!({"provider_id":"google", "model_id":FLASH_MODEL,"at_ms":boundary + 200}),

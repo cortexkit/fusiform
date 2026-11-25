@@ -881,7 +881,7 @@ pub(super) fn golden_cases() -> serde_json::Map<String, Value> {
     let (ordinary, _ordinary_dir) = super::golden_payload::store();
     let (cache, _cache_dir) = super::cache_lifetimes::store(None);
     let (speed, _speed_dir) = super::golden_payload::speed_twin_store();
-    overlays(&cache);
+    let (image, _image_dir) = super::fact_overrides::historical_flash_store();
     let mut cases = serde_json::Map::new();
     for (label, store, arguments) in [
         (
@@ -891,8 +891,8 @@ pub(super) fn golden_cases() -> serde_json::Map<String, Value> {
         ),
         (
             "catalog.history — served override addition",
-            &cache,
-            json!({"provider_id":"openai", "model_id":"gpt-realtime-2.1", "fact_key":"rate.cached_input_audio", "served":true}),
+            &image,
+            json!({"provider_id":"google", "model_id":"gemini-3.1-flash-image", "fact_key":"rate.output_image", "served":true}),
         ),
         (
             "catalog.history — served cache lifetime",
@@ -901,8 +901,8 @@ pub(super) fn golden_cases() -> serde_json::Map<String, Value> {
         ),
         (
             "catalog.history — historical rate keys",
-            &cache,
-            json!({"provider_id":"openai", "model_id":"gpt-realtime-2.1", "fact_prefix":"rate.cached_", "served":true}),
+            &image,
+            json!({"provider_id":"google", "model_id":"gemini-3.1-flash-image", "fact_prefix":"rate.output", "served":true}),
         ),
         (
             "catalog.history — served Moonshot Highspeed rate",

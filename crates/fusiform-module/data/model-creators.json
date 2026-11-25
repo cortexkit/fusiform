@@ -18,27 +18,27 @@
       "recorded": "2026-09-06"
     },
     {
-      "family": "deepseek-thinking",
+      "family": "deepseek-pro",
       "creator_provider_id": "deepseek",
-      "basis": "Same originator as `deepseek`; the family split is a model line rather than a different publisher.",
-      "recorded": "2026-09-06"
+      "basis": "DeepSeek publishes the V4 Pro weights. Its first-party seed entry `deepseek/deepseek-v4-pro` reports `family: deepseek-pro` and a $0.66 input rate per million tokens.",
+      "recorded": "2026-11-25"
     },
     {
-      "family": "kimi-k3",
+      "family": "kimi",
       "creator_provider_id": "moonshotai",
-      "basis": "Moonshot AI publishes the Kimi weights under its own provider entry.",
-      "recorded": "2026-09-06"
+      "basis": "Moonshot AI publishes the Kimi weights. Its first-party seed entries `moonshotai/kimi-k3` and `moonshotai/kimi-k2.6` report `family: kimi` and input rates of $3 and $0.95 per million tokens.",
+      "recorded": "2026-11-25"
+    },
+    {
+      "family": "kimi-pro",
+      "creator_provider_id": "moonshotai",
+      "basis": "Moonshot AI publishes the Kimi Pro weights. Its first-party seed entries `moonshotai/kimi-k3.1-pro` and `moonshotai/kimi-k3.1-pro-highspeed` report `family: kimi-pro` and input rates of $2 and $4 per million tokens.",
+      "recorded": "2026-11-25"
     },
     {
       "family": "qwen",
       "creator_provider_id": "alibaba",
       "basis": "Alibaba publishes the Qwen weights under its own provider entry.",
-      "recorded": "2026-09-06"
-    },
-    {
-      "family": "nemotron",
-      "creator_provider_id": "nvidia",
-      "basis": "NVIDIA publishes the Nemotron weights under its own provider entry.",
       "recorded": "2026-09-06"
     },
     {

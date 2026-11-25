@@ -772,14 +772,12 @@ withdraws those facts on the next poll. Point-in-time reads replay what was
 stored then. The table is passed to `fusiform_core::normalize_models_dev_with`
 as data, so the core crate does no file IO.
 
-OpenAI input evidence is restricted to `gpt-realtime-2.1`: its embedded upstream
-`cost.input_audio` is 32 and the vendor states $32 per million audio input tokens.
-No override supplies that price. The first poll with this evidence writes one
-`rate.input_audio` era for that row; earlier point-in-time reads remain without
-it. Other OpenAI models stay unattributed until their own source checks. The
-check against the embedded seed requires every included model to still publish `cost.input_audio`,
-and a test pins this row's upstream $32 to the quoted vendor price. Cached audio
-input needs no extra role: $0.40 matches the existing `rate.cache_read`.
+OpenAI's `gpt-realtime-2.1` no longer appears in the upstream v1 catalog, so it
+is served as a curated row rather than through ingest evidence. Its card carries
+three distinct audio rates: $32 input, $0.40 cached input, and $64 output per
+million tokens. Cached audio uses `rate.cached_input_audio`, not `rate.cache_read`
+(which prices cached text). The curated card replaces the current cached-audio
+override; dated reads still use the recorded override until its withdrawal.
 
 The optional `audio_tokens_per_second` is applied only on current reads as
 `limit.audio_tokens_per_second`, a JSON integer. It is joined onto a provider's

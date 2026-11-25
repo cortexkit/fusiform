@@ -1,6 +1,6 @@
 {
   "format": "providers-v1",
-  "snapshot_fetched_at": "2026-11-19T18:47:20Z",
+  "snapshot_fetched_at": "2026-11-25T17:51:30Z",
   "providers": [
     {
       "id": "302ai",
@@ -802,6 +802,18 @@
       ]
     },
     {
+      "id": "concentrate",
+      "name": "Concentrate",
+      "doc": "https://concentrate.ai/docs",
+      "source": "models.dev",
+      "env": [
+        "CONCENTRATE_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "confidential-ai",
       "name": "Confidential AI",
       "doc": "https://confidential.ai/docs/inference-api/get-started",
@@ -1269,8 +1281,7 @@
         "audio",
         "embedding",
         "image",
-        "text",
-        "video"
+        "text"
       ]
     },
     {
@@ -2572,7 +2583,6 @@
         "OPENAI_API_KEY"
       ],
       "output_modalities": [
-        "audio",
         "embedding",
         "image",
         "text"
@@ -2816,6 +2826,18 @@
       "source": "models.dev",
       "env": [
         "POWERSPRING_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "primalabs",
+      "name": "PrimaLabs",
+      "doc": "https://docs.primalabs.ai/inference/models",
+      "source": "models.dev",
+      "env": [
+        "PRIMALABS_API_KEY"
       ],
       "output_modalities": [
         "text"
@@ -3099,7 +3121,7 @@
     {
       "id": "sarvam",
       "name": "Sarvam AI",
-      "doc": "https://docs.sarvam.ai/api-reference-docs/getting-started/models",
+      "doc": "https://docs.sarvam.ai/api/token-factory/models",
       "source": "models.dev",
       "env": [
         "SARVAM_API_KEY"
@@ -3271,7 +3293,7 @@
     {
       "id": "steadyrouter",
       "name": "SteadyRouter",
-      "doc": "https://www.steadyrouter.com/site/docs.html",
+      "doc": "https://www.steadyrouter.com/site/docs.html?utm_source=models.dev",
       "source": "models.dev",
       "env": [
         "STEADYROUTER_API_KEY"
@@ -3986,7 +4008,6 @@
         "XIAOMI_API_KEY"
       ],
       "output_modalities": [
-        "audio",
         "text"
       ]
     },
@@ -3999,7 +4020,6 @@
         "XIAOMI_API_KEY"
       ],
       "output_modalities": [
-        "audio",
         "text"
       ]
     },
@@ -4012,7 +4032,6 @@
         "XIAOMI_API_KEY"
       ],
       "output_modalities": [
-        "audio",
         "text"
       ]
     },

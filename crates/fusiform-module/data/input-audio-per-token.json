@@ -27,21 +27,7 @@
             "quote": "20 billed gemini-4-hydrogen requests on 2026-11-16, WAV clips of 4.3–7.0 s: billed audio input tokens fit 30.49 × seconds + 0.75 (least squares), every clip between 30.2 and 31.1 tokens per second, for example 4,308 ms billed 133 tokens and 7,038 ms billed 216. 31 is the nearest whole rate that never undercounts a clip of 1.5 s or longer; Google's audio page states 32"
           }
         ]
-      },
-      "excluded_models": [
-        {
-          "model_id": "gemini-3.1-flash-lite-preview",
-          "reason": "The pricing page has no row for the preview model (only the GA Gemini 3.1 Flash-Lite), and models.dev's input_audio (0.5) differs from its input (0.25), so neither an explicit audio row nor a single unsplit input price supports the number."
-        }
-      ]
-    },
-    {
-      "provider_id": "openai",
-      "included_models": ["gpt-realtime-2.1"],
-      "source_ref": "https://developers.openai.com/api/docs/pricing (accessed 2026-11-13); https://developers.openai.com/api/docs/models/gpt-realtime-2.1 (accessed 2026-11-13)",
-      "quote": "\"Prices per 1M tokens unless noted.\" Audio, columns Model / Type / Input / Output / Cached Input: \"gpt-realtime-2.1 | Audio | $32.00 | $64.00 | $0.40\". The model page's \"Audio tokens\" table states \"Input | $32 | 1M tokens\". Only this model's input-audio unit is established; other OpenAI models require their own source checks. Cached audio input is separately sourced as rate.cached_input_audio in fact-overrides.json; rate.cache_read remains the cached-text price even when the two prices are equal.",
-      "established_at_ms": 1794528000000,
-      "review_by_ms": 1799712000000
+      }
     }
   ],
   "declined": [

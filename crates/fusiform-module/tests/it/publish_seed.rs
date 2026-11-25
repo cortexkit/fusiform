@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 
 const SEED: &[u8] = include_bytes!("../../data/models-dev-seed.json");
 const PROVIDER: &str = "openai";
-const MODEL: &str = "gpt-realtime-2.1";
+const MODEL: &str = "gpt-6.1-sol";
 
 #[test]
 fn the_publisher_hashes_exactly_what_a_seeded_store_holds() {

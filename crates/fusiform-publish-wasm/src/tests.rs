@@ -20,7 +20,7 @@ fn evidence_fixture_is_canonical_and_comes_from_both_embedded_documents() {
     assert_eq!(EVIDENCE, canonical_json(&expected));
 
     let index = index_from_snapshot(SNAPSHOT).unwrap();
-    let audio = br#"{"openai":{"models":{"gpt-realtime-2.1":{"cost":{"input_audio":32,"output_audio":64}}}}}"#;
+    let audio = br#"{"google":{"models":{"gemini-3.1-flash-live-preview":{"cost":{"input_audio":3,"output_audio":12}}}}}"#;
     let (summary, _) = publish_step(audio, &index, EVIDENCE).unwrap();
     let ops = &doc(&summary)["ops"];
     for fact in ["rate.input_audio", "rate.output_audio"] {

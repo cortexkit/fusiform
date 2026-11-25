@@ -147,6 +147,108 @@
       "review_by_ms": 1799712000000
     },
     {
+      "provider_id": "openai",
+      "model_id": "gpt-realtime-2.1",
+      "auth_methods": [
+        "apikey"
+      ],
+      "facts": {
+        "existence": "present",
+        "model.name": "GPT-Realtime-2.1",
+        "model.type": "realtime",
+        "model.canonical_id": "openai/gpt-realtime-2.1",
+        "capability.input_modalities": [
+          "audio",
+          "image",
+          "text"
+        ],
+        "capability.output_modalities": [
+          "audio",
+          "text"
+        ],
+        "capability.attachment": true,
+        "capability.reasoning": true,
+        "capability.tool_call": true,
+        "capability.structured_output": false,
+        "capability.temperature": false,
+        "capability.reasoning_options": [
+          {
+            "type": "effort",
+            "values": [
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ]
+          }
+        ],
+        "limit.context": 128000,
+        "limit.output": 32000,
+        "rate.input": {
+          "state": "priced",
+          "units": 4000000000,
+          "exponent": 9,
+          "currency": "USD",
+          "unit_provenance": {
+            "kind": "stated"
+          }
+        },
+        "rate.cache_read": {
+          "state": "priced",
+          "units": 400000000,
+          "exponent": 9,
+          "currency": "USD",
+          "unit_provenance": {
+            "kind": "stated"
+          }
+        },
+        "rate.output": {
+          "state": "priced",
+          "units": 24000000000,
+          "exponent": 9,
+          "currency": "USD",
+          "unit_provenance": {
+            "kind": "stated"
+          }
+        },
+        "rate.input_audio": {
+          "state": "priced",
+          "units": 32000000000,
+          "exponent": 9,
+          "currency": "USD",
+          "unit_provenance": {
+            "kind": "stated"
+          }
+        },
+        "rate.cached_input_audio": {
+          "state": "priced",
+          "units": 400000000,
+          "exponent": 9,
+          "currency": "USD",
+          "unit_provenance": {
+            "kind": "stated"
+          }
+        },
+        "rate.output_audio": {
+          "state": "priced",
+          "units": 64000000000,
+          "exponent": 9,
+          "currency": "USD",
+          "unit_provenance": {
+            "kind": "stated"
+          }
+        },
+        "wire.api": {
+          "value": "https://api.openai.com/v1",
+          "from": "curated"
+        }
+      },
+      "source_ref": "Read 2026-11-25. https://developers.openai.com/api/docs/models/gpt-realtime-2.1: \"Input modalities: text, audio, image\"; \"Output modalities: text, audio\"; \"128,000 context window\"; \"32,000 max output tokens\"; \"Reasoning token support\"; \"GPT-Realtime-2.1 supports configurable reasoning effort\"; Text tokens \"Input | $4\", \"Cached input | $0.4\", \"Output | $24\"; Audio tokens \"Input | $32\", \"Cached input | $0.4\", \"Output | $64\" (per 1M tokens). Curated because models.dev made its realtime models v2-only on 2026-11-23 (commit f52df4a220, \"make gpt-realtime-2.1 v2-only like the other realtime models\"), so the v1 catalog fusiform reads no longer lists it. Effort values and structured_output false are the last models.dev values, which its v2 file still states. Image-token rates ($5, cached $0.50) are not served: no image-token rate role exists. Same OpenAI v1 API base as the other curated OpenAI rows; no unverified wire.family is served.",
+      "established_at_ms": 1795564800000,
+      "review_by_ms": 1800748800000
+    },
+    {
       "provider_id": "google",
       "model_id": "gemini-3.5-transcribe-live",
       "auth_methods": ["apikey"],
