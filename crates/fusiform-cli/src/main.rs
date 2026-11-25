@@ -802,7 +802,12 @@ where
                 merged.models.extend(models);
                 merged.curated.extend(curated);
                 merged.login_methods.extend(login_methods);
-                if quality_scores.is_some() {
+                if quality_scores.as_ref().is_some_and(|incoming| {
+                    merged
+                        .quality_scores
+                        .as_ref()
+                        .is_none_or(|current| incoming.graded_at_ms > current.graded_at_ms)
+                }) {
                     merged.quality_scores = quality_scores;
                 }
                 merged.overrides.extend(overrides);
@@ -4492,6 +4497,25 @@ mod paging_tests {
         );
         assert_eq!(result["curated"].as_array().unwrap().len(), 2);
         assert!(result.get("next_page_token").is_none());
+    }
+
+    #[tokio::test]
+    async fn paging_loop_keeps_newest_quality_attribution() {
+        let mut first = page(2, "a", Some("next"));
+        first["quality_scores"] = json!({"graded_by":"new","graded_at_ms":2000});
+        let mut second = page(2, "b", None);
+        second["quality_scores"] = json!({"graded_by":"old","graded_at_ms":1000});
+        let mut pages = VecDeque::from([Ok(first), Ok(second)]);
+        let result = read_catalog_pages(json!({"paged":true}), |_| {
+            std::future::ready(pages.pop_front().unwrap())
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            result["quality_scores"],
+            json!({"graded_by":"new","graded_at_ms":2000}),
+            "quality attribution must describe the newest judgment across pages"
+        );
     }
 
     #[tokio::test]
