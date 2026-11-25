@@ -79,6 +79,15 @@ pub type Aliases = BTreeMap<(String, String), Alias>;
 /// does: a loader that quietly returns fewer rows turns a schema
 /// mistake into a model that mysteriously answers `no_coverage`.
 pub fn load_reporting_rejects(doc: &str) -> (Aliases, Vec<String>) {
+    load(doc, false)
+}
+
+/// Load aliases from a stored release, ignoring the retired `limit_output` field.
+pub fn load_stored_reporting_rejects(doc: &str) -> (Aliases, Vec<String>) {
+    load(doc, true)
+}
+
+fn load(doc: &str, stored: bool) -> (Aliases, Vec<String>) {
     #[derive(serde::Deserialize)]
     struct Doc {
         aliases: Vec<serde_json::Value>,
@@ -90,7 +99,12 @@ pub fn load_reporting_rejects(doc: &str) -> (Aliases, Vec<String>) {
 
     let mut out = Aliases::new();
     let mut rejects = Vec::new();
-    for raw in doc.aliases {
+    for mut raw in doc.aliases {
+        if let Some(row) = raw.as_object_mut().filter(|_| stored) {
+            // Older signed releases carry `limit_output`. Replay must accept
+            // it without overriding the target model's output limit.
+            row.remove("limit_output");
+        }
         let row: AliasRow = match serde_json::from_value(raw.clone()) {
             Ok(r) => r,
             Err(e) => {

@@ -3,6 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::curation::validate_new_release_documents;
 use crate::{
     Change, ChangeOp, CurationSet, Hash, ReleaseEnvelope, ReleaseFormat, fact_hash, state_hash,
     upstream_hash_sorted, validate_judgments, validate_received, validate_upstream_key,
@@ -35,6 +36,13 @@ impl std::error::Error for ArtifactRefusal {}
 /// Parse and hash the curation as stored, without normalizing numbers through
 /// a floating-point representation or silently dropping unrecognized fields.
 pub fn decode_curation(raw: &[u8]) -> Result<(CurationSet, Hash), ArtifactRefusal> {
+    let (curation, hash) = parse_curation(raw)?;
+    validate_received(&curation.vendor_facts)
+        .map_err(|err| ArtifactRefusal::new("invalid_curation", err))?;
+    Ok((curation, hash))
+}
+
+fn parse_curation(raw: &[u8]) -> Result<(CurationSet, Hash), ArtifactRefusal> {
     let curation: CurationSet =
         serde_json::from_slice(raw).map_err(|err| ArtifactRefusal::new("invalid_curation", err))?;
     let value: Value =
@@ -46,9 +54,7 @@ pub fn decode_curation(raw: &[u8]) -> Result<(CurationSet, Hash), ArtifactRefusa
             "stored curation does not round-trip in the release schema",
         ));
     }
-    validate_judgments(&curation)
-        .and_then(|()| validate_received(&curation.vendor_facts))
-        .map_err(|err| ArtifactRefusal::new("invalid_curation", err))?;
+    validate_judgments(&curation).map_err(|err| ArtifactRefusal::new("invalid_curation", err))?;
     Ok((curation, hash))
 }
 
@@ -99,8 +105,18 @@ pub fn build_release(
                 .map_err(|err| ArtifactRefusal::new("invalid_parent", err))?,
         )
     };
-    let (curation, curation_hash) = decode_curation(curation_set_raw)?;
+    let (curation, curation_hash) = parse_curation(curation_set_raw)?;
     let version = curation.version;
+    // Reusing the parent's exact curation does not publish any vendor document.
+    let validate_documents = if parent.as_ref().is_some_and(|prior| {
+        prior.curation_version == version && prior.curation_hash == curation_hash
+    }) {
+        validate_received
+    } else {
+        validate_new_release_documents
+    };
+    validate_documents(&curation.vendor_facts)
+        .map_err(|err| ArtifactRefusal::new("invalid_curation", err))?;
     let upstream_hash = summary.upstream_hash;
     let mut envelope = ReleaseEnvelope {
         format: ReleaseFormat::V1,

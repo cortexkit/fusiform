@@ -244,7 +244,8 @@ fn model_options(state: &State, key: &str) -> Result<Vec<Value>> {
         }
     }
     if !found && let Some(doc) = documents.get("model-aliases") {
-        for ((provider, model), alias) in aliases::load_reporting_rejects(&doc.to_string()).0 {
+        for ((provider, model), alias) in aliases::load_stored_reporting_rejects(&doc.to_string()).0
+        {
             if !matches_id(key, &provider, &model) {
                 continue;
             }

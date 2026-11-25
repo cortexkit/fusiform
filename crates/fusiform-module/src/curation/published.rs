@@ -56,7 +56,7 @@ impl PublishedCuration {
                 {
                     let mut aliases = accepted(
                         "model-aliases",
-                        curate::aliases::load_reporting_rejects(&doc),
+                        curate::aliases::load_stored_reporting_rejects(&doc),
                     )?;
                     if let Some(alias) = aliases.remove(&identity) {
                         out.aliases.insert(identity, alias);
@@ -188,7 +188,7 @@ impl PublishedCuration {
             aliases: load(
                 &docs,
                 "model-aliases",
-                curate::aliases::load_reporting_rejects,
+                curate::aliases::load_stored_reporting_rejects,
             )?,
             retired_aliases: docs
                 .get("model-aliases")
