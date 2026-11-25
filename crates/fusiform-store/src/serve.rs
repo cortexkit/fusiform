@@ -496,11 +496,13 @@ impl CatalogStore {
         // read it as data.
         let corrections = self.all_corrections_covering(query.source, resolved_at)?;
 
-        // Facts whose value at this instant sits inside a later era's window.
-        // One query for the whole read, and empty by construction for a read of
-        // the current catalog.
-        let uncertainty =
-            self.uncertain_facts_in_range(query.source, resolved_at, after, through)?;
+        // Only a dated read needs to check later eras for windows that
+        // contain the requested instant.
+        let uncertainty = if let Some(at) = query.at {
+            self.uncertain_facts_in_range(query.source, at, after, through)?
+        } else {
+            UncertaintyByFact::new()
+        };
 
         let mut by_model: BTreeMap<(String, String), BTreeMap<FactKey, String>> = BTreeMap::new();
         let mut withheld: Vec<WithheldFact> = Vec::new();
