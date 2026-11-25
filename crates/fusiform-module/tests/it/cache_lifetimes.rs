@@ -287,6 +287,48 @@ fn dated_cache_lifetimes_use_the_upstream_prices_at_the_requested_instant() {
 }
 
 #[test]
+fn cache_lifetime_boot_diff_keeps_the_first_provenance_for_the_same_claim() {
+    use fusiform_module::cache_lifetimes::{rules, stored_rules};
+
+    let (store, _dir) = store(None);
+    let mut rows = stored_rules(rules());
+    let index = rows
+        .iter()
+        .position(|row| row.model_id == "gpt-6.2-sol")
+        .unwrap();
+    assert_eq!(store.append_cache_lifetimes(&rows, DATED_READ).unwrap(), 2);
+    let (provider, model) = (
+        rows[index].provider_id.clone(),
+        rows[index].model_id.clone(),
+    );
+    let before = store.model_cache_lifetime_eras(&provider, &model).unwrap();
+    assert_eq!(before.len(), 1);
+
+    for (i, (field, value)) in [
+        ("quote", json!("Same prices and lifetimes, updated wording")),
+        ("source_ref", json!("https://example.com/same-prices")),
+        ("established_at_ms", json!(DATED_READ + 100)),
+        ("review_by_ms", json!(DATED_READ + 200)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_ne!(rows[index].rule[field], value);
+        rows[index].rule[field] = value;
+        assert_eq!(
+            store
+                .append_cache_lifetimes(&rows, DATED_READ + 1 + i as i64)
+                .unwrap(),
+            0,
+            "editing {field} must not open a new era for the same served claim"
+        );
+    }
+    let after = store.model_cache_lifetime_eras(&provider, &model).unwrap();
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].rule, before[0].rule);
+}
+
+#[test]
 fn cache_lifetime_boot_diff_records_changes_removals_and_new_rules_once() {
     use fusiform_module::cache_lifetimes::{rules, stored_rules};
     let (store, dir) = store(None);

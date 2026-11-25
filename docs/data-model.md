@@ -523,12 +523,12 @@ same guarded price calculation. Derived TTL rates are never stored as upstream
   rules begin at 1794089713000 (2026-11-07T22:15:13Z), except Claude Fable 5.2
   at 1794341726000 (2026-11-10T20:15:26Z). These are first-serving instants,
   not source-review dates. `recorded_at_ms` records when the import ran.
-- Every boot calls `CatalogStore::append_cache_lifetimes`. A parsed JSON diff
-  of the per-model claim ignores group membership and appends only additions,
-  changes and removals. New rules, changed rules, reappearances and tombstones
-  begin at boot, clamped to the key's newest boundary if the clock moved
-  backwards. An unchanged restart writes nothing, and a removed rule is
-  tombstoned only once.
+- Every boot calls `CatalogStore::append_cache_lifetimes`. The diff compares
+  the lifetimes and multipliers for each model. Group membership and provenance
+  edits keep the existing era and its original provenance. Additions, claim
+  changes, reappearances and tombstones begin at boot, clamped to the key's
+  newest boundary if the clock moved backwards. An unchanged restart writes
+  nothing, and a removed rule is tombstoned only once.
 - The rule in force is the greatest boundary not exceeding `at_ms`, with
   newest `id` breaking ties. Before a key's first era, or after a tombstone,
   no lifetime facts or TTL rates are added. The provider/model/boundary/id
