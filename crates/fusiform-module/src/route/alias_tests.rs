@@ -94,7 +94,8 @@ fn hydrogen_antigravity_alias_serves_its_route_and_borrowed_facts() {
     let got = get(&store, args).unwrap();
     let facts = &got.models["google/antigravity-gemini-4-hydrogen"];
     assert_eq!(facts["limit.context"], 1_048_576);
-    assert_eq!(facts["limit.output"], 262_144);
+    // The route enforces the target's limit; it has no output override.
+    assert_eq!(facts["limit.output"], 65_536);
     assert_eq!(
         facts["capability.reasoning_options"],
         serde_json::json!([{"type":"effort","values":["low", "medium", "high", "xhigh"]}])
