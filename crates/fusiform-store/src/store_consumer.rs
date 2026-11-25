@@ -420,6 +420,21 @@ impl CatalogStore {
         Ok(())
     }
 
+    pub fn store_document_at(
+        &self,
+        document: &str,
+        at: i64,
+    ) -> Result<Option<String>, CatalogError> {
+        self.raw_conn(|conn| {
+            Ok(conn.query_row(
+                "SELECT document_json FROM store_document_era WHERE document = ?1 AND recorded_at_ms <= ?2 \
+                 ORDER BY recorded_at_ms DESC, id DESC LIMIT 1",
+                params![document, at],
+                |row| row.get::<_, Option<String>>(0),
+            ).optional()?.flatten())
+        })
+    }
+
     pub fn store_documents_at(
         &self,
         at: Option<i64>,

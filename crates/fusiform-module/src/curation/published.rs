@@ -12,6 +12,7 @@ thread_local! {
     static PUBLISHED_LOAD_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+#[derive(Default)]
 pub(crate) struct PublishedCuration {
     aliases: curate::aliases::Aliases,
     retired_aliases: BTreeMap<(String, String), curate::aliases::RetiredAlias>,
@@ -33,6 +34,35 @@ pub(crate) struct PublishedCuration {
 }
 
 impl PublishedCuration {
+    /// Prepared history already has the model's dated claims. The only extra
+    /// input is an alias that can explain why the dated read has no coverage.
+    pub(crate) fn for_history(
+        store: &fusiform_store::CatalogStore,
+        at: i64,
+        alias_candidate: Option<(String, String)>,
+    ) -> Result<Self, String> {
+        let mut out = Self::default();
+        if let Some(identity) = alias_candidate {
+            if store.is_store_mode() {
+                if let Some(doc) = store
+                    .store_document_at("model-aliases", at)
+                    .map_err(|e| e.to_string())?
+                {
+                    let mut aliases = accepted(
+                        "model-aliases",
+                        curate::aliases::load_reporting_rejects(&doc),
+                    )?;
+                    if let Some(alias) = aliases.remove(&identity) {
+                        out.aliases.insert(identity, alias);
+                    }
+                }
+            } else if let Some(alias) = crate::aliases::aliases().get(&identity) {
+                out.aliases.insert(identity, alias.clone());
+            }
+        }
+        Ok(out)
+    }
+
     pub(crate) fn current_speed_twins(
         store: &fusiform_store::CatalogStore,
     ) -> Result<std::borrow::Cow<'static, curate::speed_twins::SpeedTwins>, String> {
@@ -477,6 +507,95 @@ mod tests {
     use super::*;
     use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
     use fusiform_store::{CatalogStore, ReleaseArrival, StoreRelease};
+
+    #[test]
+    fn history_does_not_load_unrelated_published_curation_at_cutpoints() {
+        use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
+        use fusiform_store::{FactKey, NewCuratedModel, NewEra, NewObservation};
+        use std::time::Instant;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open_for_store(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_str().unwrap().into(),
+            },
+        })
+        .unwrap();
+        let source = SourceId::ModelsDev;
+        store
+            .record_observation(&NewObservation {
+                source,
+                observed_at: Timestamp(1_000),
+                outcome: ObservationOutcome::Seeded,
+                normalized_hash: None,
+                raw_hash: None,
+                etag: None,
+                duration_ms: None,
+                detail: None,
+            })
+            .unwrap();
+        let era = |key: &str, value: String, at| NewEra {
+            source,
+            provider_id: "fixture".into(),
+            model_id: "model".into(),
+            fact_key: FactKey::from_stored(key.into()),
+            value_json: value,
+            boundary_at: Timestamp(at),
+            boundary_kind: BoundaryKind::Asserted,
+            observation_id: None,
+        };
+        let mut eras = vec![
+            era("existence", r#""present""#.into(), 1_000),
+            era("limit.context", "100".into(), 1_000),
+        ];
+        eras.extend((0..96).map(|i| era("limit.context", i.to_string(), 1_100 + i)));
+        store.append_eras(&eras).unwrap();
+        let request = br#"{"provider_id":"fixture","model_id":"model","fact_key":"limit.context","served":true}"#;
+        let read = || {
+            crate::route::serve_history(&store, request)
+                .unwrap()
+                .served
+                .unwrap()
+        };
+        let expected = read();
+        assert_eq!(expected.len(), 97);
+        let timed = || {
+            let start = Instant::now();
+            let actual = read();
+            let elapsed = start.elapsed();
+            assert_eq!(actual, expected);
+            elapsed
+        };
+        let baseline = [timed(), timed(), timed()];
+        let cards: Vec<_> = (0..1_000)
+            .map(|i| NewCuratedModel {
+                provider_id: "unrelated".into(),
+                model_id: format!("model-{i}"),
+                facts: [("model.name".into(), json!(format!("Unrelated {i}")))].into(),
+                auth_methods: Vec::new(),
+                source_ref: "https://example.test/card".into(),
+                established_by: None,
+                established_at_ms: 1_000,
+                review_by_ms: 10_000,
+            })
+            .collect();
+        assert_eq!(
+            store.append_curated_models(&cards, &[], 1_000).unwrap(),
+            1_000
+        );
+        timed();
+        PUBLISHED_LOAD_COUNT.with(|count| count.set(0));
+        let background = [timed(), timed(), timed()];
+        eprintln!("97 boundaries, identical timelines: no unrelated cards {baseline:?}; 1,000 unrelated cards {background:?}");
+        assert_eq!(
+            PUBLISHED_LOAD_COUNT.with(|count| count.get()),
+            0,
+            "exact upstream history should not load the whole published curation"
+        );
+    }
 
     #[test]
     fn cold_page_only_loads_published_curation_once() {

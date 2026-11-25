@@ -989,10 +989,28 @@ fn serve_catalog_get_snapshot(
     // Select the plane before reading rows. A subscription with no declared
     // billing claim must never receive the API card, even if its provider or
     // model would otherwise produce a different no-coverage refusal.
+    let history_sample = prepared.is_some();
+    let scoped;
     let published;
     let owned_tables;
     let tables = if let Some(page) = page {
         page.tables
+    } else if let Some(prepared) = prepared {
+        let alias_candidate = (!prepared.model_known()).then(|| {
+            request
+                .provider_id
+                .clone()
+                .zip(request.model_id.clone())
+                .expect("history names a model")
+        });
+        scoped = crate::curation::PublishedCuration::for_history(
+            store,
+            request.at_ms.expect("history samples a dated read"),
+            alias_candidate,
+        )
+        .map_err(RouteError::unavailable)?;
+        owned_tables = scoped.tables();
+        &owned_tables
     } else {
         published = crate::curation::PublishedCuration::load(store, request.at_ms)
             .map_err(RouteError::unavailable)?;
@@ -1315,6 +1333,7 @@ fn serve_catalog_get_snapshot(
                 at,
                 prepared,
                 tables,
+                history_sample,
             );
         }
     }
@@ -1492,6 +1511,7 @@ fn serve_catalog_get_snapshot(
         at,
         prepared,
         tables,
+        history_sample,
     )?;
     // Observed plane rows keep their envelope when billing rules remove all
     // selected rates. Curated rows and plain bulk rows require a selected fact.
@@ -2052,6 +2072,7 @@ fn finish_plane_view(
     at: Option<Timestamp>,
     prepared: Option<&dated_model::DatedModel>,
     tables: &curate::CurationSet<'_>,
+    history_sample: bool,
 ) -> Result<CatalogGetResponse, RouteError> {
     let historical_rules = at
         .map(|at| match prepared {
@@ -2062,14 +2083,19 @@ fn finish_plane_view(
         .map_err(|e| store_error(&e))?;
     let lifetimes = historical_rules.as_ref().unwrap_or(tables.cache_lifetimes);
     let current = at.is_none().then_some(tables);
-    let published_quality = if at.is_none() {
-        read_quality(store)?
+    let (published_quality, local) = if history_sample {
+        (curate::Quality::default(), Default::default())
     } else {
-        read_quality_at(store, at.map(|time| time.0))?
+        let quality = if at.is_none() {
+            read_quality(store)?
+        } else {
+            read_quality_at(store, at.map(|time| time.0))?
+        };
+        let local = store
+            .local_overrides_at(at.map(|time| time.0))
+            .map_err(|e| store_error(&e))?;
+        (quality, local)
     };
-    let local = store
-        .local_overrides_at(at.map(|time| time.0))
-        .map_err(|e| store_error(&e))?;
     let (quality, metadata) = local_overrides::overlay(&published_quality, &local);
     if metadata.is_empty() {
         curate::derive_row_facts(

@@ -45,6 +45,101 @@ fn label_card() -> fusiform_store::NewCuratedModel {
 }
 
 #[test]
+fn served_history_respects_a_dated_alias_before_a_curated_model() {
+    use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+    use fusiform_core::{ObservationOutcome, Timestamp};
+    use fusiform_store::{ImportedTables, NewObservation, ReleaseArrival, StoreRelease};
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open_for_store(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_str().unwrap().into(),
+        },
+    })
+    .unwrap();
+    let aliases = json!({"aliases":[{
+        "provider_id":"fixture-label", "model_id":"curated",
+        "target":{"provider_id":"fixture-label", "model_id":"upstream"},
+        "basis":"the fixture originally forwarded the request", "source_ref":"https://example.test/alias",
+        "established_at_ms":BOOT, "review_by_ms":BOOT + 1000
+    }]}).to_string();
+    let release = |seq, at, doc: Option<String>| {
+        let row = json!({"document":"model-aliases", "document_json":doc, "recorded_at_ms":at});
+        ReleaseArrival {
+            published_at_ms: at,
+            release: StoreRelease {
+                release: seq,
+                state_hash: "a".repeat(64),
+                curation_hash: "b".repeat(64),
+                applied_at_ms: at,
+            },
+            rows: ImportedTables::from([(
+                "store_document_era".into(),
+                vec![row.as_object().unwrap().clone()],
+            )]),
+            upstream: None,
+        }
+    };
+    store
+        .apply_store_releases(
+            Some(&ImportedTables::new()),
+            &[
+                release(1, BOOT, Some(aliases)),
+                release(2, BOOT + 100, None),
+            ],
+        )
+        .unwrap();
+    store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(BOOT),
+            outcome: ObservationOutcome::Seeded,
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: None,
+            detail: None,
+        })
+        .unwrap();
+    let mut card = label_card();
+    // Write a new card at the transition so history samples the instant
+    // when the alias ends and the curated card becomes the dated answer.
+    store
+        .append_curated_models(&[card.clone()], &[], BOOT)
+        .unwrap();
+    card.facts.insert("limit.context".into(), json!(200));
+    store
+        .append_curated_models(&[card], &[], BOOT + 100)
+        .unwrap();
+    let read = |at| {
+        serve_catalog_get(
+            &store,
+            &serde_json::to_vec(&json!({
+                "provider_id":"fixture-label", "model_id":"curated", "at_ms":at
+            }))
+            .unwrap(),
+        )
+    };
+    assert!(read(BOOT)
+        .unwrap_err()
+        .message
+        .contains("aliases apply to current reads only"));
+    assert_eq!(
+        read(BOOT + 100).unwrap().models["fixture-label/curated"]["limit.context"],
+        200
+    );
+    let history = serve_history(&store, br#"{"provider_id":"fixture-label","model_id":"curated","fact_key":"limit.context","served":true}"#).unwrap();
+    let segments = history.served.unwrap();
+    assert_eq!(segments.len(), 2);
+    assert_eq!(segments[0].reason, Some(HistoryRefusalReason::NoCoverage));
+    assert_eq!(segments[0].until_ms, Some(BOOT + 100));
+    assert_eq!(segments[1].value, Some(json!(200)));
+}
+
+#[test]
 fn served_history_ends_provider_label_when_donor_disappears() {
     let (store, _dir) = provider_label_fixture();
     store
