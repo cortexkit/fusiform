@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 # and tool versions, and no machine-specific paths baked into the binary.
 rust_version=1.100.0
 bindgen_version=0.2.127
+opt_version=120
 installed=$(wasm-bindgen --version)
 if [[ "$installed" != "wasm-bindgen $bindgen_version" ]]; then
     printf 'Expected wasm-bindgen %s, found %s\n' "$bindgen_version" "$installed" >&2
@@ -16,6 +17,15 @@ rustc_found=$(rustc --version)
 if [[ "$rustc_found" != "rustc $rust_version "* ]]; then
     printf 'Expected rustc %s, found %s (set RUSTUP_TOOLCHAIN=%s)\n' \
         "$rust_version" "$rustc_found" "$rust_version" >&2
+    exit 1
+fi
+if ! command -v wasm-opt > /dev/null; then
+    printf 'Expected wasm-opt version %s, but it is not on PATH\n' "$opt_version" >&2
+    exit 1
+fi
+optimizer=$(wasm-opt --version)
+if [[ "$optimizer" != "wasm-opt version $opt_version" && "$optimizer" != "wasm-opt version $opt_version "* ]]; then
+    printf 'Expected wasm-opt version %s, found %s\n' "$opt_version" "$optimizer" >&2
     exit 1
 fi
 
@@ -40,12 +50,8 @@ rm -f "$out/SHA256SUMS"
 wasm-bindgen --target web --no-typescript --out-dir "$out" \
     "$target_dir/$target/$profile/fusiform_publish_wasm.wasm"
 
-optimizer='not run'
-if command -v wasm-opt > /dev/null; then
-    optimizer=$(wasm-opt --version)
-    wasm-opt -Oz --all-features --strip-debug --strip-producers \
-        "$out/$wasm" -o "$out/$wasm"
-fi
+wasm-opt -Oz --all-features --strip-debug --strip-producers \
+    "$out/$wasm" -o "$out/$wasm"
 
 raw_size=$(wc -c < "$out/$wasm")
 gzip_size=$(gzip -9 -n -c "$out/$wasm" | wc -c)

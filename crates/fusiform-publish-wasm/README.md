@@ -5,6 +5,11 @@ In this directory, run `sha256sum -c SHA256SUMS` (macOS:
 `fusiform_publish_wasm.js` from the same verified artifact, without modifying
 their bytes. The manifest checks integrity; get it from a trusted CI run.
 
+To reproduce the distributable build, run `scripts/build-publish-wasm.sh` from
+the checkout with Rust 1.100.0 (including `wasm32-unknown-unknown`), wasm-bindgen
+0.2.127, and `wasm-opt` from Binaryen 120. The script refuses to build with a
+missing or mismatched optimizer.
+
 In a Cloudflare Worker, configure `.wasm` imports as compiled WebAssembly
 modules and initialize the glue once per isolate:
 
