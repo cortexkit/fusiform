@@ -112,8 +112,14 @@ given UTC day. Release 1 belongs in the separately generated `history/base.json`
 The day builder preserves signatures; it does not verify them.
 
 Pass history files as an ordered JSON array of `{"file": "base.json", "sha256": "…"}`
-entries. The host selects the files that cover the snapshot's release and
-hashes their exact bytes. Sign `history_attestation_signing_bytes` for
+entries and hash their exact bytes. Starting from `base.json`, the listed
+files must replay to exactly the snapshot's release. The consumer replays the
+entire last day file; it does not ignore releases after the snapshot. A day
+file at the same path can change as releases are added. Replacing it makes
+any attestation over the old bytes fail verification, so a snapshot that
+attests a final day file must end at the last release of that day.
+
+Sign `history_attestation_signing_bytes` for
 `{"release": n, "state_hash": "…", "history": [...]}` with the release key
 and pass the resulting `{kid, sig}` as `history_signatures`. The pinned key
 document is `{kid, public_key}`, where `public_key` is the raw 32-byte Ed25519

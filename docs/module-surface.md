@@ -50,8 +50,11 @@ Pin your store's unpadded base64url Ed25519 public key. Use a fresh fusiform dat
 folder when switching modes: the daemon refuses to import into a database that
 already holds local catalog history. It checks `{base}/v1/head` every minute
 (the edge caches it for 30 seconds). Immutable objects are at
-`{base}/v1/releases/{n}`, `{base}/v1/snapshots/{n}`,
-`{base}/v1/history/base.json`, and `{base}/v1/history/days/{YYYY-MM-DD}.json`.
+`{base}/v1/releases/{n}`, `{base}/v1/snapshots/{n}` and
+`{base}/v1/history/base.json`. A file at `{base}/v1/history/days/{YYYY-MM-DD}.json`
+can change as releases are added to its day. The listed history files must
+replay to exactly the snapshot's release, and their bytes must match its
+attestation. Replacing a day file invalidates attestations over the old bytes.
 Release and snapshot numbers are canonical positive decimals. The daemon does
 not fetch `{base}/.well-known/models-keys.json`; that endpoint is for operators.
 Before the first verified release, the daemon can serve the built-in snapshot
