@@ -1,7 +1,7 @@
 #!/bin/sh
 # Refuse a push that CI would fail for reasons a local check can see in under a
-# second: a committed lock that is not the validated one, unformatted code, or
-# a lock that does not resolve.
+# second: unformatted code, a lock that does not resolve, or a dependency
+# resolved from a local path outside the repository.
 #
 # WHY A HOOK RATHER THAN A HABIT
 #
@@ -29,26 +29,28 @@ if ! command -v cargo > /dev/null 2>&1; then
     exit 0
 fi
 
-# The lock being PUSHED is the one CI resolves, and it is not necessarily the
-# one validated below. A gate run without --locked rewrites the lock; stage
-# explicit paths afterwards and the working tree resolves while the commit
-# carries the old pin. Equality is the whole proof: if the committed bytes are
-# the validated bytes, the checks below cover the push.
-if ! cmp -s "$(git rev-parse --show-toplevel)/Cargo.lock" /dev/stdin <<CMPEOF
-$(git show HEAD:Cargo.lock)
-CMPEOF
-then
-    echo "pre-push refused: the committed Cargo.lock is not the one in the tree" >&2
-    echo >&2
-    echo "  CI resolves the COMMIT, so validating this working tree proves" >&2
-    echo "  nothing about the push. The usual cause is a gate run without" >&2
-    echo "  --locked, which rewrites the lock, followed by staging explicit" >&2
-    echo "  paths that leave the rewrite behind." >&2
-    echo >&2
-    echo "      git diff HEAD -- Cargo.lock" >&2
-    echo >&2
-    exit 1
-fi
+repo_env=$(git rev-parse --local-env-vars)
+scratch=$(mktemp -d)
+tree="$scratch/tree"
+finished=0
+cleanup() {
+    rc=$?
+    if [ -e "$tree/.git" ]; then
+        git worktree remove --force "$tree"
+    fi
+    rm -rf "$scratch"
+    if [ "$rc" -eq 0 ] && [ "$finished" -ne 1 ]; then
+        exit 1
+    fi
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+check_tree() (
+    # Git's inherited repository variables can point tools back at the tree
+    # being pushed from rather than the commit checked out for validation.
+    unset $repo_env
+    cd "$tree" || exit 1
 
 # `cargo fmt --all -- --check` is the first thing ci.yml runs. Cheap enough to be
 # unconditional: it reads files and compares, no build. --check rather than
@@ -94,9 +96,31 @@ fi
 
 # No dependency may resolve from a path outside this repo. A sibling path dep
 # goes stale on every sibling release; see the script for why.
-if ! "$(git rev-parse --show-toplevel)/scripts/no-outside-path-deps.sh"; then
+if ! ./scripts/no-outside-path-deps.sh; then
     echo "pre-push refused: a dependency resolves from outside this repository" >&2
     echo >&2
     echo "  Take it from crates.io, or pin a git rev if it is unpublished." >&2
     exit 1
 fi
+)
+
+checked=' '
+while read -r local_ref local_sha remote_ref remote_sha; do
+    # Ref deletions have no local tree to check. Several pushed refs can point
+    # at the same commit, including annotated tags; validate each commit once.
+    [ "$local_ref" != '(delete)' ] || continue
+    commit=$(git rev-parse --verify "$local_sha^{commit}") || exit 1
+    case "$checked" in *" $commit "*) continue ;; esac
+
+    # A push can name any ref, and unstaged edits can mask a defect in HEAD.
+    # Check the committed tree without running a post-checkout hook that could
+    # alter the files being validated.
+    git -c core.hooksPath=/dev/null worktree add --quiet --detach "$tree" "$commit" </dev/null
+    if ! check_tree </dev/null; then
+        echo "  Commit $commit ($local_ref -> $remote_ref) did not pass." >&2
+        exit 1
+    fi
+    git worktree remove --force "$tree"
+    checked="$checked$commit "
+done
+finished=1
