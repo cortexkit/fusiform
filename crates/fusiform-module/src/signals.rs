@@ -75,9 +75,10 @@ const fn decode_class(value: u64) -> Option<FailureClass> {
 #[derive(Debug)]
 pub struct Signals {
     store_url: Option<String>,
-    store_poll_error: arc_swap::ArcSwapOption<String>,
+    store_poll_failure: arc_swap::ArcSwapOption<StorePollFailure>,
     /// When the poller last verified the published head, even if it wrote nothing.
     last_store_head_check_ms: AtomicI64,
+    last_store_replay_progress_ms: AtomicI64,
     /// Zero until a release is known. Adopted from the store at startup, so
     /// the metric describes the catalog rather than resetting per process.
     store_applied_release: AtomicU64,
@@ -195,12 +196,19 @@ impl Default for Signals {
     }
 }
 
+#[derive(Debug)]
+struct StorePollFailure {
+    error: std::sync::Arc<String>,
+    streak: u64,
+}
+
 impl Signals {
     pub fn new() -> Self {
         Self {
             store_url: None,
-            store_poll_error: arc_swap::ArcSwapOption::empty(),
+            store_poll_failure: arc_swap::ArcSwapOption::empty(),
             last_store_head_check_ms: AtomicI64::new(NEVER),
+            last_store_replay_progress_ms: AtomicI64::new(NEVER),
             store_applied_release: AtomicU64::new(0),
             polls_recorded: AtomicU64::new(0),
             consecutive_unpersisted_polls: AtomicU64::new(0),
@@ -237,11 +245,35 @@ impl Signals {
     }
 
     pub fn store_poll_result(&self, error: Option<String>) {
-        self.store_poll_error.store(error.map(std::sync::Arc::new));
+        let streak = self.store_poll_failures().saturating_add(1);
+        self.set_store_poll_failure(error, streak);
+    }
+
+    pub fn store_startup_status(&self, detail: String) {
+        self.set_store_poll_failure(Some(detail), 0);
+    }
+
+    fn set_store_poll_failure(&self, error: Option<String>, streak: u64) {
+        self.store_poll_failure.store(error.map(|error| {
+            std::sync::Arc::new(StorePollFailure {
+                error: std::sync::Arc::new(error),
+                streak,
+            })
+        }));
     }
 
     pub fn store_poll_error(&self) -> Option<std::sync::Arc<String>> {
-        self.store_poll_error.load_full()
+        self.store_poll_failure
+            .load()
+            .as_ref()
+            .map(|f| f.error.clone())
+    }
+
+    pub(crate) fn store_poll_failures(&self) -> u64 {
+        self.store_poll_failure
+            .load()
+            .as_ref()
+            .map_or(0, |f| f.streak)
     }
 
     pub(crate) fn store_head_checked(&self, at_ms: i64) {
@@ -251,6 +283,16 @@ impl Signals {
 
     pub(crate) fn store_head_check_age_ms(&self, now_ms: i64) -> Option<i64> {
         let at = self.last_store_head_check_ms.load(Ordering::Relaxed);
+        (at != NEVER).then(|| now_ms.saturating_sub(at))
+    }
+
+    pub(crate) fn store_replay_progress(&self, at_ms: i64) {
+        self.last_store_replay_progress_ms
+            .store(at_ms, Ordering::Relaxed);
+    }
+
+    pub(crate) fn store_replay_progress_age_ms(&self, now_ms: i64) -> Option<i64> {
+        let at = self.last_store_replay_progress_ms.load(Ordering::Relaxed);
         (at != NEVER).then(|| now_ms.saturating_sub(at))
     }
 

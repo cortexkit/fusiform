@@ -7,7 +7,7 @@ use std::{
 };
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_release::{canonical_json, sign_envelope, sign_head, SigningKey};
+use fusiform_release::{canonical_json, sha256, sign_envelope, sign_head, SigningKey};
 use serde_json::{json, Value};
 
 use super::*;
@@ -22,6 +22,10 @@ const DAY: &[u8] = include_bytes!(
 const SNAPSHOT: &[u8] =
     include_bytes!("../../../fusiform-release/fixtures/release-format-v1/chain/snapshot.json");
 const KID: &str = "release-format-v1-test-key";
+
+fn poll_store(descriptor: &StorageDescriptor) -> Arc<CatalogStore> {
+    Arc::new(CatalogStore::open_for_store(descriptor).unwrap())
+}
 
 fn server(files: Arc<Mutex<BTreeMap<String, Vec<u8>>>>) -> Url {
     server_with_requests(files, Arc::default())
@@ -116,6 +120,150 @@ fn next_named_release(snapshot: &mut Snapshot, key: &SigningKey) -> Release {
     }
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn store_poll_replay_leaves_the_async_worker_responsive() {
+    let key = SigningKey::from_bytes(&[42; 32]);
+    let snapshot: Snapshot = serde_json::from_slice(SNAPSHOT).unwrap();
+    let files = Arc::new(Mutex::new(BTreeMap::from([
+        ("/v1/head".into(), signed_head(&snapshot, 2, &key)),
+        ("/v1/snapshots/2".into(), SNAPSHOT.to_vec()),
+        ("/v1/releases/1".into(), FIRST.to_vec()),
+        ("/v1/history/base.json".into(), BASE.to_vec()),
+        ("/v1/history/days/2026-11-19.json".into(), DAY.to_vec()),
+    ])));
+    let dir = tempfile::tempdir().unwrap();
+    let store = poll_store(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into_owned(),
+        },
+    });
+    let mut poller = StorePoller::new(
+        server(files),
+        BTreeMap::from([(KID.into(), key.verifying_key())]),
+    )
+    .unwrap();
+    let (started, replaying) = tokio::sync::oneshot::channel();
+    let (reply, replied) = std::sync::mpsc::channel();
+    let probe = Mutex::new(Some((started, replied)));
+    let request = tokio::spawn(async move {
+        replaying.await.unwrap();
+        reply.send(()).unwrap();
+    });
+
+    assert_eq!(
+        poller
+            .poll_with_progress(&store, move || {
+                // Hold the first replay stage until another task can answer. A replay
+                // on the sole async worker prevents the reply until the timeout.
+                if let Some((started, replied)) = probe.lock().unwrap().take() {
+                    started.send(()).unwrap();
+                    assert_eq!(
+                        replied.recv_timeout(Duration::from_secs(2)),
+                        Ok(()),
+                        "the async worker could not answer while replay was in progress"
+                    );
+                }
+            })
+            .await
+            .unwrap(),
+        2
+    );
+    request.await.unwrap();
+}
+
+#[tokio::test]
+async fn store_poll_restart_uses_snapshot_instead_of_full_history() {
+    use std::{
+        sync::atomic::{AtomicU64, Ordering},
+        time::Instant,
+    };
+
+    let key = SigningKey::from_bytes(&[42; 32]);
+    let mut snapshot: Snapshot = serde_json::from_slice(SNAPSHOT).unwrap();
+    let mut files = BTreeMap::from([
+        ("/v1/head".into(), signed_head(&snapshot, 2, &key)),
+        ("/v1/snapshots/2".into(), SNAPSHOT.to_vec()),
+        ("/v1/releases/1".into(), FIRST.to_vec()),
+        ("/v1/history/base.json".into(), BASE.to_vec()),
+        ("/v1/history/days/2026-11-19.json".into(), DAY.to_vec()),
+    ]);
+    for day in ["2026-11-21", "2026-11-23", "2026-11-25"] {
+        publish_snapshot_day(&mut files, &mut snapshot, &key, day);
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let store = poll_store(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into_owned(),
+        },
+    });
+    let files = Arc::new(Mutex::new(files));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let url = server_with_requests(files.clone(), requests.clone());
+    let poller = || {
+        StorePoller::new(
+            url.clone(),
+            BTreeMap::from([(KID.into(), key.verifying_key())]),
+        )
+        .unwrap()
+    };
+    assert_eq!(poller().poll(&store).await.unwrap(), 5);
+
+    let mut restarts = Vec::new();
+    for number in 6..=7 {
+        let release = next_named_release(&mut snapshot, &key);
+        {
+            let mut files = files.lock().unwrap();
+            files.insert(
+                format!("/v1/releases/{number}"),
+                serde_json::to_vec(&release).unwrap(),
+            );
+            files.insert("/v1/head".into(), signed_head(&snapshot, 5, &key));
+        }
+        requests.lock().unwrap().clear();
+        let mut restarted = poller();
+        let started = Instant::now();
+        let progress = Arc::new(AtomicU64::new(0));
+        let stamp = Arc::clone(&progress);
+        assert_eq!(
+            restarted
+                .poll_with_progress(&store, move || {
+                    stamp.fetch_add(1, Ordering::Relaxed);
+                })
+                .await
+                .unwrap(),
+            number
+        );
+        let seen = requests.lock().unwrap().clone();
+        println!(
+            "restart at cursor {} applied {number} in {:?}: {} requests {seen:?}",
+            number - 1,
+            started.elapsed(),
+            seen.len()
+        );
+        assert_eq!(progress.load(Ordering::Relaxed), 1 + number - 5);
+        restarts.push(seen);
+    }
+    assert_eq!(
+        restarts,
+        [
+            vec!["/v1/head", "/v1/snapshots/5", "/v1/releases/6"],
+            vec![
+                "/v1/head",
+                "/v1/snapshots/5",
+                "/v1/releases/6",
+                "/v1/releases/7",
+            ],
+        ],
+        "cold replay must start at the signed snapshot, not release 1"
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore = "measures peak RSS; run alone so other tests do not affect it"]
@@ -180,15 +328,14 @@ async fn store_poll_large_curation_backlog_has_bounded_peak_rss() {
             std::io::copy(&mut response, &mut stream).unwrap();
         }
     });
-    let store = CatalogStore::open_for_store(&StorageDescriptor {
+    let store = poll_store(&StorageDescriptor {
         module_id: "fusiform".into(),
         storage_namespace: "default".into(),
         isolation: Isolation::Module,
         backend: StorageBackend::Sqlite {
             path: dir.path().join("store.db").to_string_lossy().into_owned(),
         },
-    })
-    .unwrap();
+    });
     let mut poller =
         StorePoller::new(url, BTreeMap::from([(KID.into(), key.verifying_key())])).unwrap();
     assert_eq!(poller.poll(&store).await.unwrap(), 2);
@@ -290,15 +437,14 @@ async fn store_poll_warm_catch_up_reads_only_the_missing_suffix() {
             publish_snapshot_day(&mut files, &mut snapshot, &key, day);
         }
         let dir = tempfile::tempdir().unwrap();
-        let store = CatalogStore::open_for_store(&StorageDescriptor {
+        let store = poll_store(&StorageDescriptor {
             module_id: "fusiform".into(),
             storage_namespace: "default".into(),
             isolation: Isolation::Module,
             backend: StorageBackend::Sqlite {
                 path: dir.path().join("store.db").to_string_lossy().into_owned(),
             },
-        })
-        .unwrap();
+        });
         let files = Arc::new(Mutex::new(files));
         let requests = Arc::new(Mutex::new(Vec::new()));
         let mut poller = StorePoller::new(
@@ -329,6 +475,7 @@ async fn store_poll_warm_catch_up_reads_only_the_missing_suffix() {
                 store.latest_store_release().unwrap().unwrap().release,
                 previous
             );
+            assert!(poller.verified.is_none());
             files
                 .lock()
                 .unwrap()
@@ -336,12 +483,22 @@ async fn store_poll_warm_catch_up_reads_only_the_missing_suffix() {
             requests.lock().unwrap().clear();
         }
         assert_eq!(poller.poll(&store).await.unwrap(), next);
-        assert_eq!(
-            *requests.lock().unwrap(),
-            ["/v1/head".into(), next_path],
-            "one newly applied release after {} published day files",
-            prior_days + 1
-        );
+        if prior_days == 0 {
+            // A rejected individual object invalidates the warm path. The
+            // next poll verifies the archived copy instead.
+            assert_eq!(
+                *requests.lock().unwrap(),
+                [
+                    "/v1/head".to_owned(),
+                    format!("/v1/snapshots/{next}"),
+                    "/v1/releases/1".into(),
+                    "/v1/history/days/2026-11-19.json".into(),
+                    "/v1/history/days/2026-11-21.json".into(),
+                ]
+            );
+        } else {
+            assert_eq!(*requests.lock().unwrap(), ["/v1/head".into(), next_path]);
+        }
 
         let archived = publish_snapshot_day(
             &mut files.lock().unwrap(),
@@ -359,7 +516,10 @@ async fn store_poll_warm_catch_up_reads_only_the_missing_suffix() {
         } else {
             // Replay must reconstruct and verify the state at the local
             // cursor if no matching state was retained.
-            poller.verified.as_mut().unwrap().envelope.curation_hash = Hash::from_bytes([0; 32]);
+            Arc::get_mut(poller.verified.as_mut().unwrap())
+                .unwrap()
+                .envelope
+                .curation_hash = Hash::from_bytes([0; 32]);
         }
         requests.lock().unwrap().clear();
         assert_eq!(poller.poll(&store).await.unwrap(), number);
@@ -514,13 +674,18 @@ fn store_poll_writes_the_same_model_eras_as_direct_ingest() {
             envelope,
             change,
         };
-        let next = if let Some(previous) = &previous {
-            Verified::advance(previous, &release, &keys).unwrap()
+        let previous_at = previous
+            .as_ref()
+            .map(|previous| previous.envelope.upstream_observed_at_ms);
+        let (next, before) = if let Some(mut previous) = previous.take() {
+            let before = previous.advance(&release, &keys).unwrap();
+            (previous, before)
         } else {
-            Verified::first(release.clone(), &keys).unwrap()
+            (Verified::first(release.clone(), &keys).unwrap(), None)
         };
         let arrival = translate::arrival(
-            previous.as_ref(),
+            previous_at,
+            before.as_ref(),
             &next,
             &release.change.upstream,
             i == 0,
@@ -691,15 +856,14 @@ async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
         ("/v1/history/days/2026-11-19.json".into(), DAY.to_vec()),
     ])));
     let dir = tempfile::tempdir().unwrap();
-    let store = CatalogStore::open_for_store(&StorageDescriptor {
+    let store = poll_store(&StorageDescriptor {
         module_id: "fusiform".into(),
         storage_namespace: "default".into(),
         isolation: Isolation::Module,
         backend: StorageBackend::Sqlite {
             path: dir.path().join("store.db").to_string_lossy().into_owned(),
         },
-    })
-    .unwrap();
+    });
     let mut poller = StorePoller::new(
         server(Arc::clone(&files)),
         BTreeMap::from([(KID.into(), key.verifying_key())]),
@@ -935,15 +1099,14 @@ async fn store_poll_keeps_one_state_and_refuses_tampered_bytes() {
         ("/v1/history/days/2026-11-19.json".into(), DAY.to_vec()),
     ])));
     let dir = tempfile::tempdir().unwrap();
-    let store = CatalogStore::open_for_store(&StorageDescriptor {
+    let store = poll_store(&StorageDescriptor {
         module_id: "fusiform".into(),
         storage_namespace: "default".into(),
         isolation: Isolation::Module,
         backend: StorageBackend::Sqlite {
             path: dir.path().join("store.db").to_string_lossy().into_owned(),
         },
-    })
-    .unwrap();
+    });
     let mut poller = StorePoller::new(
         server(Arc::clone(&files)),
         BTreeMap::from([(KID.into(), key.verifying_key())]),
@@ -970,23 +1133,35 @@ async fn store_poll_keeps_one_state_and_refuses_tampered_bytes() {
         );
     }
 
-    // A trailing space changes the bytes but not the decoded state or its
-    // release hashes. Only the retained-buffer integrity check can reject it.
-    let retained = poller.verified.as_mut().unwrap();
-    let tampered = [retained.bytes.as_ref(), b" "].concat().into_boxed_slice();
-    let original = std::mem::replace(&mut retained.bytes, tampered);
     assert_eq!(poller.poll(&store).await.unwrap(), 32);
     let version = store.catalog_version().unwrap();
     publish(&mut snapshot, 33);
-    assert_eq!(
-        poller.poll(&store).await.unwrap_err(),
-        "retained store state does not match its verified hash"
+    let path = "/v1/releases/33";
+    let release = files.lock().unwrap().remove(path).unwrap();
+    assert!(poller.poll(&store).await.unwrap_err().contains("404"));
+    assert!(
+        poller.verified.is_some(),
+        "a transport miss keeps the anchor"
     );
+    files.lock().unwrap().insert(path.into(), release);
+
+    // Broken JSON cannot recreate verified state from the retained copy.
+    Arc::get_mut(poller.verified.as_mut().unwrap())
+        .unwrap()
+        .bytes = Box::from(&b"{"[..]);
+    assert!(poller
+        .poll(&store)
+        .await
+        .unwrap_err()
+        .contains("decode verified store state"));
     assert_eq!(store.catalog_version().unwrap(), version);
     assert_eq!(store.latest_store_release().unwrap().unwrap().release, 32);
 
-    poller.verified.as_mut().unwrap().bytes = original;
-    assert_eq!(poller.poll(&store).await.unwrap(), 33);
+    assert_eq!(
+        poller.poll(&store).await,
+        Ok(33),
+        "the next poll must rebuild the rejected retained state from signed releases"
+    );
     assert_eq!(
         model_name_at(&store, snapshot.envelope.upstream_observed_at_ms),
         "Mini 3"

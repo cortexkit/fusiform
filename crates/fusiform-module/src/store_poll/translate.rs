@@ -15,7 +15,8 @@ fn add(rows: &mut ImportedTables, table: &str, row: Value) {
 }
 
 pub(super) fn arrival(
-    previous: Option<&Verified>,
+    previous_observed_at_ms: Option<i64>,
+    before: Option<&CurationSet>,
     next: &Verified,
     operations: &[ChangeOp],
     curation_changed: bool,
@@ -23,9 +24,8 @@ pub(super) fn arrival(
 ) -> Result<ReleaseArrival, String> {
     let mut rows = ImportedTables::new();
     let mut upstream = None;
-    let before = previous.map(|p| &p.state.curation_set);
     let release = &next.envelope;
-    if let Some(previous) = previous {
+    if let Some(previous_observed_at_ms) = previous_observed_at_ms {
         if !operations.is_empty() {
             *last_observation = last_observation
                 .checked_add(1)
@@ -59,7 +59,7 @@ pub(super) fn arrival(
                     json!({"source":"models.dev","provider_id":provider,"model_id":"",
                     "fact_key":fact,"value_json":value,"boundary_at_ms":release.upstream_observed_at_ms,
                     "boundary_kind":"observed","observation_id":last_observation,
-                    "prior_observation_at_ms":previous.envelope.upstream_observed_at_ms}),
+                    "prior_observation_at_ms":previous_observed_at_ms}),
                 );
             }
             if !touched.is_empty() {
@@ -89,7 +89,7 @@ pub(super) fn arrival(
                 upstream = Some(ReleaseObservation {
                     id: *last_observation,
                     at: Timestamp(release.upstream_observed_at_ms),
-                    prior_at: Timestamp(previous.envelope.upstream_observed_at_ms),
+                    prior_at: Timestamp(previous_observed_at_ms),
                     models,
                 });
             }

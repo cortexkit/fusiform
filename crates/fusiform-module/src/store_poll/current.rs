@@ -69,7 +69,7 @@ impl StorePoller {
             if release.envelope.release != number {
                 return Err(format!("{path}: wrong release number"));
             }
-            current = Verified::advance(&current, &release, &self.keys)?;
+            current.advance(&release, &self.keys)?;
             if release.change.curation_set.is_some() {
                 let raw: ReleaseDocuments = step(&path, serde_json::from_slice(&bytes))?;
                 documents = raw.change.curation_set.vendor_facts;

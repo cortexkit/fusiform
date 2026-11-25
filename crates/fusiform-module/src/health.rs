@@ -59,6 +59,7 @@ pub const LOOP_SILENT_AFTER_MS: i64 = 70 * 60 * 1_000;
 // A signed-store poll can verify many releases in one attempt, so allow ten
 // minutes of catch-up work in addition to two regular polling intervals.
 const STORE_LOOP_SILENT_AFTER_MS: i64 = 2 * crate::store_poll::POLL_INTERVAL_MS + 10 * 60_000;
+const STORE_HEAD_STALE_AFTER_MS: i64 = 4 * crate::store_poll::POLL_INTERVAL_MS;
 
 /// Tolerate one transient persistence failure, but alert on a streak.
 /// In-flight polls have not reached a verdict and do not affect this threshold.
@@ -79,9 +80,6 @@ pub const CATALOG_WRITE_FAILED_DETAIL: &str =
 pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
     let mut report = serving_report(signals, now_ms);
     if let Some(error) = signals.store_poll_error() {
-        if report.status != HealthStatus::Failing {
-            report.status = HealthStatus::Degraded;
-        }
         report.detail = Some(format!("published store: {error}"));
     }
 
@@ -142,12 +140,14 @@ fn serving_report(signals: &Signals, now_ms: i64) -> HealthReport {
 
     if signals.store_url().is_some() {
         let checked_age = signals.store_head_check_age_ms(now_ms);
-        // A long catch-up that just finished is not a silent loop. Bound the
-        // gap from the start of an in-flight attempt, or from a later success.
+        let failures = signals.store_poll_failures();
+        // A long catch-up can be active before the head is verified. Measure
+        // silence since the most recent attempt, verified release or head.
         let activity_age = signals
             .attempt_age_ms(now_ms)
             .into_iter()
             .chain(checked_age)
+            .chain(signals.store_replay_progress_age_ms(now_ms))
             .min();
         let (status, detail) = match activity_age {
             Some(age) if age > STORE_LOOP_SILENT_AFTER_MS => (
@@ -160,6 +160,17 @@ fn serving_report(signals: &Signals, now_ms: i64) -> HealthReport {
                 ),
             ),
             _ => match checked_age {
+                Some(age) if age > STORE_HEAD_STALE_AFTER_MS => (
+                    HealthStatus::Degraded,
+                    format!(
+                        "published head was last verified {} minutes ago",
+                        age / 60_000
+                    ),
+                ),
+                Some(_) if failures >= FAILURE_STREAK_DEGRADED => (
+                    HealthStatus::Degraded,
+                    format!("{failures} consecutive published store poll failures"),
+                ),
                 Some(age) => (
                     HealthStatus::Ok,
                     format!("published head verified {} minutes ago", age / 60_000),
@@ -448,6 +459,9 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
     });
     if signals.store_url().is_some() {
         metrics["store_applied_release"] = serde_json::json!(signals.store_applied_release());
+        metrics["process_store_poll_failures"] = serde_json::json!(signals.store_poll_failures());
+        metrics["process_store_poll_error"] =
+            serde_json::json!(signals.store_poll_error().as_deref());
     }
     metrics
 }
@@ -475,6 +489,83 @@ mod tests {
         signals.record_store_applied_release(7);
         signals.store_poll_result(Some("published head unavailable".into()));
         assert_eq!(metrics(&signals, 0)["store_applied_release"], 7);
+    }
+
+    #[test]
+    fn a_store_catchup_verifying_releases_is_not_a_silent_loop() {
+        let signals = Signals::for_store("https://example.test/".into());
+        signals.store_opened();
+        signals.attempted(0);
+        let now = STORE_LOOP_SILENT_AFTER_MS + 1;
+        let detail = |now| report(&signals, now).detail.unwrap();
+        assert!(detail(now).contains("no activity"));
+        signals.store_replay_progress(now);
+        assert_eq!(detail(now), "waiting for verified store head");
+        assert!(detail(now + STORE_LOOP_SILENT_AFTER_MS + 1).contains("no activity"));
+    }
+
+    #[test]
+    fn one_transient_store_poll_failure_is_not_degraded() {
+        let now = 10_000_000;
+        let store = Signals::for_store("https://example.test/".into());
+        store.store_opened();
+        store.attempted(now - 61_000);
+        store.store_head_checked(now - 60_000);
+        store.attempted(now - 1_000);
+        let error = "v1/releases/7: HTTP status client error (404 Not Found)";
+        store.store_poll_result(Some(error.into()));
+        let store_report = report(&store, now);
+        let direct = open_store();
+        direct.observed(now - 60_000);
+        direct.attempted(now - 1_000);
+        direct.failed(FailureClass::Network);
+        assert_eq!(report(&direct, now).status, HealthStatus::Ok);
+        assert_eq!(store_report.status, HealthStatus::Ok, "{store_report:?}");
+        assert_eq!(
+            store_report.detail.unwrap(),
+            format!("published store: {error}")
+        );
+        let metrics = store_report.metrics.unwrap();
+        assert_eq!(metrics["process_store_poll_failures"], 1);
+        assert_eq!(metrics["process_store_poll_error"], error);
+    }
+
+    #[test]
+    fn store_health_degrades_for_bootstrap_staleness_and_failure_streaks() {
+        let now = 10_000_000;
+        let store = Signals::for_store("https://example.test/".into());
+        store.store_opened();
+        store.attempted(now);
+        store.store_startup_status("serving the built-in snapshot".into());
+        assert_eq!(report(&store, now).status, HealthStatus::Degraded);
+        assert_eq!(metrics(&store, now)["process_store_poll_failures"], 0);
+
+        store.store_head_checked(now);
+        store.store_poll_result(None);
+        for failure in 1..=FAILURE_STREAK_DEGRADED {
+            store.store_poll_result(Some("upstream unavailable".into()));
+            assert_eq!(
+                report(&store, now).status,
+                if failure < FAILURE_STREAK_DEGRADED {
+                    HealthStatus::Ok
+                } else {
+                    HealthStatus::Degraded
+                }
+            );
+        }
+        store.store_poll_result(None);
+        let recovered = report(&store, now);
+        assert_eq!(recovered.status, HealthStatus::Ok);
+        let metrics = recovered.metrics.unwrap();
+        assert_eq!(metrics["process_store_poll_failures"], 0);
+        assert_eq!(metrics["process_store_poll_error"], serde_json::Value::Null);
+
+        let stale = now + STORE_HEAD_STALE_AFTER_MS + 1;
+        store.attempted(stale);
+        store.store_replay_progress(stale);
+        let report = report(&store, stale);
+        assert_eq!(report.status, HealthStatus::Degraded);
+        assert!(report.detail.unwrap().contains("last verified 4 minutes"));
     }
 
     #[test]
