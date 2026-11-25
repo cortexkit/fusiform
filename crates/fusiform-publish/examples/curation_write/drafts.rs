@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use fusiform_curate::{aliases, curated_models, fact_overrides::options_list_effort};
+use fusiform_curate::{
+    aliases, curated_models, fact_overrides::options_list_effort, model_lineage::valid_model_key,
+};
 use fusiform_module::store_poll::validate_judgments;
 use fusiform_release::{
     CurationSet, Decommissioned, EffortGrade, Facts, Grade, State, WorkloadEffort,
@@ -29,6 +31,9 @@ impl Input {
     pub(super) fn new(family: &str, key: &str, text: &str, note: String) -> Result<Self> {
         let proposal = Proposal::parse(family, text)?;
         check_key(key)?;
+        if key.starts_with("local:") && !matches!(&proposal, Proposal::KindGrades(_)) {
+            return Err("local engine keys only support kind_grades drafts".into());
+        }
         metadata("note", &note)?;
         Ok(Self {
             key: key.into(),
@@ -44,16 +49,18 @@ impl Input {
 
     fn compare(self, state: &State) -> Result<(bool, Request)> {
         let family = self.proposal.family();
-        let options = model_options(state, &self.key)?;
-        for effort in self.proposal.efforts() {
-            if !options
-                .iter()
-                .any(|option| options_list_effort(Some(option), effort))
-            {
-                return Err(format!(
-                    "{}: effort {effort:?} is not listed in capability.reasoning_options for {}",
-                    family, self.key
-                ));
+        if !self.key.starts_with("local:") {
+            let options = model_options(state, &self.key)?;
+            for effort in self.proposal.efforts() {
+                if !options
+                    .iter()
+                    .any(|option| options_list_effort(Some(option), effort))
+                {
+                    return Err(format!(
+                        "{}: effort {effort:?} is not listed in capability.reasoning_options for {}",
+                        family, self.key
+                    ));
+                }
             }
         }
         let (current, value) = self
@@ -194,6 +201,12 @@ fn check_key(key: &str) -> Result<()> {
         return Err(
             "model key must be 1–200 bytes without whitespace or control characters".into(),
         );
+    }
+    if key
+        .strip_prefix("local:")
+        .is_some_and(|id| !valid_model_key(id))
+    {
+        return Err("local engine keys must be local:<provider>/<model> with nonempty parts and no whitespace or control characters".into());
     }
     Ok(())
 }

@@ -25,7 +25,8 @@ fn fake_store(tamper_release: bool) -> String {
     ]);
     let curation_set: CurationSet = serde_json::from_value(json!({
         "version": 1, "approved_at_ms": null, "approved_drafts": [], "grades": {},
-        "effort_grades": {}, "kind_grades": {}, "workload_efforts": {}, "decommissioned": {},
+        "effort_grades": {}, "kind_grades": {"local:workbench/transcriber":{"transcription":1200}},
+        "workload_efforts": {}, "decommissioned": {},
         "vendor_facts": {},
     }))
     .unwrap();
@@ -299,6 +300,77 @@ async fn rejects_unknown_family_without_a_fetch() {
     .unwrap_err();
     assert_eq!(error, r#"unknown draft family "unknown""#);
     assert!(!dir.path().join("request.json").exists());
+}
+
+#[tokio::test]
+async fn drafts_can_add_and_remove_local_task_grades_without_a_catalog_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let removal = dir.path().join("remove");
+    invoke(
+        &fake_store(false),
+        &removal,
+        &[
+            "draft",
+            "kind_grades",
+            "local:workbench/transcriber",
+            "--remove",
+            "--note",
+            "test note",
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(removal.join("request.json")).unwrap(),
+        r#"{"note":"test note","value":null}"#
+    );
+
+    let input = dir.path().join("local.json");
+    fs::write(
+        &input,
+        r#"{"note":"test note","kind_grades":{"speech":1100}}"#,
+    )
+    .unwrap();
+    let addition = dir.path().join("add");
+    invoke(
+        &fake_store(false),
+        &addition,
+        &[
+            "from-local",
+            "--model",
+            "local:workbench/new/voice",
+            "--local-json",
+            input.to_str().unwrap(),
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(addition.join("kind_grades/request.json")).unwrap(),
+        r#"{"note":"test note","value":{"speech":1100}}"#
+    );
+
+    for (family, key, expected) in [
+        (
+            "kind_grades",
+            "local:workbench/",
+            "local engine keys must be",
+        ),
+        (
+            "decommissioned",
+            "local:workbench/transcriber",
+            "only support kind_grades",
+        ),
+    ] {
+        let error = invoke(
+            "http://127.0.0.1:1",
+            &dir.path().join("invalid"),
+            &["draft", family, key, "--remove", "--note", "test note"],
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains(expected), "{error}");
+    }
 }
 
 #[tokio::test]
