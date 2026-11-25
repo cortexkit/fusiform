@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::{
     Change, ChangeOp, CurationSet, Hash, ReleaseEnvelope, ReleaseFormat, canonical_json, fact_hash,
-    state_hash,
+    state_hash, validate_upstream_key,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -66,6 +66,10 @@ pub fn build_release(
 
     let summary: Summary = serde_json::from_slice(summary)
         .map_err(|err| ArtifactRefusal::new("invalid_summary", err))?;
+    for op in &summary.ops {
+        validate_upstream_key(op.key())
+            .map_err(|err| ArtifactRefusal::new("invalid_summary", err))?;
+    }
     if !summary
         .ops
         .windows(2)

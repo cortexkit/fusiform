@@ -1,6 +1,6 @@
 use fusiform_release::{
-    state_hash, upstream_state_hash, verify_envelope, ChangeOp, CurationSet, ProviderFacts,
-    Release, ReleaseEnvelope, Snapshot, State, Upstream,
+    state_hash, upstream_state_hash, validate_upstream_key, verify_envelope, ChangeOp, CurationSet,
+    ProviderFacts, Release, ReleaseEnvelope, Snapshot, State, Upstream,
 };
 
 use super::{step, ReleaseKeys};
@@ -161,13 +161,9 @@ fn apply_ops(
     ops: impl IntoIterator<Item = ChangeOp>,
 ) -> Result<(), String> {
     for op in ops {
-        let (provider, model, key) = op.key();
-        if provider.is_empty() || model == Some("") || key.is_empty() {
-            return Err(
-                "upstream operations must name a provider and a fact; model ids cannot be empty"
-                    .into(),
-            );
-        }
+        let key = op.key();
+        validate_upstream_key(key)?;
+        let (provider, model, key) = key;
         match op {
             ChangeOp::Set {
                 provider,

@@ -125,9 +125,25 @@ fn parse_catalog(
     models_dev: &[u8],
     evidence: &ChargeUnitEvidence,
 ) -> Result<NormalizedCatalog, PublishRefusal> {
-    normalize_models_dev_with(models_dev, evidence)
+    let catalog = normalize_models_dev_with(models_dev, evidence)
         .map(|outcome| outcome.catalog)
-        .map_err(|err| PublishRefusal::Parse(err.to_string()))
+        .map_err(|err| PublishRefusal::Parse(err.to_string()))?;
+    for provider in &catalog.providers {
+        if provider.provider_id.is_empty() {
+            return Err(PublishRefusal::Parse("empty provider id".into()));
+        }
+        if provider
+            .models
+            .iter()
+            .any(|model| model.key.model_id.is_empty())
+        {
+            return Err(PublishRefusal::Parse(format!(
+                "empty model id for provider {:?}",
+                provider.provider_id
+            )));
+        }
+    }
+    Ok(catalog)
 }
 
 fn project_model(model: &NormalizedModel) -> ModelFacts {

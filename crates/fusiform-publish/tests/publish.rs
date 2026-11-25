@@ -86,6 +86,27 @@ fn refusals_separate_parse_errors_from_a_drop_beyond_the_guard() {
 }
 
 #[test]
+fn refuses_empty_upstream_ids() {
+    let previous = empty_snapshot_index();
+    let evidence = ChargeUnitEvidence::default();
+    for (input, detail) in [
+        (
+            br#"{"":{"models":{"m":{}}}}"#.as_slice(),
+            "empty provider id",
+        ),
+        (br#"{"p":{"models":{"":{}}}}"#.as_slice(), "empty model id"),
+    ] {
+        assert!(
+            matches!(
+                publish_step(input, &previous, &evidence),
+                Err(PublishRefusal::Parse(reason)) if reason.contains(detail)
+            ),
+            "expected a refusal for {detail}"
+        );
+    }
+}
+
+#[test]
 fn the_index_refuses_corruption_truncation_and_unsupported_versions() {
     let step = publish_step(
         &document(2),

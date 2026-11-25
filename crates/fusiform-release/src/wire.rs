@@ -157,6 +157,16 @@ pub enum ChangeOp {
     },
 }
 
+/// Check that an operation names every component of its upstream key.
+pub fn validate_upstream_key((provider, model, fact): FactKeyRef<'_>) -> Result<(), &'static str> {
+    if provider.is_empty() || model == Some("") || fact.is_empty() {
+        return Err(
+            "upstream operations must name a provider and a fact; model ids cannot be empty",
+        );
+    }
+    Ok(())
+}
+
 impl ChangeOp {
     pub fn key(&self) -> FactKeyRef<'_> {
         match self {

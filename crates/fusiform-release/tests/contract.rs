@@ -110,6 +110,34 @@ fn release_builder_refuses_curation_rollback() {
 }
 
 #[test]
+fn release_builder_refuses_empty_op_keys() {
+    let first: Release = serde_json::from_slice(include_bytes!(
+        "../fixtures/release-format-v1/chain/release-1.json"
+    ))
+    .unwrap();
+    let curation = serde_json::to_vec(&first.change.curation_set.unwrap()).unwrap();
+    for (provider, model, fact) in [
+        ("", "m", "existence"),
+        ("p", "", "existence"),
+        ("p", "m", ""),
+    ] {
+        let summary = serde_json::to_vec(&json!({
+            "ops": [ChangeOp::Set {
+                provider: provider.into(), model: model.into(), fact: fact.into(), value: json!(true)
+            }],
+            "upstream_hash": first.envelope.upstream_hash,
+        })).unwrap();
+        let result = fusiform_release::build_release(&summary, &curation, &[], 1, 1, 0);
+        assert_eq!(
+            result.err().map(|err| err.class),
+            Some("invalid_summary"),
+            "accepted {:?}",
+            (provider, model, fact)
+        );
+    }
+}
+
+#[test]
 fn canonical_json_orders_and_escapes_at_every_depth() {
     let input = br#" {"z":{"z":[],"a":{}},"\u00e9":"\u96ea\/","a":[{"x":1,"b":"\u0001\u0000\u000b\u0008\u000c\u000a\u000d\u0009\u0022\u005c"},null,true]} "#;
     assert_eq!(
