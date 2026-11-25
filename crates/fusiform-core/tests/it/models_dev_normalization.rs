@@ -68,6 +68,30 @@ fn the_measured_document_normalizes() {
         .any(|p| p.provider_id == "cerebras" && p.models.is_empty()));
 }
 
+#[test]
+fn document_parse_errors_distinguish_nested_failures_from_root_shape() {
+    for payload in [
+        &b"{\n\"p\":{\"models\":{\"m\":{\"limit\":{\"context\":\"large\"}}}}}"[..],
+        &b"{\n\"p\":"[..],
+    ] {
+        let diagnostic = normalize_models_dev(payload).unwrap_err().to_string();
+        assert!(diagnostic.contains("line 2 column"), "{diagnostic}");
+        assert!(
+            diagnostic.contains("large") || diagnostic.contains("EOF"),
+            "{diagnostic}"
+        );
+        assert!(!diagnostic.contains("document root"), "{diagnostic}");
+    }
+    assert_eq!(
+        normalize_models_dev(b"[]").unwrap_err(),
+        NormalizeError::NotAProviderMap
+    );
+    assert!(!normalize_models_dev(b"[\n")
+        .unwrap_err()
+        .to_string()
+        .contains("document root"));
+}
+
 /// Ordinary rates scale exactly, with no float anywhere in the path.
 #[test]
 fn rates_scale_to_exact_minor_units() {

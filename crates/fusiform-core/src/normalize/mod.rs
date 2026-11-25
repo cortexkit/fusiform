@@ -215,14 +215,14 @@ impl NormalizedCatalog {
 
 /// What went wrong, precisely enough to fix without re-fetching.
 ///
-/// Every variant carries the model it happened on. When one variant lacks the
-/// context its siblings carry, that is nearly always an oversight rather than a
-/// decision, and the cost lands on whoever reads the log at 3am with no way to
-/// tell which of 6,000 rows caused it.
+/// Model-level errors identify the affected row; document parse errors retain
+/// the parser's diagnostic and source location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NormalizeError {
     /// The document's top level was not an object of providers.
     NotAProviderMap,
+    /// The parser rejected the document's JSON or a nested value.
+    DocumentParse { diagnostic: String },
     /// A rate literal could not be scaled to minor units.
     BadRate {
         model: String,
@@ -294,6 +294,9 @@ impl std::fmt::Display for NormalizeError {
         match self {
             NormalizeError::NotAProviderMap => {
                 write!(f, "document root is not a map of provider entries")
+            }
+            NormalizeError::DocumentParse { diagnostic } => {
+                write!(f, "could not parse models.dev document: {diagnostic}")
             }
             NormalizeError::BadRate {
                 model,
@@ -490,8 +493,20 @@ pub fn normalize_models_dev_with(
     bytes: &[u8],
     evidence: &ChargeUnitEvidence,
 ) -> Result<NormalizeOutcome, NormalizeError> {
+    let document_parse = |error: serde_json::Error| NormalizeError::DocumentParse {
+        diagnostic: error.to_string(),
+    };
+    let root = bytes
+        .iter()
+        .find(|&&b| !matches!(b, b' ' | b'\t' | b'\r' | b'\n'));
+    if root != Some(&b'{') {
+        // A non-object opening token alone is not a shape diagnosis: the
+        // document might instead be malformed or incomplete.
+        serde_json::from_slice::<serde_json::Value>(bytes).map_err(document_parse)?;
+        return Err(NormalizeError::NotAProviderMap);
+    }
     let doc: BTreeMap<String, RawProvider> =
-        serde_json::from_slice(bytes).map_err(|_| NormalizeError::NotAProviderMap)?;
+        serde_json::from_slice(bytes).map_err(document_parse)?;
 
     let mut findings = Vec::new();
     let mut providers = Vec::with_capacity(doc.len());
