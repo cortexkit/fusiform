@@ -79,6 +79,37 @@ fn release_builder_checks_parent_chronology() {
 }
 
 #[test]
+fn release_builder_refuses_curation_rollback() {
+    let first: Release = serde_json::from_slice(include_bytes!(
+        "../fixtures/release-format-v1/chain/release-1.json"
+    ))
+    .unwrap();
+    let parent = first.envelope;
+    let summary =
+        serde_json::to_vec(&json!({"ops": [], "upstream_hash": parent.upstream_hash})).unwrap();
+    let parent_bytes = serde_json::to_vec(&parent).unwrap();
+    let mut curation = first.change.curation_set.unwrap();
+    let build = |curation: &fusiform_release::CurationSet| {
+        fusiform_release::build_release(
+            &summary,
+            &serde_json::to_vec(curation).unwrap(),
+            &parent_bytes,
+            2,
+            parent.published_at_ms + 1,
+            parent.upstream_observed_at_ms,
+        )
+    };
+    assert_eq!(build(&curation).unwrap_err().class, "nothing_to_publish");
+    curation.version = parent.curation_version + 1;
+    assert!(build(&curation).is_ok());
+    curation.version = parent.curation_version.checked_sub(1).unwrap();
+    assert_eq!(
+        build(&curation).err().map(|err| err.class),
+        Some("curation_version_regressed")
+    );
+}
+
+#[test]
 fn canonical_json_orders_and_escapes_at_every_depth() {
     let input = br#" {"z":{"z":[],"a":{}},"\u00e9":"\u96ea\/","a":[{"x":1,"b":"\u0001\u0000\u000b\u0008\u000c\u000a\u000d\u0009\u0022\u005c"},null,true]} "#;
     assert_eq!(

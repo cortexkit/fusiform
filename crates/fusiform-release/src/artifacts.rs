@@ -112,6 +112,15 @@ pub fn build_release(
         ));
     }
 
+    if parent
+        .as_ref()
+        .is_some_and(|prior| version < prior.curation_version)
+    {
+        return Err(ArtifactRefusal::new(
+            "curation_version_regressed",
+            "curation version does not advance",
+        ));
+    }
     let unchanged = parent
         .as_ref()
         .filter(|prior| prior.curation_version == version);
