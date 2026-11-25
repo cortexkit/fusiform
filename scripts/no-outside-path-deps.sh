@@ -36,7 +36,7 @@ check() {
     # on a fresh runner. The self-test's throwaway workspace has no lock and
     # no registry dependencies, so it runs offline instead.
     metadata=$(cargo metadata ${METADATA_FLAGS:---locked} --format-version 1 \
-        --manifest-path "$manifest" 2>/dev/null) || {
+        --manifest-path "$manifest") || {
         echo "no-outside-path-deps: cargo metadata failed for $manifest" >&2
         return 2
     }
@@ -121,7 +121,15 @@ if [ "${1:-}" = "--self-test" ]; then
         echo "self-test FAILED: a clean workspace was refused" >&2
         exit 1
     }
-    echo "no-outside-path-deps self-test: refuses a planted path dependency and a planted [patch], accepts the clean control"
+    rm "$tmp/outside/Cargo.toml"
+    rc=0
+    "$script" --manifest-path "$tmp/outside/Cargo.toml" 2> "$tmp/err" || rc=$?
+    if [ "$rc" -ne 2 ] || ! grep -q 'does not exist' "$tmp/err"; then
+        echo "self-test FAILED: cargo's metadata error did not reach stderr (exit $rc):" >&2
+        cat "$tmp/err" >&2
+        exit 1
+    fi
+    echo "no-outside-path-deps self-test: refuses outside paths, accepts the clean control, preserves cargo diagnostics"
     finished=1
     exit 0
 fi

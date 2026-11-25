@@ -56,9 +56,8 @@ impl std::fmt::Display for InvalidCurrencyCode {
 impl std::error::Error for InvalidCurrencyCode {}
 
 impl CurrencyCode {
-    /// Three ASCII letters, upper-cased. Anything else is refused rather than
-    /// normalised: a currency this type cannot recognise must not become one
-    /// it can, because the failure would be a silently mispriced ledger.
+    /// Trim surrounding whitespace and uppercase a code of three ASCII
+    /// letters. Reject any other shape without trying to repair it.
     pub fn new(code: &str) -> Result<Self, InvalidCurrencyCode> {
         let trimmed = code.trim();
         if trimmed.len() != 3 || !trimmed.chars().all(|c| c.is_ascii_alphabetic()) {
