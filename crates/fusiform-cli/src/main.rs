@@ -1719,42 +1719,108 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
     Ok(args)
 }
 
-/// Translate a fact key into the `FieldId` the wire expects.
-///
-/// An operator types the key they read in `history` and `get` output. Building
-/// the JSON object here rather than making them write it keeps one spelling of
-/// a fact across every verb — and a key this cannot translate is refused by
-/// name, listing what it can, rather than being passed through to fail with a
-/// serde message about an unknown variant.
+/// Translate a served fact key into the wire form of its typed correction field.
 fn field_id_for_fact_key(key: &str) -> Result<serde_json::Value, String> {
-    // Rates carry their token class.
-    if let Some(class) = key.strip_prefix("rate.") {
-        if class.contains(".above_context.") {
-            return Err(format!(
-                "{key} is a tiered rate; tier corrections carry a threshold this \
-                 command cannot address yet"
-            ));
-        }
-        // A mode rate names its mode, which the correction must carry so it
-        // maps back to exactly this key.
-        if let Some((class, mode)) = class.split_once(fusiform_store::rate_key::MODE) {
-            return Ok(serde_json::json!({"field": "mode_rate", "class": class, "mode": mode}));
-        }
-        return Ok(serde_json::json!({"field": "rate", "class": class}));
+    use fusiform_core::{upstream_facts::FactKey, FieldId};
+    use fusiform_store::rate_key::{ABOVE_CONTEXT, MODE};
+
+    if key.starts_with(prefix::RATE) && key.contains(ABOVE_CONTEXT) {
+        return Err(format!(
+            "{key} is a tiered rate; tier corrections carry a threshold this \
+             command cannot address yet"
+        ));
     }
-    if let Some(limit) = key.strip_prefix("limit.") {
-        return Ok(serde_json::json!({"field": "limit", "limit": limit}));
-    }
-    if let Some(capability) = key.strip_prefix("capability.") {
-        return Ok(serde_json::json!({"field": "capability", "capability": capability}));
-    }
-    if key == "existence" {
-        return Ok(serde_json::json!({"field": "existence"}));
-    }
-    Err(format!(
-        "{key:?} is not a fact this catalog can correct; expected one of: {}",
-        fusiform_store::ingest::SERVED_FACT_NAMESPACE.join(", ")
-    ))
+    let fields = correction_fields();
+    let field = fields.get(key).cloned().or_else(|| {
+        let (base, mode) = key.split_once(MODE)?;
+        let FieldId::Rate { class } = fields.get(base)? else {
+            return None;
+        };
+        let field = FieldId::ModeRate {
+            class: *class,
+            mode: mode.to_owned(),
+        };
+        let fact = FactKey::for_field(field.clone())?;
+        (fact.as_str() == key).then_some(field)
+    });
+    let Some(field) = field else {
+        return Err(format!(
+            "{key:?} is not a fact this catalog can correct; expected one of: {}\n\
+             Mode rates use rate.<class>.mode.<name>.",
+            fields
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    };
+    serde_json::to_value(field)
+        .map_err(|error| format!("could not encode correction field: {error}"))
+}
+
+fn correction_fields() -> &'static std::collections::BTreeMap<String, fusiform_core::FieldId> {
+    use fusiform_core::{
+        upstream_facts::FactKey, CapabilityId, FieldId, LimitId, ModelAttributeId, TokenClass,
+        WireAttributeId,
+    };
+    use std::{collections::BTreeMap, sync::LazyLock};
+
+    // Use the same field-to-fact mapping as the store. Both translation and
+    // help use this index, so the CLI never advertises keys it cannot send.
+    static FIELDS: LazyLock<BTreeMap<String, FieldId>> = LazyLock::new(|| {
+        [FieldId::Existence, FieldId::ProviderName]
+            .into_iter()
+            .chain([LimitId::Context, LimitId::Output].map(|limit| FieldId::Limit { limit }))
+            .chain(
+                [
+                    ModelAttributeId::Name,
+                    ModelAttributeId::Family,
+                    ModelAttributeId::OpenWeights,
+                    ModelAttributeId::CanonicalId,
+                    ModelAttributeId::Status,
+                    ModelAttributeId::Type,
+                ]
+                .map(|attribute| FieldId::Model { attribute }),
+            )
+            .chain(
+                [
+                    WireAttributeId::Npm,
+                    WireAttributeId::Api,
+                    WireAttributeId::Shape,
+                ]
+                .map(|attribute| FieldId::Wire { attribute }),
+            )
+            .chain(
+                [
+                    CapabilityId::Reasoning,
+                    CapabilityId::ReasoningOptions,
+                    CapabilityId::StructuredOutput,
+                    CapabilityId::Temperature,
+                    CapabilityId::ToolCall,
+                    CapabilityId::Attachment,
+                    CapabilityId::InputModalities,
+                    CapabilityId::OutputModalities,
+                ]
+                .map(|capability| FieldId::Capability { capability }),
+            )
+            .chain(
+                [
+                    TokenClass::Input,
+                    TokenClass::Output,
+                    TokenClass::CacheRead,
+                    TokenClass::CacheWrite,
+                    TokenClass::Reasoning,
+                    TokenClass::InputAudio,
+                    TokenClass::OutputAudio,
+                ]
+                .map(|class| FieldId::Rate { class }),
+            )
+            .filter_map(|field| {
+                FactKey::for_field(field.clone()).map(|key| (key.as_str().to_owned(), field))
+            })
+            .collect()
+    });
+    &FIELDS
 }
 
 /// Print what a correction did, or would do.
@@ -2225,6 +2291,47 @@ mod tests {
             let error = result.expect_err("a flag must not be ignored");
             assert!(error.contains(flag), "{argv:?}: {error}");
         }
+    }
+
+    #[test]
+    fn correction_diagnostic_names_only_translatable_fields() {
+        let diagnostic = field_id_for_fact_key("not_a_fact").unwrap_err();
+        let listed = diagnostic
+            .split_once("expected one of: ")
+            .unwrap()
+            .1
+            .lines()
+            .next()
+            .unwrap();
+        assert_eq!(
+            listed
+                .split(", ")
+                .collect::<std::collections::BTreeSet<_>>(),
+            fusiform_store::ingest::SERVED_FACT_NAMESPACE
+                .iter()
+                .copied()
+                .collect()
+        );
+        for key in listed.split(", ") {
+            let wire =
+                field_id_for_fact_key(key).unwrap_or_else(|e| panic!("advertised {key}, but {e}"));
+            let field = serde_json::from_value::<fusiform_core::FieldId>(wire).unwrap();
+            let fact = fusiform_core::upstream_facts::FactKey::for_field(field).unwrap();
+            assert_eq!(fact.as_str(), key);
+        }
+        assert_eq!(
+            field_id_for_fact_key("provider.name").unwrap(),
+            serde_json::json!({"field":"provider_name"})
+        );
+        assert_eq!(
+            field_id_for_fact_key("rate.input.mode.fast").unwrap(),
+            serde_json::json!({"field":"mode_rate","class":"input","mode":"fast"})
+        );
+        assert!(field_id_for_fact_key("rate.typo").is_err());
+        assert!(field_id_for_fact_key("rate.input.mode.BAD").is_err());
+        assert!(field_id_for_fact_key("rate.input.above_context.200000")
+            .unwrap_err()
+            .contains("threshold"));
     }
 
     #[test]

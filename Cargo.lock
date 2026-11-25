@@ -549,6 +549,7 @@ dependencies = [
 name = "fusiform-cli"
 version = "0.1.0"
 dependencies = [
+ "fusiform-core",
  "fusiform-module",
  "fusiform-protocol",
  "fusiform-store",

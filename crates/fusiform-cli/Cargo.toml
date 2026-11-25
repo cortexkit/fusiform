@@ -11,6 +11,7 @@ name = "ck-models"
 path = "src/main.rs"
 
 [dependencies]
+fusiform-core = { path = "../fusiform-core" }
 fusiform-module = { path = "../fusiform-module" }
 fusiform-protocol = { path = "../fusiform-protocol" }
 # For the fact-key namespace constants the plane flags and correct verb use.
