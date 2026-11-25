@@ -76,18 +76,10 @@ fn validate_vendor_documents(
             ModelLineage => curate::model_lineage::load_reporting_rejects(&doc).1,
             SpeedTwins => curate::speed_twins::load_reporting_rejects(&doc).1,
             TemperatureRanges => curate::temperature_ranges::load_reporting_rejects(&doc).1,
-            WireCorrections => {
-                let (corrections, mut rejects) =
-                    curate::wire_corrections::load_reporting_rejects(&doc);
-                rejects.extend(
-                    curate::wire_corrections::load_complete_providers_reporting_rejects(
-                        &doc,
-                        &corrections,
-                    )
-                    .1,
-                );
-                rejects
+            WireCorrections if stored => {
+                curate::wire_corrections::load_stored_reporting_rejects(&doc).1
             }
+            WireCorrections => curate::wire_corrections::load_reporting_rejects(&doc).1,
             WireFamilies => curate::wire_families::load_reporting_rejects(&doc).1,
             PlanPrices => curate::plan_prices::load_reporting_rejects(&doc).1,
         };

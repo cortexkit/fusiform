@@ -10,8 +10,6 @@ const ARGON: &str = "google/antigravity-gemini-4-argon";
 const SONNET: &str = "google/antigravity-claude-sonnet-5-5";
 const OPUS: &str = "google/antigravity-claude-opus-5-5";
 const RETIRED: &str = "google/antigravity-gemini-3.7-flash";
-const UNROUTED_ID: &str = "kimi-k3.1-pro";
-const UNROUTED: &str = "opencode-go/kimi-k3.1-pro";
 
 pub(crate) fn store() -> (CatalogStore, tempfile::TempDir) {
     store_with_anthropic_api(None)
@@ -25,13 +23,7 @@ fn store_with_anthropic_api(api: Option<&str>) -> (CatalogStore, tempfile::TempD
     for (provider, ids) in [
         (
             "opencode-go",
-            vec![
-                "claude-haiku-5-5",
-                "minimax-m2.7",
-                "deepseek-v4-pro",
-                "gpt-6-luna",
-                "minimax-m3",
-            ],
+            vec!["claude-haiku-5-5", "minimax-m2.7", "minimax-m3"],
         ),
         (
             "google",
@@ -60,18 +52,6 @@ fn store_with_anthropic_api(api: Option<&str>) -> (CatalogStore, tempfile::TempD
     for id in ["claude-haiku-5-5", "minimax-m2.7"] {
         upstream["opencode-go"]["models"][id]["provider"]["shape"] = json!("observed-shape");
     }
-    // A synthetic stand-in for an OpenCode Go model upstream added after pi's
-    // route list was read, publishing its own model-level endpoint. The
-    // embedded seed predates `kimi-k3.1-pro`, so it is cloned from `kimi-k3`.
-    let mut unrouted = seed["opencode-go"]["models"]["kimi-k3"].clone();
-    assert!(unrouted.is_object(), "missing seed row opencode-go/kimi-k3");
-    unrouted["id"] = json!(UNROUTED_ID);
-    unrouted["name"] = json!("Kimi K3.1 Pro");
-    unrouted["provider"] = json!({
-        "api": "https://opencode.ai/inference/go/openai/v1",
-        "shape": "observed-shape",
-    });
-    upstream["opencode-go"]["models"][UNROUTED_ID] = unrouted;
     // Exercise upstream endpoint precedence without relying on seed omissions.
     let mut observed = upstream["openai"]["models"]["gpt-6.1-sol"].clone();
     observed["id"] = json!("observed-api");
@@ -245,61 +225,23 @@ fn provider_api_defaults_fill_only_missing_current_endpoints() {
 }
 
 #[test]
-fn pi_endpoints_correct_current_reads_without_changing_observed_facts_or_history() {
+fn go_observed_endpoints_serve_currently_without_changing_history() {
     let (store, _dir) = store();
-    for arguments in [
-        json!({}),
+    let id = "opencode-go/claude-haiku-5-5";
+    let expected = json!({"value":"https://opencode.ai/inference/go/anthropic/v1","from":"model"});
+    for args in [
         json!({"provider_id":"opencode-go"}),
         json!({"provider_id":"opencode-go","model_id":"claude-haiku-5-5"}),
-        json!({"fact_prefixes":["wire."]}),
-        json!({"paged":true}),
+        json!({"fact_prefixes":["wire.api"],"paged":true}),
+        json!({"provider_id":"opencode-go","at_ms":1_000}),
     ] {
-        let response = get(&store, arguments);
-        let row = &response.models["opencode-go/claude-haiku-5-5"];
-        assert_eq!(
-            row["wire.api"],
-            json!({"value":"https://opencode.ai/inference/go/v1","from":"curated"})
-        );
-        assert_eq!(
-            row["wire.npm"],
-            json!({"value":"@ai-sdk/anthropic","from":"model"})
-        );
-        assert_eq!(
-            row["wire.shape"],
-            json!({"value":"observed-shape","from":"model"})
-        );
-        let disclosure = response
+        let response = get(&store, args);
+        assert_eq!(response.models[id]["wire.api"], expected);
+        assert!(response
             .wire_corrections
             .iter()
-            .find(|row| row.model == "claude-haiku-5-5")
-            .unwrap();
-        assert_eq!(disclosure.provider, "opencode-go");
-        assert_eq!(disclosure.field, "wire.api");
-        assert!(!disclosure.withheld);
-        assert_eq!(disclosure.source_ref.commit, "74f46864");
-        assert_eq!(disclosure.established_by, "fusiform");
-        assert_eq!(
-            disclosure.review_by_ms - disclosure.established_at_ms,
-            60 * 86_400_000
-        );
+            .all(|row| row.provider != "opencode-go"));
     }
-    let all = get(&store, json!({"provider_id":"opencode-go"}));
-    for id in ["deepseek-v4-pro", "gpt-6-luna"] {
-        assert_eq!(
-            all.models[&format!("opencode-go/{id}")]["wire.api"],
-            json!({"value":"https://opencode.ai/inference/go/v1","from":"curated"})
-        );
-    }
-    let historical = get(&store, json!({"provider_id":"opencode-go","at_ms":1_000}));
-    assert!(historical.wire_corrections.is_empty());
-    assert_eq!(
-        historical.models["opencode-go/claude-haiku-5-5"]["wire.api"]["from"],
-        "model"
-    );
-    assert_eq!(
-        historical.models["opencode-go/claude-haiku-5-5"]["wire.api"]["value"],
-        "https://opencode.ai/inference/go/anthropic/v1"
-    );
     let request = json!({"name":"catalog.history","arguments":{"provider_id":"opencode-go","model_id":"claude-haiku-5-5","fact_key":"wire.api"}});
     let ToolResponse::History(history) =
         serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap()
@@ -307,147 +249,7 @@ fn pi_endpoints_correct_current_reads_without_changing_observed_facts_or_history
         panic!("expected history")
     };
     assert_eq!(history.eras.len(), 1);
-    assert_eq!(history.eras[0].value["from"], "model");
-    assert_eq!(
-        history.eras[0].value["value"],
-        "https://opencode.ai/inference/go/anthropic/v1"
-    );
-    assert!(get(&store, json!({"fact_prefixes":["wire.npm"]}))
-        .wire_corrections
-        .is_empty());
-}
-
-#[test]
-fn unsupported_pi_routes_withhold_only_the_endpoint_and_disclose_it() {
-    let (store, _dir) = store();
-    for arguments in [
-        json!({}),
-        json!({"provider_id":"opencode-go","model_id":"minimax-m2.7"}),
-        json!({"fact_prefixes":["wire.api"]}),
-        json!({"paged":true}),
-    ] {
-        let response = get(&store, arguments);
-        if let Some(row) = response.models.get("opencode-go/minimax-m2.7") {
-            assert!(!row.contains_key("wire.api"));
-        }
-        let disclosure = response
-            .wire_corrections
-            .iter()
-            .find(|row| row.model == "minimax-m2.7")
-            .unwrap();
-        assert!(disclosure.withheld);
-    }
-    let response = get(
-        &store,
-        json!({"provider_id":"opencode-go","model_id":"minimax-m2.7"}),
-    );
-    assert!(response.models["opencode-go/minimax-m2.7"].contains_key("wire.npm"));
-    assert_eq!(
-        response.models["opencode-go/minimax-m2.7"]["wire.shape"]["value"],
-        "observed-shape"
-    );
-    let historical = get(
-        &store,
-        json!({"provider_id":"opencode-go","model_id":"minimax-m2.7","at_ms":1_000}),
-    );
-    assert!(historical.models["opencode-go/minimax-m2.7"].contains_key("wire.api"));
-    assert!(historical.wire_corrections.is_empty());
-}
-
-#[test]
-fn models_missing_from_a_complete_route_list_withhold_only_the_endpoint() {
-    let (store, _dir) = store();
-    for arguments in [
-        json!({}),
-        json!({"provider_id":"opencode-go"}),
-        json!({"provider_id":"opencode-go","model_id":UNROUTED_ID}),
-        json!({"fact_prefixes":["wire.api"]}),
-        json!({"paged":true}),
-    ] {
-        let response = get(&store, arguments.clone());
-        // A bulk read filtered to wire.api leaves this model with no facts, so
-        // only its disclosure remains.
-        if let Some(row) = response.models.get(UNROUTED) {
-            assert!(!row.contains_key("wire.api"), "{arguments}");
-        }
-        let disclosure = response
-            .wire_corrections
-            .iter()
-            .find(|row| row.provider == "opencode-go" && row.model == UNROUTED_ID)
-            .unwrap_or_else(|| panic!("no disclosure for {UNROUTED} in {arguments}"));
-        assert!(disclosure.withheld);
-        assert_eq!(disclosure.field, "wire.api");
-        assert_eq!(
-            disclosure.source_ref.repo,
-            "https://github.com/earendil-works/pi"
-        );
-        assert_eq!(disclosure.source_ref.commit, "74f46864");
-        assert_eq!(
-            disclosure.notes.as_deref(),
-            Some("not routed by pi at 74f46864")
-        );
-        assert_eq!(disclosure.established_by, "fusiform");
-        assert_eq!(
-            disclosure.review_by_ms - disclosure.established_at_ms,
-            60 * 86_400_000
-        );
-        // Only the completeness rule writes a note; other providers get none.
-        assert!(response
-            .wire_corrections
-            .iter()
-            .filter(|row| row.notes.is_some())
-            .all(|row| row.provider == "opencode-go" && row.withheld));
-    }
-
-    let named = get(
-        &store,
-        json!({"provider_id":"opencode-go","model_id":UNROUTED_ID}),
-    );
-    let facts = &named.models[UNROUTED];
-    assert_eq!(
-        facts["wire.npm"],
-        json!({"value":"@ai-sdk/openai-compatible","from":"provider"})
-    );
-    assert_eq!(
-        facts["wire.shape"],
-        json!({"value":"observed-shape","from":"model"})
-    );
-
-    // A routed model keeps its curated base, disclosed without a note.
-    let provider = get(&store, json!({"provider_id":"opencode-go"}));
-    assert_eq!(
-        provider.models["opencode-go/deepseek-v4-pro"]["wire.api"],
-        json!({"value":"https://opencode.ai/inference/go/v1","from":"curated"})
-    );
-    let routed = provider
-        .wire_corrections
-        .iter()
-        .find(|row| row.model == "deepseek-v4-pro")
-        .unwrap();
-    assert!(!routed.withheld);
-    assert_eq!(routed.notes, None);
-
-    // Another provider's observed model-level endpoint is untouched.
-    let other = get(&store, json!({"provider_id":"openai"}));
-    assert_eq!(
-        other.models["openai/observed-api"]["wire.api"],
-        json!({"value":"https://observed.example/model/v1","from":"model"})
-    );
-    assert!(!other
-        .wire_corrections
-        .iter()
-        .any(|row| row.model == "observed-api"));
-
-    // History and point-in-time reads keep the upstream claim.
-    let historical = get(
-        &store,
-        json!({"provider_id":"opencode-go","model_id":UNROUTED_ID,"at_ms":1_000}),
-    );
-    assert_eq!(
-        historical.models[UNROUTED]["wire.api"],
-        json!({"value":"https://opencode.ai/inference/go/openai/v1","from":"model"})
-    );
-    assert!(historical.wire_corrections.is_empty());
+    assert_eq!(history.eras[0].value, expected);
 }
 
 #[test]

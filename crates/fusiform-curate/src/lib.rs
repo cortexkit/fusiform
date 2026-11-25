@@ -61,7 +61,6 @@ pub struct CurationSet<'a> {
     pub speed_twins: &'a speed_twins::SpeedTwins,
     pub temperature_ranges: &'a temperature_ranges::Ranges,
     pub wire_corrections: &'a wire_corrections::WireCorrections,
-    pub complete_providers: &'a wire_corrections::CompleteProviders,
     pub wire_families: &'a wire_families::Families,
 }
 

@@ -1,0 +1,34 @@
+{
+  "corrections": [
+    {
+      "provider": "opencode-go",
+      "model": "beam-free",
+      "field": "wire.api",
+      "value": "https://opencode.ai/inference/go/v1",
+      "withheld": false,
+      "source_ref": {
+        "repo": "https://github.com/earendil-works/pi",
+        "commit": "74f46864",
+        "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)"
+      },
+      "established_by": "fusiform",
+      "established_at_ms": 1792713600000,
+      "review_by_ms": 1797897600000
+    }
+  ],
+  "complete_providers": [
+    {
+      "provider": "opencode-go",
+      "field": "wire.api",
+      "source_ref": {
+        "repo": "https://github.com/earendil-works/pi",
+        "commit": "74f46864",
+        "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)"
+      },
+      "notes": "not routed by pi at 74f46864",
+      "established_by": "fusiform",
+      "established_at_ms": 1792713600000,
+      "review_by_ms": 1797897600000
+    }
+  ]
+}

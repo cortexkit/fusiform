@@ -25,7 +25,6 @@ pub fn embedded() -> CurationSet<'static> {
         speed_twins: crate::speed_twins::rows(),
         temperature_ranges: crate::temperature_ranges::ranges(),
         wire_corrections: crate::wire_corrections::corrections(),
-        complete_providers: crate::wire_corrections::complete_providers(),
         wire_families: crate::wire_families::families(),
     }
 }

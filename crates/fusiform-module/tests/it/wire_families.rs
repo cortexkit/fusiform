@@ -32,9 +32,6 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
     let mut upstream = json!({});
     let extras = [
         ("perplexity", "sonar", ""),
-        ("opencode-go", "minimax-m2.7", ""),
-        ("opencode-go", "qwen4-max", ""),
-        ("opencode-go", "gpt-6-luna", ""),
         ("google", "gemini-4-argon", ""),
         ("google", "gemini-4-carbon", ""),
         ("google", "gemini-4-hydrogen", ""),
@@ -79,6 +76,92 @@ fn get(store: &CatalogStore, args: Value) -> CatalogGetResponse {
 }
 
 #[test]
+fn opencode_go_serves_saved_v2_protocols_on_plain_and_apikey_reads() {
+    let snapshot: Value =
+        serde_json::from_slice(include_bytes!("../../data/models-dev-seed.json")).unwrap();
+    let catalog = fusiform_core::normalize_models_dev_v2_with(
+        &serde_json::to_vec(&json!({"opencode-go": snapshot["opencode-go"]})).unwrap(),
+        &fusiform_module::input_audio::evidence(),
+    )
+    .unwrap()
+    .catalog;
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
+    store.append_eras(&plan.eras).unwrap();
+
+    let plain = get(
+        &store,
+        json!({"provider_id":"opencode-go","fact_prefixes":["wire."]}),
+    );
+    let apikey = get(
+        &store,
+        json!({"provider_id":"opencode-go","auth_method":"apikey","fact_prefixes":["wire."]}),
+    );
+    for (model, family, protocol_path, npm) in [
+        (
+            "hy4-flash-free",
+            "openai.chat_completions",
+            "openai",
+            "@ai-sdk/openai-compatible",
+        ),
+        (
+            "muse-spark-1.3-contributor",
+            "openai.responses",
+            "openai",
+            "@ai-sdk/openai",
+        ),
+        (
+            "muse-spark-1.2-contributor",
+            "openai.responses",
+            "openai",
+            "@ai-sdk/openai",
+        ),
+        ("gpt-6-luna", "openai.responses", "openai", "@ai-sdk/openai"),
+        ("grok-4.7", "openai.responses", "openai", "@ai-sdk/openai"),
+        (
+            "qwen4-max",
+            "anthropic.messages",
+            "anthropic",
+            "@ai-sdk/anthropic",
+        ),
+    ] {
+        let id = format!("opencode-go/{model}");
+        let row = &plain.models[&id];
+        assert_eq!(row.get("wire.family"), Some(&json!(family)), "{id}");
+        assert_eq!(
+            row["wire.api"],
+            json!({
+                "value": format!("https://opencode.ai/inference/go/{protocol_path}/v1"),
+                "from": "model",
+            }),
+            "{id}"
+        );
+        assert_eq!(
+            row["wire.npm"],
+            json!({"value": npm, "from": "model"}),
+            "{id}"
+        );
+        assert!(!row.contains_key("wire.shape"), "{id}");
+    }
+    assert_eq!(
+        serde_json::to_value(&apikey.plane).unwrap()["kind"],
+        "quota_proxy"
+    );
+    assert_eq!(apikey.models, plain.models);
+    assert!(plain.wire_corrections.is_empty());
+    assert!(apikey.wire_corrections.is_empty());
+}
+
+#[test]
 fn npm_rules_serve_verified_protocols_from_real_seed_rows() {
     let (store, _dir) = store();
     let eras = store.era_count(SourceId::ModelsDev).unwrap();
@@ -101,53 +184,6 @@ fn npm_rules_serve_verified_protocols_from_real_seed_rows() {
     assert_eq!(store.era_count(SourceId::ModelsDev).unwrap(), eras);
     assert_eq!(store.catalog_version().unwrap(), version);
     assert!(!bulk.models["perplexity/sonar"].contains_key("wire.family"));
-}
-
-#[test]
-fn withheld_go_endpoint_has_no_protocol_but_routed_go_does() {
-    let (store, _dir) = store();
-    for args in [
-        json!({"provider_id":"opencode-go"}),
-        json!({"provider_id":"opencode-go","fact_prefixes":["wire.family"]}),
-    ] {
-        let response = get(&store, args);
-        for model in ["minimax-m2.7", "qwen4-max"] {
-            if let Some(facts) = response.models.get(&format!("opencode-go/{model}")) {
-                assert!(!facts.contains_key("wire.family"));
-                assert!(!facts.contains_key("wire.api"));
-            }
-        }
-        assert_eq!(
-            response.models["opencode-go/gpt-6-luna"]["wire.family"],
-            "openai.responses"
-        );
-    }
-    let response = get(
-        &store,
-        json!({"provider_id":"opencode-go","model_id":"minimax-m2.7"}),
-    );
-    assert_eq!(
-        response.models["opencode-go/minimax-m2.7"]["wire.npm"]["value"],
-        "@ai-sdk/anthropic"
-    );
-    assert!(!response.models["opencode-go/minimax-m2.7"].contains_key("wire.shape"));
-    assert!(!response.models["opencode-go/minimax-m2.7"].contains_key("wire.api"));
-    assert!(response
-        .wire_corrections
-        .iter()
-        .any(|row| row.model == "minimax-m2.7" && row.withheld));
-    let unrouted = get(
-        &store,
-        json!({"provider_id":"opencode-go","model_id":"qwen4-max"}),
-    );
-    assert!(!unrouted.models["opencode-go/qwen4-max"].contains_key("wire.api"));
-    assert!(!unrouted.models["opencode-go/qwen4-max"].contains_key("wire.family"));
-    assert!(unrouted
-        .wire_corrections
-        .iter()
-        .any(|row| row.model == "qwen4-max"
-            && row.withheld
-            && row.notes.as_deref() == Some("not routed by pi at 74f46864")));
 }
 
 #[test]

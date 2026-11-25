@@ -188,7 +188,6 @@ pub fn render_row<'a>(
             ));
         if let Some(correction) = crate::wire_corrections::apply(
             current.wire_corrections,
-            current.complete_providers,
             provider,
             model,
             &mut facts,
