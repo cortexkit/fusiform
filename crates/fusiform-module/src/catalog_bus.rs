@@ -58,7 +58,8 @@ impl EventPublisher for CatalogBus {
 }
 
 /// Publish only a newly read high-water mark, with bounded retries and a poll
-/// backstop. Notifications carry no version: delayed wakes cannot replay old data.
+/// backstop. Notifications carry only the version number, not catalog data,
+/// so a delayed wake cannot replay old facts.
 pub async fn run_publisher(
     store: Arc<CatalogStore>,
     signals: Arc<Signals>,
