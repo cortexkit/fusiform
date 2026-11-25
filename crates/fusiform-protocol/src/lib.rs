@@ -1860,12 +1860,13 @@ pub struct WireCorrectionWire {
     pub notes: Option<String>,
 }
 
-/// One fact served with a curated value in place of the upstream's value.
+/// One fact served with a curated value in place of, or absent from, upstream.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FactOverrideWire {
     /// `provider_id/model_id` of the `models` entry carrying the value. On an
     /// alias entry this is the alias id, and `provider_id`/`model_id` below
-    /// name the row the override is declared for.
+    /// name the row the override is declared for. `model_id` is `"*"` for a
+    /// provider-wide addition; `model` still names the actual served entry.
     pub model: String,
     pub provider_id: String,
     pub model_id: String,

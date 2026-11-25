@@ -54,7 +54,7 @@ impl CatalogStore {
                 "SELECT boundary_at_ms, 0 FROM era
                  WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3
                  UNION SELECT boundary_at_ms, 0 FROM fact_override_era
-                 WHERE provider_id = ?2 AND model_id = ?3
+                 WHERE provider_id = ?2 AND model_id IN (?3, '*')
                  UNION SELECT boundary_at_ms, 0 FROM curated_model_era
                  WHERE provider_id = ?2 AND model_id = ?3
                  UNION SELECT boundary_at_ms, 0 FROM cache_lifetime_era
@@ -106,7 +106,7 @@ impl CatalogStore {
                 "SELECT fact_key FROM era
                  WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3
                  UNION SELECT fact_key FROM fact_override_era
-                 WHERE provider_id = ?2 AND model_id = ?3
+                 WHERE provider_id = ?2 AND model_id IN (?3, '*')
                  UNION SELECT facts.key FROM curated_model_era, json_each(facts_json) AS facts
                  WHERE provider_id = ?2 AND model_id = ?3 AND facts_json IS NOT NULL",
             )?;

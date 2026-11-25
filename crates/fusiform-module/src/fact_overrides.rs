@@ -88,7 +88,8 @@ pub(crate) fn from_eras(
 /// it and upstream wins. Either way, and when the model is missing from the
 /// seed, a store seeded from that copy would never apply the row: upstream has
 /// moved (re-source the override or remove it) or the row was written against
-/// the wrong value.
+/// the wrong value. A provider-wide addition is stale only when it would
+/// apply to none of the provider's models.
 pub fn stale_against_seed(rows: &FactOverrides, seed: &serde_json::Value) -> Vec<String> {
     let bytes = serde_json::to_vec(seed).expect("a JSON value serializes");
     let catalog = match fusiform_core::normalize::normalize_models_dev(&bytes) {
@@ -108,6 +109,19 @@ pub fn stale_against_seed(rows: &FactOverrides, seed: &serde_json::Value) -> Vec
     }
     rows.values()
         .filter_map(|row| {
+            if row.model_id == "*" {
+                let provider = row.provider_id.as_str();
+                let applies = stored
+                    .range((provider, "")..)
+                    .take_while(|((id, _), _)| *id == provider)
+                    .any(|(_, facts)| stale_row(row, Some(facts)).is_none());
+                return (!applies).then(|| {
+                    format!(
+                        "{provider}/* {}: no model in the embedded seed can receive this addition; re-verify the provider and upstream facts, or remove the override",
+                        row.fact_key
+                    )
+                });
+            }
             stale_row(
                 row,
                 stored.get(&(row.provider_id.as_str(), row.model_id.as_str())),
@@ -184,7 +198,7 @@ mod tests {
     fn shipped_overrides_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 103);
+        assert_eq!(rows.len(), 109);
         let row = argon();
         assert_eq!(row.value, json!(65_536));
         assert_eq!(row.replaces, json!(32_768));
@@ -256,12 +270,13 @@ mod tests {
             ),
             ("rate.output_image".into(), json!(null)),
         ]);
+        let output = vec!["rate.output".to_string()];
         let applied = apply_rows(
             rows,
             "google",
             "gemini-3.1-flash-image",
             &mut facts,
-            None,
+            Some(&output),
             &[],
         );
         assert!(applied.is_empty());
@@ -273,7 +288,7 @@ mod tests {
             "google",
             "gemini-3.1-flash-image",
             &mut facts,
-            None,
+            Some(&output),
             &["rate.output_image"],
         );
         assert!(applied.is_empty());
@@ -533,7 +548,9 @@ mod tests {
                     load_reporting_rejects(&json!({"overrides": [row]}).to_string());
                 assert!(rows.is_empty(), "{key} {field}");
                 assert_eq!(rejects.len(), 1, "{key} {field}");
-                let reason = if key.starts_with("rate.") && matches!(field, "value" | "replaces") {
+                let reason = if key == "rate.reasoning" && matches!(field, "value" | "replaces") {
+                    "rate.reasoning must add exactly"
+                } else if key.starts_with("rate.") && matches!(field, "value" | "replaces") {
                     "must add a sourced token rate"
                 } else if key == "capability.reasoning_default" && field == "value" {
                     "reasoning default value must be exactly"
@@ -769,7 +786,11 @@ mod tests {
         };
         // Control: options listing the effort let the row apply.
         let mut served = options(json!(["low", "medium", "high"]));
-        assert_eq!(apply("openai", "gpt-5.5", &mut served, None, &[]).len(), 1);
+        let prefixes = vec![KEY.to_string()];
+        assert_eq!(
+            apply("openai", "gpt-5.5", &mut served, Some(&prefixes), &[]).len(),
+            1
+        );
         assert_eq!(served[KEY], json!({"type":"effort","value":"medium"}));
         assert!(stale_row(row, Some(&options(json!(["medium"])))).is_none());
         // Options that do not list it, or no options at all, refuse it at
@@ -784,7 +805,7 @@ mod tests {
             BTreeMap::new(),
         ] {
             let mut served = stored.clone();
-            assert!(apply("openai", "gpt-5.5", &mut served, None, &[]).is_empty());
+            assert!(apply("openai", "gpt-5.5", &mut served, Some(&prefixes), &[]).is_empty());
             assert!(!served.contains_key(KEY));
             let stale = stale_row(row, Some(&stored)).expect("refused");
             assert!(stale.contains("openai/gpt-5.5 capability.reasoning_default"));
@@ -828,8 +849,15 @@ mod tests {
 
     #[test]
     fn applies_only_while_upstream_publishes_the_replaced_value() {
+        let prefixes = vec!["limit.output".to_string()];
         let mut served = facts(json!(32_768));
-        let applied = apply("google", "gemini-4-argon", &mut served, None, &[]);
+        let applied = apply(
+            "google",
+            "gemini-4-argon",
+            &mut served,
+            Some(&prefixes),
+            &[],
+        );
         assert_eq!(served["limit.output"], json!(65_536));
         assert_eq!(applied.len(), 1);
         assert_eq!(applied[0].model, "google/gemini-4-argon");
@@ -839,12 +867,26 @@ mod tests {
         // upstream wins and nothing is disclosed.
         for moved in [json!(65_536), json!(49_152), json!(null)] {
             let mut served = facts(moved.clone());
-            assert!(apply("google", "gemini-4-argon", &mut served, None, &[]).is_empty());
+            assert!(apply(
+                "google",
+                "gemini-4-argon",
+                &mut served,
+                Some(&prefixes),
+                &[]
+            )
+            .is_empty());
             assert_eq!(served["limit.output"], moved);
         }
         // An absent fact is not supplied.
         let mut served = BTreeMap::new();
-        assert!(apply("google", "gemini-4-argon", &mut served, None, &[]).is_empty());
+        assert!(apply(
+            "google",
+            "gemini-4-argon",
+            &mut served,
+            Some(&prefixes),
+            &[]
+        )
+        .is_empty());
         assert!(served.is_empty());
         // Another model, or another provider serving the same id, is untouched.
         for (provider, model) in [
@@ -852,7 +894,7 @@ mod tests {
             ("openrouter", "gemini-4-argon"),
         ] {
             let mut served = facts(json!(32_768));
-            assert!(apply(provider, model, &mut served, None, &[]).is_empty());
+            assert!(apply(provider, model, &mut served, Some(&prefixes), &[]).is_empty());
             assert_eq!(served["limit.output"], json!(32_768));
         }
     }
@@ -860,7 +902,7 @@ mod tests {
     #[test]
     fn a_filter_excluding_the_fact_applies_nothing() {
         let mut served = facts(json!(32_768));
-        let rates = vec!["rate.".to_string()];
+        let rates = vec!["rate.input".to_string()];
         assert!(apply("google", "gemini-4-argon", &mut served, Some(&rates), &[]).is_empty());
         assert_eq!(served["limit.output"], json!(32_768));
         let limits = vec!["limit.".to_string()];
@@ -869,4 +911,35 @@ mod tests {
             1
         );
     }
+}
+#[test]
+fn reasoning_override_rejects_other_wildcards_and_noncanonical_values() {
+    let doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
+    let reasoning = doc["overrides"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["fact_key"] == "rate.reasoning")
+        .unwrap();
+    for value in [
+        serde_json::json!("rate.output"),
+        serde_json::json!({"state":"billed_as", "key":"rate.input"}),
+        serde_json::json!({"state":"billed_as", "key":"rate.output", "extra":true}),
+    ] {
+        let mut row = reasoning.clone();
+        row["value"] = value;
+        let (rows, rejects) =
+            load_reporting_rejects(&serde_json::json!({"overrides":[row]}).to_string());
+        assert!(rows.is_empty());
+        assert_eq!(rejects.len(), 1);
+        assert!(rejects[0].contains("rate.reasoning must add exactly"));
+    }
+    let mut row = reasoning.clone();
+    row["fact_key"] = serde_json::json!("capability.effort_change_cache");
+    row["value"] = serde_json::json!(true);
+    let (rows, rejects) =
+        load_reporting_rejects(&serde_json::json!({"overrides":[row]}).to_string());
+    assert!(rows.is_empty());
+    assert_eq!(rejects.len(), 1);
+    assert!(rejects[0].contains("model_id '*' is only allowed for rate.reasoning"));
 }

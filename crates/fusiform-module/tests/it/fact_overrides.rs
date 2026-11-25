@@ -86,6 +86,138 @@ fn get(store: &CatalogStore, args: Value) -> CatalogGetResponse {
     serve_catalog_get(store, &serde_json::to_vec(&args).unwrap()).unwrap()
 }
 
+fn assert_no_added_reasoning_rate(reasoning: Option<bool>) {
+    let mut row = json!({"id":"speech", "name":"Speech", "cost":{"output":10}});
+    if let Some(reasoning) = reasoning {
+        row["reasoning"] = json!(reasoning);
+    }
+    let document = json!({"openai":{"id":"openai", "name":"OpenAI", "models":{"speech":row}}});
+    let (store, _dir) = store_document(&serde_json::to_vec(&document).unwrap());
+    let overrides = fusiform_module::fact_overrides::overrides();
+    let boundary =
+        overrides[&("openai".into(), "*".into(), "rate.reasoning".into())].established_at_ms;
+    fusiform_module::fact_overrides::apply_to_store(&store, overrides, boundary).unwrap();
+    for at_ms in [None, Some(boundary)] {
+        let read = get(
+            &store,
+            json!({"provider_id":"openai", "model_id":"speech", "at_ms":at_ms,
+            "fact_prefixes":["capability.reasoning", "rate."]}),
+        );
+        let facts = &read.models["openai/speech"];
+        assert_eq!(facts["rate.output"]["state"], "priced");
+        assert_eq!(
+            facts.get("capability.reasoning").and_then(Value::as_bool),
+            reasoning
+        );
+        assert!(
+            !facts.contains_key("rate.reasoning"),
+            "{reasoning:?} at {at_ms:?}"
+        );
+        assert!(read.fact_overrides.is_empty());
+    }
+}
+
+#[test]
+fn reasoning_rate_is_not_added_when_capability_is_false() {
+    assert_no_added_reasoning_rate(Some(false));
+}
+
+#[test]
+fn reasoning_rate_is_not_added_when_capability_is_unknown() {
+    assert_no_added_reasoning_rate(None);
+}
+
+#[test]
+fn reasoning_billed_as_output_on_current_and_dated_reads() {
+    let upstream = json!({"openai":{"id":"openai", "name":"OpenAI", "models":{
+        "output-only":{"id":"output-only", "name":"Output only", "reasoning":true, "cost":{"output":10}},
+        "priced":{"id":"priced", "name":"Priced", "reasoning":true, "cost":{"output":10, "reasoning":1}},
+        "zero":{"id":"zero", "name":"Zero", "reasoning":true, "cost":{"output":10, "reasoning":0}},
+        "unpriced":{"id":"unpriced", "name":"Unpriced", "reasoning":true, "cost":{"output":10}}
+    }}});
+    let (store, _dir) = store_document(&serde_json::to_vec(&upstream).unwrap());
+    let unpriced = json!({"state":"unpriced", "reason":"missing_rate"});
+    store
+        .append_eras(&[fusiform_store::NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "openai".into(),
+            model_id: "unpriced".into(),
+            fact_key: fusiform_store::FactKey::from_stored("rate.reasoning".into()),
+            value_json: unpriced.to_string(),
+            boundary_at: Timestamp(1_000),
+            boundary_kind: BoundaryKind::Seed,
+            observation_id: None,
+        }])
+        .unwrap();
+    let args = json!({"provider_id":"openai", "fact_prefixes":["rate.reasoning"]});
+    let value = json!({"state":"billed_as", "key":"rate.output"});
+    let check = |read: &CatalogGetResponse| {
+        assert_eq!(
+            read.models["openai/output-only"].get("rate.reasoning"),
+            Some(&value)
+        );
+        assert_eq!(
+            read.models["openai/priced"]["rate.reasoning"]["state"],
+            "priced"
+        );
+        assert_eq!(
+            read.models["openai/priced"]["rate.reasoning"]["units"],
+            1_000_000_000
+        );
+        assert_eq!(
+            read.models["openai/zero"]["rate.reasoning"],
+            json!({"state":"stated_zero"})
+        );
+        assert_eq!(read.models["openai/unpriced"]["rate.reasoning"], unpriced);
+        assert_eq!(read.fact_overrides.len(), 1);
+        assert_eq!(read.fact_overrides[0].model, "openai/output-only");
+        assert_eq!(read.fact_overrides[0].model_id, "*");
+        assert!(read
+            .models
+            .values()
+            .all(|facts| !facts.contains_key("capability.reasoning")));
+    };
+    check(&get(&store, args.clone()));
+
+    let mut rows = fusiform_module::fact_overrides::overrides().clone();
+    let wildcard_key = ("openai".into(), "*".into(), "rate.reasoning".into());
+    let mut rule = rows.remove(&wildcard_key).unwrap();
+    let boundary = 2_000;
+    rule.established_at_ms = boundary;
+    rule.review_by_ms = boundary + 60 * 86_400_000;
+    let rows = [(wildcard_key, rule)].into_iter().collect();
+    fusiform_module::fact_overrides::apply_to_store(&store, &rows, boundary).unwrap();
+
+    let mut dated = args;
+    dated["at_ms"] = json!(boundary);
+    check(&get(&store, dated.clone()));
+    dated["model_id"] = json!("output-only");
+    assert_eq!(
+        get(&store, dated.clone()).models["openai/output-only"]["rate.reasoning"],
+        value
+    );
+    dated["at_ms"] = json!(boundary - 1);
+    assert!(!get(&store, dated).models["openai/output-only"].contains_key("rate.reasoning"));
+
+    let history = json!({"provider_id":"openai", "model_id":"output-only",
+        "fact_key":"rate.reasoning", "served":true});
+    let read = serve_history(&store, history.to_string().as_bytes()).unwrap();
+    assert!(
+        read.eras.is_empty(),
+        "the reasoning rate was never stored upstream"
+    );
+    let segments = read.served.unwrap();
+    assert_eq!(segments.len(), 2);
+    assert_eq!(segments[0].value, None);
+    assert_eq!(segments[0].until_ms, Some(boundary));
+    assert_eq!(segments[1].from_ms, boundary);
+    assert_eq!(segments[1].value.as_ref(), Some(&value));
+    assert_eq!(
+        segments[1].source,
+        Some(fusiform_protocol::HistorySource::Override)
+    );
+}
+
 const FLASH: &str = "google/gemini-3.1-flash-image";
 const FLASH_MODEL: &str = "gemini-3.1-flash-image";
 
@@ -188,7 +320,11 @@ fn retired_flash_text_override_stays_historical_after_upstream_correction() {
             response.models[FLASH]["rate.output"]["units"],
             60_000_000_000i64
         );
-        assert_eq!(disclosed(&response, FLASH).len(), 1);
+        assert_eq!(
+            disclosed_fact(&response, FLASH, "rate.output_image").len(),
+            1
+        );
+        assert!(disclosed_fact(&response, FLASH, "rate.output").is_empty());
     }
 }
 
@@ -329,7 +465,11 @@ fn dated_overrides_diff_claims_not_provenance_and_tombstone_removals() {
         current.models[FLASH]["rate.output"]["units"],
         60_000_000_000i64
     );
-    assert_eq!(disclosed(&current, FLASH).len(), 1);
+    assert_eq!(
+        disclosed_fact(&current, FLASH, "rate.output_image").len(),
+        1
+    );
+    assert!(disclosed_fact(&current, FLASH, "rate.output").is_empty());
 }
 
 #[test]
@@ -467,13 +607,16 @@ fn assert_overridden(response: &CatalogGetResponse, model: &str, label: &str) {
     );
     let rows = disclosed_fact(response, model, "limit.output");
     // An unfiltered Argon read also carries its independent temperature
-    // replacement and reasoning-default addition. Every disclosed row must
+    // replacement and reasoning additions. Every disclosed row must
     // still correspond to a served fact.
     for row in disclosed(response, model) {
         assert_eq!(response.models[model].get(&row.fact_key), Some(&row.value));
         assert!(matches!(
             row.fact_key.as_str(),
-            "limit.output" | "capability.temperature" | "capability.reasoning_default"
+            "limit.output"
+                | "capability.temperature"
+                | "capability.reasoning_default"
+                | "rate.reasoning"
         ));
     }
     assert_eq!(
@@ -579,13 +722,13 @@ fn the_antigravity_alias_serves_the_overridden_value() {
             "{label}: the entry is served as an alias"
         );
     }
-    // The named alias read carries only the alias entry, so both the output
-    // and temperature disclosures are re-keyed rather than naming the target.
+    // The named alias read carries only the alias entry, so its disclosures
+    // are re-keyed rather than naming the target.
     let named = get(
         &store,
         json!({"provider_id":"google","model_id":"antigravity-gemini-4-argon"}),
     );
-    assert_eq!(named.fact_overrides.len(), 2);
+    assert_eq!(named.fact_overrides.len(), 3);
     assert!(named.fact_overrides.iter().all(|row| row.model == ALIAS));
 }
 
@@ -600,7 +743,13 @@ fn a_filter_excluding_the_fact_serves_and_discloses_nothing() {
         json!({"provider_id":"google","model_id":"gemini-4-argon","auth_method":"apikey","fact_prefixes":["rate."]}),
     ] {
         let response = get(&store, args.clone());
-        assert!(response.fact_overrides.is_empty(), "{args}");
+        assert!(
+            response
+                .fact_overrides
+                .iter()
+                .all(|row| row.fact_key == "rate.reasoning"),
+            "{args}"
+        );
         assert!(
             response
                 .models
@@ -939,7 +1088,10 @@ fn the_antigravity_route_to_opus_does_not_carry_server_side_fallback() {
         let facts = &response.models[OPUS_ALIAS];
         assert!(facts.contains_key("limit.context"), "{args}");
         assert!(!facts.contains_key(FALLBACK), "{args}");
-        assert!(disclosed(&response, OPUS_ALIAS).is_empty(), "{args}");
+        assert!(
+            disclosed_fact(&response, OPUS_ALIAS, FALLBACK).is_empty(),
+            "{args}"
+        );
     }
 }
 
@@ -1171,7 +1323,7 @@ fn a_current_read_marks_the_vendor_deprecated_daybreak_aliases() {
             json!("deprecated"),
             "{label}"
         );
-        let rows = disclosed(&response, DAYBREAK_BLUE);
+        let rows = disclosed_fact(&response, DAYBREAK_BLUE, STATUS);
         assert_eq!(rows.len(), 1, "{label}: {:?}", response.fact_overrides);
         assert_eq!(rows[0].fact_key, STATUS, "{label}");
         assert_eq!(
@@ -1218,7 +1370,7 @@ fn a_status_models_dev_publishes_wins_over_the_deprecation_row() {
         let response = get(&store, json!({"provider_id":"openai"}));
         assert_eq!(response.models[DAYBREAK_BLUE][STATUS], published);
         assert!(
-            disclosed(&response, DAYBREAK_BLUE).is_empty(),
+            disclosed_fact(&response, DAYBREAK_BLUE, STATUS).is_empty(),
             "{published}"
         );
         // Red still has no published status, so it keeps its addition.

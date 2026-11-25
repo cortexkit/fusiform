@@ -26,6 +26,48 @@ use fusiform_protocol::CatalogGetResponse;
 
 const SERVED: &str = include_str!("../../fixtures/served-payloads.json");
 
+#[test]
+fn aliased_and_quota_reasoning_rules_decode_with_provenance_on_the_output_price() {
+    let doc: serde_json::Value = serde_json::from_str(SERVED).unwrap();
+    for (label, model, basis) in [
+        (
+            "catalog.get — a curated alias",
+            "google/antigravity-gemini-3.8-flash",
+            "alias",
+        ),
+        (
+            "chatgpt luna — named, rates",
+            "openai/gpt-5.6-luna",
+            "quota_proxy",
+        ),
+    ] {
+        let read: CatalogGetResponse =
+            serde_json::from_value(doc[label]["response"].clone()).unwrap();
+        let raw = &read.models[model]["rate.reasoning"];
+        let rule: RateValue = serde_json::from_value(raw.clone()).unwrap();
+        let RateValue::BilledAs { key } = &rule else {
+            panic!("{label} needs a reasoning rule")
+        };
+        assert_eq!(key, "rate.output");
+        assert_eq!(serde_json::to_value(&rule).unwrap(), *raw, "{label}");
+        let output: RateValue = serde_json::from_value(read.models[model][key].clone()).unwrap();
+        let RateValue::Priced {
+            inherited_from: Some(origin),
+            ..
+        } = output
+        else {
+            panic!("{label} needs a borrowed output price")
+        };
+        assert_eq!(origin.basis, basis);
+        assert!(
+            read.fact_overrides.iter().any(|row| row.model == model
+                && row.fact_key == "rate.reasoning"
+                && row.value == *raw),
+            "{label}"
+        );
+    }
+}
+
 /// The plane states and disclosures exist only in served responses: the route
 /// adds them per request (finish_plane_view and apply_billing_plane in route.rs)
 /// and the store never writes them, because they describe one login method
@@ -330,9 +372,8 @@ fn collect_priced<'a>(node: &'a serde_json::Value, out: &mut Vec<&'a serde_json:
 #[test]
 fn every_variant_the_producer_writes_decodes() {
     // Stored rate literals come from json_rate in fusiform_core::upstream_facts.
-    // billed_as and not_established are never stored, since they belong to a
-    // plane read, so they come from the serve path instead:
-    // route::serve_tool_call -> finish_plane_view -> apply_billing_plane.
+    // The billed_as and not_established rate states are not upstream facts.
+    // The serve path supplies them from fact overrides or plane rules.
     let cases: &[(&str, &str)] = &[
         ("stated_zero", r#"{"state":"stated_zero"}"#),
         (
@@ -660,27 +701,10 @@ fn the_fixture_carries_every_rate_state() {
     let doc: serde_json::Value = serde_json::from_str(SERVED).expect("the fixture parses");
     let mut shapes: Vec<String> = Vec::new();
     collect_rate_shapes(&doc, &mut shapes);
-    // A read without a login method must never serve billed_as, which only a
-    // plane read can produce. Matching those cases separately means the plane
-    // cases in the same fixture cannot mask a billed_as leaking into them.
-    let mut non_plane_shapes = Vec::new();
-    for case in doc.as_object().unwrap().values() {
-        if case["request"]["arguments"].get("auth_method").is_none() {
-            collect_rate_shapes(&case["response"], &mut non_plane_shapes);
-        }
-    }
-    assert!(!non_plane_shapes.is_empty());
-    for shape in &non_plane_shapes {
-        match serde_json::from_str::<RateValue>(shape) {
-            Ok(RateValue::BilledAs { .. }) => panic!("never on a read without auth_method"),
-            Ok(
-                RateValue::Priced { .. }
-                | RateValue::StatedZero { .. }
-                | RateValue::Unpriced { .. },
-            )
-            | Err(_) => {}
-        }
-    }
+    // Ordinary responses may only carry billed_as for a sourced reasoning
+    // rule. Keep the fixture's state coverage separate from plane selection.
+    let (checked, leaks) = super::golden_payload::non_plane_leaks(&doc);
+    assert!(checked > 0 && leaks.is_empty(), "{leaks:?}");
     assert!(
         !shapes.is_empty(),
         "no served rates found at all, so every assertion below would pass \

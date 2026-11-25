@@ -415,6 +415,10 @@
         },
         "units": 12000000000
       },
+      "rate.reasoning": {
+        "key": "rate.output",
+        "state": "billed_as"
+      },
       "wire.api": {
         "from": "model",
         "value": "https://generativelanguage.googleapis.com/v1beta"
@@ -629,6 +633,10 @@
           "policy": "models-dev-usd-v1"
         },
         "units": 64000000000
+      },
+      "rate.reasoning": {
+        "key": "rate.output",
+        "state": "billed_as"
       },
       "wire.api": {
         "from": "model",

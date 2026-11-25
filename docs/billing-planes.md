@@ -43,7 +43,7 @@ A `catalog.get` request selects a plane with `auth_method`:
 
 On a `quota_proxy` plane:
 
-1. Every rate that is not already borrowed is marked `inherited_from` with
+1. Every rate that is neither a `billed_as` rule nor already borrowed is marked `inherited_from` with
    basis `quota_proxy` and the row's real `model.family`
    (`billing_plane_tests::quota_proxies_mark_each_unmarked_rate_with_its_real_family`).
    A consumer must not treat a `quota_proxy` price as an amount billed.
@@ -191,7 +191,13 @@ A plane may carry rules, each stating how one token class bills on that plane.
 2. On an `upstream` plane a rule never overwrites a key the provider
    published, including a stated zero or a tombstone; it fills only missing
    keys (`billing_plane_tests::upstream_rules_never_overwrite_a_published_key_but_fill_each_missing_tier`).
-   On a `quota_proxy` plane a rule replaces the proxied price
+   A sourced `rate.reasoning` addition is not a published price: a plane
+   rule for that key takes precedence over the addition.
+   Cross-provider quota proxies also carry the donor's sourced reasoning
+   addition when both rows are reasoning-capable and the donor does not
+   publish a reasoning rate. The disclosure
+   names the plan row and keeps the donor's source. On a `quota_proxy` plane
+   a rule replaces the proxied price or addition
    (`billing_plane_tests::quota_rules_replace_published_prices_and_narrow_disclosures_last`).
 3. A `billed_as` rule whose target key is absent on the row serves
    `not_established` instead, and the disclosure still names the target class

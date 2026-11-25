@@ -447,11 +447,23 @@ A rate is a JSON object tagged by `state` (`RateValue` in
 | `priced` | `units`, `exponent`, `currency`, `unit_provenance`, `floor`, optional `per`, `increment`, `minimum_quantity`, `inherited_from` | an exact amount: `units × 10^-exponent` of `currency`; per million tokens unless the key names a billing unit |
 | `stated_zero` | optional `inherited_from` | the source stated exactly zero; whether that is a real price is the consumer's policy |
 | `unpriced` | `reason`, optional `inherited_from` | no rate can be stated, for the reason given |
-| `billed_as` | `key` | on a billing-plane read, this class is billed at the rate of the full fact key named (see [`billing-planes.md`](billing-planes.md)) |
+| `billed_as` | `key` | this class is billed at another rate on the row; may be served on ordinary reads for reasoning or on billing-plane reads (see [`billing-planes.md`](billing-planes.md)) |
 
 - Amounts are integers. Upstream decimals are converted exactly at the parse
   boundary and never become floats (`crates/fusiform-core/src/money.rs`:
   `a_nonzero_rate_never_becomes_free`, `plain_decimals_scale_exactly`).
+- When `rate.reasoning` is `billed_as` with `key: "rate.output"`, price the
+  reasoning tokens at the `rate.output` key that applies to the request,
+  including its `.above_context.<n>` and `.mode.<m>` variants. On ordinary
+  current and dated reads, a sourced addition supplies this value only when
+  the stored row has `capability.reasoning: true` and no `rate.reasoning` key.
+  A false or unknown capability gets no addition. Any published price, stated
+  zero, or unpriced value wins. On a billing-plane read, a plane rule for that
+  key takes precedence over the addition.
+  The `billed_as` object is only `{state, key}`: it names another rate on the
+  same row and does not borrow an amount. The selected `rate.output` variant
+  carries `inherited_from` when borrowed, so a reader that refuses borrowed
+  prices also refuses the reasoning cost that depends on that output price.
 - `unpriced.reason` is one of `missing_rate` (the source describes the model
   and publishes no rate for this class), `no_catalog_coverage`,
   `unknown_charge_basis` (a rate exists and what it charges for cannot be
@@ -543,6 +555,9 @@ Open-weight inheritance rules, each with its test in `crates/fusiform-module/src
 2. A provider that published any rate keeps its own card; a partial card is
    not topped up (`inheritance_tests::a_provider_that_published_any_rate_keeps_its_own_card`,
    `inheritance_tests::a_partial_card_is_not_topped_up_from_the_creator`).
+   A sourced `rate.reasoning` billing rule is not a published price: it does
+   not block inheritance, and an inheriting row does not copy the creator's
+   rule.
 3. A published rate is left exactly as published
    (`inheritance_tests::a_published_rate_is_left_exactly_as_published`).
 4. Inheritance never supplies a mode rate
@@ -552,7 +567,7 @@ Open-weight inheritance rules, each with its test in `crates/fusiform-module/src
 6. A family with no curated creator inherits nothing
    (`inheritance_tests::an_uncurated_family_inherits_nothing`).
 
-The marker survives decoding in every rate state
+The marker survives decoding in every rate state that carries it
 (`wire_types_decode_the_wire::a_borrowed_marker_survives_the_published_type_in_every_state`).
 
 ### 4.5 Never served
@@ -763,9 +778,11 @@ also omitted because an alias reaches a different backend. Rules, tested in
    (`alias_tests::a_point_in_time_read_never_aliases`).
 2. A real upstream row for the alias id always wins
    (`alias_tests::a_real_row_for_the_alias_id_wins`).
-3. Rates through an alias carry `inherited_from` with basis `alias`
+3. Prices through an alias carry `inherited_from` with basis `alias`
    (`alias_tests::a_named_alias_read_serves_the_target_under_the_alias_key`),
    including mode rates (`mode_rates::an_alias_carries_its_targets_mode_rates_marked`).
+   An alias can carry a `billed_as` rule without a marker; the target price
+   on the alias row still carries its own marker.
 4. Structured-output claims are omitted from aliases while remaining on the
    target row (`alias_tests::structured_output_is_not_projected_onto_an_alias`).
    The same holds for `wire.npm`, `wire.api` and `wire.shape`

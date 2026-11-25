@@ -248,6 +248,47 @@ fn quota_proxies_drop_all_mode_rates() {
 }
 
 #[test]
+fn kimi_k31_pro_quota_proxy_borrows_the_api_reasoning_rule() {
+    let (store, _dir) = store();
+    seed(
+        &store,
+        "moonshotai",
+        "kimi-k3.1-pro",
+        vec![("rate.output", priced(300))],
+    );
+    seed(
+        &store,
+        "kimi-code-plan-global",
+        "k3.1-pro",
+        vec![("model.canonical_id", json!("moonshotai/kimi-k3.1-pro"))],
+    );
+    let read = get(
+        &store,
+        request(
+            "kimi-code-plan-global",
+            Some("k3.1-pro"),
+            "apikey",
+            Some("rate."),
+        ),
+    )
+    .unwrap();
+    let identity = "kimi-code-plan-global/k3.1-pro";
+    let facts = &read.models[identity];
+    assert_eq!(
+        facts["rate.output"]["inherited_from"]["provider_id"],
+        "moonshotai"
+    );
+    assert_eq!(
+        facts.get("rate.reasoning"),
+        Some(&json!({"state":"billed_as", "key":"rate.output"}))
+    );
+    let claim = &read.fact_overrides[0];
+    assert_eq!(claim.model, identity);
+    assert_eq!(claim.provider_id, "moonshotai");
+    assert_eq!(claim.model_id, "*");
+}
+
+#[test]
 fn kimi_plan_borrows_only_exact_canonical_api_cards_without_changing_storage() {
     let (store, _dir) = store();
     let provider = "kimi-code-plan-global";
@@ -450,6 +491,33 @@ fn seed_speed_twins(store: &CatalogStore) {
 }
 
 #[test]
+fn speed_twin_does_not_duplicate_the_reasoning_addition_under_fast() {
+    let (store, _dir) = store();
+    let provider = "moonshotai";
+    let model = "kimi-k3.1-pro";
+    seed(&store, provider, model, vec![("rate.output", priced(300))]);
+    seed(
+        &store,
+        provider,
+        "kimi-k3.1-pro-highspeed",
+        vec![("rate.output", priced(600))],
+    );
+    for args in [
+        json!({"provider_id":provider, "model_id":model}),
+        json!({"provider_id":provider}),
+    ] {
+        let read = get(&store, args).unwrap();
+        let facts = &read.models["moonshotai/kimi-k3.1-pro"];
+        assert_eq!(
+            facts["rate.reasoning"],
+            json!({"state":"billed_as", "key":"rate.output"})
+        );
+        assert_eq!(facts["rate.output.mode.fast"]["units"], 600);
+        assert!(!facts.contains_key("rate.reasoning.mode.fast"));
+    }
+}
+
+#[test]
 fn speed_twins_plain_named_bulk_and_paged_reads_agree() {
     let (store, _dir) = store();
     seed_speed_twins(&store);
@@ -486,6 +554,9 @@ fn speed_twins_plain_named_bulk_and_paged_reads_agree() {
         assert_eq!(base_facts["route.mode_wire_ids"], json!({"fast":twin}));
         assert_eq!(base_facts["route.mode_labels"], json!({"fast":"Highspeed"}));
         assert_eq!(base_facts["rate.input.mode.fast"], expected_rate);
+        if provider == "moonshotai" {
+            assert_eq!(base_facts["rate.reasoning.mode.fast"]["state"], "unpriced");
+        }
         assert_eq!(
             bulk.models[&format!("{provider}/{twin}")]["model.mode_of"],
             json!({"model_id":base,"mode":"fast"})
@@ -930,6 +1001,41 @@ fn assert_canonical_borrow_uses_the_required_empty_family_sentinel() {
 }
 
 #[test]
+fn reasoning_addition_keeps_open_weight_price_inheritance() {
+    let (store, _dir) = store();
+    seed(
+        &store,
+        "zai",
+        "open-weight",
+        vec![("rate.input", priced(100)), ("rate.output", priced(200))],
+    );
+    seed(
+        &store,
+        "openai",
+        "open-weight",
+        vec![
+            ("model.family", json!("glm")),
+            ("model.open_weights", json!(true)),
+        ],
+    );
+    let read = get(
+        &store,
+        json!({"provider_id":"openai", "model_id":"open-weight"}),
+    )
+    .unwrap();
+    let facts = &read.models["openai/open-weight"];
+    for (key, units) in [("rate.input", 100), ("rate.output", 200)] {
+        assert_eq!(facts[key]["units"], units);
+        assert_eq!(facts[key]["inherited_from"]["provider_id"], "zai");
+    }
+    assert_eq!(
+        facts["rate.reasoning"],
+        json!({"state":"billed_as", "key":"rate.output"})
+    );
+    assert_eq!(read.fact_overrides[0].provider_id, "openai");
+}
+
+#[test]
 fn quota_proxies_preserve_the_first_hop_of_inherited_rates() {
     let (store, _dir) = store();
     seed(
@@ -1241,6 +1347,19 @@ fn a_read_without_auth_method_keeps_the_pre_plane_wire_bytes() {
         assert_eq!(response.wire_corrections[0].provider, "openai");
         assert_eq!(response.wire_corrections[0].model, "test-model");
         response.wire_corrections.clear();
+        // The plain API's reasoning rule is curated independently of planes.
+        // Check it separately so the previous bytes remain pinned.
+        assert_eq!(
+            response
+                .models
+                .get_mut("openai/test-model")
+                .unwrap()
+                .remove("rate.reasoning"),
+            Some(json!({"state":"billed_as", "key":"rate.output"}))
+        );
+        assert_eq!(response.fact_overrides.len(), 1);
+        assert_eq!(response.fact_overrides[0].fact_key, "rate.reasoning");
+        response.fact_overrides.clear();
         assert_eq!(
             serde_json::to_string(&response).unwrap(),
             r#"{"source":"models.dev","resolved_at_ms":1000,"catalog_version":1,"models":{"openai/test-model":{"capability.reasoning":true,"existence":"present","limit.temperature_max":2,"limit.temperature_min":0,"model.family":"real-family","model.open_weights":false,"rate.input":{"currency":"USD","exponent":9,"state":"priced","unit_provenance":"source","units":100}}}}"#

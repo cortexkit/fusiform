@@ -552,10 +552,23 @@ fn claude_aliases_restrict_efforts_without_changing_the_targets() {
                     direct.models[&target]["rate.input"]["units"]
                 );
                 for (key, value) in facts.iter().filter(|(key, _)| key.starts_with("rate.")) {
-                    assert_eq!(value["inherited_from"]["basis"], "alias", "{key}");
-                    assert_eq!(value["inherited_from"]["provider_id"], "anthropic", "{key}");
-                    assert_eq!(value["inherited_from"]["model_id"], model, "{key}");
+                    match value["state"].as_str() {
+                        Some("priced" | "stated_zero" | "unpriced") => {
+                            assert_eq!(value["inherited_from"]["basis"], "alias", "{key}");
+                            assert_eq!(
+                                value["inherited_from"]["provider_id"], "anthropic",
+                                "{key}"
+                            );
+                            assert_eq!(value["inherited_from"]["model_id"], model, "{key}");
+                        }
+                        Some("billed_as") => assert_eq!(key, "rate.reasoning"),
+                        state => panic!("{key}: unexpected rate state {state:?}"),
+                    }
                 }
+                assert_eq!(
+                    facts["rate.reasoning"],
+                    json!({"state":"billed_as", "key":"rate.output"})
+                );
             } else {
                 assert_eq!(facts.len(), 1, "the capability filter must be applied last");
             }
