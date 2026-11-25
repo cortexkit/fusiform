@@ -744,6 +744,61 @@ fn quality_grades_lists_current_or_newest_first_history_and_response_dates() {
 }
 
 #[test]
+fn store_mode_marks_list_and_history_follow_local_decommission() {
+    let (store, dir) = fixture_in_mode(false, true);
+    let db = rusqlite::Connection::open(dir.path().join("quality.db")).unwrap();
+    db.execute(
+        "INSERT INTO model_mark_era (model, decommissioned, marked_by, reason, recorded_at_ms)
+         VALUES ('reseller/shared', 1, 'operator', 'published fixture', 1000)",
+        [],
+    )
+    .unwrap();
+    let call = |name, arguments| {
+        serve_tool_call(
+            &store,
+            &serde_json::to_vec(&json!({"name": name, "arguments": arguments})).unwrap(),
+        )
+        .unwrap()
+    };
+    let list = |arguments| {
+        let ToolResponse::QualityMarks(response) = call("quality.marks", arguments) else {
+            panic!("expected marks response");
+        };
+        response.marks
+    };
+    let model = "reseller/own";
+    call(
+        "quality.decommission",
+        json!({"model": model, "reason": "retired", "dry_run": false}),
+    );
+    assert_eq!(
+        get(&store, json!({})).models[model]["quality.decommissioned"],
+        true
+    );
+    let listed = list(json!({}));
+    let local = listed
+        .iter()
+        .find(|row| row.model == model)
+        .expect("committed local decommission missing from quality.marks");
+    assert_eq!(local.marked_by, "user");
+    assert_eq!(list(json!({"model": model})), vec![local.clone()]);
+
+    for key in [model, "reseller/shared"] {
+        call(
+            "quality.restore",
+            json!({"model": key, "reason": "restored", "dry_run": false}),
+        );
+        assert!(!get(&store, json!({})).models[key].contains_key("quality.decommissioned"));
+        assert!(!list(json!({})).iter().any(|row| row.model == key));
+        let history = list(json!({"model": key}));
+        assert_eq!(history.len(), 2);
+        assert!(!history[0].decommissioned);
+        assert_eq!(history[0].marked_by, "user");
+        assert!(history[1].decommissioned);
+    }
+}
+
+#[test]
 fn store_mode_grade_refresh_and_history_follow_local_writes() {
     let (store, dir) = fixture_in_mode(false, true);
     let db = rusqlite::Connection::open(dir.path().join("quality.db")).unwrap();

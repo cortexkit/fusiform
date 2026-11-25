@@ -29,6 +29,16 @@ fn mark_wire(row: fusiform_store::ModelMarkEra) -> ModelMarkWire {
     }
 }
 
+fn local_mark_wire(row: fusiform_store::LocalMark) -> ModelMarkWire {
+    ModelMarkWire {
+        model: row.model,
+        decommissioned: row.decommissioned,
+        marked_by: "user".into(),
+        reason: row.reason,
+        recorded_at_ms: row.recorded_at_ms,
+    }
+}
+
 pub(super) fn marks(store: &CatalogStore, body: &[u8]) -> Result<QualityMarksResponse, RouteError> {
     let request: QualityMarksRequest = if body.is_empty() {
         QualityMarksRequest::default()
@@ -36,10 +46,29 @@ pub(super) fn marks(store: &CatalogStore, body: &[u8]) -> Result<QualityMarksRes
         serde_json::from_slice(body)
             .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?
     };
-    let rows = if let Some(model) = request.model {
+    let read = || mark_rows(store, request.model.as_deref());
+    let marks = if store.is_store_mode() {
+        store
+            .with_read_snapshot(read)
+            .map_err(|e| store_error(&e))??
+    } else {
+        read()?
+    };
+    Ok(QualityMarksResponse { marks })
+}
+
+fn mark_rows(store: &CatalogStore, model: Option<&str>) -> Result<Vec<ModelMarkWire>, RouteError> {
+    if let Some(model) = model {
         let mut history = store
-            .model_mark_history(&model)
+            .model_mark_history(model)
             .map_err(|e| store_error(&e))?;
+        if store.is_store_mode() {
+            history.extend(
+                store
+                    .local_mark_history(model)
+                    .map_err(|e| store_error(&e))?,
+            );
+        }
         if history.is_empty() {
             return Err(RouteError {
                 code: "no_coverage",
@@ -47,13 +76,31 @@ pub(super) fn marks(store: &CatalogStore, body: &[u8]) -> Result<QualityMarksRes
             });
         }
         history.reverse();
-        history
-    } else {
-        store.model_marks().map_err(|e| store_error(&e))?
-    };
-    Ok(QualityMarksResponse {
-        marks: rows.into_iter().map(mark_wire).collect(),
-    })
+        if store.is_store_mode() {
+            // The reverse insertion order breaks timestamp ties, putting local marks first.
+            history.sort_by_key(|row| std::cmp::Reverse(row.recorded_at_ms));
+        }
+        return Ok(history.into_iter().map(mark_wire).collect());
+    }
+
+    let published = store.model_marks().map_err(|e| store_error(&e))?;
+    if !store.is_store_mode() {
+        return Ok(published.into_iter().map(mark_wire).collect());
+    }
+    let local = store
+        .local_overrides_at(None)
+        .map_err(|e| store_error(&e))?
+        .marks;
+    let effective: BTreeMap<_, _> = published
+        .into_iter()
+        .map(mark_wire)
+        .chain(local.into_iter().map(local_mark_wire))
+        .map(|row| (row.model.clone(), row))
+        .collect();
+    Ok(effective
+        .into_values()
+        .filter(|row| row.decommissioned)
+        .collect())
 }
 
 pub(super) fn mark(
@@ -106,13 +153,7 @@ pub(super) fn mark(
         .marks
         .into_iter()
         .find(|row| row.model == request.model)
-        .map(|row| ModelMarkWire {
-            model: row.model,
-            decommissioned: row.decommissioned,
-            marked_by: "user".into(),
-            reason: row.reason,
-            recorded_at_ms: row.recorded_at_ms,
-        });
+        .map(local_mark_wire);
     if request.withdraw && local_override.is_none() {
         return Err(RouteError::no_coverage(
             "no current local override to withdraw",

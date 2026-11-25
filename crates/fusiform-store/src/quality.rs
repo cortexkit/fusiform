@@ -61,7 +61,7 @@ pub struct ModelMarkEra {
     pub recorded_at_ms: i64,
 }
 
-fn decode_mark(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelMarkEra> {
+pub(super) fn decode_mark(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelMarkEra> {
     Ok(ModelMarkEra {
         id: row.get(0)?,
         model: row.get(1)?,

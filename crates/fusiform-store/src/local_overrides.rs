@@ -3,7 +3,7 @@ use rusqlite::{params, Row};
 
 use crate::{
     advance_catalog_version_in, quality, quality_efforts, CatalogError, CatalogStore,
-    EffortGradeEra, QualityGrade, QualityGradeEra, WorkloadEffortEra,
+    EffortGradeEra, ModelMarkEra, QualityGrade, QualityGradeEra, WorkloadEffortEra,
 };
 
 #[derive(Debug)]
@@ -139,6 +139,19 @@ impl CatalogStore {
                 WHERE decommissioned IS NOT NULL AND id=(SELECT MAX(id) FROM override_mark_era WHERE model=e.model AND recorded_at_ms<=?1)", at,
                 |r| Ok(LocalMark { model:r.get(0)?, decommissioned:r.get(1)?,reason:r.get(2)?,recorded_at_ms:r.get(3)? }))?;
             Ok(LocalOverrides { grades, efforts, workloads, marks })
+        })
+    }
+
+    /// Local decommissions and restorations in insertion order. A withdrawal
+    /// removes an override; it is not itself a decommission or restoration.
+    pub fn local_mark_history(&self, model: &str) -> Result<Vec<ModelMarkEra>, CatalogError> {
+        self.raw_conn(|conn| {
+            conn.prepare(
+                "SELECT id,model,decommissioned,marked_by,reason,recorded_at_ms
+                 FROM override_mark_era WHERE model=?1 AND decommissioned IS NOT NULL ORDER BY id",
+            )?
+            .query_map([model], quality::decode_mark)?
+            .collect()
         })
     }
 }
