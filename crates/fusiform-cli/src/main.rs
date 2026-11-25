@@ -286,75 +286,7 @@ struct Args {
 /// which this repo has now produced three times in a day — the artifact under
 /// test has to be the thing that ships.
 fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String> {
-    if args.command != "history" && (args.served || args.fact_prefix.is_some()) {
-        return Err("--served and --fact-prefix apply to history only".into());
-    }
-    if args.command != "grade" && (args.elo.is_some() || args.eq.is_some() || args.grade.is_some())
-    {
-        return Err("--elo, --eq and --grade apply to grade only".into());
-    }
-    if args.kind.is_some() && !matches!(args.command.as_str(), "grade" | "withdraw-grade") {
-        return Err("--kind applies to grade and withdraw-grade only".into());
-    }
-    if args.graded_effort.is_some() && args.command != "grade"
-        || args.effort_grade.is_some()
-            && !matches!(args.command.as_str(), "grade" | "withdraw-grade")
-    {
-        return Err(
-            "--effort applies to grade; --effort-grade applies to grade and withdraw-grade".into(),
-        );
-    }
-    if (args.effort_default.is_some() || args.effort_minimum.is_some() || args.exclude)
-        && args.command != "workload"
-    {
-        return Err("--default, --minimum and --exclude apply to workload only".into());
-    }
-    if args.withdraw
-        && !matches!(
-            args.command.as_str(),
-            "grade" | "workload" | "decommission" | "restore"
-        )
-    {
-        return Err("--withdraw applies to grade and workload only".into());
-    }
-    if args.prefix.is_some() && args.command != "grades" {
-        return Err("--prefix applies to grades only".into());
-    }
-    // A flag that does nothing must SAY so rather than be dropped.
-    //
-    // `--at` is a global option but only `get` resolves an instant: `history`
-    // returns the whole timeline by construction (its request type has no
-    // instant field), `status` describes the module, and `correct` takes a
-    // window through --from/--until. Accepting it elsewhere and ignoring it
-    // means an operator asking for the past gets a confident answer about
-    // something else, with nothing in the output to say the flag was dropped.
-    //
-    // Found by asserting the request body: the test expected history to carry
-    // --at, and the honest resolution is not to add the field but to refuse
-    // the flag.
-    if args.at_ms.is_some() && args.command != "get" {
-        return Err(format!(
-            "--at applies to `get` only; `{}` does not resolve an instant.\n\
-             history returns the whole timeline for a fact, and correct takes \
-             a window through --from and --until.",
-            args.command
-        ));
-    }
-
-    // A billing plane is scoped to a provider and only catalog.get can serve
-    // it. Dropping the flag elsewhere would make API prices look like the
-    // subscription view the operator asked for.
-    if args.auth_method.is_some() {
-        if args.command != "get" {
-            return Err(format!(
-                "--auth-method applies to `get` only; `{}` does not serve a billing plane.",
-                args.command
-            ));
-        }
-        if args.provider.is_none() {
-            return Err("--auth-method requires --provider".to_string());
-        }
-    }
+    validate_verb_options(args)?;
 
     match args.command.as_str() {
         "grade" | "withdraw-grade" | "decommission" | "restore" | "workload" => {
@@ -407,9 +339,6 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
                         "--kind must be transcription, speech, image, video, search or decision"
                             .into(),
                     );
-                }
-                if !matches!(args.command.as_str(), "grade" | "withdraw-grade") {
-                    return Err("--kind is only valid for grade and withdraw-grade".into());
                 }
                 body["kind"] = serde_json::json!(kind);
             }
@@ -618,6 +547,98 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
         }
         other => Err(format!("unknown command {other:?}\n\n{USAGE}")),
     }
+}
+
+// Check applicability before building a request so no supplied flag is dropped.
+fn validate_verb_options(args: &Args) -> Result<(), String> {
+    const WRITES: &[&str] = &[
+        "correct",
+        "mark-artifact",
+        "retract-artifact",
+        "grade",
+        "withdraw-grade",
+        "decommission",
+        "restore",
+        "workload",
+    ];
+    const MODELS: &[&str] = &[
+        "get",
+        "history",
+        "correct",
+        "grade",
+        "withdraw-grade",
+        "decommission",
+        "restore",
+        "workload",
+        "grades",
+        "marks",
+    ];
+    let constraints: &[(&str, bool, &[&str])] = &[
+        (
+            "--provider",
+            args.provider.is_some(),
+            &["get", "history", "correct", "plan-prices"],
+        ),
+        ("--model", args.model.is_some(), MODELS),
+        ("--auth-method", args.auth_method.is_some(), &["get"]),
+        ("--at", args.at_ms.is_some(), &["get"]),
+        (
+            "--rates and --capabilities",
+            args.prefixes.is_some(),
+            &["get"],
+        ),
+        ("--include-retired", args.include_retired, &["get"]),
+        ("--polls", args.polls.is_some(), &["status"]),
+        ("--fact", args.fact.is_some(), &["history"]),
+        ("--fact-prefix", args.fact_prefix.is_some(), &["history"]),
+        ("--served", args.served, &["history"]),
+        ("--field", !args.fields.is_empty(), &["correct"]),
+        ("--from", args.from_ms.is_some(), &["correct"]),
+        ("--until", args.until_ms.is_some(), &["correct"]),
+        (
+            "--observation",
+            args.observation.is_some(),
+            &["mark-artifact", "retract-artifact"],
+        ),
+        ("--reason", args.reason.is_some(), WRITES),
+        ("--commit", args.commit, WRITES),
+        ("--elo", args.elo.is_some(), &["grade"]),
+        ("--eq", args.eq.is_some(), &["grade"]),
+        ("--grade", args.grade.is_some(), &["grade"]),
+        ("--kind", args.kind.is_some(), &["grade", "withdraw-grade"]),
+        ("--effort", args.graded_effort.is_some(), &["grade"]),
+        (
+            "--effort-grade",
+            args.effort_grade.is_some(),
+            &["grade", "withdraw-grade"],
+        ),
+        ("--default", args.effort_default.is_some(), &["workload"]),
+        ("--minimum", args.effort_minimum.is_some(), &["workload"]),
+        ("--exclude", args.exclude, &["workload"]),
+        (
+            "--withdraw",
+            args.withdraw,
+            &["grade", "workload", "decommission", "restore"],
+        ),
+        ("--prefix", args.prefix.is_some(), &["grades"]),
+    ];
+    for &(flag, supplied, verbs) in constraints {
+        if supplied && !verbs.contains(&args.command.as_str()) {
+            let verbs = verbs
+                .iter()
+                .map(|verb| format!("`{verb}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(format!(
+                "{flag} applies to {verbs} only; not `{}`",
+                args.command
+            ));
+        }
+    }
+    if args.auth_method.is_some() && args.provider.is_none() {
+        return Err("--auth-method requires --provider".into());
+    }
+    Ok(())
 }
 
 async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
@@ -2176,6 +2197,37 @@ mod tests {
     use super::catalog_render::{render_billing_plane, render_catalog_models};
 
     #[test]
+    fn verb_specific_flags_are_refused_when_unused() {
+        for (argv, flag) in [
+            (
+                &[
+                    "get",
+                    "--provider",
+                    "p",
+                    "--model",
+                    "m",
+                    "--fact",
+                    "rate.input",
+                ][..],
+                "--fact",
+            ),
+            (&["get", "--polls", "3"][..], "--polls"),
+            (&["status", "--include-retired"][..], "--include-retired"),
+            (&["get", "--commit"][..], "--commit"),
+            (&["status", "--rates"][..], "--rates"),
+        ] {
+            let result = parse_args(
+                std::iter::once("ck-models")
+                    .chain(argv.iter().copied())
+                    .map(OsString::from),
+            )
+            .and_then(|args| request_for(&args));
+            let error = result.expect_err("a flag must not be ignored");
+            assert!(error.contains(flag), "{argv:?}: {error}");
+        }
+    }
+
+    #[test]
     fn a_write_reason_does_not_consume_a_switch() {
         let request = |args: &[&str]| {
             let args = super::parse_args(args.iter().map(std::ffi::OsString::from))?;
@@ -3202,24 +3254,23 @@ mod tests {
                 .contains("--auth-method requires --provider"),
             "a billing plane cannot be selected without its provider"
         );
-        for command in [
-            "status",
-            "history",
-            "correct",
-            "plan-prices",
-            "mark-artifact",
-            "retract-artifact",
-        ] {
-            // Supply every verb's required fields so the refusal cannot pass
-            // merely because an unrelated argument is missing.
-            let mut argv = vec![
-                command,
+        for mut argv in [
+            vec!["status"],
+            vec![
+                "history",
                 "--provider",
                 "openai",
                 "--model",
-                "gpt-5.6-luna",
+                "m",
                 "--fact",
                 "rate.input",
+            ],
+            vec![
+                "correct",
+                "--provider",
+                "openai",
+                "--model",
+                "m",
                 "--field",
                 "rate.input",
                 "--from",
@@ -3227,10 +3278,25 @@ mod tests {
                 "--until",
                 "2",
                 "--reason",
-                "docs/findings/example.md",
+                "example.md",
+            ],
+            vec!["plan-prices"],
+            vec![
+                "mark-artifact",
                 "--observation",
                 "1",
-            ];
+                "--reason",
+                "example.md",
+            ],
+            vec![
+                "retract-artifact",
+                "--observation",
+                "1",
+                "--reason",
+                "example.md",
+            ],
+        ] {
+            let command = argv[0];
             let _ = body(&argv);
             argv.extend(["--auth-method", "chatgpt"]);
             let msg = refused(&argv);
