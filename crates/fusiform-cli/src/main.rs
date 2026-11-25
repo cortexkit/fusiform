@@ -41,7 +41,7 @@
 
 use std::{
     env,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     path::{Path, PathBuf},
     process,
     time::Duration,
@@ -158,7 +158,12 @@ async fn main() {
     // probe must work on a bare binary, because that is the situation a deploy
     // ladder and an incident responder invoke it in. Fleet convention, from
     // CKCRED via SUBC.
-    if env::args().skip(1).any(|a| a == "--version" || a == "-V") {
+    let argv: Vec<_> = env::args_os().collect();
+    let probe = match argv.as_slice() {
+        [_, command] => Some(command.as_os_str()),
+        _ => None,
+    };
+    if probe == Some(OsStr::new("--version")) || probe == Some(OsStr::new("-V")) {
         println!(
             "{}",
             fusiform_protocol::version_line("ck-models", env!("CARGO_PKG_VERSION"))
@@ -174,14 +179,14 @@ async fn main() {
     // for it.
     //
     // Exactly one non-empty line, well inside the 2 s budget.
-    if env::args().skip(1).any(|a| a == "--ck-domain") {
+    if probe == Some(OsStr::new("--ck-domain")) {
         println!("{CK_DOMAIN_HEADLINE}");
         return;
     }
 
     disown_inherited_module_identity();
 
-    if let Err(e) = run(env::args_os()).await {
+    if let Err(e) = run(argv).await {
         eprintln!("ck models: {e}");
         process::exit(1);
     }
@@ -1523,8 +1528,9 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
     let mut it = argv.into_iter().skip(1);
     let command = it
         .next()
-        .map(|s| s.to_string_lossy().into_owned())
-        .ok_or_else(|| format!("a command is required\n\n{USAGE}"))?;
+        .ok_or_else(|| format!("a command is required\n\n{USAGE}"))?
+        .into_string()
+        .map_err(|command| format!("command {command:?} must be valid UTF-8"))?;
 
     if command == "--help" || command == "-h" || command == "help" {
         println!("{USAGE}");
@@ -1566,20 +1572,28 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
     };
 
     while let Some(flag) = it.next() {
-        let flag = flag.to_string_lossy().into_owned();
+        let flag = flag
+            .into_string()
+            .map_err(|argument| format!("argument {argument:?} must be valid UTF-8"))?;
         if let Some(reason) = flag.strip_prefix("--reason=") {
             args.reason = Some(reason.into());
             continue;
         }
-        let mut value = || {
-            let value = it
-                .next()
-                .map(|v| v.to_string_lossy().into_owned())
-                .ok_or_else(|| format!("{flag} needs a value"))?;
-            if is_known_switch(&value) {
+        let mut os_value = || {
+            let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
+            if value.to_str().is_some_and(is_known_switch) {
                 return Err(format!("{flag} needs a value before {value:?}"));
             }
             Ok(value)
+        };
+        if flag == "--subc" {
+            args.connection_file = Some(PathBuf::from(os_value()?));
+            continue;
+        }
+        let mut value = || {
+            os_value()?
+                .into_string()
+                .map_err(|_| format!("{flag} needs a valid UTF-8 value"))
         };
         match flag.as_str() {
             "--provider" => args.provider = Some(value()?),
@@ -1647,7 +1661,6 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
                 )
             }
             "--commit" => args.commit = true,
-            "--subc" => args.connection_file = Some(PathBuf::from(value()?)),
             // Prefixes come from the store's own constants, not string
             // literals here. A prefix that matches nothing returns an empty
             // catalog rather than an error, so a drifted literal would make
@@ -3620,6 +3633,22 @@ mod tests {
 #[cfg(test)]
 mod connection_discovery_tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn an_explicit_connection_path_keeps_its_os_bytes() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let path = OsString::from_vec(b"/dev/null/\xff".to_vec());
+        let args = parse_args([
+            "ck-models".into(),
+            "status".into(),
+            "--subc".into(),
+            path.clone(),
+        ])
+        .unwrap();
+        assert_eq!(args.connection_file, Some(PathBuf::from(path)));
+    }
 
     /// This CLI CALLS the shared ladder rather than resolving one.
     ///
