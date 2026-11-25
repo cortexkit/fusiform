@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
 use fusiform_curate as curate;
 use fusiform_release::{Upstream, VendorDocument};
@@ -10,7 +11,12 @@ type Documents = BTreeMap<String, Value>;
 #[cfg(test)]
 thread_local! {
     static PUBLISHED_LOAD_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    // Tests that count cache hits need their own slot, since other tests open stores too.
+    static TEST_CACHE: std::cell::Cell<Option<ParsedCurationCache>> = const { std::cell::Cell::new(None) };
 }
+
+type ParsedCurationCache = Mutex<Option<((u64, i64), Arc<PublishedCuration>)>>;
+static CURRENT_CURATION: ParsedCurationCache = Mutex::new(None);
 
 #[derive(Default)]
 pub(crate) struct PublishedCuration {
@@ -87,10 +93,46 @@ impl PublishedCuration {
     pub(crate) fn load(
         store: &fusiform_store::CatalogStore,
         at: Option<i64>,
-    ) -> Result<Option<Self>, String> {
+    ) -> Result<Option<Arc<Self>>, String> {
         if !store.is_store_mode() {
             return Ok(None);
         }
+        if at.is_some() {
+            return Self::parse(store, at).map(|parsed| Some(Arc::new(parsed)));
+        }
+        #[cfg(test)]
+        if let Some(result) = TEST_CACHE.with(|slot| {
+            let cache = slot.take()?;
+            let result = Self::load_current(store, &cache);
+            slot.set(Some(cache));
+            Some(result)
+        }) {
+            return result.map(Some);
+        }
+        Self::load_current(store, &CURRENT_CURATION).map(Some)
+    }
+
+    fn load_current(
+        store: &fusiform_store::CatalogStore,
+        cache: &ParsedCurationCache,
+    ) -> Result<Arc<Self>, String> {
+        // The version and documents must come from the same committed release.
+        store
+            .with_read_snapshot(|| {
+                let version = store.catalog_version().map_err(|err| err.to_string())?;
+                let key = (store.instance_id(), version);
+                let mut slot = cache.lock().unwrap_or_else(|err| err.into_inner());
+                if let Some((_, parsed)) = slot.as_ref().filter(|(cached, _)| *cached == key) {
+                    return Ok(parsed.clone());
+                }
+                let parsed = Arc::new(Self::parse(store, None)?);
+                *slot = Some((key, parsed.clone()));
+                Ok(parsed)
+            })
+            .map_err(|err| err.to_string())?
+    }
+
+    fn parse(store: &fusiform_store::CatalogStore, at: Option<i64>) -> Result<Self, String> {
         #[cfg(test)]
         PUBLISHED_LOAD_COUNT.with(|count| count.set(count.get() + 1));
         let docs = store
@@ -142,7 +184,7 @@ impl PublishedCuration {
             }
             curate::login_methods::load_with(doc, &models, &curated_models.models)
         })?;
-        Ok(Some(Self {
+        Ok(Self {
             aliases: load(
                 &docs,
                 "model-aliases",
@@ -201,7 +243,7 @@ impl PublishedCuration {
                 "wire-families",
                 curate::wire_families::load_reporting_rejects,
             )?,
-        }))
+        })
     }
 
     pub(crate) fn tables(&self) -> curate::CurationSet<'_> {
@@ -585,6 +627,89 @@ mod tests {
     use fusiform_store::{CatalogStore, ReleaseArrival, StoreRelease};
 
     #[test]
+    fn current_reads_reuse_parsed_curation_only_for_the_same_store_and_version() {
+        use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
+        use fusiform_store::{FactKey, NewEra, NewObservation};
+
+        TEST_CACHE.with(|slot| slot.set(Some(Mutex::new(None))));
+
+        let fixture = || {
+            let dir = tempfile::tempdir().unwrap();
+            let store = CatalogStore::open_for_store(&StorageDescriptor {
+                module_id: "fusiform".into(),
+                storage_namespace: "default".into(),
+                isolation: Isolation::Module,
+                backend: StorageBackend::Sqlite {
+                    path: dir.path().join("store.db").to_str().unwrap().into(),
+                },
+            })
+            .unwrap();
+            let obs = store
+                .record_observation(&NewObservation {
+                    source: SourceId::ModelsDev,
+                    observed_at: Timestamp(1000),
+                    outcome: ObservationOutcome::Seeded,
+                    normalized_hash: None,
+                    raw_hash: None,
+                    etag: None,
+                    duration_ms: None,
+                    detail: None,
+                })
+                .unwrap();
+            store
+                .append_eras(&[NewEra {
+                    source: SourceId::ModelsDev,
+                    provider_id: "fixture".into(),
+                    model_id: "model".into(),
+                    fact_key: FactKey::existence(),
+                    value_json: r#""present""#.into(),
+                    boundary_at: Timestamp(1000),
+                    boundary_kind: BoundaryKind::Seed,
+                    observation_id: None,
+                }])
+                .unwrap();
+            (store, dir, obs)
+        };
+        let (store, _dir, obs) = fixture();
+        let (other, _other_dir, _) = fixture();
+        let read = |store, args| crate::route::serve_catalog_get(store, args).unwrap();
+        let current = br#"{"provider_id":"fixture","model_id":"model"}"#.as_slice();
+        let dated = br#"{"provider_id":"fixture","model_id":"model","at_ms":1000}"#.as_slice();
+        let measure = |operation: &dyn Fn()| {
+            PUBLISHED_LOAD_COUNT.with(|count| count.set(0));
+            operation();
+            PUBLISHED_LOAD_COUNT.with(|count| count.get())
+        };
+        assert_eq!(
+            measure(&|| {
+                assert_eq!(read(&store, current).models, read(&store, current).models);
+            }),
+            1,
+            "current reads parsed the same catalog version more than once"
+        );
+        assert_eq!(
+            measure(&|| {
+                read(&other, current);
+            }),
+            1
+        );
+        store.advance_catalog_version(obs, Timestamp(2000)).unwrap();
+        assert_eq!(
+            measure(&|| {
+                read(&store, current);
+            }),
+            1
+        );
+        assert_eq!(
+            measure(&|| {
+                read(&store, dated);
+                read(&store, dated);
+            }),
+            2
+        );
+    }
+
+    #[test]
     fn history_does_not_load_unrelated_published_curation_at_cutpoints() {
         use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
         use fusiform_store::{FactKey, NewCuratedModel, NewEra, NewObservation};
@@ -737,15 +862,20 @@ mod tests {
             let loads = PUBLISHED_LOAD_COUNT.with(|count| count.get());
             (result, start.elapsed(), loads)
         };
+        TEST_CACHE.with(|slot| slot.set(Some(Mutex::new(None))));
         let (plain, unpaged, _) = timed(br#"{"fact_prefixes":["existence"]}"#);
+        store
+            .advance_catalog_version_at_start(Timestamp(at + 1))
+            .unwrap();
         let args = br#"{"paged":true,"fact_prefixes":["existence"]}"#;
         let (first, cold, cold_loads) = timed(args);
-        let (second, warm, _) = timed(args);
+        let (second, warm, warm_loads) = timed(args);
         eprintln!("64 upstream providers, {} served models: unpaged={unpaged:?}, cold={cold:?}, warm={warm:?}, cold loads={cold_loads}", first.models.len());
         assert_eq!(first.models, plain.models);
         assert_eq!(first.models, second.models);
         assert!(first.next_page_token.is_none());
         assert_eq!(cold_loads, 1);
+        assert_eq!(warm_loads, 0);
     }
 
     #[test]
