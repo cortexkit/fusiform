@@ -9,6 +9,25 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "anthropic/claude-sonnet-4-5",
+          "model_id": "*",
+          "provider_id": "anthropic",
+          "quote": "Thinking tokens are billed as output tokens once, when they are generated.",
+          "reason": "Claude bills generated thinking tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/context-windows (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "anthropic/claude-sonnet-4-5": {
           "capability.attachment": true,
@@ -111,6 +130,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
             "from": "curated",
@@ -343,6 +366,23 @@
             "type": "effort",
             "value": "medium"
           }
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-5.6-luna",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
         }
       ],
       "models": {
@@ -556,6 +596,10 @@
             },
             "units": 2400000000
           },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
+          },
           "wire.api": {
             "from": "curated",
             "value": "https://api.openai.com/v1"
@@ -629,6 +673,25 @@
         }
       ],
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "xai/grok-4.20-0309-non-reasoning",
+          "model_id": "*",
+          "provider_id": "xai",
+          "quote": "| Completion tokens | Full completion token price |\n| Reasoning tokens | Full completion token price |",
+          "reason": "xAI's token billing table lists the same full completion price for reasoning and completion tokens.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://docs.x.ai/developers/advanced-api-usage/prompt-caching/usage-and-pricing.md (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "xai/grok-4.20-0309-non-reasoning": {
           "capability.attachment": true,
@@ -727,6 +790,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 5000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
             "from": "curated",
@@ -862,6 +929,23 @@
           "review_by_ms": 1798156800000,
           "source_ref": "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-10-26); https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts",
           "value": true
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "*",
+          "provider_id": "anthropic",
+          "quote": "Thinking tokens are billed as output tokens once, when they are generated.",
+          "reason": "Claude bills generated thinking tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/context-windows (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
         }
       ],
       "models": {
@@ -1023,6 +1107,10 @@
             },
             "units": 40000000000
           },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
+          },
           "wire.family": "anthropic.messages",
           "wire.npm": {
             "from": "provider",
@@ -1063,6 +1151,25 @@
         }
       ],
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "google/antigravity-claude-sonnet-5-5",
+          "model_id": "*",
+          "provider_id": "anthropic",
+          "quote": "Thinking tokens are billed as output tokens once, when they are generated.",
+          "reason": "Claude bills generated thinking tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/context-windows (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "google/antigravity-claude-sonnet-5-5": {
           "capability.attachment": true,
@@ -1162,6 +1269,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 10000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "route.reasoning_default": "low",
           "route.reasoning_wire_ids": {
@@ -1400,6 +1511,23 @@
             },
             "units": 60000000000
           }
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "google/gemini-3.1-flash-image",
+          "model_id": "*",
+          "provider_id": "google",
+          "quote": "Gemini Developer API pricing: \"Output price (including thinking tokens)\". Gemini thinking: \"When thinking is turned on, response pricing is the sum of output tokens and thinking tokens.\"",
+          "reason": "Google includes thinking tokens in its Gemini output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing; https://ai.google.dev/gemini-api/docs/thinking#pricing (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
         }
       ],
       "models": {
@@ -1432,6 +1560,10 @@
               "kind": "stated"
             },
             "units": 60000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       },
@@ -1721,6 +1853,23 @@
           "review_by_ms": 1799625600000,
           "source_ref": "https://ai.google.dev/api/rest/v1beta/models/generateContent (accessed 2026-11-12); https://ai.google.dev/gemini-api/docs/text-generation (accessed 2026-11-12)",
           "value": false
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "google/antigravity-gemini-3.8-flash",
+          "model_id": "*",
+          "provider_id": "google",
+          "quote": "Gemini Developer API pricing: \"Output price (including thinking tokens)\". Gemini thinking: \"When thinking is turned on, response pricing is the sum of output tokens and thinking tokens.\"",
+          "reason": "Google includes thinking tokens in its Gemini output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing; https://ai.google.dev/gemini-api/docs/thinking#pricing (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
         }
       ],
       "models": {
@@ -1825,6 +1974,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 3750000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "route.reasoning_default": "medium",
           "route.reasoning_wire_ids": {
@@ -2753,6 +2906,23 @@
           "review_by_ms": 1799625600000,
           "source_ref": "https://ai.google.dev/api/rest/v1beta/models/generateContent (accessed 2026-11-12); https://ai.google.dev/gemini-api/docs/text-generation (accessed 2026-11-12)",
           "value": false
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "google/antigravity-gemini-3.8-flash",
+          "model_id": "*",
+          "provider_id": "google",
+          "quote": "Gemini Developer API pricing: \"Output price (including thinking tokens)\". Gemini thinking: \"When thinking is turned on, response pricing is the sum of output tokens and thinking tokens.\"",
+          "reason": "Google includes thinking tokens in its Gemini output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing; https://ai.google.dev/gemini-api/docs/thinking#pricing (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
         }
       ],
       "models": {
@@ -2841,6 +3011,10 @@
             },
             "units": 3750000000
           },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
+          },
           "route.reasoning_default": "medium",
           "route.reasoning_wire_ids": {
             "high": "gemini-3.8-flash-high",
@@ -2894,6 +3068,25 @@
         }
       ],
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-6.1-sol",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "login_methods": [
         {
           "auth_methods": [
@@ -3004,6 +3197,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       },
@@ -3201,6 +3398,23 @@
           "review_by_ms": 1798156800000,
           "source_ref": "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback (accessed 2026-10-26); https://github.com/cortexkit/anthropic-auth/blob/a9b4c35b1ed5aef217d29e6dc699d60589b0c9e2/packages/core/src/model-capabilities.ts",
           "value": true
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "anthropic/claude-opus-5-5",
+          "model_id": "*",
+          "provider_id": "anthropic",
+          "quote": "Thinking tokens are billed as output tokens once, when they are generated.",
+          "reason": "Claude bills generated thinking tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/context-windows (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
         }
       ],
       "models": {
@@ -3361,6 +3575,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 40000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
             "from": "curated",
@@ -3914,6 +4132,23 @@
             "type": "effort",
             "value": "medium"
           }
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-6.1-sol",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
         }
       ],
       "login_methods": [
@@ -4216,6 +4451,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 60000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
             "from": "curated",
@@ -5198,6 +5437,25 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-5.6-luna",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "openai/gpt-5.6-luna": {
           "rate.cache_read": {
@@ -5359,6 +5617,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 2400000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       },
@@ -5398,6 +5660,25 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "anthropic/claude-sonnet-4-5",
+          "model_id": "*",
+          "provider_id": "anthropic",
+          "quote": "Thinking tokens are billed as output tokens once, when they are generated.",
+          "reason": "Claude bills generated thinking tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/context-windows (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "anthropic/claude-sonnet-4-5": {
           "capability.attachment": true,
@@ -5500,6 +5781,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
             "from": "curated",
@@ -6225,6 +6510,23 @@
             "type": "effort",
             "value": "medium"
           }
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-6.1-sol",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
         }
       ],
       "login_methods": [
@@ -6528,6 +6830,10 @@
             },
             "units": 60000000000
           },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
+          },
           "wire.api": {
             "from": "curated",
             "value": "https://api.openai.com/v1"
@@ -6576,6 +6882,25 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "google/gemini-flash-latest",
+          "model_id": "*",
+          "provider_id": "google",
+          "quote": "Gemini Developer API pricing: \"Output price (including thinking tokens)\". Gemini thinking: \"When thinking is turned on, response pricing is the sum of output tokens and thinking tokens.\"",
+          "reason": "Google includes thinking tokens in its Gemini output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing; https://ai.google.dev/gemini-api/docs/thinking#pricing (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "google/gemini-flash-latest": {
           "rate.cache_read": {
@@ -6617,6 +6942,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 9000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       },
@@ -6991,6 +7320,26 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "kimi-code-plan-global/k3.1-pro",
+          "model_id": "*",
+          "notes": "The quoted text says ‘Output token count (including reasoning tokens)’ and ‘The model inference API bills both Input and Output by usage.’",
+          "provider_id": "moonshotai",
+          "quote": "Messages API: \"输出 Token 数（含推理 Token）\". Model pricing: \"模型推理接口对 Input 和 Output 均实行按量计费。\"",
+          "reason": "Kimi's API includes reasoning tokens in its output token count and bills output by usage.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.kimi.com/docs/api/messages.md; https://platform.kimi.com/docs/pricing/chat.md (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "kimi-code-plan-global/k3.1-pro": {
           "capability.attachment": true,
@@ -7155,6 +7504,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 20000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "route.mode_labels": {
             "fast": "Highspeed"
@@ -7315,6 +7668,26 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "kimi-code-plan-global/k3.1-pro-highspeed",
+          "model_id": "*",
+          "notes": "The quoted text says ‘Output token count (including reasoning tokens)’ and ‘The model inference API bills both Input and Output by usage.’",
+          "provider_id": "moonshotai",
+          "quote": "Messages API: \"输出 Token 数（含推理 Token）\". Model pricing: \"模型推理接口对 Input 和 Output 均实行按量计费。\"",
+          "reason": "Kimi's API includes reasoning tokens in its output token count and bills output by usage.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.kimi.com/docs/api/messages.md; https://platform.kimi.com/docs/pricing/chat.md (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "kimi-code-plan-global/k3.1-pro-highspeed": {
           "capability.attachment": true,
@@ -7419,6 +7792,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 20000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
             "from": "provider",
@@ -7576,6 +7953,24 @@
             "type": "effort",
             "value": "max"
           }
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "moonshotai/kimi-k3.1-pro",
+          "model_id": "*",
+          "notes": "The quoted text says ‘Output token count (including reasoning tokens)’ and ‘The model inference API bills both Input and Output by usage.’",
+          "provider_id": "moonshotai",
+          "quote": "Messages API: \"输出 Token 数（含推理 Token）\". Model pricing: \"模型推理接口对 Input 和 Output 均实行按量计费。\"",
+          "reason": "Kimi's API includes reasoning tokens in its output token count and bills output by usage.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.kimi.com/docs/api/messages.md; https://platform.kimi.com/docs/pricing/chat.md (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
         }
       ],
       "models": {
@@ -7699,6 +8094,10 @@
             },
             "units": 20000000000
           },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
+          },
           "route.mode_labels": {
             "fast": "Highspeed"
           },
@@ -7744,6 +8143,26 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "moonshotai/kimi-k3.1-pro-highspeed",
+          "model_id": "*",
+          "notes": "The quoted text says ‘Output token count (including reasoning tokens)’ and ‘The model inference API bills both Input and Output by usage.’",
+          "provider_id": "moonshotai",
+          "quote": "Messages API: \"输出 Token 数（含推理 Token）\". Model pricing: \"模型推理接口对 Input 和 Output 均实行按量计费。\"",
+          "reason": "Kimi's API includes reasoning tokens in its output token count and bills output by usage.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.kimi.com/docs/api/messages.md; https://platform.kimi.com/docs/pricing/chat.md (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "moonshotai/kimi-k3.1-pro-highspeed": {
           "capability.attachment": true,
@@ -7824,6 +8243,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 20000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
             "from": "provider",
@@ -8183,6 +8606,25 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-5.5",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "login_methods": [
         {
           "auth_methods": [
@@ -8314,6 +8756,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       },
@@ -8334,6 +8780,25 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-6.1-sol",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "login_methods": [
         {
           "auth_methods": [
@@ -8586,6 +9051,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 60000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       },
@@ -8606,6 +9075,25 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-4o",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "openai/gpt-4o": {
           "rate.cache_read": {
@@ -8667,6 +9155,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 17000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       },
@@ -9530,6 +10022,25 @@
         }
       ],
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-image-1",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "openai/gpt-image-1": {
           "capability.attachment": true,
@@ -9559,6 +10070,10 @@
           "rate.cache_write": {
             "reason": "not_established",
             "state": "unpriced"
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
             "from": "curated",
@@ -9813,6 +10328,42 @@
         }
       ],
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-5.6-luna",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-image-1",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "openai/gpt-5.6-luna": {
           "rate.cache_read": {
@@ -9912,12 +10463,20 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 1800000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         },
         "openai/gpt-image-1": {
           "rate.cache_write": {
             "reason": "not_established",
             "state": "unpriced"
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       },
@@ -9991,6 +10550,40 @@
           "value": {
             "type": "effort",
             "value": "medium"
+          }
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-5.6-luna",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-image-1",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       ],
@@ -10139,6 +10732,10 @@
             },
             "units": 1800000000
           },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
+          },
           "wire.api": {
             "from": "curated",
             "value": "https://api.openai.com/v1"
@@ -10177,6 +10774,10 @@
           "rate.cache_write": {
             "reason": "not_established",
             "state": "unpriced"
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
             "from": "curated",
@@ -10408,6 +11009,25 @@
         }
       ],
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-5.6-luna",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "openai/gpt-5.6-luna": {
           "rate.cache_read": {
@@ -10507,6 +11127,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 1800000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       },
@@ -10571,6 +11195,23 @@
           "value": {
             "type": "effort",
             "value": "medium"
+          }
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-5.6-luna",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       ],
@@ -10719,6 +11360,10 @@
             },
             "units": 1800000000
           },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
+          },
           "wire.api": {
             "from": "curated",
             "value": "https://api.openai.com/v1"
@@ -10837,6 +11482,25 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "anthropic/claude-sonnet-4-5",
+          "model_id": "*",
+          "provider_id": "anthropic",
+          "quote": "Thinking tokens are billed as output tokens once, when they are generated.",
+          "reason": "Claude bills generated thinking tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/context-windows (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "anthropic/claude-sonnet-4-5": {
           "capability.attachment": true,
@@ -10939,6 +11603,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
             "from": "curated",
@@ -11086,6 +11754,62 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "kimi-code-plan-global/k3",
+          "model_id": "*",
+          "notes": "The quoted text says ‘Output token count (including reasoning tokens)’ and ‘The model inference API bills both Input and Output by usage.’",
+          "provider_id": "moonshotai",
+          "quote": "Messages API: \"输出 Token 数（含推理 Token）\". Model pricing: \"模型推理接口对 Input 和 Output 均实行按量计费。\"",
+          "reason": "Kimi's API includes reasoning tokens in its output token count and bills output by usage.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.kimi.com/docs/api/messages.md; https://platform.kimi.com/docs/pricing/chat.md (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "kimi-code-plan-global/k3-256k",
+          "model_id": "*",
+          "notes": "The quoted text says ‘Output token count (including reasoning tokens)’ and ‘The model inference API bills both Input and Output by usage.’",
+          "provider_id": "moonshotai",
+          "quote": "Messages API: \"输出 Token 数（含推理 Token）\". Model pricing: \"模型推理接口对 Input 和 Output 均实行按量计费。\"",
+          "reason": "Kimi's API includes reasoning tokens in its output token count and bills output by usage.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.kimi.com/docs/api/messages.md; https://platform.kimi.com/docs/pricing/chat.md (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "kimi-code-plan-global/kimi-for-coding-highspeed",
+          "model_id": "*",
+          "notes": "The quoted text says ‘Output token count (including reasoning tokens)’ and ‘The model inference API bills both Input and Output by usage.’",
+          "provider_id": "moonshotai",
+          "quote": "Messages API: \"输出 Token 数（含推理 Token）\". Model pricing: \"模型推理接口对 Input 和 Output 均实行按量计费。\"",
+          "reason": "Kimi's API includes reasoning tokens in its output token count and bills output by usage.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.kimi.com/docs/api/messages.md; https://platform.kimi.com/docs/pricing/chat.md (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "kimi-code-plan-global/k3": {
           "capability.attachment": true,
@@ -11188,6 +11912,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
             "from": "provider",
@@ -11299,6 +12027,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
             "from": "provider",
@@ -11448,6 +12180,10 @@
             },
             "units": 8000000000
           },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
+          },
           "wire.api": {
             "from": "provider",
             "value": "https://api.kimi.ai/coding/v1"
@@ -11488,6 +12224,26 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "kimi-code-plan-global/k3",
+          "model_id": "*",
+          "notes": "The quoted text says ‘Output token count (including reasoning tokens)’ and ‘The model inference API bills both Input and Output by usage.’",
+          "provider_id": "moonshotai",
+          "quote": "Messages API: \"输出 Token 数（含推理 Token）\". Model pricing: \"模型推理接口对 Input 和 Output 均实行按量计费。\"",
+          "reason": "Kimi's API includes reasoning tokens in its output token count and bills output by usage.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.kimi.com/docs/api/messages.md; https://platform.kimi.com/docs/pricing/chat.md (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "kimi-code-plan-global/k3": {
           "rate.cache_read": {
@@ -11553,6 +12309,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       },
@@ -11581,6 +12341,26 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "kimi-code-plan-global/k3-256k",
+          "model_id": "*",
+          "notes": "The quoted text says ‘Output token count (including reasoning tokens)’ and ‘The model inference API bills both Input and Output by usage.’",
+          "provider_id": "moonshotai",
+          "quote": "Messages API: \"输出 Token 数（含推理 Token）\". Model pricing: \"模型推理接口对 Input 和 Output 均实行按量计费。\"",
+          "reason": "Kimi's API includes reasoning tokens in its output token count and bills output by usage.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.kimi.com/docs/api/messages.md; https://platform.kimi.com/docs/pricing/chat.md (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "kimi-code-plan-global/k3-256k": {
           "rate.cache_read": {
@@ -11646,6 +12426,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       },
@@ -11723,6 +12507,26 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "kimi-code-plan-global/kimi-for-coding-highspeed",
+          "model_id": "*",
+          "notes": "The quoted text says ‘Output token count (including reasoning tokens)’ and ‘The model inference API bills both Input and Output by usage.’",
+          "provider_id": "moonshotai",
+          "quote": "Messages API: \"输出 Token 数（含推理 Token）\". Model pricing: \"模型推理接口对 Input 和 Output 均实行按量计费。\"",
+          "reason": "Kimi's API includes reasoning tokens in its output token count and bills output by usage.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.kimi.com/docs/api/messages.md; https://platform.kimi.com/docs/pricing/chat.md (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "kimi-code-plan-global/kimi-for-coding-highspeed": {
           "rate.cache_read": {
@@ -11772,6 +12576,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 8000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           }
         }
       },
@@ -12038,6 +12846,25 @@
     },
     "response": {
       "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "anthropic/claude-sonnet-4-5",
+          "model_id": "*",
+          "provider_id": "anthropic",
+          "quote": "Thinking tokens are billed as output tokens once, when they are generated.",
+          "reason": "Claude bills generated thinking tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://platform.claude.com/docs/en/build-with-claude/context-windows (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
       "models": {
         "anthropic/claude-sonnet-4-5": {
           "capability.attachment": true,
@@ -12170,6 +12997,10 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 15000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
             "from": "curated",

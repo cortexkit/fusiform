@@ -323,12 +323,15 @@ pub enum RateValue {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         inherited_from: Option<InheritedFrom>,
     },
-    /// This class is billed at another key's rate on the selected plane.
+    /// This class is billed at another rate on this row. Ordinary reads can
+    /// serve it for reasoning billed at the output price; billing-plane reads
+    /// can also serve it from a rule for the selected plane.
     /// Serve-only: this is a curated billing claim, not an upstream observation.
     BilledAs {
-        /// The full fact key, including any context-tier suffix. An unfiltered
-        /// plane read also serves that key; a read limited by `fact_prefixes`
-        /// (for example to `rate.cache_write`) may leave it out.
+        /// The full fact key, including any context-tier suffix. For
+        /// `rate.reasoning` billed as `rate.output`, use the output rate that
+        /// applies to the request, including context-tier and mode variants.
+        /// A read limited by `fact_prefixes` may omit the target rate.
         key: String,
     },
 }

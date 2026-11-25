@@ -81,9 +81,9 @@ fn get(store: &CatalogStore, body: &str) -> serde_json::Value {
     }
 }
 
-/// An ordinary read must not invent rates absent from the upstream row.
+/// An ordinary read must not invent unsourced rates absent from upstream.
 #[test]
-fn an_ordinary_read_preserves_unpublished_rate_absence() {
+fn an_ordinary_read_preserves_unsourced_rate_absence() {
     let (store, _dir) = store();
     let response = get(&store, r#"{"name":"catalog.get","arguments":{}}"#);
     let sonnet = &response["models"]["anthropic/claude-sonnet-4-5"];
@@ -91,11 +91,18 @@ fn an_ordinary_read_preserves_unpublished_rate_absence() {
     // Verify this is a served row, rather than an empty result whose missing
     // keys would satisfy the absence check for the wrong reason.
     assert_eq!(sonnet["limit.context"], 1_000_000);
-    assert!(sonnet.get("rate.reasoning").is_none());
+    assert_eq!(
+        sonnet["rate.reasoning"],
+        serde_json::json!({"state":"billed_as", "key":"rate.output"})
+    );
     for key in sonnet.as_object().unwrap().keys() {
         assert!(
-            !key.starts_with("rate.") || key == "rate.input" || key == "rate.output",
-            "served rate {key} was not published by this fixture"
+            !key.starts_with("rate.")
+                || matches!(
+                    key.as_str(),
+                    "rate.input" | "rate.output" | "rate.reasoning"
+                ),
+            "served rate {key} was neither published by this fixture nor sourced"
         );
     }
 }

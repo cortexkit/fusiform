@@ -121,14 +121,20 @@ pub fn plane_rate_target<'a>(
         .map(|(_, id)| id)
 }
 
-/// Project a billing plane from raw upstream cards already read at the same
-/// instant. The key of each card is its model id under the borrowing provider.
+pub struct PlaneRateCard {
+    pub facts: RawFacts,
+    /// The donor's sourced fallback, only if the stored reasoning key was absent.
+    pub reasoning_override: Option<fusiform_protocol::FactOverrideWire>,
+}
+
+/// Project a billing plane from upstream cards already read at the same
+/// instant. Each card is keyed by its model id under the rate provider.
 pub fn project_plane(
     response: &mut ServedState,
     wire: PlaneWire,
     declared: Option<&Plane>,
     speed_twins: &SpeedTwins,
-    cards: &BTreeMap<String, RawFacts>,
+    cards: &BTreeMap<String, PlaneRateCard>,
 ) {
     if wire.auth_method == "gateway" {
         // Endpoint corrections describe the upstream API address, which the
@@ -136,17 +142,45 @@ pub fn project_plane(
         response.wire_corrections.clear();
     }
     response.plane = Some(wire);
+    let added_reasoning: BTreeSet<_> = response
+        .fact_overrides
+        .iter()
+        .filter(|row| row.fact_key == "rate.reasoning")
+        .map(|row| row.model.as_str())
+        .collect();
+    let mut replaced_reasoning = BTreeSet::new();
+    let mut borrowed_reasoning = Vec::new();
     for (identity, facts) in &mut response.models {
         if let Some(declared) = declared {
+            let mut borrowed_override = None;
             if let Some(provider) = declared.borrows_rates_from() {
                 let origin = plane_rate_target(speed_twins, identity, facts, provider)
-                    .and_then(|id| cards.get_key_value(id))
-                    .map(|(id, facts)| (id.as_str(), facts));
-                borrow_plane_rates(facts, provider, origin);
+                    .and_then(|id| cards.get_key_value(id));
+                borrow_plane_rates(
+                    facts,
+                    provider,
+                    origin.map(|(id, card)| (id.as_str(), &card.facts)),
+                );
+                replaced_reasoning.insert(identity);
+                if let Some(mut row) = origin.and_then(|(_, card)| card.reasoning_override.clone())
+                {
+                    // Keep the claim's original provider, but disclose it on
+                    // the plan row whose borrowed output price resolves it.
+                    row.model.clone_from(identity);
+                    facts.insert(row.fact_key.clone(), row.value.clone());
+                    borrowed_override = Some(row);
+                }
             }
-            response
-                .billing_rules
-                .extend(apply_billing_plane(identity, facts, declared));
+            let reasoning_was_added = added_reasoning.contains(identity.as_str());
+            let rules = apply_billing_plane(identity, facts, declared, reasoning_was_added);
+            if rules.iter().any(|rule| rule.fact_key == "rate.reasoning") {
+                if reasoning_was_added {
+                    replaced_reasoning.insert(identity);
+                }
+            } else {
+                borrowed_reasoning.extend(borrowed_override);
+            }
+            response.billing_rules.extend(rules);
             if !response.wire_corrections.iter().any(|correction| {
                 correction.withheld
                     && format!("{}/{}", correction.provider, correction.model) == *identity
@@ -157,6 +191,12 @@ pub fn project_plane(
             }
         }
     }
+    // A plane can set the same value as the addition. Attribute that value
+    // to the plane alone, rather than relying on a value comparison later.
+    response
+        .fact_overrides
+        .retain(|row| row.fact_key != "rate.reasoning" || !replaced_reasoning.contains(&row.model));
+    response.fact_overrides.extend(borrowed_reasoning);
 }
 
 /// Narrow only after the plane and speed modes have used the supporting facts.
@@ -202,11 +242,22 @@ pub fn annotate_speed_twin(row: &SpeedTwin, response: &mut ServedState) {
 
 /// Join a twin's rates only after billing projection, so a base-mode call and
 /// a call to the twin id use the same rate.
-pub fn apply_speed_twin(row: &SpeedTwin, base: &str, card: Facts, response: &mut ServedState) {
+pub fn apply_speed_twin(
+    row: &SpeedTwin,
+    base: &str,
+    card: Facts,
+    reasoning_was_added: bool,
+    response: &mut ServedState,
+) {
     let Some(facts) = response.models.get_mut(base) else {
         return;
     };
     for (key, value) in card {
+        // The base reasoning addition already follows the selected output
+        // mode. Only a distinct price or plane rule needs a reasoning mode key.
+        if reasoning_was_added && key == "rate.reasoning" {
+            continue;
+        }
         if let Some(key) = crate::speed_twins::mode_rate_key(&key, &row.mode) {
             facts.insert(key, value);
         }
@@ -222,6 +273,13 @@ pub fn apply_speed_twin(row: &SpeedTwin, base: &str, card: Facts, response: &mut
             .expect("speed route fact is an object")
             .insert(row.mode.clone(), serde_json::json!(value));
     }
+}
+
+pub fn has_reasoning_override(response: &ServedState, identity: &str) -> bool {
+    response
+        .fact_overrides
+        .iter()
+        .any(|row| row.model == identity && row.fact_key == "rate.reasoning")
 }
 
 fn retain_speed_twins(rows: &SpeedTwins, response: &mut CatalogGetResponse) {
@@ -524,6 +582,7 @@ fn apply_billing_plane(
     identity: &str,
     facts: &mut BTreeMap<String, serde_json::Value>,
     plane: &Plane,
+    reasoning_was_added: bool,
 ) -> Vec<BillingRuleWire> {
     if plane.auth_method == "gateway" {
         // A gateway's address belongs to the credential. Keeping the upstream
@@ -555,7 +614,9 @@ fn apply_billing_plane(
         })
         .expect("a struct of strings serialises");
         for (key, value) in facts.iter_mut() {
-            if !key.starts_with(RATE) {
+            // A billed-as rule carries no price; its target rate carries the
+            // quota-proxy marker instead.
+            if !key.starts_with(RATE) || value["state"] == "billed_as" {
                 continue;
             }
             let Some(obj) = value.as_object_mut() else {
@@ -601,7 +662,10 @@ fn apply_billing_plane(
         }
         for suffix in suffixes {
             let fact_key = format!("{class_key}{suffix}");
-            if plane.kind == PlaneKind::Upstream && before_rules.contains_key(&fact_key) {
+            if plane.kind == PlaneKind::Upstream
+                && before_rules.contains_key(&fact_key)
+                && !(reasoning_was_added && fact_key == "rate.reasoning")
+            {
                 // A published price, zero or tombstone is authoritative for this
                 // key, not a row-level veto of rules for other missing tiers.
                 continue;
@@ -672,6 +736,60 @@ mod tests {
     }
 
     #[test]
+    fn upstream_plane_reasoning_rule_wins_over_the_addition_but_not_a_published_rate() {
+        let mut plane = planes()[&("openai".into(), "chatgpt".into())].clone();
+        plane.kind = PlaneKind::Upstream;
+        plane.rules = vec![billing_planes::BillingRule {
+            class: TokenClass::Reasoning,
+            state: RuleState::BilledAs,
+            as_class: Some(TokenClass::Output),
+            model_ids: None,
+            ..plane.rules[0].clone()
+        }];
+        let mut response =
+            crate::response_envelope(fusiform_core::SourceId::ModelsDev, 1, 1, vec![], vec![]);
+        let (overrides, _) = crate::fact_overrides::load_reporting_rejects(include_str!(
+            "../../fusiform-module/data/fact-overrides.json"
+        ));
+        let mut added = BTreeMap::from([("rate.output".into(), priced(100))]);
+        response.fact_overrides =
+            crate::fact_overrides::apply_rows(&overrides, "openai", "added", &mut added, None, &[]);
+        assert_eq!(response.fact_overrides.len(), 1);
+        response.models.insert("openai/added".into(), added);
+        response.models.insert(
+            "openai/published".into(),
+            BTreeMap::from([
+                ("rate.output".into(), priced(100)),
+                ("rate.reasoning".into(), priced(200)),
+            ]),
+        );
+        project_plane(
+            &mut response,
+            PlaneWire {
+                provider_id: "openai".into(),
+                auth_method: "apikey".into(),
+                kind: "upstream".into(),
+                source_ref: None,
+                review_by_ms: None,
+            },
+            Some(&plane),
+            &Default::default(),
+            &Default::default(),
+        );
+        assert_eq!(
+            response.models["openai/added"]["rate.reasoning"],
+            json!({"state":"billed_as", "key":"rate.output"})
+        );
+        assert_eq!(
+            response.models["openai/published"]["rate.reasoning"],
+            priced(200)
+        );
+        assert_eq!(response.billing_rules.len(), 1);
+        assert_eq!(response.billing_rules[0].model, "openai/added");
+        assert!(response.fact_overrides.is_empty());
+    }
+
+    #[test]
     fn every_rule_state_uses_class_tiers_and_exact_model_scopes() {
         // Rule states and exact-model scopes the loader accepts but no shipped
         // plane uses yet. Test them on a cloned plane rather than adding an
@@ -699,7 +817,7 @@ mod tests {
                 ("rate.output.above_context.42".into(), priced(200)),
                 ("rate.reasoning.above_context.43".into(), priced(300)),
             ]);
-            let rules = apply_billing_plane(&format!("openai/{model}"), &mut facts, &plane);
+            let rules = apply_billing_plane(&format!("openai/{model}"), &mut facts, &plane, false);
             for key in ["rate.output", "rate.output.above_context.42"] {
                 assert_eq!(facts[key]["state"], expected);
             }
@@ -730,7 +848,7 @@ mod tests {
             },
         );
         let mut facts = BTreeMap::from([("rate.cache_write.above_context.42".into(), priced(100))]);
-        let rules = apply_billing_plane("openai/test-model", &mut facts, &plane);
+        let rules = apply_billing_plane("openai/test-model", &mut facts, &plane, false);
         assert_eq!(facts["rate.input"], json!({"state":"stated_zero"}));
         assert_eq!(
             facts["rate.cache_write"],
@@ -764,7 +882,7 @@ mod tests {
         ]);
         mark_rates_borrowed_through_alias(&mut facts, &alias);
         let before = facts["rate.input"].clone();
-        apply_billing_plane("openai/alias-model", &mut facts, plane);
+        apply_billing_plane("openai/alias-model", &mut facts, plane, false);
         assert_eq!(facts["rate.input"], before);
         assert_eq!(
             facts["rate.cache_write"],

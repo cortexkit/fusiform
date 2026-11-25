@@ -39,7 +39,8 @@ type Claim = (serde_json::Value, serde_json::Value);
 type Newest = (i64, Option<Claim>);
 
 impl CatalogStore {
-    /// All override eras for one model, oldest first, including tombstones.
+    /// All override eras for one model and its provider-wide claims, oldest
+    /// first, including records for removals.
     pub fn model_fact_override_eras(
         &self,
         provider: &str,
@@ -49,7 +50,7 @@ impl CatalogStore {
             let mut stmt = conn.prepare(
                 "SELECT provider_id, model_id, fact_key, boundary_at_ms, value_json, replaces_json,
                         reason, source_ref, quote, notes, established_by, established_at_ms, review_by_ms
-                 FROM fact_override_era WHERE provider_id = ?1 AND model_id = ?2
+                 FROM fact_override_era WHERE provider_id = ?1 AND model_id IN (?2, '*')
                  ORDER BY boundary_at_ms, id",
             )?;
             let rows = stmt.query_map(params![provider, model], raw_era)?;

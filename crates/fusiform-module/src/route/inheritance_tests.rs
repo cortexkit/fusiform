@@ -151,6 +151,7 @@ fn an_unpriced_open_weight_row_inherits_and_says_whose_price_it_is() {
         &creators(),
         &mut facts,
         "glm-x",
+        false,
     );
 
     let rate = facts.get("rate.input").expect("must inherit");
@@ -177,6 +178,7 @@ fn a_closed_weight_row_does_not_inherit() {
         &creators(),
         &mut facts,
         "closed-y",
+        false,
     );
     assert!(
         !facts.contains_key("rate.input"),
@@ -209,6 +211,7 @@ fn inheritance_never_supplies_a_mode_rate() {
         &creators(),
         &mut facts,
         "glm-m",
+        false,
     );
 
     // Control: inheritance did fire, so the absence below is the filter.
@@ -241,6 +244,7 @@ fn a_row_with_only_mode_rates_does_not_inherit() {
         &creators(),
         &mut facts,
         "glm-n",
+        false,
     );
 
     assert!(
@@ -269,6 +273,7 @@ fn a_published_rate_is_left_exactly_as_published() {
         &creators(),
         &mut facts,
         "glm-x",
+        false,
     );
     assert_eq!(
         facts["rate.input"]["units"], 9_000_000,
@@ -329,6 +334,7 @@ fn every_rate_dimension_the_creator_publishes_is_inherited() {
         &creators(),
         &mut facts,
         "glm-x",
+        false,
     );
 
     for key in [
@@ -416,6 +422,7 @@ fn a_provider_that_published_any_rate_keeps_its_own_card() {
         &creators(),
         &mut facts,
         "glm-x",
+        false,
     );
 
     assert_eq!(
@@ -457,6 +464,7 @@ fn a_partial_card_is_not_topped_up_from_the_creator() {
         &creators(),
         &mut facts,
         "glm-x",
+        false,
     );
 
     assert_eq!(
@@ -745,6 +753,7 @@ fn an_uncurated_family_inherits_nothing() {
         &crate::creators::Creators::new(),
         &mut facts,
         "glm-x",
+        false,
     );
     assert!(
         !facts.contains_key("rate.input"),

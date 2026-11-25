@@ -12,8 +12,8 @@
 //! as `null` when models.dev publishes nothing (`model.status`): the row then
 //! applies only while that stored `null` is there.
 //!
-//! An ADDITION supplies a fact models.dev publishes nothing for and ingest does
-//! not store at all (see `ADDED_FACTS`), sourced from the model vendor's own
+//! An ADDITION supplies a fact models.dev publishes nothing for and ingest
+//! does not store for that row, sourced from the model vendor's own
 //! documentation. Its `replaces` is `null`. It applies only
 //! while the stored upstream row carries no such fact at all. If upstream ever
 //! records the key, upstream wins and the row stops applying, for the same
@@ -71,7 +71,10 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 /// replacement and an image-rate addition, before alias and plane projection.
 /// `capability.temperature` replaces only a published boolean when the vendor
 /// documents different acceptance; it never fills an unknown upstream claim.
-pub const OVERRIDABLE_FACTS: [&str; 14] = [
+/// `rate.reasoning` can only fill an absent rate with a vendor's statement
+/// that reasoning is billed at the output price. It may cover every model
+/// under a provider (`model_id: "*"`).
+pub const OVERRIDABLE_FACTS: [&str; 15] = [
     "limit.context",
     "limit.output",
     "capability.server_side_fallback",
@@ -86,12 +89,13 @@ pub const OVERRIDABLE_FACTS: [&str; 14] = [
     "rate.output",
     "rate.output_image",
     "rate.cached_input_audio",
+    "rate.reasoning",
 ];
 
-/// The facts only an addition row can serve, because models.dev publishes no
-/// value for them. A read filtered to one of these must still reach the rows
-/// an addition applies to, even though the store holds no matching fact.
-pub const ADDED_FACTS: [&str; 9] = [
+/// The facts an override can only add, never replace. A read filtered to one
+/// of these must reach the rows an addition applies to even when the store
+/// holds no matching fact.
+pub const ADDED_FACTS: [&str; 10] = [
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
     "capability.allowed_fallback_models",
@@ -101,6 +105,7 @@ pub const ADDED_FACTS: [&str; 9] = [
     "capability.reasoning_default",
     "rate.output_image",
     "rate.cached_input_audio",
+    "rate.reasoning",
 ];
 
 /// Whether a row supplies a fact the stored row lacks (an addition), rather
@@ -131,6 +136,15 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 || !row.replaces.is_null()
             {
                 Some("rate addition must add a sourced token rate with replaces null")
+            } else {
+                None
+            }
+        }
+        "rate.reasoning" => {
+            if row.value != serde_json::json!({"state":"billed_as", "key":"rate.output"})
+                || !row.replaces.is_null()
+            {
+                Some("rate.reasoning must add exactly {\"state\":\"billed_as\",\"key\":\"rate.output\"} with replaces null")
             } else {
                 None
             }
@@ -212,7 +226,7 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
                 None
             }
         }
-        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system, capability.allowed_fallback_models, route.refusal_fallback.bio, route.refusal_fallback.cyber, capability.effort_change_cache, capability.reasoning_default, capability.temperature, model.status, rate.output, rate.output_image and rate.cached_input_audio may be overridden"),
+        _ => Some("only limit.context, limit.output, capability.server_side_fallback, capability.mid_conversation_system, capability.allowed_fallback_models, route.refusal_fallback.bio, route.refusal_fallback.cyber, capability.effort_change_cache, capability.reasoning_default, capability.temperature, model.status, rate.output, rate.output_image, rate.cached_input_audio and rate.reasoning may be overridden"),
     }
 }
 
@@ -392,6 +406,8 @@ pub fn load_reporting_rejects(doc: &str) -> (FactOverrides, Vec<String>) {
         .any(|field| field.trim().is_empty())
         {
             Some("empty identity, reason, source or quote")
+        } else if row.model_id == "*" && row.fact_key != "rate.reasoning" {
+            Some("model_id '*' is only allowed for rate.reasoning")
         } else if row.notes.as_ref().is_some_and(|n| n.trim().is_empty()) {
             Some("notes, when present, must be nonempty")
         } else if let Some(reason) = invalid_values(&row) {
@@ -487,12 +503,16 @@ pub fn apply_rows(
     prefixes: Option<&Vec<String>>,
     withheld: &[&str],
 ) -> Vec<fusiform_protocol::FactOverrideWire> {
-    let start = (provider_id.to_string(), model_id.to_string(), String::new());
     let mut applied = Vec::new();
-    for ((provider, model, fact_key), row) in rows.range(start..) {
-        if provider != provider_id || model != model_id {
-            break;
-        }
+    let start = (provider_id.to_string(), model_id.to_string(), String::new());
+    let specific = rows
+        .range(start..)
+        .take_while(|((provider, model, _), _)| provider == provider_id && model == model_id);
+    // A model-specific source takes precedence when both rows make the same
+    // claim. The addition's absent-key guard then skips the wildcard row.
+    let wildcard = rows.get(&(provider_id.to_string(), "*".into(), "rate.reasoning".into()));
+    for row in specific.map(|(_, row)| row).chain(wildcard) {
+        let fact_key = &row.fact_key;
         // A fact the caller filtered out is not served, so nothing is
         // overridden and nothing disclosed.
         if prefixes.is_some_and(|p| !p.iter().any(|p| fact_key.starts_with(p.as_str()))) {

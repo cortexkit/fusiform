@@ -182,7 +182,9 @@ pub(crate) fn mark_rates_borrowed_through_alias(
     })
     .expect("a struct of strings serialises");
     for (key, value) in facts.iter_mut() {
-        if !key.starts_with(RATE) {
+        // A billing rule points to a rate on this row. Only that rate, not
+        // the rule that points to it, borrows an amount from the alias target.
+        if !key.starts_with(RATE) || value["state"] == "billed_as" {
             continue;
         }
         let Some(obj) = value.as_object_mut() else {

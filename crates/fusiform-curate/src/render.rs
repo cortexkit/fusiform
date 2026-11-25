@@ -221,8 +221,16 @@ pub fn render_row<'a>(
 }
 
 /// The exact creator row needed to price an otherwise unpriced open-weight row.
-pub fn inheritance_source<'a>(creators: &'a Creators, facts: &Facts) -> Option<(&'a str, String)> {
-    let publishes_a_rate = facts.keys().any(|k| k.starts_with(RATE));
+pub fn inheritance_source<'a>(
+    creators: &'a Creators,
+    facts: &Facts,
+    reasoning_was_added: bool,
+) -> Option<(&'a str, String)> {
+    // A sourced rule says how reasoning is billed, not that the reseller has
+    // published a price. It cannot prevent borrowing the prices it refers to.
+    let publishes_a_rate = facts
+        .keys()
+        .any(|key| key.starts_with(RATE) && !(reasoning_was_added && key == "rate.reasoning"));
     if publishes_a_rate {
         return None;
     }

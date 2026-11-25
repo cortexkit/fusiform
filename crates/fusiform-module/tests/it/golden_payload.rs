@@ -684,7 +684,8 @@ fn current_cache_lifetime_models_keep_the_original_golden_bytes() {
             // again for the sourced `capability.allowed_fallback_models`
             // addition and its disclosure, and again for the sourced
             // `capability.effort_change_cache` addition and its disclosure.
-            "913ac517cac45237cd90844ebedbeaffe0ce05957d60ff2e5c3114c3cb40fa81",
+            // The sourced reasoning rate adds its own fact and disclosure.
+            "11d6e5c1b99e749460b135de652ac696fd32600bec8145e6956d94fd7819a5be",
         ),
         (
             "openai/gpt-6.1-sol",
@@ -693,7 +694,8 @@ fn current_cache_lifetime_models_keep_the_original_golden_bytes() {
             // Re-pinned again when current reads began serving the sourced
             // `capability.reasoning_default` addition and its disclosure, and
             // for the sourced `capability.effort_change_cache` addition.
-            "3e1d184e9ab0e38ea1e3ee75263f59193f6370417b21ec70b2a9d6d35913a41e",
+            // The sourced reasoning rate adds its own fact and disclosure.
+            "284e5330cdf5e223bb7576a6beda45aa063a8256d5b9594cf74975eadf7aa7da",
         ),
     ] {
         let label = format!("catalog.get — cache lifetimes {identity}");
@@ -1899,7 +1901,62 @@ fn render_paged() -> serde_json::Value {
     serde_json::json!({"request":request,"response":response})
 }
 
-fn non_plane_leaks(doc: &serde_json::Value) -> (usize, Vec<String>) {
+/// Remove only the state tag of ordinary reasoning values that have a
+/// matching sourced disclosure. The rest of the envelope stays unchanged.
+fn allow_sourced_reasoning(response: &mut serde_json::Value) {
+    let overrides = fusiform_module::fact_overrides::overrides();
+    let Some(disclosures) = response["fact_overrides"].as_array() else {
+        return;
+    };
+    let allowed: Vec<_> = disclosures
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| {
+            let fact = row["fact_key"].as_str()?;
+            let model = row["model"].as_str()?;
+            let (served_provider, served_model) = model.split_once('/')?;
+            let provider = row["provider_id"].as_str()?;
+            let claim_model = row["model_id"].as_str()?;
+            let claim = overrides.get(&(provider.into(), claim_model.into(), fact.into()))?;
+            let value = &response["models"][model][fact];
+            if fact != "rate.reasoning"
+                || row["source_ref"] != claim.source_ref
+                || row.get("replaces") != Some(&serde_json::Value::Null)
+                || &row["value"] != value
+            {
+                return None;
+            }
+            let alias = response["aliased"]
+                .as_array()
+                .and_then(|aliases| aliases.iter().find(|alias| alias["model"] == model));
+            if let Some(alias) = alias {
+                let target = alias["target_model_id"].as_str()?;
+                if alias["target_provider_id"] != provider
+                    || (claim_model != "*" && claim_model != target)
+                {
+                    return None;
+                }
+            } else if provider != served_provider
+                || (claim_model != "*" && claim_model != served_model)
+            {
+                return None;
+            }
+            (value == &claim.value).then(|| (index, model.to_owned()))
+        })
+        .collect();
+    for (index, model) in allowed {
+        response["fact_overrides"][index]["value"]
+            .as_object_mut()
+            .unwrap()
+            .remove("state");
+        response["models"][model]["rate.reasoning"]
+            .as_object_mut()
+            .unwrap()
+            .remove("state");
+    }
+}
+
+pub(super) fn non_plane_leaks(doc: &serde_json::Value) -> (usize, Vec<String>) {
     let mut checked = 0;
     let mut leaks = Vec::new();
     for (label, case) in doc.as_object().expect("golden cases are an object") {
@@ -1911,6 +1968,7 @@ fn non_plane_leaks(doc: &serde_json::Value) -> (usize, Vec<String>) {
         let mut keys = std::collections::BTreeSet::new();
         collect_keys(response, &mut keys);
         let mut scanned = response.clone();
+        allow_sourced_reasoning(&mut scanned);
         // plan.prices legitimately uses state "not_established" for quota
         // values nobody has measured. Exempt only that state field from this
         // billing-data leak check, not a rate's reason "not_established" or the
@@ -2105,6 +2163,25 @@ fn planted_plane_bytes_in_an_ordinary_case_are_reported() {
             "the scan must catch each forbidden shape independently"
         );
     }
+
+    let rule = &fusiform_module::fact_overrides::overrides()
+        [&("openai".into(), "*".into(), "rate.reasoning".into())];
+    let value = serde_json::json!({"state":"billed_as", "key":"rate.output"});
+    let mut doc = serde_json::json!({"ordinary":{"request":{"arguments":{}},"response":{
+        "models":{"openai/m":{"rate.reasoning":value}},
+        "fact_overrides":[{"model":"openai/m", "provider_id":"openai", "model_id":"*",
+            "fact_key":"rate.reasoning", "source_ref":rule.source_ref, "value":value, "replaces":null}]
+    }}});
+    assert_eq!(non_plane_leaks(&doc), (1, vec![]));
+    doc["ordinary"]["response"]["models"]["openai/m"]["rate.reasoning.mode.fast"] = value;
+    assert_eq!(non_plane_leaks(&doc).1.len(), 1);
+    doc["ordinary"]["response"]["models"]["openai/m"]
+        .as_object_mut()
+        .unwrap()
+        .remove("rate.reasoning.mode.fast");
+    doc["ordinary"]["response"]["fact_overrides"][0]["provider_id"] =
+        serde_json::json!("not-sourced");
+    assert_eq!(non_plane_leaks(&doc).1.len(), 1);
 }
 
 #[test]
@@ -2216,9 +2293,13 @@ fn chatgpt_named_and_bulk_cases_apply_the_plane_before_each_filter() {
                 }
             }
             let rate_count = row.keys().filter(|key| key.starts_with("rate.")).count();
+            if filter != "cache-write" {
+                assert_eq!(row["rate.reasoning"]["state"], "billed_as", "{label}");
+                assert_eq!(row["rate.reasoning"]["key"], "rate.output", "{label}");
+            }
             assert_eq!(
                 rate_count,
-                if filter == "cache-write" { 2 } else { 8 },
+                if filter == "cache-write" { 2 } else { 9 },
                 "{label}"
             );
             let rules = response["billing_rules"].as_array().unwrap();
@@ -2364,9 +2445,24 @@ fn kimi_plane_cases_pin_borrowed_cards_and_missing_api_coverage() {
             assert!(key.starts_with("rate."));
             assert_eq!(value, &bulk["models"][&identity][key]);
             if let Some(target) = target {
-                assert_eq!(value["inherited_from"]["provider_id"], "moonshotai");
-                assert_eq!(value["inherited_from"]["model_id"], target);
-                assert_eq!(value["inherited_from"]["basis"], "quota_proxy");
+                if key == "rate.reasoning" && value["state"] == "billed_as" {
+                    assert_eq!(
+                        *value,
+                        serde_json::json!({"state":"billed_as", "key":"rate.output"})
+                    );
+                    let claims = doc[&label]["response"]["fact_overrides"]
+                        .as_array()
+                        .unwrap();
+                    assert!(claims.iter().any(|row| row["model"] == identity
+                        && row["provider_id"] == "moonshotai"
+                        && row["model_id"] == "*"
+                        && row["fact_key"] == *key
+                        && row["value"] == *value));
+                } else {
+                    assert_eq!(value["inherited_from"]["provider_id"], "moonshotai");
+                    assert_eq!(value["inherited_from"]["model_id"], target);
+                    assert_eq!(value["inherited_from"]["basis"], "quota_proxy");
+                }
             } else {
                 assert_eq!(
                     value,
@@ -2418,7 +2514,7 @@ fn the_plain_anthropic_read_serves_the_apikey_card() {
 }
 
 #[test]
-fn anthropic_oauth_marks_every_served_rate_and_drops_modes() {
+fn anthropic_oauth_marks_quota_weights_but_not_the_reasoning_rule_and_drops_modes() {
     let doc: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
     let response = &doc["oauth anthropic — quota weights"]["response"];
     assert_eq!(
@@ -2437,9 +2533,16 @@ fn anthropic_oauth_marks_every_served_rate_and_drops_modes() {
             .iter()
             .filter(|(key, _)| key.starts_with("rate."))
         {
-            rates += 1;
             assert!(!key.contains(".mode."));
-            assert_eq!(value["inherited_from"]["basis"], "quota_proxy");
+            if key == "rate.reasoning" && value["state"] == "billed_as" {
+                assert_eq!(
+                    *value,
+                    serde_json::json!({"state":"billed_as", "key":"rate.output"})
+                );
+            } else {
+                rates += 1;
+                assert_eq!(value["inherited_from"]["basis"], "quota_proxy");
+            }
         }
     }
     assert!(rates > 0, "oauth must serve real quota weights");

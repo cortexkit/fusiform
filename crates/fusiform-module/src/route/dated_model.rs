@@ -9,7 +9,7 @@ pub(super) struct DatedModel {
     pub(super) version: i64,
     facts: BTreeMap<FactKey, FactHistory>,
     pub(super) curated: Vec<fusiform_store::CuratedModelEra>,
-    overrides: BTreeMap<String, Vec<fusiform_store::FactOverrideEra>>,
+    overrides: BTreeMap<(String, String), Vec<fusiform_store::FactOverrideEra>>,
     lifetimes: Vec<(i64, crate::cache_lifetimes::Rules)>,
     pub(super) speed_twins: DatedSpeedTwins,
     provider_known: bool,
@@ -32,12 +32,15 @@ impl DatedModel {
         let curated = store
             .curated_model_eras(provider, model)
             .map_err(|e| store_error(&e))?;
-        let mut overrides: BTreeMap<String, Vec<_>> = BTreeMap::new();
+        let mut overrides: BTreeMap<_, Vec<_>> = BTreeMap::new();
         for era in store
             .model_fact_override_eras(provider, model)
             .map_err(|e| store_error(&e))?
         {
-            overrides.entry(era.fact_key.clone()).or_default().push(era);
+            overrides
+                .entry((era.model_id.clone(), era.fact_key.clone()))
+                .or_default()
+                .push(era);
         }
         let lifetimes = store
             .model_cache_lifetime_eras(provider, model)

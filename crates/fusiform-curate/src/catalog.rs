@@ -113,7 +113,8 @@ pub fn curate(
         if present && response.models.contains_key(&base) {
             let id = format!("{}/{}", twin.provider_id, twin.twin_model_id);
             if let Some(card) = response.models.get(&id).cloned() {
-                apply_speed_twin(twin, &base, card, &mut response);
+                let added = crate::has_reasoning_override(&response, &id);
+                apply_speed_twin(twin, &base, card, added, &mut response);
             }
         }
     }
@@ -182,10 +183,14 @@ fn inheritance_cards(upstream: &UpstreamState, curation: &CurationSet<'_>) -> Ra
                 continue;
             }
             let facts = decode_current(curation, &mut scratch, provider, model, raw);
+            let added = scratch
+                .fact_overrides
+                .iter()
+                .any(|o| o.fact_key == "rate.reasoning");
             scratch.fact_overrides.clear();
             scratch.wire_corrections.clear();
             scratch.canonical_links.clear();
-            let Some((creator, _)) = inheritance_source(curation.creators, &facts) else {
+            let Some((creator, _)) = inheritance_source(curation.creators, &facts, added) else {
                 continue;
             };
             if let Some(origin) = upstream.model(creator, model) {
@@ -240,8 +245,12 @@ fn render_current(
     model: &str,
     raw: &RawFacts,
 ) {
+    let start = response.fact_overrides.len();
     let mut facts = decode_current(curation, response, provider, model, raw);
-    if let Some((creator, family)) = inheritance_source(curation.creators, &facts) {
+    let added = response.fact_overrides[start..]
+        .iter()
+        .any(|o| o.fact_key == "rate.reasoning");
+    if let Some((creator, family)) = inheritance_source(curation.creators, &facts, added) {
         if let Some(origin) = origins.get(creator).and_then(|rows| rows.get(model)) {
             inherit_rates(
                 &mut facts,

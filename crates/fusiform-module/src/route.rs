@@ -2182,27 +2182,45 @@ fn finish_plane_view(
         let speed_twins = tables.speed_twins;
         let mut cards = BTreeMap::new();
         if let Some(provider) = plane.declared.and_then(Plane::borrows_rates_from) {
+            let reasoning = FactKey::from_stored("rate.reasoning".into());
+            let reasoning_prefixes = vec![reasoning.as_str().to_string()];
             for (identity, facts) in &response.models {
                 if let Some(id) = curate::plane_rate_target(speed_twins, identity, facts, provider)
                 {
-                    if let Some(origin) = store
+                    let (origin, withheld) = store
                         .read_model(
                             source,
                             provider,
                             id,
                             Some(Timestamp(response.resolved_at_ms)),
                         )
-                        .map_err(|e| store_error(&e))?
-                        .0
-                        .filter(|model| model.is_present())
-                    {
+                        .map_err(|e| store_error(&e))?;
+                    if let Some(origin) = origin.filter(|model| model.is_present()) {
+                        let reasoning_override = if !origin.facts.contains_key(&reasoning)
+                            && !withheld.iter().any(|row| row.fact_key == reasoning)
+                        {
+                            curate::fact_overrides::apply_rows(
+                                tables.fact_overrides,
+                                provider,
+                                id,
+                                &mut BTreeMap::new(),
+                                Some(&reasoning_prefixes),
+                                &[],
+                            )
+                            .pop()
+                        } else {
+                            None
+                        };
                         cards.insert(
                             id.to_string(),
-                            origin
-                                .facts
-                                .into_iter()
-                                .map(|(k, v)| (k.as_str().to_string(), v))
-                                .collect(),
+                            curate::PlaneRateCard {
+                                facts: origin
+                                    .facts
+                                    .into_iter()
+                                    .map(|(k, v)| (k.as_str().to_string(), v))
+                                    .collect(),
+                                reasoning_override,
+                            },
                         );
                     }
                 }
@@ -2349,8 +2367,11 @@ fn read_speed_twin_cards(
         if !present {
             continue;
         }
-        let card = if let Some(facts) = response.models.get(&twin) {
-            facts.clone()
+        let (card, added) = if let Some(facts) = response.models.get(&twin) {
+            (
+                facts.clone(),
+                curate::has_reasoning_override(response, &twin),
+            )
         } else {
             // Named base reads still use the twin's full served context, not its
             // stored zeros or a differently selected billing plane.
@@ -2365,9 +2386,9 @@ fn read_speed_twin_cards(
             let Some(facts) = served.models.remove(&twin) else {
                 continue;
             };
-            facts
+            (facts, curate::has_reasoning_override(&served, &twin))
         };
-        curate::apply_speed_twin(row, &base, card, response);
+        curate::apply_speed_twin(row, &base, card, added, response);
     }
     Ok(())
 }
@@ -2673,6 +2694,7 @@ fn render(
             .filter(|w| w.provider_id == provider && w.model_id == model_id)
             .map(|w| w.fact_key.as_str())
             .collect();
+        let start = response.fact_overrides.len();
         let mut facts = curate::render_row(
             &mut response,
             (provider, model_id),
@@ -2686,7 +2708,10 @@ fn render(
             current,
         );
         if let (Some((store, creators)), None) = (inherit, at) {
-            inherit_rate_for(store, source, creators, &mut facts, model_id);
+            let added = response.fact_overrides[start..]
+                .iter()
+                .any(|o| o.fact_key == "rate.reasoning");
+            inherit_rate_for(store, source, creators, &mut facts, model_id, added);
         }
         narrow_to_requested(&mut facts, requested_prefixes);
         response.models.insert(identity, facts);
@@ -3295,7 +3320,7 @@ fn inheritance_origin(
         })
         .collect();
 
-    inherit_rate_for(store, source, creators, &mut facts, model_id);
+    inherit_rate_for(store, source, creators, &mut facts, model_id, false);
 
     serde_json::from_value(facts.get(fact.as_str())?.get("inherited_from")?.clone()).ok()
 }
@@ -3306,8 +3331,10 @@ fn inherit_rate_for(
     creators: &crate::creators::Creators,
     facts: &mut curate::Facts,
     model_id: &str,
+    reasoning_was_added: bool,
 ) {
-    let Some((creator, family)) = curate::inheritance_source(creators, facts) else {
+    let Some((creator, family)) = curate::inheritance_source(creators, facts, reasoning_was_added)
+    else {
         return;
     };
     // Do not turn a missing or unreadable creator card into a refusal of the
