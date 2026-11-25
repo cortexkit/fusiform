@@ -348,6 +348,10 @@ pub(crate) fn document_rows(
         if previous == next {
             continue;
         }
+        if name == "plan-prices" {
+            plan_price_changes(out, previous, next, at)?;
+            continue;
+        }
         if let Some(table) = dedicated_table(document_kind(name)?) {
             // The imported base already contains the original dedicated eras.
             let previous_rows = changeable_claims(name, previous)?;
@@ -364,12 +368,10 @@ pub(crate) fn document_rows(
                 } else {
                     tombstone(table, previous.unwrap())
                 };
-                if old.is_none() && table != "plan_price_era" {
+                if old.is_none() {
                     continue;
                 }
-                if table != "plan_price_era" || next.is_none() {
-                    row["boundary_at_ms"] = json!(at);
-                }
+                row["boundary_at_ms"] = json!(at);
                 if table == "cache_lifetime_era" {
                     row["recorded_at_ms"] = json!(at);
                 }
@@ -415,25 +417,99 @@ fn changeable_claims(name: &str, doc: Option<&Value>) -> Result<Claims, String> 
             let value = json!({"provider_id":p,"model_id":m,"rule_json":json!(row).to_string()});
             ((p,m,empty()), value)
         }).collect(),
-        "plan-prices" => {
-            let mut rows = BTreeMap::new();
-            let prices = accepted(name, crate::plan_prices::load_reporting_rejects(&text))?;
-            for (plan, row) in prices.iter().zip(crate::plan_prices::store_rows(&prices)) {
-                let key = (row.provider_id.clone(), row.tier.clone(), empty());
-                if rows.get(&key).is_some_and(|(at, _)| *at > row.boundary_at_ms) { continue; }
-                let value = json!({"provider_id":row.provider_id,"tier":row.tier,"minor_units":row.minor_units,"exponent":row.exponent,
-                    "currency":row.currency,"period":row.period,"boundary_kind":"asserted","boundary_at_ms":row.boundary_at_ms,"established_by":row.established_by,
-                    "established_at_ms":row.established_at_ms,"review_by_ms":row.review_by_ms,"source_ref":row.source_ref,"refusal_reason":row.refusal_reason,
-                    "quota_value_json":plan.quota_value.as_ref().map(|v| json!(v).to_string()),
-                    "service_tiers_json":plan.service_tiers.as_ref().map(|v| json!(v).to_string()),
-                    "concurrency_json":plan.concurrency.as_ref().map(|v| json!(v).to_string())});
-                rows.insert(key, (row.boundary_at_ms, value));
-            }
-            rows.into_iter().map(|(k, (_, v))| (k, v)).collect()
-        }
         _ => unreachable!("document has no dedicated era table"),
     };
     Ok(rows)
+}
+
+type Plans = BTreeMap<(String, String), BTreeMap<i64, Value>>;
+
+fn plan_price_claims(doc: Option<&Value>) -> Result<Plans, String> {
+    let mut plans = Plans::new();
+    let Some(doc) = doc else { return Ok(plans) };
+    let prices = accepted(
+        "plan-prices",
+        crate::plan_prices::load_reporting_rejects(&doc.to_string()),
+    )?;
+    for (plan, row) in prices.iter().zip(crate::plan_prices::store_rows(&prices)) {
+        let key = (row.provider_id.clone(), row.tier.clone());
+        let value = json!({"provider_id":row.provider_id,"tier":row.tier,"minor_units":row.minor_units,"exponent":row.exponent,
+            "currency":row.currency,"period":row.period,"boundary_kind":"asserted","boundary_at_ms":row.boundary_at_ms,"established_by":row.established_by,
+            "established_at_ms":row.established_at_ms,"review_by_ms":row.review_by_ms,"source_ref":row.source_ref,"refusal_reason":row.refusal_reason,
+            "quota_value_json":plan.quota_value.as_ref().map(|v| json!(v).to_string()),
+            "service_tiers_json":plan.service_tiers.as_ref().map(|v| json!(v).to_string()),
+            "concurrency_json":plan.concurrency.as_ref().map(|v| json!(v).to_string())});
+        plans
+            .entry(key)
+            .or_default()
+            .insert(row.boundary_at_ms, value);
+    }
+    Ok(plans)
+}
+
+fn plan_price_changes(
+    out: &mut ImportedTables,
+    previous: Option<&Value>,
+    next: Option<&Value>,
+    at: i64,
+) -> Result<(), String> {
+    let old = plan_price_claims(previous)?;
+    let new = plan_price_claims(next)?;
+    let mut emit = |row: Value| {
+        out.entry("plan_price_era".to_owned())
+            .or_default()
+            .push(row.as_object().unwrap().clone());
+    };
+    for (key, next) in &new {
+        let previous = old.get(key);
+        let old_latest = previous.and_then(BTreeMap::last_key_value);
+        let (&latest, latest_row) = next
+            .last_key_value()
+            .expect("plan has at least one boundary");
+        for (&boundary, row) in next {
+            if previous.and_then(|p| p.get(&boundary)) == Some(row) {
+                continue;
+            }
+            let mut row = row.clone();
+            if boundary == latest
+                && old_latest.is_some_and(|(&old_at, old_row)| {
+                    // Metadata on the current claim takes effect at publication.
+                    // A distinct added boundary stays effective at the vendor date.
+                    (boundary == old_at || (boundary > old_at && !next.contains_key(&old_at)))
+                        && [
+                            "minor_units",
+                            "exponent",
+                            "currency",
+                            "period",
+                            "refusal_reason",
+                        ]
+                        .iter()
+                        .all(|&field| old_row[field] == row[field])
+                })
+            {
+                row["boundary_at_ms"] = json!(at);
+            }
+            emit(row);
+        }
+        if old_latest.is_some_and(|(&old_at, _)| old_at > latest) {
+            // Dropping the latest claim makes the remaining price current at
+            // publication, not retroactively at its original boundary.
+            let mut replacement = latest_row.clone();
+            replacement["boundary_at_ms"] = json!(at);
+            emit(replacement);
+        }
+    }
+    for (key, previous) in &old {
+        if !new.contains_key(key) {
+            let (_, latest) = previous
+                .last_key_value()
+                .expect("plan has at least one boundary");
+            let mut withdrawn = tombstone("plan_price_era", latest);
+            withdrawn["boundary_at_ms"] = json!(at);
+            emit(withdrawn);
+        }
+    }
+    Ok(())
 }
 
 fn tombstone(table: &str, previous: &Value) -> Value {
@@ -727,6 +803,85 @@ mod tests {
     }
 
     #[test]
+    fn plan_backfills_and_document_withdrawals_keep_effective_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open_for_store(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().into_owned(),
+            },
+        })
+        .unwrap();
+        let cell = |boundary, amount| {
+            json!({"provider_id":"provider","tier":"pro", "boundary_at_ms":boundary,
+                "established_by":"operator", "source_ref":"https://example.test/prices",
+                "established_at_ms":3000, "review_by_ms":6000,
+                "price":{"currency":"USD","exponent":2,"period":"month","minor_units":amount}})
+        };
+        let documents = |cells| BTreeMap::from([("plan-prices".into(), json!({"cells":cells}))]);
+        let later = cell(2000, 200);
+        let earlier = cell(1000, 100);
+        let first = documents(vec![later.clone()]);
+        let both = documents(vec![later, earlier.clone()]);
+        let remaining = documents(vec![earlier]);
+        let withdrawn = Documents::new();
+        let apply = |release, old, docs, at| {
+            let mut rows = ImportedTables::new();
+            validate_published(docs, &Upstream::default()).unwrap();
+            validate_received(docs, &Upstream::default()).unwrap();
+            document_rows(&mut rows, old, docs, at).unwrap();
+            let base = ImportedTables::new();
+            store
+                .apply_store_releases(
+                    (release == 1).then_some(&base),
+                    &[ReleaseArrival {
+                        published_at_ms: at,
+                        release: StoreRelease {
+                            release,
+                            state_hash: "a".repeat(64),
+                            curation_hash: "b".repeat(64),
+                            applied_at_ms: at,
+                        },
+                        rows,
+                        upstream: None,
+                    }],
+                )
+                .unwrap();
+        };
+        let read = |at| store.plan_prices_at(at, Some("provider")).unwrap();
+        let price = |at| read(at).first().and_then(|row| row.minor_units);
+
+        apply(1, None, &first, 3001);
+        apply(2, Some(&first), &both, 3002);
+        assert_eq!(store.latest_store_release().unwrap().unwrap().release, 2);
+        assert_eq!(price(1500), Some(100), "the cursor skipped the backfill");
+        assert_eq!(
+            price(2500),
+            Some(200),
+            "the backfill won over a later price"
+        );
+
+        apply(3, Some(&both), &first, 3003);
+        assert_eq!(price(1500), Some(100));
+        assert_eq!(price(3003), Some(200), "removed only an older boundary");
+
+        apply(4, Some(&first), &both, 3004);
+        apply(5, Some(&both), &remaining, 3005);
+        assert_eq!(price(2500), Some(200));
+        assert_eq!(price(3004), Some(200));
+        assert_eq!(price(3005), Some(100), "reasserted the remaining claim");
+
+        apply(6, Some(&remaining), &withdrawn, 3006);
+        assert_eq!(price(3005), Some(100));
+        assert_eq!(
+            read(3006)[0].refusal_reason.as_deref(),
+            Some(fusiform_store::UNCURATED)
+        );
+    }
+
+    #[test]
     fn plan_metadata_revision_keeps_price_origin_and_real_changes_break_the_run() {
         let dir = tempfile::tempdir().unwrap();
         let make = |name: &str| StorageDescriptor {
@@ -766,11 +921,13 @@ mod tests {
         let original_amount = raw["price"]["minor_units"].as_i64().unwrap();
         let documents = |cell| BTreeMap::from([("plan-prices".into(), json!({"cells":[cell]}))]);
         let first = documents(raw.clone());
-        let mut base_row = changeable_claims("plan-prices", first.get("plan-prices"))
+        let mut base_row = plan_price_claims(first.get("plan-prices"))
             .unwrap()
             .into_values()
+            .flatten()
             .next()
-            .unwrap();
+            .unwrap()
+            .1;
         base_row["id"] = json!(1);
         base_row["boundary_at_ms"] = json!(1000);
         for key in ["quota_value_json", "concurrency_json", "service_tiers_json"] {
@@ -867,5 +1024,25 @@ mod tests {
         assert_eq!(current["price"]["minor_units"], original_amount);
         assert_eq!(current["quota_value"]["low"]["units"], low + 1);
         assert_eq!(current["boundary_at_ms"], 3500);
+
+        // The stored metadata row at 5000 carries the old price. An effective
+        // price at 4500 cannot make that row distinguishable from a reprice.
+        let mut delayed_price = raw.clone();
+        delayed_price["boundary_at_ms"] = json!(4500);
+        delayed_price["price"]["minor_units"] = json!(original_amount + 2);
+        consumer
+            .apply_store_releases(
+                None,
+                &[prepare(5, Some(&metadata), &documents(delayed_price), 5500)],
+            )
+            .unwrap();
+        assert_eq!(
+            read(&consumer, Some(4999))["price"]["minor_units"],
+            original_amount + 2
+        );
+        assert_eq!(
+            read(&consumer, Some(5000))["price"]["minor_units"],
+            original_amount
+        );
     }
 }

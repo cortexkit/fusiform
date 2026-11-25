@@ -2172,14 +2172,17 @@ pub const CURATED_FILE: &str = "crates/fusiform-module/data/plan-prices.json";
 impl CatalogStore {
     /// The plan price in force for every `(provider, tier)` at `at_ms`.
     ///
-    /// Supersession is by insertion order, matching the ingest's diff: the row
-    /// in force is the newest id among those at or before the instant. A
-    /// correction shares its predecessor's boundary, so ordering by boundary
-    /// alone would be free to serve either one.
+    /// Later effective boundaries supersede earlier ones, even when an earlier
+    /// claim is backfilled after a later claim. At one boundary the latest id
+    /// wins, so a same-boundary correction supersedes the original.
     ///
     /// The returned price boundary is the first eligible era in the unbroken
     /// run of equal claims. Metadata-only revisions can change which row is
     /// eligible without changing when the price claim took effect.
+    /// A metadata-only row stores the previous price at its publication time.
+    /// If a later release asserts a different price effective before that time,
+    /// the metadata row still wins once eligible: it cannot be distinguished
+    /// from a reinstated price in the stored history.
     pub fn plan_prices_at(
         &self,
         at_ms: i64,
@@ -2190,17 +2193,18 @@ impl CatalogStore {
                 "SELECT provider_id, tier, minor_units, exponent, currency, period, \
                         (SELECT origin.boundary_at_ms FROM plan_price_era origin \
                          WHERE origin.provider_id = p.provider_id AND origin.tier = p.tier \
-                           AND origin.id <= p.id AND origin.boundary_at_ms <= ?1 \
-                           AND origin.id > COALESCE(( \
-                               SELECT MAX(previous.id) FROM plan_price_era previous \
-                               WHERE previous.provider_id = p.provider_id AND previous.tier = p.tier \
-                                 AND previous.id < p.id AND previous.boundary_at_ms <= ?1 \
+                            AND (origin.boundary_at_ms, origin.id) <= (p.boundary_at_ms, p.id) \
+                            AND NOT EXISTS ( \
+                                SELECT 1 FROM plan_price_era previous \
+                                WHERE previous.provider_id = p.provider_id AND previous.tier = p.tier \
+                                  AND (previous.boundary_at_ms, previous.id) < (p.boundary_at_ms, p.id) \
+                                  AND (previous.boundary_at_ms, previous.id) >= (origin.boundary_at_ms, origin.id) \
                                  AND NOT (previous.minor_units IS p.minor_units \
                                      AND previous.exponent IS p.exponent \
                                      AND previous.currency IS p.currency AND previous.period IS p.period \
                                      AND previous.refusal_reason IS p.refusal_reason) \
-                           ), 0) \
-                         ORDER BY origin.id LIMIT 1), established_by, established_at_ms, \
+                            ) \
+                          ORDER BY origin.boundary_at_ms, origin.id LIMIT 1), established_by, established_at_ms, \
                         review_by_ms, source_ref, refusal_reason \
                  FROM plan_price_era p \
                  WHERE boundary_at_ms <= ?1 \
@@ -2209,7 +2213,7 @@ impl CatalogStore {
                        SELECT id FROM plan_price_era q \
                        WHERE q.provider_id = p.provider_id AND q.tier = p.tier \
                          AND q.boundary_at_ms <= ?1 \
-                       ORDER BY q.id DESC LIMIT 1 \
+                        ORDER BY q.boundary_at_ms DESC, q.id DESC LIMIT 1 \
                    ) \
                  ORDER BY provider_id, tier",
             )?;

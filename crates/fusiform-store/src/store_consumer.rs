@@ -226,7 +226,9 @@ impl<'a> RowWriter<'a> {
                     ))),
                 })
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-        if let Some(arrival) = arrival.filter(|_| table == "plan_price_era") {
+        if let Some(arrival) =
+            arrival.filter(|a| table == "plan_price_era" && a.release.release == 1)
+        {
             if !resolve_plan_boundary(self.tx, &columns, &mut values, arrival)? {
                 return Ok(());
             }
@@ -244,13 +246,16 @@ fn resolve_plan_boundary(
     use rusqlite::types::Value as Sql;
     let position = |name: &str| columns.iter().position(|&column| column == name);
     let field = |name| position(name).map_or(&Sql::Null, |i| &values[i]);
+    // The first signed release can repeat a claim imported in the history base.
+    // Never move a distinct vendor boundary to publication just because the
+    // amount matches the price in force at publication.
     let previous = conn
         .query_row(
             "SELECT minor_units, exponent, currency, period, refusal_reason, quota_value_json, \
                     service_tiers_json, concurrency_json FROM plan_price_era \
-             WHERE provider_id = ?1 AND tier = ?2 AND boundary_at_ms <= ?3 \
+             WHERE provider_id = ?1 AND tier = ?2 AND boundary_at_ms = ?3 \
              ORDER BY id DESC LIMIT 1",
-            params![field("provider_id"), field("tier"), arrival.published_at_ms],
+            params![field("provider_id"), field("tier"), field("boundary_at_ms")],
             |row| {
                 (0..8)
                     .map(|i| row.get::<_, Sql>(i))
@@ -270,14 +275,29 @@ fn resolve_plan_boundary(
     ];
     if claim.into_iter().map(field).eq(previous[..5].iter()) {
         let metadata = ["quota_value_json", "service_tiers_json", "concurrency_json"];
-        if arrival.release.release == 1 && metadata.into_iter().map(field).eq(previous[5..].iter())
-        {
+        if metadata.into_iter().map(field).eq(previous[5..].iter()) {
             return Ok(false);
         }
+        let boundary = field("boundary_at_ms");
+        let provider = field("provider_id");
+        let tier = field("tier");
+        let has_later_boundary = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM plan_price_era \
+             WHERE provider_id = ?1 AND tier = ?2 AND boundary_at_ms > ?3)",
+            params![provider, tier, boundary],
+            |r| r.get::<_, bool>(0),
+        )? || arrival.rows["plan_price_era"].iter().any(|row| {
+            matches!((provider, tier, boundary), (Sql::Text(p), Sql::Text(t), Sql::Integer(at))
+                if row["provider_id"].as_str() == Some(p)
+                    && row["tier"].as_str() == Some(t)
+                    && row["boundary_at_ms"].as_i64().is_some_and(|later| later > *at))
+        });
         // The price is unchanged. Only the new metadata becomes eligible at publication.
-        let index =
-            position("boundary_at_ms").ok_or_else(|| invalid("plan-price row needs a boundary"))?;
-        values[index] = Sql::Integer(arrival.published_at_ms);
+        if !has_later_boundary {
+            let index = position("boundary_at_ms")
+                .ok_or_else(|| invalid("plan-price row needs a boundary"))?;
+            values[index] = Sql::Integer(arrival.published_at_ms);
+        }
     }
     Ok(true)
 }
