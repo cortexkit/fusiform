@@ -245,6 +245,54 @@ fn a_malformed_tier_spec_is_refused_without_naming_a_cause_it_cannot_know() {
     }
 }
 
+#[test]
+fn malformed_cost_members_refuse_only_the_affected_base_schedule() {
+    for (cost, unreadable) in [
+        (r#"{"input":"1.25","output":2}"#, "cost.input"),
+        (r#"{"input":1,"tiers":false}"#, "cost.tiers"),
+        (
+            r#"{"input":1,"tiers":[{"tier":{"type":"context","size":200000},"input":9},false]}"#,
+            "cost.tiers[1]",
+        ),
+        (
+            r#"{"input":1,"tiers":[{"tier":{"type":"context","size":200000},"input":null}]}"#,
+            "cost.tiers[0].input",
+        ),
+        (
+            r#"{"input":1,"tiers":[{"tier":{"type":"context"},"input":9}]}"#,
+            "cost.tiers[0].tier.size",
+        ),
+        (
+            r#"{"input":1,"context_over_200k":{"output_audio":"9"}}"#,
+            "cost.context_over_200k.output_audio",
+        ),
+    ] {
+        let payload = serde_json::json!({"p":{"models":{
+            "m":{"cost":serde_json::from_str::<serde_json::Value>(cost).unwrap(),
+                 "experimental":{"modes":{"fast":{"cost":{"input":3}}}}},
+            "other":{"cost":{"input":4}},
+        }}});
+        let outcome = normalize_models_dev(payload.to_string().as_bytes()).unwrap();
+        assert!(
+            outcome.findings.iter().any(|finding| {
+                let diagnostic = finding.to_string();
+                diagnostic.contains("p/m") && diagnostic.contains(unreadable)
+            }),
+            "missing finding for {unreadable}: {:?}",
+            outcome.findings
+        );
+        let affected = model(&outcome, "p/m");
+        assert_eq!(affected.rates.len(), 1, "partial schedule for {cost}");
+        assert_eq!(
+            affected.rates[0].condition,
+            RateCondition::Mode {
+                name: "fast".into()
+            }
+        );
+        assert_eq!(model(&outcome, "p/other").rates.len(), 1);
+    }
+}
+
 /// The two tier encodings must agree ON RATES, and disagreement stops the parse.
 ///
 /// The mutation is structural rather than textual. A `str::replace` against

@@ -174,6 +174,9 @@ pub struct RawCost {
     /// Scalar rate keys, as literal source text.
     pub scalars: BTreeMap<String, String>,
     pub tiers: Vec<RawTier>,
+    /// Paths to unreadable cost members. Serving only the remaining rates
+    /// could understate the price.
+    pub unreadable_members: Vec<String>,
     /// The older duplicate encoding of a context tier's rates.
     ///
     /// The key's NAME is not its threshold. Measured 2026-08-11 across the 288
@@ -188,24 +191,53 @@ impl From<BTreeMap<String, serde_json::Value>> for RawCost {
         let mut scalars = BTreeMap::new();
         let mut tiers = Vec::new();
         let mut context_over_200k = None;
+        let mut unreadable_members = Vec::new();
 
         for (key, value) in map {
             match key.as_str() {
                 "tiers" => {
-                    if let Ok(parsed) = serde_json::from_value::<Vec<RawTier>>(value) {
-                        tiers = parsed;
+                    let serde_json::Value::Array(rows) = value else {
+                        unreadable_members.push("cost.tiers".into());
+                        continue;
+                    };
+                    for (index, row) in rows.into_iter().enumerate() {
+                        let Ok(tier) = serde_json::from_value::<RawTier>(row) else {
+                            unreadable_members.push(format!("cost.tiers[{index}]"));
+                            continue;
+                        };
+                        unreadable_members.extend(
+                            tier.unreadable_rates
+                                .iter()
+                                .map(|key| format!("cost.tiers[{index}].{key}")),
+                        );
+                        if tier.tier.as_ref().is_some_and(|spec| {
+                            spec.tier_type.as_deref() == Some("context") && spec.size.is_none()
+                        }) {
+                            unreadable_members.push(format!("cost.tiers[{index}].tier.size"));
+                        }
+                        tiers.push(tier);
                     }
                 }
                 "context_over_200k" => {
-                    context_over_200k = value.as_object().map(|obj| {
-                        obj.iter()
-                            .filter_map(|(k, v)| v.as_number().map(|n| (k.clone(), n.to_string())))
-                            .collect()
-                    });
+                    let serde_json::Value::Object(obj) = value else {
+                        unreadable_members.push("cost.context_over_200k".into());
+                        continue;
+                    };
+                    let mut legacy = BTreeMap::new();
+                    for (key, value) in obj {
+                        if let Some(number) = value.as_number() {
+                            legacy.insert(key, number.to_string());
+                        } else if is_known_rate(&key) {
+                            unreadable_members.push(format!("cost.context_over_200k.{key}"));
+                        }
+                    }
+                    context_over_200k = Some(legacy);
                 }
                 _ => {
                     if let Some(number) = value.as_number() {
                         scalars.insert(key, number.to_string());
+                    } else if is_known_rate(&key) {
+                        unreadable_members.push(format!("cost.{key}"));
                     }
                 }
             }
@@ -214,6 +246,7 @@ impl From<BTreeMap<String, serde_json::Value>> for RawCost {
         RawCost {
             scalars,
             tiers,
+            unreadable_members,
             context_over_200k,
         }
     }
@@ -264,6 +297,10 @@ impl RawCost {
 
 const KNOWN_TOKEN_KEYS: &[&str] = &["input", "output", "cache_read", "cache_write", "reasoning"];
 
+fn is_known_rate(key: &str) -> bool {
+    KNOWN_TOKEN_KEYS.contains(&key) || matches!(key, "input_audio" | "output_audio")
+}
+
 /// One pricing tier.
 ///
 /// `tier.type` and `tier.size` are read together and never independently: the
@@ -273,22 +310,30 @@ const KNOWN_TOKEN_KEYS: &[&str] = &["input", "output", "cache_read", "cache_writ
 pub struct RawTier {
     pub scalars: BTreeMap<String, String>,
     pub tier: Option<RawTierSpec>,
+    unreadable_rates: Vec<String>,
 }
 
 impl From<BTreeMap<String, serde_json::Value>> for RawTier {
     fn from(map: BTreeMap<String, serde_json::Value>) -> Self {
         let mut scalars = BTreeMap::new();
         let mut tier = None;
+        let mut unreadable_rates = Vec::new();
 
         for (key, value) in map {
             if key == "tier" {
                 tier = serde_json::from_value::<RawTierSpec>(value).ok();
             } else if let Some(number) = value.as_number() {
                 scalars.insert(key, number.to_string());
+            } else if is_known_rate(&key) {
+                unreadable_rates.push(key);
             }
         }
 
-        RawTier { scalars, tier }
+        RawTier {
+            scalars,
+            tier,
+            unreadable_rates,
+        }
     }
 }
 

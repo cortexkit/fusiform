@@ -269,6 +269,8 @@ pub enum NormalizeError {
     /// pricing documentation settles the unit, and the key becomes a priced
     /// `rate.input_audio`.
     UnattributableChargeUnit { model: String, key: String },
+    /// An unreadable cost member made the model's base and tier rates unsafe to serve.
+    RefusedBaseSchedule { model: String, member: String },
     /// A named mode under `experimental.modes` whose price could not be served.
     ///
     /// Not fatal, and never a fallback: the mode produces no rate at all, the
@@ -331,6 +333,9 @@ impl std::fmt::Display for NormalizeError {
             ),
             NormalizeError::UnattributableChargeUnit { model, key } => {
                 write!(f, "{model}: cost key {key:?} has no establishable charge unit")
+            }
+            NormalizeError::RefusedBaseSchedule { model, member } => {
+                write!(f, "{model}: cannot read {member}; base and tier rates refused")
             }
             NormalizeError::RefusedMode {
                 model,
@@ -737,6 +742,18 @@ fn normalize_rates(
     output_audio_per_token: bool,
     findings: &mut Vec<NormalizeError>,
 ) -> Result<Vec<NormalizedRate>, NormalizeError> {
+    if !cost.unreadable_members.is_empty() {
+        findings.extend(cost.unreadable_members.iter().map(|member| {
+            NormalizeError::RefusedBaseSchedule {
+                model: label.to_string(),
+                member: member.clone(),
+            }
+        }));
+        // Serving the readable subset could understate the price. Named modes
+        // have independent schedules and are normalized separately.
+        return Ok(Vec::new());
+    }
+
     let mut rates = Vec::new();
 
     // Base rates: the token classes, always unconditional.
