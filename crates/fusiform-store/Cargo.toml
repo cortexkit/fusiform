@@ -19,5 +19,6 @@ serde_json = { workspace = true, features = ["arbitrary_precision"] }
 tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
+fusiform-core = { path = "../fusiform-core", features = ["legacy-test-parser"] }
 fusiform-testkit = { workspace = true }
 tempfile = "3"

@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
 use fusiform_core::{ChargeBasis, RateValue};
 
 fn payload() -> Option<Vec<u8>> {
@@ -33,7 +33,7 @@ fn a_whole_live_document_normalizes_without_a_single_refusal() {
         return;
     };
 
-    let outcome = match normalize_models_dev(&bytes) {
+    let outcome = match normalize_legacy_models_dev_for_tests(&bytes) {
         Ok(outcome) => outcome,
         Err(e) => panic!("the live document must normalize, got: {e}"),
     };
@@ -86,7 +86,8 @@ fn every_zero_rate_on_live_data_was_stated_as_zero() {
         eprintln!("skipped: set FUSIFORM_FULL_PAYLOAD to a captured models.dev document");
         return;
     };
-    let outcome = normalize_models_dev(&bytes).expect("live document must normalize");
+    let outcome =
+        normalize_legacy_models_dev_for_tests(&bytes).expect("live document must normalize");
 
     let mut priced = 0usize;
     let mut stated_zero = 0usize;
@@ -137,7 +138,8 @@ fn tiered_rates_are_self_describing_on_live_data() {
         eprintln!("skipped: set FUSIFORM_FULL_PAYLOAD to a captured models.dev document");
         return;
     };
-    let outcome = normalize_models_dev(&bytes).expect("live document must normalize");
+    let outcome =
+        normalize_legacy_models_dev_for_tests(&bytes).expect("live document must normalize");
 
     let mut thresholds: BTreeMap<u64, usize> = BTreeMap::new();
     for model in outcome.catalog.models() {

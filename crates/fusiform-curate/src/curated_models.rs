@@ -299,9 +299,16 @@ pub fn load_reporting_rejects(doc: &str) -> (CuratedModels, Vec<String>) {
     (rows, rejects)
 }
 
-pub fn upstream_collisions(rows: &CuratedModels, seed: &serde_json::Value) -> Vec<String> {
+pub fn upstream_collisions(
+    rows: &CuratedModels,
+    seed: &fusiform_core::NormalizedCatalog,
+) -> Vec<String> {
+    let identities: std::collections::BTreeSet<_> = seed
+        .models()
+        .map(|row| (&row.key.provider_id, &row.key.model_id))
+        .collect();
     rows.keys()
-        .filter(|(provider, model)| seed[provider]["models"].get(model).is_some())
+        .filter(|(provider, model)| identities.contains(&(provider, model)))
         .map(|(provider, model)| {
             format!("{provider}/{model}: upstream now publishes this row; remove the curated row")
         })

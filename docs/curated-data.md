@@ -661,7 +661,7 @@ if they differ.
 
 ## 6. The embedded seed (`models-dev-seed.json`)
 
-A verbatim copy of `https://models.dev/api.json`, with
+A verbatim copy of `https://models.dev/experimental/v2.0/api.json`, with
 `models-dev-seed.meta.json` recording the fetch instant, URL, SHA-256 and
 counts. On first boot an empty store is seeded from it, so a fresh install with
 no network answers reads (`bootstrap::a_fresh_install_with_no_network_answers_a_read`).

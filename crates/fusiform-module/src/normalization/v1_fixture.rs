@@ -9,7 +9,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use fusiform_core::normalize::normalize_models_dev_with;
+use fusiform_core::normalize::normalize_legacy_models_dev_for_tests_with;
 use fusiform_core::upstream_facts::facts_of;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -54,9 +54,10 @@ fn fixture(source: &[u8], generated_from_commit: String) -> Fixture {
         source_sha256, SOURCE_SHA256,
         "unexpected v1 source snapshot"
     );
-    let catalog = normalize_models_dev_with(source, &crate::input_audio::evidence())
-        .expect("normalize the saved v1 document with production evidence")
-        .catalog;
+    let catalog =
+        normalize_legacy_models_dev_for_tests_with(source, &crate::input_audio::evidence())
+            .expect("normalize the saved v1 document with production evidence")
+            .catalog;
 
     let mut providers = BTreeMap::new();
     let mut conflicts = Vec::new();

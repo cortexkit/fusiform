@@ -1,7 +1,7 @@
 //! Cache lifetimes through current, historical and billing-plane reads.
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::serve_catalog_get;
 use fusiform_store::ingest::plan_ingest;
@@ -40,7 +40,7 @@ pub(super) fn store(mismatch: Option<(&str, &str)>) -> (CatalogStore, tempfile::
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_models_dev(doc.to_string().as_bytes())
+    let catalog = normalize_legacy_models_dev_for_tests(doc.to_string().as_bytes())
         .unwrap()
         .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
@@ -259,7 +259,7 @@ fn dated_cache_lifetimes_use_the_upstream_prices_at_the_requested_instant() {
         .retain(|provider, _| provider == "openai" || provider == "anthropic");
     doc["anthropic"]["models"]["claude-opus-5-5"]["cost"]["input"] = json!(6);
     doc["anthropic"]["models"]["claude-opus-5-5"]["cost"]["cache_write"] = json!(7.5);
-    let catalog = normalize_models_dev(doc.to_string().as_bytes())
+    let catalog = normalize_legacy_models_dev_for_tests(doc.to_string().as_bytes())
         .unwrap()
         .catalog;
     let change = DATED_READ - 100;

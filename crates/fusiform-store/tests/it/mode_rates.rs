@@ -10,7 +10,9 @@
 use std::collections::BTreeMap;
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::{normalize_models_dev, NormalizeOutcome, NormalizedModel};
+use fusiform_core::normalize::{
+    normalize_legacy_models_dev_for_tests, NormalizeOutcome, NormalizedModel,
+};
 use fusiform_core::{BoundaryKind, NormalizeError, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::{catalog_digest, facts_with_values, plan_ingest};
 use fusiform_store::{CatalogStore, NewObservation};
@@ -74,7 +76,8 @@ const DOC: &str = r#"{
 }"#;
 
 fn normalized() -> NormalizeOutcome {
-    normalize_models_dev(DOC.as_bytes()).expect("a document with refused modes still normalizes")
+    normalize_legacy_models_dev_for_tests(DOC.as_bytes())
+        .expect("a document with refused modes still normalizes")
 }
 
 fn model<'a>(outcome: &'a NormalizeOutcome, id: &str) -> &'a NormalizedModel {
@@ -274,7 +277,9 @@ fn with_luna_fast(edit: impl FnOnce(&mut serde_json::Value)) -> String {
 #[test]
 fn ingest_opens_an_era_only_when_a_mode_price_moves() {
     let (store, _dir) = store();
-    let seed = normalize_models_dev(EXCERPT.as_bytes()).unwrap().catalog;
+    let seed = normalize_legacy_models_dev_for_tests(EXCERPT.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(&store, &seed, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     assert!(
         plan.eras
@@ -308,7 +313,9 @@ fn ingest_opens_an_era_only_when_a_mode_price_moves() {
     let bytes_only = with_luna_fast(|fast| {
         fast["provider"]["body"]["service_tier"] = serde_json::json!("flex");
     });
-    let bytes_only = normalize_models_dev(bytes_only.as_bytes()).unwrap().catalog;
+    let bytes_only = normalize_legacy_models_dev_for_tests(bytes_only.as_bytes())
+        .unwrap()
+        .catalog;
     assert_eq!(
         catalog_digest(&bytes_only),
         catalog_digest(&seed),
@@ -328,7 +335,9 @@ fn ingest_opens_an_era_only_when_a_mode_price_moves() {
     let repriced = with_luna_fast(|fast| {
         fast["cost"]["input"] = serde_json::json!(0.5);
     });
-    let repriced = normalize_models_dev(repriced.as_bytes()).unwrap().catalog;
+    let repriced = normalize_legacy_models_dev_for_tests(repriced.as_bytes())
+        .unwrap()
+        .catalog;
     assert_ne!(
         catalog_digest(&repriced),
         catalog_digest(&seed),

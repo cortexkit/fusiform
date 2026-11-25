@@ -2,6 +2,23 @@
   "notes": "wire.api follows models.dev's base-URL convention: include the version path so consumers append only the operation (/messages, /chat/completions, or /models/{id}:streamGenerateContent). Curated and observed bases are therefore interchangeable. Provider entries (model *) fill only missing observed endpoints on current upstream rows; disclosures name each affected model. A complete_providers entry declares that the provider's per-model corrections list every model its source routes: any other model of that provider has wire.api withheld on current reads, disclosed with the entry's source and notes.",
   "corrections": [
     {
+      "provider": "elevenlabs",
+      "model": "*",
+      "field": "wire.api",
+      "value": "https://api.elevenlabs.io/v1",
+      "replaces": "https://api.elevenlabs.io",
+      "withheld": false,
+      "source_ref": {
+        "repo": "https://elevenlabs.io",
+        "commit": "accessed 2026-11-25",
+        "file": "https://elevenlabs.io/docs/api-reference/text-to-speech/convert.md"
+      },
+      "quote": "POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+      "established_by": "fusiform",
+      "established_at_ms": 1795564800000,
+      "review_by_ms": 1800748800000
+    },
+    {
       "provider": "openai",
       "model": "*",
       "field": "wire.api",

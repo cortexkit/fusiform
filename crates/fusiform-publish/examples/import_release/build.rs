@@ -171,7 +171,10 @@ fn nullable_projection_keys() -> ImportResult<BTreeSet<String>> {
     // A null era for a sparse fact is a withdrawal. The presence of a null
     // in the projection of an otherwise empty model identifies the base
     // facts that publish null instead. Use the projection, not a copied list.
-    let catalog = normalize_models_dev(br#"{"p":{"models":{"m":{}}}}"#)?.catalog;
+    let catalog = normalize_models_dev(
+        br#"{"p":{"models":{"m":{"type":"chat","capabilities":{},"api":{}}}}}"#,
+    )?
+    .catalog;
     let model = catalog.models().next().ok_or("empty projection probe")?;
     Ok(facts_of(model)
         .values

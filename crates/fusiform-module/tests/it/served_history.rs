@@ -339,7 +339,7 @@ fn oscillating_store() -> (CatalogStore, tempfile::TempDir) {
                 detail: None,
             })
             .unwrap();
-        let catalog = fusiform_core::normalize_models_dev_with(
+        let catalog = fusiform_core::normalize_legacy_models_dev_for_tests_with(
             &serde_json::to_vec(&document).unwrap(),
             &fusiform_module::input_audio::evidence(),
         )

@@ -22,9 +22,11 @@ pub(crate) fn store() -> (CatalogStore, tempfile::TempDir) {
         },
     })
     .unwrap();
-    let catalog = fusiform_core::normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
-        .unwrap()
-        .catalog;
+    let catalog = fusiform_core::normalize_legacy_models_dev_for_tests(
+        &serde_json::to_vec(&upstream).unwrap(),
+    )
+    .unwrap()
+    .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     (store, dir)

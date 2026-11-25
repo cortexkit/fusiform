@@ -76,12 +76,25 @@ pub(crate) const TEST_HELD: &[(&str, &str)] = &[
 #[cfg(test)]
 pub(crate) const TEST_HELD_SINCE_MS: i64 = 1_792_614_600_000;
 
-/// The shipped document with `TEST_HELD` held, whatever the shipped file
-/// holds today. The held tests plant this so they test the mechanism, not
-/// whichever rows happen to be held when they run.
+/// Include the former fallback rows in tests of historical curation. Current
+/// reads get them upstream; a held or withdrawn claim still needs a fixture.
+#[cfg(test)]
+pub(crate) fn document_with_retired_test_models() -> serde_json::Value {
+    let mut doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
+    let mut retired: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/retired-curated-models.json")).unwrap();
+    doc["models"]
+        .as_array_mut()
+        .unwrap()
+        .append(retired["models"].as_array_mut().unwrap());
+    doc
+}
+
+/// A test document that holds the System One claims. The retired rows are
+/// included so the tests do not depend on current upstream coverage.
 #[cfg(test)]
 pub(crate) fn document_holding_system_one() -> String {
-    let mut doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
+    let mut doc = document_with_retired_test_models();
     doc["held"] = TEST_HELD
         .iter()
         .map(|(provider, model)| {
@@ -185,28 +198,18 @@ mod tests {
     /// load (or a new one) changes this test rather than passing a count.
     const SHIPPED: &[(&str, &str)] = &[
         ("brave", "web-search"),
-        ("cloudflare-workers-ai", "@cf/cloudflare/clairic"),
-        ("cloudflare-workers-ai", "@cf/cloudflare/clef"),
-        ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
         ("deepseek", "search"),
-        ("elevenlabs", "eleven_flash_v2_5"),
         ("exa", "search"),
-        ("google", "gemini-3.5-transcribe"),
-        ("google", "gemini-3.5-transcribe-live"),
-        ("google", "gemini-3.8-flash-tts"),
-        ("google", "gemini-omni-1.2-flash"),
         ("kimi-for-coding", "search"),
         ("meta", "muse-wonder-full-1.0"),
         ("ollama-cloud", "web-search"),
         ("openai", "gpt-6-luna-decisions"),
-        ("openai", "gpt-image-2.6-flare"),
-        ("openai", "gpt-live-transcribe"),
-        ("openai", "gpt-realtime-2.1"),
-        ("openai", "gpt-transcribe"),
         ("tavily", "search"),
-        ("typesafe", "jev-1.13.0"),
-        ("typesafe", "jev-1.14.0"),
     ];
+
+    fn test_models() -> CuratedModels {
+        load_reporting_rejects(&document_with_retired_test_models().to_string()).0
+    }
 
     /// The shipped document with one edit applied to the row of that identity.
     fn planted_in(
@@ -214,7 +217,7 @@ mod tests {
         model: &str,
         edit: impl FnOnce(&mut serde_json::Value),
     ) -> String {
-        let mut doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
+        let mut doc = document_with_retired_test_models();
         let row = doc["models"]
             .as_array_mut()
             .unwrap()
@@ -267,7 +270,8 @@ mod tests {
             .keys()
             .map(|(provider, model)| (provider.as_str(), model.as_str()))
             .collect();
-        assert_eq!(ids, SHIPPED);
+        assert_eq!(ids.len(), test_models().len());
+        assert!(SHIPPED.iter().all(|row| ids.contains(row)));
     }
 
     #[test]
@@ -282,7 +286,7 @@ mod tests {
         assert!(rejects[0].contains("cloudflare-workers-ai/@cf/cloudflare/not-a-row"));
         assert!(rejects[0].contains("must name a row in models"));
         assert_eq!(table.held.len(), SHIPPED_HELD.len());
-        assert_eq!(table.models.len(), SHIPPED.len());
+        assert_eq!(table.models.len(), test_models().len());
     }
 
     #[test]
@@ -320,7 +324,7 @@ mod tests {
     fn single_reject(doc: &str, provider: &str, model: &str) -> String {
         let (rows, rejects) = load_reporting_rejects(doc);
         assert_eq!(rejects.len(), 1, "{rejects:?}");
-        assert_eq!(rows.len(), SHIPPED.len() - 1);
+        assert_eq!(rows.len(), test_models().len() - 1);
         assert!(!rows.contains_key(&(provider.to_string(), model.to_string())));
         assert!(rejects[0].contains(&format!("{provider}/{model}")));
         rejects[0].clone()
@@ -339,7 +343,8 @@ mod tests {
 
     #[test]
     fn upstream_now_publishes_this_row_remove_the_curated_row() {
-        let seed = serde_json::from_str(include_str!("../data/models-dev-seed.json")).unwrap();
+        let seed =
+            crate::seed::catalog().expect("the embedded seed must have the models.dev v2 shape");
         let collisions = upstream_collisions(models(), &seed);
         assert!(collisions.is_empty(), "{}", collisions.join("\n"));
     }
@@ -350,7 +355,11 @@ mod tests {
         // each row rather than only the first one in the file.
         for (provider, model) in SHIPPED {
             let mut seed = serde_json::json!({});
-            seed[*provider]["models"][*model] = serde_json::json!({});
+            seed[*provider]["models"][*model] =
+                serde_json::json!({"type":"chat","api":{},"capabilities":{}});
+            let seed = fusiform_core::normalize_models_dev(&serde_json::to_vec(&seed).unwrap())
+                .unwrap()
+                .catalog;
             let collisions = upstream_collisions(models(), &seed);
             assert_eq!(collisions.len(), 1, "{provider}/{model}: {collisions:?}");
             assert!(collisions[0].starts_with(&format!("{provider}/{model}:")));
@@ -527,7 +536,7 @@ mod tests {
             });
             let (rows, rejects) = load_reporting_rejects(&doc);
             assert!(rejects.is_empty(), "{kind}: {rejects:?}");
-            assert_eq!(rows.len(), SHIPPED.len());
+            assert_eq!(rows.len(), test_models().len());
         }
     }
 
@@ -583,7 +592,7 @@ mod tests {
             .unwrap()
             .extend([duplicate, serde_json::json!({})]);
         let (rows, rejects) = load_reporting_rejects(&doc.to_string());
-        assert_eq!(rows.len(), SHIPPED.len());
+        assert_eq!(rows.len(), test_models().len());
         assert_eq!(rejects.len(), 2);
         assert!(rejects[0].contains("duplicate"));
         assert!(rejects[1].contains("did not parse"));

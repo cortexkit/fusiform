@@ -24,7 +24,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 data_dir="$repo_root/crates/fusiform-module/data"
 snapshot="$data_dir/models-dev-seed.json"
 meta="$data_dir/models-dev-seed.meta.json"
-source_url="https://models.dev/api.json"
+source_url="https://models.dev/experimental/v2.0/api.json"
 
 command -v python3 >/dev/null || { echo "error: python3 is required" >&2; exit 1; }
 mkdir -p "$data_dir"

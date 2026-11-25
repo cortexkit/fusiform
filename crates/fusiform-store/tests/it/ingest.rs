@@ -1,13 +1,13 @@
 //! Ingest behaviour, driven by the real normalizer over real upstream bytes.
 //!
-//! The catalogs here are produced by `normalize_models_dev` from the fixture
+//! The catalogs here are produced by `normalize_legacy_models_dev_for_tests` from the fixture
 //! excerpt cut from a live fetch, then mutated at the JSON level to simulate an
 //! upstream change. Nothing constructs a `NormalizedModel` by hand: a
 //! hand-built catalog would encode this test author's belief about what the
 //! normalizer produces, and the assertions would then certify that belief
 //! rather than the code.
 
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, FactKey, NewEra, NewObservation};
@@ -56,7 +56,9 @@ fn observe(f: &Fixture, at: i64, outcome: ObservationOutcome) -> i64 {
 
 /// Seed the store from the fixture as it stands, returning the era count.
 fn seed(f: &Fixture, at: i64) -> usize {
-    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(&f.store, &catalog, Timestamp(at), BoundaryKind::Seed, None).unwrap();
     f.store.append_eras(&plan.eras).unwrap()
 }
@@ -65,7 +67,9 @@ fn seed(f: &Fixture, at: i64) -> usize {
 #[test]
 fn a_first_ingest_records_every_fact_as_new() {
     let f = fixture();
-    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
+        .unwrap()
+        .catalog;
 
     let plan = plan_ingest(
         &f.store,
@@ -106,7 +110,9 @@ fn a_first_ingest_records_every_fact_as_new() {
 #[test]
 fn ingested_eras_never_carry_serve_only_billing_states() {
     let f = fixture();
-    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
+        .unwrap()
+        .catalog;
     let first = plan_ingest(
         &f.store,
         &catalog,
@@ -125,7 +131,7 @@ fn ingested_eras_never_carry_serve_only_billing_states() {
         .unwrap()
         .remove("cost")
         .is_some());
-    let withdrawn = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+    let withdrawn = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
         .catalog;
     let next = plan_ingest(
@@ -208,7 +214,9 @@ fn re_ingesting_the_same_document_writes_nothing() {
     seed(&f, 1_000);
 
     observe(&f, 2_000, ObservationOutcome::Unchanged);
-    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &f.store,
         &catalog,
@@ -245,7 +253,9 @@ fn one_rate_change_opens_exactly_one_era() {
     let mutated = mutate(FIXTURE, "\"input\": 3,", "\"input\": 4,");
     assert_ne!(mutated, FIXTURE, "the mutation must actually apply");
 
-    let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(mutated.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &f.store,
         &catalog,
@@ -310,7 +320,9 @@ fn a_disappeared_model_is_tombstoned_and_stays_readable() {
     zhipu.insert("models".to_string(), serde_json::json!({}));
     let mutated = serde_json::to_string(&doc).unwrap();
 
-    let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(mutated.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &f.store,
         &catalog,
@@ -382,7 +394,9 @@ fn a_returning_model_opens_a_new_existence_era() {
         .insert("models".to_string(), serde_json::json!({}));
     let removed = serde_json::to_string(&without).unwrap();
 
-    let catalog = normalize_models_dev(removed.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(removed.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &f.store,
         &catalog,
@@ -396,7 +410,9 @@ fn a_returning_model_opens_a_new_existence_era() {
     // It comes back, unchanged from its original form.
     observe(&f, 4_000, ObservationOutcome::Unchanged);
     let back = observe(&f, 5_000, ObservationOutcome::Changed { snapshot_seq: 2 });
-    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &f.store,
         &catalog,
@@ -476,7 +492,9 @@ fn reordering_a_modality_array_is_not_a_change() {
         serde_json::to_string(&doc).unwrap()
     };
 
-    let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(mutated.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &f.store,
         &catalog,
@@ -514,7 +532,9 @@ fn reordering_reasoning_option_values_is_a_change() {
     // CONTROL first: the identical document writes nothing. Without it the
     // assertion below would also pass on a diff that opened an era for this
     // fact on every poll.
-    let identical = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let identical = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &f.store,
         &identical,
@@ -548,7 +568,9 @@ fn reordering_reasoning_option_values_is_a_change() {
         serde_json::to_string(&doc).unwrap()
     };
 
-    let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(mutated.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &f.store,
         &catalog,
@@ -615,7 +637,9 @@ fn a_withdrawn_rate_is_tombstoned_rather_than_left_current() {
         .remove("input");
     let mutated = serde_json::to_string(&doc).unwrap();
 
-    let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(mutated.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &f.store,
         &catalog,
@@ -674,7 +698,9 @@ fn a_withdrawn_rate_is_tombstoned_rather_than_left_current() {
     observe(&f, 4_000, ObservationOutcome::Unchanged);
     let again = plan_ingest(
         &f.store,
-        &normalize_models_dev(mutated.as_bytes()).unwrap().catalog,
+        &normalize_legacy_models_dev_for_tests(mutated.as_bytes())
+            .unwrap()
+            .catalog,
         Timestamp(5_000),
         BoundaryKind::Observed,
         None,
@@ -713,7 +739,9 @@ fn a_withdrawn_limit_becomes_null() {
         .remove("limit");
     let mutated = serde_json::to_string(&doc).unwrap();
 
-    let catalog = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(mutated.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &f.store,
         &catalog,
@@ -819,7 +847,9 @@ fn the_digest_moves_exactly_when_the_diff_does() {
     seed(&f, 1_000);
     observe(&f, 2_000, ObservationOutcome::Unchanged);
 
-    let base = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let base = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
+        .unwrap()
+        .catalog;
     let base_digest = catalog_digest(&base);
 
     // A reserialization: different bytes, same facts. The diff writes nothing,
@@ -831,7 +861,9 @@ fn the_digest_moves_exactly_when_the_diff_does() {
         FIXTURE.as_bytes(),
         "the round trip must change bytes"
     );
-    let same = normalize_models_dev(&reserialized).unwrap().catalog;
+    let same = normalize_legacy_models_dev_for_tests(&reserialized)
+        .unwrap()
+        .catalog;
 
     assert_eq!(
         catalog_digest(&same),
@@ -851,7 +883,9 @@ fn the_digest_moves_exactly_when_the_diff_does() {
     // A real change: one rate moves. Both must move together.
     let mutated = mutate(FIXTURE, "\"input\": 3,", "\"input\": 4,");
     assert_ne!(mutated, FIXTURE, "the mutation must apply");
-    let changed = normalize_models_dev(mutated.as_bytes()).unwrap().catalog;
+    let changed = normalize_legacy_models_dev_for_tests(mutated.as_bytes())
+        .unwrap()
+        .catalog;
 
     assert_ne!(
         catalog_digest(&changed),
@@ -878,7 +912,9 @@ fn the_digest_moves_exactly_when_the_diff_does() {
 fn the_digest_ignores_quarantined_fields() {
     use fusiform_store::ingest::catalog_digest;
 
-    let base = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let base = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
+        .unwrap()
+        .catalog;
     let before = catalog_digest(&base);
 
     // Credential environment names remain unread, unlike connection claims.
@@ -891,7 +927,9 @@ fn the_digest_ignores_quarantined_fields() {
         .insert("env".to_string(), serde_json::json!(["ANOTHER_API_KEY"]));
     let mutated = serde_json::to_vec(&doc).unwrap();
 
-    let changed = normalize_models_dev(&mutated).unwrap().catalog;
+    let changed = normalize_legacy_models_dev_for_tests(&mutated)
+        .unwrap()
+        .catalog;
     assert_eq!(
         catalog_digest(&changed),
         before,
@@ -945,12 +983,12 @@ fn the_digest_is_not_confusable_across_field_boundaries() {
     let right = build("a", "b/c");
 
     let dl = catalog_digest(
-        &normalize_models_dev(&serde_json::to_vec(&left).unwrap())
+        &normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&left).unwrap())
             .unwrap()
             .catalog,
     );
     let dr = catalog_digest(
-        &normalize_models_dev(&serde_json::to_vec(&right).unwrap())
+        &normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&right).unwrap())
             .unwrap()
             .catalog,
     );
@@ -972,7 +1010,9 @@ fn the_digest_is_not_confusable_across_field_boundaries() {
 fn the_digest_does_not_depend_on_provider_order() {
     use fusiform_store::ingest::catalog_digest;
 
-    let mut catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let mut catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
+        .unwrap()
+        .catalog;
     let ordered = catalog_digest(&catalog);
 
     catalog.providers.reverse();
@@ -1032,7 +1072,9 @@ fn a_store_behind_the_document_catches_up_in_one_changed_poll() {
         .expect("the model this test removes must be in the fixture");
     let behind_doc = serde_json::to_string(&behind).unwrap();
 
-    let catalog = normalize_models_dev(behind_doc.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(behind_doc.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &f.store,
         &catalog,
@@ -1069,7 +1111,9 @@ fn a_store_behind_the_document_catches_up_in_one_changed_poll() {
     // test, which is the invariant working rather than an inconvenience.
     observe(&f, 1_500, ObservationOutcome::Unchanged);
     let detecting = observe(&f, 2_000, ObservationOutcome::Changed { snapshot_seq: 1 });
-    let full = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let full = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &f.store,
         &full,
@@ -1145,9 +1189,10 @@ fn convergence_is_toward_the_document_not_toward_a_consumer() {
         .unwrap()
         .remove("claude-sonnet-4-5")
         .expect("the model this test retires must be in the fixture");
-    let catalog = normalize_models_dev(serde_json::to_string(&retired).unwrap().as_bytes())
-        .unwrap()
-        .catalog;
+    let catalog =
+        normalize_legacy_models_dev_for_tests(serde_json::to_string(&retired).unwrap().as_bytes())
+            .unwrap()
+            .catalog;
     let plan = plan_ingest(
         &f.store,
         &catalog,
@@ -1227,7 +1272,9 @@ fn an_annotation_fusiform_added_does_not_open_an_era() {
     let f = fixture();
     let store = &f.store;
 
-    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
+        .unwrap()
+        .catalog;
     let obs = store
         .record_observation(&NewObservation {
             source: SourceId::ModelsDev,
@@ -1317,7 +1364,9 @@ fn an_annotation_fusiform_added_does_not_open_an_era() {
         doc["anthropic"]["models"]["claude-sonnet-4-5"]["cost"]["input"] = serde_json::json!(99.0);
         serde_json::to_vec(&doc).unwrap()
     };
-    let moved_catalog = normalize_models_dev(&moved).unwrap().catalog;
+    let moved_catalog = normalize_legacy_models_dev_for_tests(&moved)
+        .unwrap()
+        .catalog;
     let plan3 = plan_ingest(
         store,
         &moved_catalog,
@@ -1346,7 +1395,9 @@ fn a_producer_annotation_moves_neither_the_digest_nor_the_diff() {
     let provider = "anthropic";
     let model = "claude-sonnet-4-5";
     let annotation = json!({"kind": "assumed_by_policy", "policy": "models-dev-usd-v1"});
-    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
+        .unwrap()
+        .catalog;
     let seed_at = Timestamp(1_000);
     let mut seed = plan_ingest(&f.store, &catalog, seed_at, BoundaryKind::Seed, None).unwrap();
     let rate = seed
@@ -1374,7 +1425,7 @@ fn a_producer_annotation_moves_neither_the_digest_nor_the_diff() {
     let cost = &mut body[provider]["models"][model]["cost"];
     assert!(cost.get("unit_provenance").is_none());
     cost["unit_provenance"] = annotation;
-    let incoming = normalize_models_dev(body.to_string().as_bytes())
+    let incoming = normalize_legacy_models_dev_for_tests(body.to_string().as_bytes())
         .unwrap()
         .catalog;
     assert_eq!(catalog_digest(&catalog), catalog_digest(&incoming));
@@ -1899,9 +1950,9 @@ fn streamed_digest_matches_the_original_tuple_sort_on_the_embedded_seed() {
         }
         hasher.finalize().to_hex().to_string()
     }
-    let mut catalog = fusiform_core::normalize::normalize_models_dev(include_bytes!(
-        "../../../fusiform-module/data/models-dev-seed.json"
-    ))
+    let mut catalog = fusiform_core::normalize::normalize_legacy_models_dev_for_tests(
+        include_bytes!("../../../fusiform-module/data/models-dev-seed.json"),
+    )
     .unwrap()
     .catalog;
     let with_refusals = catalog_digest(&catalog);

@@ -1,5 +1,5 @@
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::{serve_catalog_get, CatalogGetResponse};
 use fusiform_store::ingest::plan_ingest;
@@ -50,7 +50,9 @@ fn ingest(store: &CatalogStore, bytes: &[u8], at: i64) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_models_dev(bytes).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(bytes)
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         store,
         &catalog,
@@ -198,7 +200,7 @@ fn embedded_seed_upgrade_records_exactly_the_published_names_as_first_values() {
             }
         }
     }
-    let catalog = normalize_models_dev(seed).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(seed).unwrap().catalog;
     let mut old_catalog = catalog.clone();
     for provider in &mut old_catalog.providers {
         for model in &mut provider.models {

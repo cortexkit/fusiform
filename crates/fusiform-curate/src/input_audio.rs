@@ -162,8 +162,6 @@ pub fn load_for_schema(doc: &str, schema: &str) -> (InputAudioSources, Vec<Strin
             Some("source_ref must be an https URL to the provider's pricing page")
         } else if !row.quote.contains("1M tokens") && !row.quote.contains("million tokens") {
             Some("quote must state the per-million-token unit it establishes")
-        } else if included_present && schema != SCHEMA {
-            Some("included_models is supported only for input-audio evidence")
         } else if included_present && excluded_present {
             Some("included_models and excluded_models cannot both be set")
         } else if included_present
@@ -188,12 +186,12 @@ pub fn load_for_schema(doc: &str, schema: &str) -> (InputAudioSources, Vec<Strin
                 entry.model_id.trim().is_empty()
                     || !models.insert(&entry.model_id)
                     || entry.value == 0
-                    || entry.basis != "measured"
+                    || !matches!(entry.basis.as_str(), "measured" | "stated")
                     || !entry.source_ref.starts_with("https://")
                     || entry.quote.trim().is_empty()
             })
         }) {
-            Some("an audio token override needs a unique model_id, positive integer, measured basis, https source_ref and quote")
+            Some("an audio token override needs a unique model_id, positive integer, measured or stated basis, https source_ref and quote")
         } else if row.established_at_ms <= 0
             || row.review_by_ms.checked_sub(row.established_at_ms) != Some(REVIEW_INTERVAL_MS)
         {
@@ -277,8 +275,19 @@ pub fn add_output_evidence(
     rows: &InputAudioSources,
 ) -> ChargeUnitEvidence {
     rows.values().fold(
-        evidence.with_output_audio_per_token(rows.keys().cloned()),
+        evidence.with_output_audio_per_token(
+            rows.values()
+                .filter(|row| row.included_models.is_none())
+                .map(|row| row.provider_id.clone()),
+        ),
         |evidence, row| {
+            let evidence = row
+                .included_models
+                .iter()
+                .flatten()
+                .fold(evidence, |evidence, model| {
+                    evidence.with_output_audio_model(&row.provider_id, model)
+                });
             row.excluded_models
                 .iter()
                 .fold(evidence, |evidence, model| {
@@ -289,11 +298,12 @@ pub fn add_output_evidence(
 }
 
 /// Listed providers the embedded seed does not carry, or carries with no
-/// `cost.input_audio` on any row, included or excluded models the seed does not
-/// carry with `cost.input_audio`, and audio token overrides naming models
+/// `cost.audio.input` on any row, included or excluded models the seed does not
+/// carry with `cost.audio.input`, and audio token overrides naming models
 /// absent from that provider: those entries should be corrected or removed.
 pub fn unused_rows(rows: &InputAudioSources, seed: &serde_json::Value) -> Vec<String> {
-    let publishes_audio = |model: &serde_json::Value| model["cost"].get("input_audio").is_some();
+    let publishes_audio =
+        |model: &serde_json::Value| model["cost"]["audio"]["input"].get("price").is_some();
     let mut unused = Vec::new();
     for row in rows.values() {
         let provider = &row.provider_id;
@@ -306,14 +316,14 @@ pub fn unused_rows(rows: &InputAudioSources, seed: &serde_json::Value) -> Vec<St
                 {
                     unused.push(format!(
                         "{provider}/{model_id}: included, but the embedded seed has no such row \
-                        publishing cost.input_audio; correct or remove the inclusion"
+                         publishing cost.audio.input.price; correct or remove the inclusion"
                     ));
                 }
             }
         }
         if !models.is_some_and(|models| models.values().any(publishes_audio)) {
             unused.push(format!(
-                "{provider}: no row in the embedded seed publishes cost.input_audio; \
+                "{provider}: no row in the embedded seed publishes cost.audio.input.price; \
                  correct or remove the input-audio source"
             ));
         }

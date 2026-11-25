@@ -1,5 +1,5 @@
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::{serve_tool_call, ToolResponse};
 use fusiform_store::ingest::plan_ingest;
@@ -36,7 +36,9 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_models_dev(UPSTREAM).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(UPSTREAM)
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     (store, dir)
@@ -122,7 +124,7 @@ fn published_wire_claims_reach_plain_reads_and_wire_namespace_reads() {
 #[test]
 fn withdrawn_wire_claims_are_absent_from_catalog_but_kept_in_history() {
     let (store, _dir) = store();
-    let catalog = normalize_models_dev(
+    let catalog = normalize_legacy_models_dev_for_tests(
         br#"{
         "p": {"models": {"model": {}, "provider": {}}},
         "unknown": {"models": {"none": {}}}
@@ -210,10 +212,12 @@ fn withdrawn_wire_claims_are_absent_from_catalog_but_kept_in_history() {
 fn a_wire_claim_change_moves_the_digest_and_opens_one_era() {
     use fusiform_store::ingest::catalog_digest;
     let (store, _dir) = store();
-    let before = normalize_models_dev(UPSTREAM).unwrap().catalog;
+    let before = normalize_legacy_models_dev_for_tests(UPSTREAM)
+        .unwrap()
+        .catalog;
     let mut upstream: serde_json::Value = serde_json::from_slice(UPSTREAM).unwrap();
     upstream["p"]["models"]["model"]["provider"]["shape"] = serde_json::json!("completions");
-    let changed = normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
+    let changed = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&upstream).unwrap())
         .unwrap()
         .catalog;
     assert_ne!(catalog_digest(&before), catalog_digest(&changed));

@@ -68,10 +68,11 @@ pub(super) fn fixture_in_mode(store_mode: bool) -> (CatalogStore, tempfile::Temp
                     "family":"gemini","limit":{"context":1000},"cost":{"input":1,"output":2}}}
         }),
     );
-    let catalog =
-        fusiform_core::normalize::normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
-            .unwrap()
-            .catalog;
+    let catalog = fusiform_core::normalize::normalize_legacy_models_dev_for_tests(
+        &serde_json::to_vec(&upstream).unwrap(),
+    )
+    .unwrap()
+    .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     let obs = observation(&store, 1000);
@@ -462,7 +463,7 @@ fn continuation_after_era_write_is_refused() {
     let (store, _dir) = fixture();
     let first = get(&store, json!({"paged":true}), 2600);
     let token = first.next_page_token.unwrap();
-    let catalog = fusiform_core::normalize::normalize_models_dev(
+    let catalog = fusiform_core::normalize::normalize_legacy_models_dev_for_tests(
         br#"{"new":{"id":"new","name":"new","models":{"m":{"id":"m","name":"new"}}}}"#,
     )
     .unwrap()

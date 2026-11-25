@@ -1,7 +1,7 @@
 //! Read surfaces preserve recorded values, bounded corrections and poll provenance.
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::{serve_tool_call, ToolResponse};
 use fusiform_store::ingest::plan_ingest;
@@ -67,7 +67,9 @@ fn store_from(upstream: &str) -> (CatalogStore, tempfile::TempDir) {
         })
         .unwrap();
 
-    let catalog = normalize_models_dev(upstream.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(upstream.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
 
@@ -290,7 +292,9 @@ fn history_preserves_the_recorded_values() {
         limit["context"] = serde_json::json!(900_000);
         serde_json::to_string(&doc).unwrap()
     };
-    let catalog = normalize_models_dev(moved.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(moved.as_bytes())
+        .unwrap()
+        .catalog;
     let obs = store
         .record_observation(&NewObservation {
             source: SourceId::ModelsDev,
@@ -376,7 +380,9 @@ fn a_corrected_fact_is_withheld_from_named_and_bulk_reads() {
             serde_json::json!(900_000);
         serde_json::to_string(&doc).unwrap()
     };
-    let catalog = normalize_models_dev(moved.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(moved.as_bytes())
+        .unwrap()
+        .catalog;
     let obs = store
         .record_observation(&NewObservation {
             source: SourceId::ModelsDev,
@@ -534,7 +540,9 @@ fn a_read_can_be_replayed_by_the_instant_it_resolved() {
             serde_json::json!(32_000);
         serde_json::to_string(&doc).unwrap()
     };
-    let catalog = normalize_models_dev(moved.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(moved.as_bytes())
+        .unwrap()
+        .catalog;
     let obs = store
         .record_observation(&NewObservation {
             source: SourceId::ModelsDev,

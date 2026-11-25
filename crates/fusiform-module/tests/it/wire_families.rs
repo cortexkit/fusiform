@@ -62,7 +62,7 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
         },
     })
     .unwrap();
-    let catalog = fusiform_core::normalize_models_dev_with(
+    let catalog = fusiform_core::normalize_legacy_models_dev_for_tests_with(
         &serde_json::to_vec(&upstream).unwrap(),
         &fusiform_module::input_audio::evidence(),
     )

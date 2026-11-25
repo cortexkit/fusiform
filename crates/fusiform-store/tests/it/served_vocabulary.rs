@@ -12,7 +12,9 @@
 //! repriced 20-40% on 2026-08-11 with `last_updated` unchanged). Answering
 //! "no, and here is what stops it" required something that stops it.
 
-use fusiform_core::normalize::{normalize_models_dev, normalize_models_dev_with};
+use fusiform_core::normalize::{
+    normalize_legacy_models_dev_for_tests, normalize_legacy_models_dev_for_tests_with,
+};
 use fusiform_core::ChargeUnitEvidence;
 use fusiform_store::ingest::fact_keys_of;
 use fusiform_store::FactKey;
@@ -107,7 +109,7 @@ fn the_served_fact_set_is_exactly_this() {
     .unwrap();
     fixture["google"]["models"]["gemini-3.1-flash-live-preview"] =
         seed["google"]["models"]["gemini-3.1-flash-live-preview"].clone();
-    let outcome = normalize_models_dev_with(
+    let outcome = normalize_legacy_models_dev_for_tests_with(
         &serde_json::to_vec(&fixture).unwrap(),
         &ChargeUnitEvidence::input_audio_per_token(["google"])
             .with_output_audio_per_token(["google"]),
@@ -220,7 +222,7 @@ fn the_served_fact_set_is_exactly_this() {
 /// different key would pass this and fail the set assertion above.
 #[test]
 fn unreliable_and_renderer_selecting_fields_are_not_facts() {
-    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
+    let outcome = normalize_legacy_models_dev_for_tests(FIXTURE).expect("fixture normalizes");
 
     for model in outcome.catalog.models() {
         for (key, value) in fusiform_store::ingest::facts_with_values(model) {
@@ -253,7 +255,7 @@ fn unreliable_and_renderer_selecting_fields_are_not_facts() {
 /// values, on every model that carries a mode.
 #[test]
 fn mode_request_bytes_never_reach_a_fact() {
-    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
+    let outcome = normalize_legacy_models_dev_for_tests(FIXTURE).expect("fixture normalizes");
 
     // Every byte-level value the fixture's modes carry: the body parameter
     // names, their values, the header name and the header value.
@@ -308,7 +310,7 @@ fn mode_request_bytes_never_reach_a_fact() {
 /// one the parser discarded. What must not happen is it reaching a consumer.
 #[test]
 fn last_updated_is_parsed_but_never_reaches_a_fact() {
-    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
+    let outcome = normalize_legacy_models_dev_for_tests(FIXTURE).expect("fixture normalizes");
 
     // It is genuinely parsed: this test would be vacuous if the field were
     // simply absent from the normalized model.
@@ -366,7 +368,7 @@ fn last_updated_is_parsed_but_never_reaches_a_fact() {
 /// built from the constants could.
 #[test]
 fn every_namespace_prefix_selects_real_facts() {
-    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
+    let outcome = normalize_legacy_models_dev_for_tests(FIXTURE).expect("fixture normalizes");
 
     let mut produced: Vec<String> = Vec::new();
     for model in outcome.catalog.models() {
@@ -438,7 +440,8 @@ fn an_unknown_modality_list_is_stored_as_null() {
         "the fixture must have had a block, or the mutation proves nothing"
     );
 
-    let outcome = normalize_models_dev(&serde_json::to_vec(&doc).unwrap()).unwrap();
+    let outcome =
+        normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap()).unwrap();
     let model = outcome
         .catalog
         .models()
@@ -522,7 +525,7 @@ fn a_tier_rate_without_a_base_rate_of_the_same_class_survives() {
       }
     }"#;
 
-    let outcome = normalize_models_dev(payload.as_bytes())
+    let outcome = normalize_legacy_models_dev_for_tests(payload.as_bytes())
         .expect("a tier rate without a base rate must normalize, not refuse");
     let model = outcome
         .catalog
@@ -587,7 +590,7 @@ fn a_stored_rate_carries_no_annotation_fusiform_invented() {
         },
     })
     .unwrap();
-    let catalog = normalize_models_dev(FIXTURE)
+    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE)
         .expect("fixture normalizes")
         .catalog;
     let plan = fusiform_store::ingest::plan_ingest(
@@ -656,7 +659,7 @@ fn a_stored_rate_carries_no_annotation_fusiform_invented() {
 /// the decision at the moment the field appears rather than at review time.
 #[test]
 fn every_capability_field_reaches_a_fact() {
-    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
+    let outcome = normalize_legacy_models_dev_for_tests(FIXTURE).expect("fixture normalizes");
     let model = outcome
         .catalog
         .models()
@@ -740,7 +743,7 @@ fn every_capability_field_reaches_a_fact() {
 /// appears rather than at review time.
 #[test]
 fn every_limit_field_reaches_a_fact() {
-    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
+    let outcome = normalize_legacy_models_dev_for_tests(FIXTURE).expect("fixture normalizes");
     let model = outcome
         .catalog
         .models()
@@ -810,8 +813,8 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
     row["type"] = serde_json::json!("transcription");
     row["provider"] =
         serde_json::json!({"npm": "@sdk/model", "api": "https://model/", "shape": "responses"});
-    let outcome =
-        normalize_models_dev(&serde_json::to_vec(&fixture).unwrap()).expect("fixture normalizes");
+    let outcome = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&fixture).unwrap())
+        .expect("fixture normalizes");
     let model = outcome
         .catalog
         .models()
@@ -903,7 +906,7 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
 #[test]
 fn canonical_identity_and_open_status_reach_stored_facts() {
     use fusiform_store::ingest::facts_with_values;
-    let outcome = normalize_models_dev(
+    let outcome = normalize_legacy_models_dev_for_tests(
         br#"{"p":{"models":{
         "published":{"canonical_model_id":"lab/weights-1.0","status":"future-preview"},
         "unpublished":{}
@@ -936,7 +939,7 @@ fn canonical_identity_and_open_status_reach_stored_facts() {
 #[test]
 fn normalized_model_type_is_verbatim_and_sparse() {
     use fusiform_store::ingest::facts_with_values;
-    let outcome = normalize_models_dev(
+    let outcome = normalize_legacy_models_dev_for_tests(
         br#"{"p":{"models":{
         "transcription":{"type":"transcription"},
         "future":{"type":"Future Kind \"v2\""},

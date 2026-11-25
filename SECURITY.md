@@ -18,7 +18,7 @@ does.
 
 ### Untrusted input: the models.dev catalog
 
-Fusiform fetches `https://models.dev/api.json` over HTTPS every 30 minutes. The
+Fusiform fetches `https://models.dev/experimental/v2.0/api.json` over HTTPS every 30 minutes. The
 document is not signed or otherwise authenticated beyond TLS, so its content is
 treated as untrusted data:
 

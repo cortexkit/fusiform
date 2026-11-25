@@ -9,7 +9,10 @@
 //! exercises a shape the real document actually contains. Inline synthetic
 //! payloads separately exercise unpublished fields and future string values.
 
-use fusiform_core::normalize::{normalize_models_dev, normalize_models_dev_with, NormalizedModel};
+use fusiform_core::normalize::{
+    normalize_legacy_models_dev_for_tests, normalize_legacy_models_dev_for_tests_with,
+    NormalizedModel,
+};
 use fusiform_core::{
     ChargeBasis, ChargeUnitEvidence, Modality, NormalizeError, RateCondition, RateValue,
     TokenClass, UnpricedReason,
@@ -22,7 +25,7 @@ fn normalize_with_bad_neighbor(bad: &str) -> fusiform_core::NormalizeOutcome {
     let document = format!(
         r#"{{"p":{{"models":{{"good":{{"cost":{{"input":1,"output":2}}}},"bad":{bad}}}}}}}"#
     );
-    let outcome = normalize_models_dev(document.as_bytes())
+    let outcome = normalize_legacy_models_dev_for_tests(document.as_bytes())
         .unwrap_or_else(|error| panic!("{bad} must not refuse its healthy neighbor: {error}"));
     assert_eq!(model(&outcome, "p/good").rates.len(), 2);
     outcome
@@ -110,7 +113,7 @@ fn extreme_valid_json_exponents_report_bad_rate_without_refusing_the_document() 
     ] {
         let payload = format!(r#"{{"p":{{"models":{{"m":{{"cost":{{"input":{literal}}}}}}}}}}}"#);
         assert!(serde_json::from_str::<serde_json::Value>(&payload).is_ok());
-        let outcome = normalize_models_dev(payload.as_bytes()).unwrap();
+        let outcome = normalize_legacy_models_dev_for_tests(payload.as_bytes()).unwrap();
         assert!(model(&outcome, "p/m").rates.is_empty());
         assert!(
             matches!(outcome.findings.as_slice(), [NormalizeError::BadRate { model, field, detail, .. }]
@@ -126,7 +129,7 @@ fn extreme_valid_json_exponents_report_bad_rate_without_refusing_the_document() 
 }
 
 fn catalog() -> fusiform_core::NormalizeOutcome {
-    normalize_models_dev(FIXTURE).expect("the measured document must normalize")
+    normalize_legacy_models_dev_for_tests(FIXTURE).expect("the measured document must normalize")
 }
 
 fn model<'a>(outcome: &'a fusiform_core::NormalizeOutcome, key: &str) -> &'a NormalizedModel {
@@ -161,7 +164,9 @@ fn the_measured_document_normalizes() {
 #[test]
 fn document_parse_errors_distinguish_nested_failures_from_root_shape() {
     for payload in [&b"{\n\"p\":{\"models\":\"large\"}}"[..], &b"{\n\"p\":"[..]] {
-        let diagnostic = normalize_models_dev(payload).unwrap_err().to_string();
+        let diagnostic = normalize_legacy_models_dev_for_tests(payload)
+            .unwrap_err()
+            .to_string();
         assert!(diagnostic.contains("line 2 column"), "{diagnostic}");
         assert!(
             diagnostic.contains("large") || diagnostic.contains("EOF"),
@@ -170,10 +175,10 @@ fn document_parse_errors_distinguish_nested_failures_from_root_shape() {
         assert!(!diagnostic.contains("document root"), "{diagnostic}");
     }
     assert_eq!(
-        normalize_models_dev(b"[]").unwrap_err(),
+        normalize_legacy_models_dev_for_tests(b"[]").unwrap_err(),
         NormalizeError::NotAProviderMap
     );
-    assert!(!normalize_models_dev(b"[\n")
+    assert!(!normalize_legacy_models_dev_for_tests(b"[\n")
         .unwrap_err()
         .to_string()
         .contains("document root"));
@@ -310,7 +315,7 @@ fn an_unknown_tier_type_is_refused_not_guessed() {
     let text = String::from_utf8(FIXTURE.to_vec()).unwrap();
     let mutated = mutate(&text, "\"type\": \"context\"", "\"type\": \"volume\"");
 
-    let outcome = normalize_models_dev(mutated.as_bytes()).unwrap();
+    let outcome = normalize_legacy_models_dev_for_tests(mutated.as_bytes()).unwrap();
     let Some(NormalizeError::UnknownTierType { model: affected, .. }) = outcome.findings.iter().find(|finding| {
         matches!(finding, NormalizeError::UnknownTierType { tier_type, .. } if tier_type == "volume")
     }) else { panic!("missing unknown tier finding: {:?}", outcome.findings) };
@@ -329,7 +334,7 @@ fn a_tier_without_a_type_is_refused() {
     let text = String::from_utf8(FIXTURE.to_vec()).unwrap();
     let mutated = mutate(&text, "\"type\": \"context\"", "\"kind\": \"context\"");
 
-    let outcome = normalize_models_dev(mutated.as_bytes()).unwrap();
+    let outcome = normalize_legacy_models_dev_for_tests(mutated.as_bytes()).unwrap();
     let Some(NormalizeError::TierMissingType { model: affected }) = outcome
         .findings
         .iter()
@@ -349,7 +354,7 @@ fn a_malformed_tier_spec_is_refused_without_naming_a_cause_it_cannot_know() {
     // key beside it is untouched and still correct.
     let mutated = mutate(&text, "\"size\": 200000", "\"size\": \"200000\"");
 
-    let outcome = normalize_models_dev(mutated.as_bytes()).unwrap();
+    let outcome = normalize_legacy_models_dev_for_tests(mutated.as_bytes()).unwrap();
     let Some(finding @ NormalizeError::RefusedBaseSchedule { model: affected, .. }) = outcome.findings.iter().find(|finding| {
         matches!(finding, NormalizeError::RefusedBaseSchedule { member, .. } if member.starts_with("cost.tiers[") && member.ends_with("].tier"))
     }) else { panic!("missing unreadable tier spec finding: {:?}", outcome.findings) };
@@ -384,7 +389,8 @@ fn malformed_cost_members_refuse_only_the_affected_base_schedule() {
                  "experimental":{"modes":{"fast":{"cost":{"input":3}}}}},
             "other":{"cost":{"input":4}},
         }}});
-        let outcome = normalize_models_dev(payload.to_string().as_bytes()).unwrap();
+        let outcome =
+            normalize_legacy_models_dev_for_tests(payload.to_string().as_bytes()).unwrap();
         assert!(
             outcome.findings.iter().any(|finding| {
                 let diagnostic = finding.to_string();
@@ -436,7 +442,7 @@ fn a_legacy_tier_whose_rates_no_row_reproduces_is_refused() {
     );
 
     let mutated = serde_json::to_vec(&doc).unwrap();
-    let outcome = normalize_models_dev(&mutated).unwrap();
+    let outcome = normalize_legacy_models_dev_for_tests(&mutated).unwrap();
     let Some(NormalizeError::OrphanedLegacyTier {
         model: affected, ..
     }) = outcome
@@ -454,7 +460,7 @@ fn a_legacy_tier_whose_rates_no_row_reproduces_is_refused() {
 
     // And the unmutated fixture normalizes, so the failure above is the
     // mutation's doing rather than a fixture that was already broken.
-    assert!(normalize_models_dev(FIXTURE).is_ok());
+    assert!(normalize_legacy_models_dev_for_tests(FIXTURE).is_ok());
 }
 
 /// A tier threshold that is not the number the legacy key is NAMED for must
@@ -555,7 +561,7 @@ fn unattributed_audio(outcome: &fusiform_core::NormalizeOutcome, label: &str) ->
 #[test]
 fn an_evidenced_provider_prices_input_audio_per_token() {
     let evidence = ChargeUnitEvidence::input_audio_per_token(["google"]);
-    let with = normalize_models_dev_with(FIXTURE, &evidence).unwrap();
+    let with = normalize_legacy_models_dev_for_tests_with(FIXTURE, &evidence).unwrap();
     let without = catalog();
 
     let gemini = model(&with, "google/gemini-flash-latest");
@@ -617,7 +623,9 @@ fn model_only_audio_evidence_does_not_admit_siblings_or_other_providers() {
         "other": {"models":{"verified":{"cost":{"input_audio":32}}}}
     });
     let evidence = ChargeUnitEvidence::none().with_input_audio_model("p", "verified");
-    let outcome = normalize_models_dev_with(&serde_json::to_vec(&doc).unwrap(), &evidence).unwrap();
+    let outcome =
+        normalize_legacy_models_dev_for_tests_with(&serde_json::to_vec(&doc).unwrap(), &evidence)
+            .unwrap();
     assert!(audio_rate(model(&outcome, "p/verified")).is_some());
     for id in ["p/future", "other/verified"] {
         assert!(audio_rate(model(&outcome, id)).is_none());
@@ -636,7 +644,9 @@ fn evidence_for_one_provider_does_not_attribute_another() {
             "cost": {"input": 0.75, "output": 4.5, "input_audio": 0.75}}}},
     });
     let evidence = ChargeUnitEvidence::input_audio_per_token(["google"]);
-    let outcome = normalize_models_dev_with(&serde_json::to_vec(&doc).unwrap(), &evidence).unwrap();
+    let outcome =
+        normalize_legacy_models_dev_for_tests_with(&serde_json::to_vec(&doc).unwrap(), &evidence)
+            .unwrap();
 
     let google = model(&outcome, "google/gemini-3.8-flash");
     let RateValue::Priced { amount, .. } = &audio_rate(google).unwrap().value else {
@@ -651,7 +661,9 @@ fn evidence_for_one_provider_does_not_attribute_another() {
 
     // A model excluded inside a listed provider stays unattributed too.
     let evidence = evidence.excluding_input_audio_of("google", "gemini-3.8-flash");
-    let outcome = normalize_models_dev_with(&serde_json::to_vec(&doc).unwrap(), &evidence).unwrap();
+    let outcome =
+        normalize_legacy_models_dev_for_tests_with(&serde_json::to_vec(&doc).unwrap(), &evidence)
+            .unwrap();
     assert!(audio_rate(model(&outcome, "google/gemini-3.8-flash")).is_none());
     assert!(unattributed_audio(&outcome, "google/gemini-3.8-flash"));
 }
@@ -680,15 +692,20 @@ fn tiered_audio_is_not_served_even_with_evidence() {
         },
     ] {
         let doc = serde_json::json!({"p": {"models": {"m": {"cost": cost}}}});
-        let outcome =
-            normalize_models_dev_with(&serde_json::to_vec(&doc).unwrap(), &evidence).unwrap();
+        let outcome = normalize_legacy_models_dev_for_tests_with(
+            &serde_json::to_vec(&doc).unwrap(),
+            &evidence,
+        )
+        .unwrap();
         assert!(audio_rate(model(&outcome, "p/m")).is_none(), "{cost}");
         assert!(unattributed_audio(&outcome, "p/m"), "{cost}");
     }
 
     // The control: without the tier the same base is served.
     let doc = serde_json::json!({"p": {"models": {"m": {"cost": base}}}});
-    let outcome = normalize_models_dev_with(&serde_json::to_vec(&doc).unwrap(), &evidence).unwrap();
+    let outcome =
+        normalize_legacy_models_dev_for_tests_with(&serde_json::to_vec(&doc).unwrap(), &evidence)
+            .unwrap();
     assert!(audio_rate(model(&outcome, "p/m")).is_some());
 }
 
@@ -700,7 +717,8 @@ fn output_audio_requires_its_own_evidence_and_refuses_conditional_prices() {
     let output = input_only.clone().with_output_audio_per_token(["p"]);
     let has_output = |doc: &serde_json::Value, evidence: &ChargeUnitEvidence| {
         let outcome =
-            normalize_models_dev_with(&serde_json::to_vec(doc).unwrap(), evidence).unwrap();
+            normalize_legacy_models_dev_for_tests_with(&serde_json::to_vec(doc).unwrap(), evidence)
+                .unwrap();
         model(&outcome, "p/m").rates.iter().any(|rate| {
             rate.basis
                 == ChargeBasis::PerMillionTokens {
@@ -869,7 +887,8 @@ fn a_missing_modality_block_is_unknown_rather_than_empty() {
         "the fixture must have had a modality block, or this proves nothing"
     );
 
-    let outcome = normalize_models_dev(&serde_json::to_vec(&doc).unwrap()).unwrap();
+    let outcome =
+        normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap()).unwrap();
     let sonnet = model(&outcome, "anthropic/claude-sonnet-4-5");
     assert_eq!(
         sonnet.capabilities.input_modalities, None,
@@ -904,7 +923,7 @@ fn an_absent_capability_and_an_explicit_null_are_both_unknown() {
 
     let read = |body: &str| {
         let text = doc(body);
-        normalize_models_dev(text.as_bytes())
+        normalize_legacy_models_dev_for_tests(text.as_bytes())
             .unwrap_or_else(|e| panic!("{body:?} must normalize: {e}"))
             .catalog
             .models()
@@ -950,7 +969,7 @@ fn a_zero_limit_and_an_absent_limit_are_both_unknown() {
     };
     let limits = |body: &str| {
         let text = doc(body);
-        let m = normalize_models_dev(text.as_bytes())
+        let m = normalize_legacy_models_dev_for_tests(text.as_bytes())
             .unwrap_or_else(|e| panic!("{body:?} must normalize: {e}"))
             .catalog
             .models()
@@ -1050,7 +1069,7 @@ fn a_tier_that_is_not_a_context_tier_is_refused() {
       }
     }"#;
 
-    let outcome = normalize_models_dev(payload.as_bytes()).unwrap();
+    let outcome = normalize_legacy_models_dev_for_tests(payload.as_bytes()).unwrap();
     assert!(
         model(&outcome, "acme/m1").rates.is_empty(),
         "a non-context tier must not be keyed as a context tier"
@@ -1066,7 +1085,7 @@ fn a_tier_that_is_not_a_context_tier_is_refused() {
     // above proves only that the fixture is malformed.
     let ok = payload.replace(r#""type": "output""#, r#""type": "context""#);
     assert_ne!(ok, payload, "the control mutation must apply");
-    let outcome = fusiform_core::normalize::normalize_models_dev(ok.as_bytes())
+    let outcome = fusiform_core::normalize::normalize_legacy_models_dev_for_tests(ok.as_bytes())
         .expect("a context tier must normalize");
     assert_eq!(
         outcome.catalog.models().count(),
@@ -1077,7 +1096,7 @@ fn a_tier_that_is_not_a_context_tier_is_refused() {
 
 #[test]
 fn canonical_identity_is_upstream_text_not_a_row_id() {
-    let outcome = normalize_models_dev(
+    let outcome = normalize_legacy_models_dev_for_tests(
         br#"{
         "lab": {"models": {"original": {"canonical_model_id": "lab/weights-1.0"}}},
         "reseller": {"models": {
@@ -1100,7 +1119,7 @@ fn canonical_identity_is_upstream_text_not_a_row_id() {
 
 #[test]
 fn status_preserves_unknown_and_empty_strings_and_absence() {
-    let outcome = normalize_models_dev(
+    let outcome = normalize_legacy_models_dev_for_tests(
         br#"{"p":{"models":{
         "deprecated":{"status":"deprecated"},
         "future":{"status":"future-preview"},
@@ -1123,7 +1142,7 @@ fn status_preserves_unknown_and_empty_strings_and_absence() {
 
 #[test]
 fn model_type_preserves_verbatim_labels_and_absence() {
-    let outcome = normalize_models_dev(
+    let outcome = normalize_legacy_models_dev_for_tests(
         br#"{"p":{"models":{
         "transcription":{"type":"transcription"},
         "future":{"type":"Future Kind \"v2\""},
@@ -1155,7 +1174,7 @@ fn structured_output_preserves_absence_and_published_booleans() {
         let text = format!(
             r#"{{"p":{{"id":"p","name":"P","models":{{"m":{{"id":"m","name":"M"{body}}}}}}}}}"#
         );
-        normalize_models_dev(text.as_bytes())
+        normalize_legacy_models_dev_for_tests(text.as_bytes())
             .expect("the model must normalize")
             .catalog
             .models()
@@ -1180,7 +1199,9 @@ fn temperature_preserves_absence_and_published_booleans() {
         (r#""temperature":false"#, Some(false)),
     ] {
         let text = format!(r#"{{"p":{{"models":{{"m":{{{field}}}}}}}}}"#);
-        let catalog = normalize_models_dev(text.as_bytes()).unwrap().catalog;
+        let catalog = normalize_legacy_models_dev_for_tests(text.as_bytes())
+            .unwrap()
+            .catalog;
         assert_eq!(
             catalog.models().next().unwrap().capabilities.temperature,
             expected
@@ -1190,7 +1211,7 @@ fn temperature_preserves_absence_and_published_booleans() {
 #[test]
 fn wire_claims_preserve_values_precedence_provenance_and_absence() {
     use fusiform_core::normalize::{WireClaim, WireFacts, WireOrigin};
-    let outcome = normalize_models_dev(br#"{
+    let outcome = normalize_legacy_models_dev_for_tests(br#"{
         "p": {"npm": "@sdk/provider", "api": "https://provider/v1/", "models": {
             "model": {"provider": {"npm": "@sdk/model", "api": "https://model/v1//", "shape": "future-shape"}},
             "provider": {},
@@ -1262,14 +1283,14 @@ fn legacy_tier_corroboration_uses_exact_decimal_values() {
         )
     };
     let equivalent = payload(r#"{"input":2,"output":250e-3}"#);
-    let outcome =
-        normalize_models_dev(equivalent.as_bytes()).expect("equivalent prices corroborate");
+    let outcome = normalize_legacy_models_dev_for_tests(equivalent.as_bytes())
+        .expect("equivalent prices corroborate");
     assert_eq!(model(&outcome, "p/m").rates.len(), 3);
     for conflict in [
         r#"{"input":2.000000000001,"output":0.25}"#,
         r#"{"input":2}"#,
     ] {
-        let outcome = normalize_models_dev(payload(conflict).as_bytes()).unwrap();
+        let outcome = normalize_legacy_models_dev_for_tests(payload(conflict).as_bytes()).unwrap();
         assert!(model(&outcome, "p/m").rates.is_empty());
         assert!(matches!(
             outcome.findings.as_slice(),

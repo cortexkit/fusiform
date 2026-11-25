@@ -547,7 +547,9 @@ async fn first_full_poll_repairs_a_legacy_hash_ahead_of_its_eras() {
     // the dangling hash and incorrectly marked the document unchanged.
     let doc =
         br#"{"anthropic":{"id":"anthropic","name":"A","models":{"m":{"id":"m","name":"M"}}}}"#;
-    let catalog = fusiform_core::normalize_models_dev(doc).unwrap().catalog;
+    let catalog = fusiform_core::normalize_legacy_models_dev_for_tests(doc)
+        .unwrap()
+        .catalog;
     let digest = fusiform_store::ingest::catalog_digest(&catalog);
     for (at, outcome) in [
         (2_000, ObservationOutcome::Changed { snapshot_seq: 0 }),

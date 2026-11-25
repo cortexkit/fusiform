@@ -34,10 +34,10 @@ pub fn snapshot_bytes(input: SnapshotInputs<'_>) -> Result<Vec<u8>, ArtifactRefu
         input.history_files,
         input.history_signatures,
         input.release_public_key,
-        |out| {
-            let catalog = parse_catalog(input.models_dev, input.evidence)
+        |out, upstream_observed_at_ms| {
+            let outcome = parse_catalog(input.models_dev, input.evidence, upstream_observed_at_ms)
                 .map_err(|err| ArtifactRefusal::new(err.class(), err))?;
-            Ok(write_upstream(out, catalog))
+            Ok(write_upstream(out, outcome.catalog))
         },
     )
 }
@@ -68,7 +68,7 @@ pub fn snapshot_bytes_from_state(
         history_files,
         history_signatures,
         release_public_key,
-        |out| write_state_upstream(out, state.upstream),
+        |out, _| write_state_upstream(out, state.upstream),
     )
 }
 
@@ -79,7 +79,7 @@ fn build_snapshot(
     history_files: &[u8],
     history_signatures: &[u8],
     release_public_key: &[u8],
-    write_upstream: impl FnOnce(&mut Vec<u8>) -> Result<Hash, ArtifactRefusal>,
+    write_upstream: impl FnOnce(&mut Vec<u8>, i64) -> Result<Hash, ArtifactRefusal>,
 ) -> Result<Vec<u8>, ArtifactRefusal> {
     let envelope: ReleaseEnvelope = decode(envelope, "invalid_envelope")?;
     let signatures: Signatures = decode(release_signatures, "invalid_release_signature")?;
@@ -130,7 +130,7 @@ fn build_snapshot(
     out.extend_from_slice(b",\"state\":{\"curation_set\":");
     write_value(&mut out, curation);
     out.extend_from_slice(b",\"upstream\":");
-    let upstream_hash = write_upstream(&mut out)?;
+    let upstream_hash = write_upstream(&mut out, envelope.upstream_observed_at_ms)?;
     if upstream_hash != envelope.upstream_hash {
         return Err(ArtifactRefusal::new(
             "snapshot_hash_mismatch",

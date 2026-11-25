@@ -7,7 +7,7 @@
 //! containing values.
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp, TokenClass};
 use fusiform_module::route::{
     serve_catalog_get, serve_tool_call, CatalogGetResponse, ToolResponse,
@@ -34,7 +34,9 @@ fn fixture() -> Fixture {
     })
     .unwrap();
 
-    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
 
@@ -149,7 +151,7 @@ fn a_point_in_time_request_is_honoured() {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
         .catalog;
     let plan = plan_ingest(
@@ -332,7 +334,7 @@ fn retired_models_are_excluded_by_default() {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
         .catalog;
     let plan = plan_ingest(
@@ -468,7 +470,7 @@ fn history_returns_eras_with_their_windows() {
                 detail: None,
             })
             .unwrap();
-        let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+        let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
             .unwrap()
             .catalog;
         let plan = plan_ingest(
@@ -2137,7 +2139,7 @@ fn the_served_last_change_ignores_an_artifact_poll() {
                 detail: None,
             })
             .unwrap();
-        let catalog = normalize_models_dev(&serde_json::to_vec(doc).unwrap())
+        let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(doc).unwrap())
             .unwrap()
             .catalog;
         let plan = plan_ingest(
@@ -2618,7 +2620,7 @@ fn a_named_read_of_a_retired_model_says_so() {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
         .catalog;
     let plan = plan_ingest(

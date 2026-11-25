@@ -8,8 +8,15 @@ fn js_error(failure: Failure) -> JsError {
 }
 
 #[wasm_bindgen]
-pub fn publish_step(models_dev: &[u8], index: &[u8], evidence: &[u8]) -> Result<Array, JsError> {
-    let (summary, index) = super::publish_step(models_dev, index, evidence).map_err(js_error)?;
+pub fn publish_step(
+    models_dev: &[u8],
+    index: &[u8],
+    evidence: &[u8],
+    upstream_observed_at_ms: i64,
+) -> Result<Array, JsError> {
+    let (summary, index) =
+        super::publish_step(models_dev, index, evidence, upstream_observed_at_ms)
+            .map_err(js_error)?;
     let result = Array::new_with_length(2);
     result.set(0, Uint8Array::from(summary.as_slice()).into());
     result.set(

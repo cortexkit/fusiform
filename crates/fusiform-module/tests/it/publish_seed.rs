@@ -25,7 +25,7 @@ fn the_publisher_hashes_exactly_what_a_seeded_store_holds() {
     let upstream = held_as_upstream(held);
     let previous = FactIndex::from_snapshot_upstream(&upstream).unwrap();
     assert_eq!(previous.upstream_hash(), held_hash);
-    let published = publish_step(SEED, &previous, &input_audio::evidence()).unwrap();
+    let published = publish_step(SEED, &previous, &input_audio::evidence(), 0).unwrap();
     assert_eq!(published.upstream_hash, held_hash);
     assert_eq!(published.model_count, model_count);
     assert_eq!(published.index.model_count(), model_count);
@@ -117,7 +117,13 @@ fn one_seed_edit_sets_one_fact_and_a_removed_model_loses_all_its_facts() {
     let edited = json!("A changed display name");
     assert_ne!(models[MODEL]["name"], edited);
     models.get_mut(MODEL).unwrap()["name"] = edited.clone();
-    let next = publish_step(&serde_json::to_vec(&changed).unwrap(), &previous, &evidence).unwrap();
+    let next = publish_step(
+        &serde_json::to_vec(&changed).unwrap(),
+        &previous,
+        &evidence,
+        0,
+    )
+    .unwrap();
     assert_eq!(next.model_count, previous.model_count());
     assert_ne!(next.upstream_hash, previous.upstream_hash());
     assert_eq!(
@@ -132,8 +138,13 @@ fn one_seed_edit_sets_one_fact_and_a_removed_model_loses_all_its_facts() {
 
     let models = changed[PROVIDER]["models"].as_object_mut().unwrap();
     assert!(models.remove(MODEL).is_some());
-    let removed =
-        publish_step(&serde_json::to_vec(&changed).unwrap(), &previous, &evidence).unwrap();
+    let removed = publish_step(
+        &serde_json::to_vec(&changed).unwrap(),
+        &previous,
+        &evidence,
+        0,
+    )
+    .unwrap();
     let expected: Vec<_> = upstream[PROVIDER].models[MODEL]
         .keys()
         .map(|fact| ChangeOp::Remove {
@@ -188,7 +199,7 @@ fn conflicting_repeated_tier_prices_are_omitted_by_both_paths() {
     let store_hash = hash_held(&held);
 
     let blank = FactIndex::from_snapshot_upstream(&Upstream::new()).unwrap();
-    let published = publish_step(REPEATED_TIERS, &blank, &input_audio::evidence()).unwrap();
+    let published = publish_step(REPEATED_TIERS, &blank, &input_audio::evidence(), 0).unwrap();
     let [conflict] = published.conflicts.as_slice() else {
         panic!("expected only the input conflict")
     };
@@ -216,8 +227,13 @@ fn conflicting_repeated_tier_prices_are_omitted_by_both_paths() {
             .count(),
         1
     );
-    let repeated =
-        publish_step(REPEATED_TIERS, &published.index, &input_audio::evidence()).unwrap();
+    let repeated = publish_step(
+        REPEATED_TIERS,
+        &published.index,
+        &input_audio::evidence(),
+        0,
+    )
+    .unwrap();
     assert!(repeated.ops.is_empty());
     assert_eq!(repeated.conflicts, published.conflicts);
 

@@ -5,7 +5,7 @@
 //! store seeded from the embedded models.dev copy, which publishes 32,768.
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::{serve_catalog_get, serve_history, CatalogGetResponse};
 use fusiform_store::ingest::plan_ingest;
@@ -50,7 +50,9 @@ fn ingest(store: &CatalogStore, bytes: &[u8], at: i64) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_models_dev(bytes).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(bytes)
+        .unwrap()
+        .catalog;
     let (kind, observation) = if at == 1_000 {
         (BoundaryKind::Seed, None)
     } else {
@@ -746,7 +748,7 @@ fn anthropic_store_with_capability(
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
+    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&upstream).unwrap())
         .unwrap()
         .catalog;
     let mut plan =
@@ -1123,7 +1125,7 @@ fn daybreak_store(planted: Option<Value>) -> (CatalogStore, tempfile::TempDir) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
+    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&upstream).unwrap())
         .unwrap()
         .catalog;
     let mut plan =
@@ -1630,7 +1632,7 @@ fn refusal_fallback_store() -> (CatalogStore, tempfile::TempDir) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
+    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&upstream).unwrap())
         .unwrap()
         .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();

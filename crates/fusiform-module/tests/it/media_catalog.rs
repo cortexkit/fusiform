@@ -303,9 +303,10 @@ fn image_store(output: i64) -> (CatalogStore, tempfile::TempDir) {
         doc[provider] = seed[provider].clone();
         doc[provider]["models"] = json!({"gemini-3.1-flash-image":row});
     }
-    let catalog = fusiform_core::normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
-        .unwrap()
-        .catalog;
+    let catalog =
+        fusiform_core::normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
+            .unwrap()
+            .catalog;
     let (store, dir) = empty_store();
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();

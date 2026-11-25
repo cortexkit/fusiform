@@ -38,7 +38,7 @@
 //! determination, and why the standing question to consumers is whether the
 //! byte-affecting set is still complete rather than whether it looks right.
 
-use fusiform_core::normalize::normalize_models_dev_with;
+use fusiform_core::normalize::normalize_legacy_models_dev_for_tests_with;
 use fusiform_store::ingest::fact_keys_of;
 
 const FIXTURE: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
@@ -74,7 +74,7 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
         serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
     fixture["google"]["models"]["gemini-3.1-flash-live-preview"] =
         seed["google"]["models"]["gemini-3.1-flash-live-preview"].clone();
-    let outcome = normalize_models_dev_with(
+    let outcome = normalize_legacy_models_dev_for_tests_with(
         &serde_json::to_vec(&fixture).unwrap(),
         &fusiform_module::input_audio::evidence(),
     )

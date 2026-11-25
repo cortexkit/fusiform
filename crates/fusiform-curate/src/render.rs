@@ -148,6 +148,19 @@ pub fn render_row<'a>(
         name_the_provenance_of_a_pre_0_11_row(&mut value);
         facts.insert(key.to_string(), value);
     }
+    if let Some("decision" | "extraction") = facts.get("model.type").and_then(|v| v.as_str()) {
+        facts.insert("model.kind".to_string(), facts["model.type"].clone());
+    }
+    let protocol_family = match facts
+        .get("wire.shape")
+        .and_then(|claim| claim["value"].as_str())
+    {
+        Some("images") => Some("openai.images"),
+        Some("interactions") => Some("google.interactions"),
+        Some("speech") => Some("elevenlabs.text_to_speech"),
+        _ => None,
+    };
+    let mut endpoint_withheld = false;
     if let Some(rows) = overrides {
         // An override must still match the upstream value it replaces (or
         // fill an absent fact). Check the value at the requested instant.
@@ -163,7 +176,6 @@ pub fn render_row<'a>(
             ));
     }
     if let Some(current) = current {
-        let mut endpoint_withheld = false;
         response
             .fact_overrides
             .extend(crate::fact_overrides::apply_rows(
@@ -201,9 +213,9 @@ pub fn render_row<'a>(
             let shape = facts
                 .get("wire.shape")
                 .and_then(|claim| claim["value"].as_str());
-            if let Some(family) =
+            if let Some(family) = protocol_family.or_else(|| {
                 npm.and_then(|npm| crate::wire_families::lookup(current.wire_families, npm, shape))
-            {
+            }) {
                 facts.insert("wire.family".to_string(), serde_json::json!(family));
             }
         }
@@ -215,6 +227,11 @@ pub fn render_row<'a>(
             requested_prefixes,
         ) {
             response.canonical_links.push(link);
+        }
+    }
+    if current.is_none() && !endpoint_withheld {
+        if let Some(family) = protocol_family {
+            facts.insert("wire.family".to_owned(), serde_json::json!(family));
         }
     }
     facts

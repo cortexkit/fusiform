@@ -60,10 +60,11 @@ fn ingest(store: &CatalogStore, at: i64, lists_clef: bool) {
     }
     let doc =
         json!({CLOUDFLARE: {"id":CLOUDFLARE, "name":"Cloudflare Workers AI", "models":models}});
-    let catalog =
-        fusiform_core::normalize::normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
-            .unwrap()
-            .catalog;
+    let catalog = fusiform_core::normalize::normalize_legacy_models_dev_for_tests(
+        &serde_json::to_vec(&doc).unwrap(),
+    )
+    .unwrap()
+    .catalog;
     let seed = at == RECORD_BEGINS_AT;
     let observation = store
         .record_observation(&NewObservation {

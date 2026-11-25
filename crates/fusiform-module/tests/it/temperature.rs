@@ -1,5 +1,5 @@
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::serve_catalog_get;
 use fusiform_store::ingest::plan_ingest;
@@ -71,7 +71,7 @@ pub(super) fn store(document: Value) -> (CatalogStore, tempfile::TempDir) {
 }
 
 fn ingest(store: &CatalogStore, document: Value, at: i64) {
-    let catalog = normalize_models_dev(&serde_json::to_vec(&document).unwrap())
+    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&document).unwrap())
         .unwrap()
         .catalog;
     let plan = plan_ingest(store, &catalog, Timestamp(at), BoundaryKind::Seed, None).unwrap();

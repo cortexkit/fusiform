@@ -7,7 +7,9 @@ use std::{
 };
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::{normalize_models_dev, BoundaryKind, ChargeUnitEvidence, ObservationOutcome};
+use fusiform_core::{
+    normalize_legacy_models_dev_for_tests, BoundaryKind, ChargeUnitEvidence, ObservationOutcome,
+};
 use fusiform_publish::{publish_step, snapshot_bytes_from_state, FactIndex};
 use fusiform_release::{
     canonical_json, sha256, sign_envelope, sign_history_attestation, verify_envelope,
@@ -80,7 +82,7 @@ fn observe(store: &CatalogStore, body: &[u8], at: i64, seeded: bool) -> i64 {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_models_dev(body).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(body).unwrap().catalog;
     let plan = plan_ingest(
         store,
         &catalog,
@@ -559,7 +561,13 @@ fn release_import_preserves_catalog_get_bytes() {
     assert_eq!(imported[0]["model_id"], "first");
     assert_eq!(imported[3]["model_id"], "steady");
     let empty = FactIndex::from_snapshot_upstream(&BTreeMap::new()).unwrap();
-    let published = publish_step(&last, &empty, &ChargeUnitEvidence::default()).unwrap();
+    let published = publish_step(
+        &last,
+        &empty,
+        &ChargeUnitEvidence::default(),
+        snapshot.envelope.upstream_observed_at_ms,
+    )
+    .unwrap();
     assert_eq!(published.upstream_hash, snapshot.envelope.upstream_hash);
     let curation = snapshot.state.curation_set;
     assert_eq!(curation.approved_at_ms, Some(end + 6));

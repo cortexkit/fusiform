@@ -71,7 +71,7 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 /// replacement and an image-rate addition, before alias and plane projection.
 /// `capability.temperature` replaces only a published boolean when the vendor
 /// documents different acceptance; it never fills an unknown upstream claim.
-pub const OVERRIDABLE_FACTS: [&str; 14] = [
+pub const OVERRIDABLE_FACTS: [&str; 22] = [
     "limit.context",
     "limit.output",
     "capability.server_side_fallback",
@@ -86,12 +86,20 @@ pub const OVERRIDABLE_FACTS: [&str; 14] = [
     "rate.output",
     "rate.output_image",
     "rate.cached_input_audio",
+    "capability.aspect_ratios",
+    "capability.output_audio",
+    "limit.output_duration_ms",
+    "limit.output_audio_tokens_per_second",
+    "limit.output_video_tokens_per_second.resolution.360p",
+    "limit.output_video_tokens_per_second.resolution.720p",
+    "limit.output_video_tokens_per_second.resolution.1080p",
+    "limit.output_video_tokens_per_second.resolution.4k",
 ];
 
 /// The facts only an addition row can serve, because models.dev publishes no
 /// value for them. A read filtered to one of these must still reach the rows
 /// an addition applies to, even though the store holds no matching fact.
-pub const ADDED_FACTS: [&str; 9] = [
+pub const ADDED_FACTS: [&str; 17] = [
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
     "capability.allowed_fallback_models",
@@ -101,6 +109,14 @@ pub const ADDED_FACTS: [&str; 9] = [
     "capability.reasoning_default",
     "rate.output_image",
     "rate.cached_input_audio",
+    "capability.aspect_ratios",
+    "capability.output_audio",
+    "limit.output_duration_ms",
+    "limit.output_audio_tokens_per_second",
+    "limit.output_video_tokens_per_second.resolution.360p",
+    "limit.output_video_tokens_per_second.resolution.720p",
+    "limit.output_video_tokens_per_second.resolution.1080p",
+    "limit.output_video_tokens_per_second.resolution.4k",
 ];
 
 /// Whether a row supplies a fact the stored row lacks (an addition), rather
@@ -159,11 +175,32 @@ fn invalid_values(row: &FactOverride) -> Option<&'static str> {
         }
         "capability.server_side_fallback"
         | "capability.mid_conversation_system"
-        | "capability.effort_change_cache" => {
+        | "capability.effort_change_cache"
+        | "capability.output_audio" => {
             if !row.value.is_boolean() {
                 Some("capability addition value must be a boolean")
             } else if !row.replaces.is_null() {
                 Some("capability rows must be additions: models.dev publishes no such field, so replaces must be null")
+            } else {
+                None
+            }
+        }
+        "capability.aspect_ratios" => {
+            if !row.replaces.is_null() || !model_id_list(&row.value)
+                || row.value.as_array().is_none_or(Vec::is_empty) {
+                Some("aspect ratios must add a nonempty list of distinct strings")
+            } else {
+                None
+            }
+        }
+        "limit.output_duration_ms"
+        | "limit.output_audio_tokens_per_second"
+        | "limit.output_video_tokens_per_second.resolution.360p"
+        | "limit.output_video_tokens_per_second.resolution.720p"
+        | "limit.output_video_tokens_per_second.resolution.1080p"
+        | "limit.output_video_tokens_per_second.resolution.4k" => {
+            if !row.replaces.is_null() || !positive_integer(&row.value) {
+                Some("media limits must add a positive integer with replaces null")
             } else {
                 None
             }

@@ -44,7 +44,7 @@ fn main() {
     let index = FactIndex::from_snapshot_upstream(&upstream).unwrap();
     let models_dev = include_bytes!("../fixtures/models-dev.json");
     // The sample has no audio rates, so native and JS can use different evidence.
-    let native_step = publish_step(models_dev, &index, &ChargeUnitEvidence::default()).unwrap();
+    let native_step = publish_step(models_dev, &index, &ChargeUnitEvidence::default(), 0).unwrap();
     assert_eq!(result.published_hash, native_step.upstream_hash.to_string());
 
     let key = SigningKey::from_bytes(&[42; 32]);

@@ -565,10 +565,12 @@ dependencies = [
 name = "fusiform-core"
 version = "0.1.0"
 dependencies = [
+ "fusiform-core",
  "fusiform-protocol",
  "fusiform-testkit",
  "serde",
  "serde_json",
+ "time",
 ]
 
 [[package]]

@@ -256,7 +256,7 @@ fn every_served_fact_has_a_field_id() {
 /// asserting against it would keep passing.
 #[test]
 fn the_closed_vocabulary_matches_the_normalizer() {
-    use fusiform_core::normalize::normalize_models_dev_with;
+    use fusiform_core::normalize::normalize_legacy_models_dev_for_tests_with;
     use fusiform_core::ChargeUnitEvidence;
     use fusiform_store::ingest::{fact_keys_of, SERVED_FACT_NAMESPACE};
 
@@ -276,7 +276,7 @@ fn the_closed_vocabulary_matches_the_normalizer() {
     .unwrap();
     fixture["google"]["models"]["gemini-3.1-flash-live-preview"] =
         seed["google"]["models"]["gemini-3.1-flash-live-preview"].clone();
-    let outcome = normalize_models_dev_with(
+    let outcome = normalize_legacy_models_dev_for_tests_with(
         &serde_json::to_vec(&fixture).unwrap(),
         &ChargeUnitEvidence::input_audio_per_token(["google"])
             .with_output_audio_per_token(["google"]),

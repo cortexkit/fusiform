@@ -7,7 +7,7 @@
 //! Skipped when the payload is absent, so the suite stays runnable without a
 //! capture.
 
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, NewObservation};
@@ -59,7 +59,7 @@ fn a_whole_document_seeds_once_and_is_then_stable() {
     };
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
-    let catalog = normalize_models_dev(&bytes)
+    let catalog = normalize_legacy_models_dev_for_tests(&bytes)
         .expect("live document normalizes")
         .catalog;
 
@@ -111,7 +111,9 @@ fn one_changed_rate_in_a_whole_document_opens_one_era() {
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
 
-    let catalog = normalize_models_dev(&bytes).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(&bytes)
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     observe(&store, 2_000, ObservationOutcome::Unchanged);
@@ -140,7 +142,9 @@ fn one_changed_rate_in_a_whole_document_opens_one_era() {
     );
     let mutated = serde_json::to_vec(&doc).unwrap();
 
-    let changed = normalize_models_dev(&mutated).unwrap().catalog;
+    let changed = normalize_legacy_models_dev_for_tests(&mutated)
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &store,
         &changed,
@@ -181,7 +185,9 @@ fn reserializing_a_document_is_not_a_change() {
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
 
-    let catalog = normalize_models_dev(&bytes).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(&bytes)
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     observe(&store, 2_000, ObservationOutcome::Unchanged);
@@ -191,7 +197,9 @@ fn reserializing_a_document_is_not_a_change() {
     let reserialized = serde_json::to_vec(&doc).unwrap();
     assert_ne!(reserialized, bytes, "the round trip must change the bytes");
 
-    let same = normalize_models_dev(&reserialized).unwrap().catalog;
+    let same = normalize_legacy_models_dev_for_tests(&reserialized)
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &store,
         &same,

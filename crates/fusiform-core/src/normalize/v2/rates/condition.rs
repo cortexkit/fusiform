@@ -4,10 +4,15 @@ use super::super::raw::Object;
 use crate::normalize::{exact_decimal_key, is_servable_mode_name};
 use crate::RateCondition;
 
-pub(super) fn parse(when: &Object<'_>) -> Result<RateCondition, String> {
+pub(super) enum Parsed {
+    Rate(RateCondition),
+    Date(i64),
+}
+
+pub(super) fn parse(when: &Object<'_>) -> Result<Parsed, String> {
     let [(key, predicate)] = when.0.as_slice() else {
         return if when.0.is_empty() {
-            Ok(RateCondition::Always)
+            Ok(Parsed::Rate(RateCondition::Always))
         } else {
             Err(format!("combined conditions: {}", describe(when)))
         };
@@ -31,16 +36,39 @@ pub(super) fn parse(when: &Object<'_>) -> Result<RateCondition, String> {
                         value.get()
                     )
                 })?;
-            Ok(RateCondition::MinContextTokens { tokens })
+            Ok(Parsed::Rate(RateCondition::MinContextTokens { tokens }))
         }
         ("service_tier", "equals") => {
             let name =
                 read_name(value).ok_or_else(|| format!("invalid service_tier: {}", value.get()))?;
-            Ok(RateCondition::Mode { name })
+            Ok(Parsed::Rate(RateCondition::Mode { name }))
+        }
+        ("date", "gt" | "gte") => {
+            let at = date_ms(value).ok_or_else(|| format!("invalid date: {}", value.get()))?;
+            Ok(Parsed::Date(at + i64::from(op == "gt")))
         }
         ("context" | "service_tier", _) => Err(format!("unsupported {key} operator {op}")),
         _ => Err(format!("unsupported condition {key} ({op})")),
     }
+}
+
+fn date_ms(raw: &RawValue) -> Option<i64> {
+    let value = serde_json::from_str::<String>(raw.get()).ok()?;
+    let [a, b, c, d, b'-', e, f, b'-', g, h] = value.as_bytes() else {
+        return None;
+    };
+    let digits = |bytes: &[u8]| {
+        bytes.iter().try_fold(0_i32, |n, &digit| {
+            digit
+                .is_ascii_digit()
+                .then(|| 10 * n + i32::from(digit - b'0'))
+        })
+    };
+    let year = digits(&[*a, *b, *c, *d])?;
+    let month = time::Month::try_from(digits(&[*e, *f])? as u8).ok()?;
+    let day = digits(&[*g, *h])? as u8;
+    let date = time::Date::from_calendar_date(year, month, day).ok()?;
+    Some(date.midnight().assume_utc().unix_timestamp() * 1_000)
 }
 
 pub(super) fn tier_hint(when: &Object<'_>) -> Option<String> {

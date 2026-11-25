@@ -116,12 +116,16 @@ pub fn meta() -> Result<SeedMeta, SeedError> {
 /// live poll uses, so the first real fetch of an unchanged document finds
 /// nothing to change.
 pub fn catalog() -> Result<NormalizedCatalog, SeedError> {
-    normalize_models_dev_with(SNAPSHOT, &crate::input_audio::evidence())
-        .map(|outcome| {
-            crate::normalization::log_findings("seed", &outcome.findings);
-            outcome.catalog
-        })
-        .map_err(|e| SeedError::Snapshot(e.to_string()))
+    normalize_models_dev_with(
+        SNAPSHOT,
+        &crate::input_audio::evidence(),
+        Timestamp(meta()?.fetched_at_ms),
+    )
+    .map(|outcome| {
+        crate::normalization::log_findings("seed", &outcome);
+        outcome.catalog
+    })
+    .map_err(|e| SeedError::Snapshot(e.to_string()))
 }
 
 /// Prepare the embedded seed for the publisher's in-memory merge without

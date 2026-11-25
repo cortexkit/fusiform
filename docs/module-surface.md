@@ -165,7 +165,7 @@ thread, so one slow read does not block health replies or other calls
 
 ## 4. The poll
 
-Each tick fetches `https://models.dev/api.json` with a 90-second whole-request
+Each tick fetches `https://models.dev/experimental/v2.0/api.json` with a 90-second whole-request
 timeout and records exactly one observation:
 
 | Result | Outcome | Effect |

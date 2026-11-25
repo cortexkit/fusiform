@@ -54,7 +54,7 @@ impl SourceEndpoint {
     pub fn models_dev() -> Self {
         Self {
             source: SourceId::ModelsDev,
-            url: "https://models.dev/api.json".to_string(),
+            url: "https://models.dev/experimental/v2.0/api.json".to_string(),
         }
     }
 }

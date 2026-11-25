@@ -12,7 +12,7 @@ use std::fmt;
 use fusiform_core::normalize::NormalizedModel;
 use fusiform_core::shrink_guard::implausible_shrink;
 use fusiform_core::upstream_facts::{Existence, FactConflict, FactKey, ModelFacts, facts_of};
-use fusiform_core::{ChargeUnitEvidence, NormalizedCatalog, normalize_models_dev_with};
+use fusiform_core::{ChargeUnitEvidence, NormalizeV2Outcome, Timestamp, normalize_models_dev_with};
 use fusiform_release::{ChangeOp, FactKeyRef, Hash, fact_hash};
 
 use index::IndexBuilder;
@@ -27,6 +27,7 @@ pub struct PublishStep {
     pub index: FactIndex,
     pub upstream_hash: Hash,
     pub model_count: usize,
+    pub next_date_boundary_ms: Option<i64>,
     /// Conflicting upstream prices that were omitted rather than guessed.
     pub conflicts: Vec<FactConflict>,
 }
@@ -64,8 +65,13 @@ pub fn publish_step(
     models_dev: &[u8],
     previous: &FactIndex,
     evidence: &ChargeUnitEvidence,
+    upstream_observed_at_ms: i64,
 ) -> Result<PublishStep, PublishRefusal> {
-    let catalog = parse_catalog(models_dev, evidence)?;
+    let NormalizeV2Outcome {
+        catalog,
+        next_date_boundary_ms,
+        ..
+    } = parse_catalog(models_dev, evidence, upstream_observed_at_ms)?;
     let model_count = catalog.model_count();
     if let Some(reason) = implausible_shrink(previous.model_count(), model_count) {
         return Err(PublishRefusal::Implausible(reason));
@@ -117,6 +123,7 @@ pub fn publish_step(
         index,
         upstream_hash,
         model_count,
+        next_date_boundary_ms,
         conflicts,
     })
 }
@@ -124,11 +131,12 @@ pub fn publish_step(
 fn parse_catalog(
     models_dev: &[u8],
     evidence: &ChargeUnitEvidence,
-) -> Result<NormalizedCatalog, PublishRefusal> {
-    let catalog = normalize_models_dev_with(models_dev, evidence)
-        .map(|outcome| outcome.catalog)
-        .map_err(|err| PublishRefusal::Parse(err.to_string()))?;
-    for provider in &catalog.providers {
+    upstream_observed_at_ms: i64,
+) -> Result<NormalizeV2Outcome, PublishRefusal> {
+    let outcome =
+        normalize_models_dev_with(models_dev, evidence, Timestamp(upstream_observed_at_ms))
+            .map_err(|err| PublishRefusal::Parse(err.to_string()))?;
+    for provider in &outcome.catalog.providers {
         if provider.provider_id.is_empty() {
             return Err(PublishRefusal::Parse("empty provider id".into()));
         }
@@ -143,7 +151,7 @@ fn parse_catalog(
             )));
         }
     }
-    Ok(catalog)
+    Ok(outcome)
 }
 
 fn project_model(model: &NormalizedModel) -> ModelFacts {

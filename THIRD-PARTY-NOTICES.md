@@ -4,10 +4,10 @@
 
 The following files contain data from the models.dev catalog
 (<https://github.com/anomalyco/models.dev>, published at
-<https://models.dev/api.json>):
+<https://models.dev/experimental/v2.0/api.json>):
 
 - `crates/fusiform-module/data/models-dev-seed.json`: a verbatim copy of
-  `https://models.dev/api.json`, written by `scripts/refresh-seed.sh` and
+  `https://models.dev/experimental/v2.0/api.json`, written by `scripts/refresh-seed.sh` and
   compiled into the `ck-fusiform` binary as its bootstrap snapshot. Its fetch
   time, URL and SHA-256 are recorded in
   `crates/fusiform-module/data/models-dev-seed.meta.json`.

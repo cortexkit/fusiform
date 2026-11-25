@@ -533,8 +533,8 @@ async fn store_poll_warm_catch_up_reads_only_the_missing_suffix() {
 #[test]
 fn store_poll_writes_the_same_model_eras_as_direct_ingest() {
     use fusiform_core::{
-        normalize_models_dev, BoundaryKind, ChargeUnitEvidence, ObservationOutcome, SourceId,
-        Timestamp,
+        normalize_legacy_models_dev_for_tests, BoundaryKind, ChargeUnitEvidence,
+        ObservationOutcome, SourceId, Timestamp,
     };
     use fusiform_publish::{publish_step, FactIndex};
     use fusiform_release::{state_hash, Change};
@@ -650,7 +650,7 @@ fn store_poll_writes_the_same_model_eras_as_direct_ingest() {
         }
         let at = 1000 * (i as i64 + 1);
         let body = serde_json::to_vec(&document).unwrap();
-        let step = publish_step(&body, &index, &ChargeUnitEvidence::default()).unwrap();
+        let step = publish_step(&body, &index, &ChargeUnitEvidence::default(), at).unwrap();
         index = step.index;
         let change = Change {
             upstream: step.ops,
@@ -710,7 +710,9 @@ fn store_poll_writes_the_same_model_eras_as_direct_ingest() {
                 detail: None,
             })
             .unwrap();
-        let catalog = normalize_models_dev(&body).unwrap().catalog;
+        let catalog = normalize_legacy_models_dev_for_tests(&body)
+            .unwrap()
+            .catalog;
         let plan = plan_ingest(
             &direct,
             &catalog,

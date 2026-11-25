@@ -109,7 +109,7 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
     );
     let evidence = fusiform_module::input_audio::evidence()
         .with_input_audio_model("openai", "gpt-realtime-2.1");
-    let after = normalize_models_dev_with(doc.as_bytes(), &evidence)
+    let after = normalize_models_dev_with(doc.as_bytes(), &evidence, Timestamp(POLLED_AT))
         .unwrap()
         .catalog;
     let plan = plan_ingest(
@@ -425,7 +425,7 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
     store.append_eras(&seeded.eras).unwrap();
 
     let evidence = fusiform_module::input_audio::evidence();
-    let with = normalize_models_dev_with(SEED.as_bytes(), &evidence)
+    let with = normalize_models_dev_with(SEED.as_bytes(), &evidence, Timestamp(POLLED_AT))
         .unwrap()
         .catalog;
     assert_ne!(

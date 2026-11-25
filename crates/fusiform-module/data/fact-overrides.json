@@ -3,6 +3,71 @@
   "overrides": [
     {
       "provider_id": "google",
+      "model_id": "gemini-3.8-flash-tts",
+      "fact_key": "limit.output_audio_tokens_per_second",
+      "value": 25,
+      "replaces": null,
+      "reason": "models.dev does not publish the conversion from synthesized audio duration to output tokens.",
+      "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)",
+      "quote": "Audio tokens correspond to 25 tokens per second of audio.",
+      "established_by": "fusiform",
+      "established_at_ms": 1794268800000,
+      "review_by_ms": 1799452800000
+    },
+    {
+      "provider_id": "google", "model_id": "gemini-omni-1.2-flash", "fact_key": "capability.aspect_ratios",
+      "value": ["9:16", "16:9"], "replaces": null,
+      "reason": "models.dev does not publish supported aspect ratios.",
+      "source_ref": "https://ai.google.dev/gemini-api/docs/omni (accessed 2026-11-14)",
+      "quote": "Supported values: \"9:16\", \"16:9\"",
+      "established_by": "fusiform", "established_at_ms": 1794614400000, "review_by_ms": 1799798400000
+    },
+    {
+      "provider_id": "google", "model_id": "gemini-omni-1.2-flash", "fact_key": "capability.output_audio",
+      "value": true, "replaces": null,
+      "reason": "Audio accompanies the generated video; this is not a standalone audio output modality.",
+      "source_ref": "https://ai.google.dev/gemini-api/docs/omni; https://ai.google.dev/gemini-api/docs/models/gemini-omni-flash (accessed 2026-11-14)",
+      "quote": "By default the model will try to generate an appropriate audio track for a video." ,
+      "established_by": "fusiform", "established_at_ms": 1794614400000, "review_by_ms": 1799798400000
+    },
+    {
+      "provider_id": "google", "model_id": "gemini-omni-1.2-flash", "fact_key": "limit.output_duration_ms",
+      "value": 15000, "replaces": null,
+      "reason": "The documented maximum is for one generated clip, not an extended video.",
+      "source_ref": "https://ai.google.dev/gemini-api/docs/omni (accessed 2026-11-14)",
+      "quote": "Setting a duration over 15 seconds returns an invalid argument error.",
+      "established_by": "fusiform", "established_at_ms": 1794614400000, "review_by_ms": 1799798400000
+    },
+    {
+      "provider_id": "google", "model_id": "gemini-omni-1.2-flash", "fact_key": "limit.output_video_tokens_per_second.resolution.360p",
+      "value": 1931, "replaces": null,
+      "reason": "This converts 360p output duration to video tokens, not to a time-billed price.",
+      "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)", "quote": "1,931 tokens/s",
+      "established_by": "fusiform", "established_at_ms": 1794268800000, "review_by_ms": 1799452800000
+    },
+    {
+      "provider_id": "google", "model_id": "gemini-omni-1.2-flash", "fact_key": "limit.output_video_tokens_per_second.resolution.720p",
+      "value": 5792, "replaces": null,
+      "reason": "This converts 720p output duration to video tokens, not to a time-billed price.",
+      "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)", "quote": "calculated at a rate of 5,792 tokens per second of 720p video",
+      "established_by": "fusiform", "established_at_ms": 1794268800000, "review_by_ms": 1799452800000
+    },
+    {
+      "provider_id": "google", "model_id": "gemini-omni-1.2-flash", "fact_key": "limit.output_video_tokens_per_second.resolution.1080p",
+      "value": 8688, "replaces": null,
+      "reason": "The 1080p token conversion includes upsampling.",
+      "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)", "quote": "8,688 tokens/s",
+      "established_by": "fusiform", "established_at_ms": 1794268800000, "review_by_ms": 1799452800000
+    },
+    {
+      "provider_id": "google", "model_id": "gemini-omni-1.2-flash", "fact_key": "limit.output_video_tokens_per_second.resolution.4k",
+      "value": 17376, "replaces": null,
+      "reason": "The 4K token conversion includes upsampling.",
+      "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)", "quote": "17,376 tokens/s",
+      "established_by": "fusiform", "established_at_ms": 1794268800000, "review_by_ms": 1799452800000
+    },
+    {
+      "provider_id": "google",
       "model_id": "gemini-3.6-flash",
       "fact_key": "capability.temperature",
       "value": false,

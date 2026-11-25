@@ -7,24 +7,28 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::value::RawValue;
 
 use super::raw::Object;
-use super::{FindingKey, Findings, RecordFinding};
-use crate::normalize::{rate_value, ChargeUnitEvidence, NormalizedRate, RefusedFactScope};
+use super::{Context, DateBoundaries, FindingKey, Findings, RecordFinding};
+use crate::normalize::{rate_value, NormalizedRate, RefusedFactScope};
 use crate::{ChargeBasis, MediaTokenClass, ModelKey, RateCondition, RateValue, TokenClass};
-use condition::{factor_at, Decimal};
+use condition::{factor_at, Decimal, Parsed};
 
 pub(super) fn normalize_rates(
     model: &ModelKey,
     cost: Option<&RawValue>,
     modes: Option<&Object<'_>>,
-    evidence: &ChargeUnitEvidence,
-    findings: &mut Findings,
+    ctx: &mut Context<'_>,
     refused: &mut BTreeSet<RefusedFactScope>,
 ) -> Vec<NormalizedRate> {
     let mut prices = Prices {
         model: &model.model_id,
-        input_audio: evidence.bills_input_audio_per_token(&model.provider_id, &model.model_id),
-        output_audio: evidence.bills_output_audio_per_token(&model.provider_id, &model.model_id),
-        findings,
+        input_audio: ctx
+            .evidence
+            .bills_input_audio_per_token(&model.provider_id, &model.model_id),
+        output_audio: ctx
+            .evidence
+            .bills_output_audio_per_token(&model.provider_id, &model.model_id),
+        findings: &mut ctx.findings,
+        dates: &mut ctx.dates,
         refused,
         rates: Vec::new(),
         base: BTreeMap::new(),
@@ -32,6 +36,7 @@ pub(super) fn normalize_rates(
         modes: Vec::new(),
         mode_prices: BTreeMap::new(),
         shadowed_prices: BTreeMap::new(),
+        date_factors: Vec::new(),
     };
     if let Some(modes) = modes {
         prices.read_modes(modes);
@@ -60,6 +65,7 @@ struct Prices<'a, 'raw> {
     input_audio: bool,
     output_audio: bool,
     findings: &'a mut Findings,
+    dates: &'a mut DateBoundaries,
     refused: &'a mut BTreeSet<RefusedFactScope>,
     rates: Vec<NormalizedRate>,
     base: BTreeMap<ChargeBasis, Price<'raw>>,
@@ -67,6 +73,7 @@ struct Prices<'a, 'raw> {
     modes: Vec<Mode<'raw>>,
     mode_prices: BTreeMap<(String, ChargeBasis), Decimal>,
     shadowed_prices: BTreeMap<(String, ChargeBasis), Decimal>,
+    date_factors: Vec<&'raw RawValue>,
 }
 
 struct Schedule<'a> {
@@ -246,8 +253,14 @@ impl<'raw> Prices<'_, 'raw> {
                         self.refuse(scope(owner), role, "override is not an object");
                         continue;
                     };
-                    if let Some(condition) = self.read_condition(&rule, role, owner) {
-                        self.read_fields(&schedule, &rule, &condition, owner);
+                    match self.read_condition(&rule, role, owner) {
+                        Some(Parsed::Rate(condition)) => {
+                            self.read_fields(&schedule, &rule, &condition, owner)
+                        }
+                        Some(Parsed::Date(_)) => {
+                            self.read_fields(&schedule, &rule, &RateCondition::Always, owner)
+                        }
+                        None => {}
                     }
                 }
             }
@@ -259,14 +272,17 @@ impl<'raw> Prices<'_, 'raw> {
         rule: &Object<'_>,
         role: &str,
         owner: Option<&str>,
-    ) -> Option<RateCondition> {
+    ) -> Option<Parsed> {
         let Some(when) = rule.object("when") else {
             self.refuse(scope(owner), role, "missing or malformed when");
             return None;
         };
         match condition::parse(&when) {
-            Ok(condition) if owner.is_none() || condition == RateCondition::Always => {
-                Some(condition)
+            Ok(Parsed::Date(at)) => self.dates.is_active(at).then_some(Parsed::Date(at)),
+            Ok(Parsed::Rate(condition))
+                if owner.is_none() || condition == RateCondition::Always =>
+            {
+                Some(Parsed::Rate(condition))
             }
             Ok(_) => {
                 self.refuse(
@@ -556,6 +572,7 @@ impl<'raw> Prices<'_, 'raw> {
         let mut products = BTreeMap::new();
         let mut shadowed = BTreeMap::new();
         let mut derived = BTreeSet::new();
+        let mut tiers = Vec::new();
         for raw in rules {
             let Ok(rule) = Object::parse(raw) else {
                 self.refuse(scope(None), "multipliers", "multiplier is not an object");
@@ -564,10 +581,16 @@ impl<'raw> Prices<'_, 'raw> {
             let Some(condition) = self.read_condition(&rule, "multipliers", None) else {
                 continue;
             };
-            let RateCondition::Mode { name: tier } = condition else {
-                self.refuse(scope(None), "multipliers", "a multiplier requires a service_tier condition, not an unconditional or context-tier price");
-                continue;
-            };
+            match condition {
+                Parsed::Date(_) => match rule.raw("factor") {
+                    Some(factor) => self.date_factors.push(factor),
+                    None => self.refuse(scope(None), "multipliers", "missing multiplier factor"),
+                },
+                Parsed::Rate(RateCondition::Mode { name }) => tiers.push((name, rule.raw("factor"))),
+                Parsed::Rate(_) => self.refuse(scope(None), "multipliers", "a multiplier requires a service_tier or date condition, not an unconditional or context-tier price"),
+            }
+        }
+        for (tier, factor) in tiers {
             for (name, source) in self.targets(&tier) {
                 if source == ModeSource::BaseCost && !derived.insert(name.clone()) {
                     continue;
@@ -577,7 +600,7 @@ impl<'raw> Prices<'_, 'raw> {
                 } else {
                     &mut products
                 };
-                if let Err(detail) = self.multiply(rule.raw("factor"), &name, source, prices) {
+                if let Err(detail) = self.multiply(factor, &name, source, prices) {
                     self.refuse(scope(Some(&name)), "multipliers", detail);
                 }
             }
@@ -626,7 +649,7 @@ impl<'raw> Prices<'_, 'raw> {
             let key = (name.to_owned(), basis.clone());
             let amount = match products.get(&key) {
                 Some(amount) => *amount,
-                None => Decimal::parse(base.raw)?,
+                None => self.dated_amount(base)?,
             };
             products.insert(key, amount.product(factor)?);
         }
@@ -634,6 +657,16 @@ impl<'raw> Prices<'_, 'raw> {
             return Err("multiplier factor names no priced base roles".to_owned());
         }
         Ok(())
+    }
+
+    fn dated_amount(&self, price: &Price<'_>) -> Result<Decimal, String> {
+        let mut amount = Decimal::parse(price.raw)?;
+        for factor in &self.date_factors {
+            if let Some(factor) = factor_at(factor, &price.path, price.ttl.as_deref()) {
+                amount = amount.product(Decimal::parse(factor)?)?;
+            }
+        }
+        Ok(amount)
     }
 }
 
@@ -675,7 +708,7 @@ impl Prices<'_, '_> {
                             basis.clone(),
                             condition.clone(),
                             &price.path,
-                            Decimal::parse(price.raw),
+                            self.dated_amount(price),
                         );
                     }
                 }
@@ -686,11 +719,11 @@ impl Prices<'_, '_> {
                 basis,
                 RateCondition::Always,
                 &price.path,
-                Decimal::parse(price.raw),
+                self.dated_amount(&price),
             );
         }
         for ((condition, basis), price) in overrides {
-            let amount = Decimal::parse(price.raw);
+            let amount = self.dated_amount(&price);
             if let RateCondition::Mode { name: tier } = condition {
                 for (name, source) in self.targets(&tier) {
                     match &amount {

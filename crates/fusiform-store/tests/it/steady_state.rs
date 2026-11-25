@@ -38,7 +38,7 @@
 
 use std::time::Instant;
 
-use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, NewObservation};
@@ -96,7 +96,9 @@ fn the_unchanged_poll_path_grows_sublinearly_with_history() {
     };
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
-    let catalog = normalize_models_dev(&bytes).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(&bytes)
+        .unwrap()
+        .catalog;
 
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     let seeded = store.append_eras(&plan.eras).unwrap();
@@ -148,7 +150,9 @@ fn the_unchanged_poll_path_grows_sublinearly_with_history() {
         }
 
         let mutated = serde_json::to_vec(&doc).unwrap();
-        let changed = normalize_models_dev(&mutated).unwrap().catalog;
+        let changed = normalize_legacy_models_dev_for_tests(&mutated)
+            .unwrap()
+            .catalog;
 
         observe(&store, clock);
         clock += 1_000;
@@ -166,9 +170,10 @@ fn the_unchanged_poll_path_grows_sublinearly_with_history() {
 
     // The same unchanged poll, now against a store carrying superseded history.
     let current: serde_json::Value = doc.clone();
-    let current_catalog = normalize_models_dev(&serde_json::to_vec(&current).unwrap())
-        .unwrap()
-        .catalog;
+    let current_catalog =
+        normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&current).unwrap())
+            .unwrap()
+            .catalog;
     observe(&store, clock);
     let start = Instant::now();
     let after = plan_ingest(
@@ -229,7 +234,9 @@ fn the_steady_state_read_is_answered_from_an_index() {
     };
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
-    let catalog = normalize_models_dev(&bytes).unwrap().catalog;
+    let catalog = normalize_legacy_models_dev_for_tests(&bytes)
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     drop(store);

@@ -45,6 +45,7 @@ fn publish_step(
     models_dev: &[u8],
     index: &[u8],
     evidence: &[u8],
+    upstream_observed_at_ms: i64,
 ) -> Result<PublishResult, Failure> {
     if index.is_empty() {
         return Ok(refuse(Failure::new(
@@ -55,7 +56,12 @@ fn publish_step(
     let previous = decode_index(index)?;
     let base_upstream_hash = previous.upstream_hash();
     let evidence = decode_evidence(evidence)?;
-    let step = match fusiform_publish::publish_step(models_dev, &previous, &evidence) {
+    let step = match fusiform_publish::publish_step(
+        models_dev,
+        &previous,
+        &evidence,
+        upstream_observed_at_ms,
+    ) {
         Ok(step) => step,
         Err(err) => return Ok(refuse(Failure::new(err.class(), err))),
     };
@@ -79,6 +85,8 @@ fn publish_step(
     write_json(&mut summary, conflicts);
     summary.extend_from_slice(b",\"model_count\":");
     write_json(&mut summary, step.model_count);
+    summary.extend_from_slice(b",\"next_date_boundary_ms\":");
+    write_json(&mut summary, step.next_date_boundary_ms);
     // Ops are already sorted. Consume them one at a time so the encoder
     // never holds a second tree for the whole diff.
     summary.extend_from_slice(b",\"ops\":[");

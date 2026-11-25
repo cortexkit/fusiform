@@ -17,7 +17,7 @@
 //! identical from the era table alone.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 
 use fusiform_core::normalize::normalize_models_dev_with;
@@ -96,6 +96,7 @@ pub struct PollContext {
     /// sends no validator; see `tick`. Private so the only way to set it is a
     /// poll that actually received a body.
     document_read: AtomicBool,
+    next_date_boundary_ms: AtomicI64,
 }
 
 impl PollContext {
@@ -112,6 +113,7 @@ impl PollContext {
             endpoint,
             signals,
             document_read: AtomicBool::new(false),
+            next_date_boundary_ms: AtomicI64::new(i64::MAX),
         }
     }
 }
@@ -158,7 +160,9 @@ async fn fetch_and_apply(ctx: &PollContext, now_ms: i64) -> Result<TickReport, T
     // until the first body arrives: a failed first poll leaves the next one
     // unconditional too.
     let document_read = ctx.document_read.load(Ordering::Acquire);
-    let etag = if document_read {
+    // A 304 confirms the bytes, but cannot apply a price that activates with time.
+    let date_boundary_ms = ctx.next_date_boundary_ms.load(Ordering::Acquire);
+    let etag = if document_read && now_ms < date_boundary_ms {
         ctx.store
             .last_etag(ctx.endpoint.source)
             .map_err(TickError::Store)?
@@ -170,16 +174,21 @@ async fn fetch_and_apply(ctx: &PollContext, now_ms: i64) -> Result<TickReport, T
     let store = ctx.store.clone();
     let signals = ctx.signals.clone();
     let source = ctx.endpoint.source;
-    let report = tokio::task::spawn_blocking(move || {
-        apply_with_count_reader(
-            &store,
-            &signals,
-            source,
+    let (report, next_date_boundary_ms) = tokio::task::spawn_blocking(move || {
+        let mut next_date_boundary_ms = None;
+        let report = apply_with_count_reader(
+            &ApplyCtx {
+                store: &store,
+                signals: &signals,
+                source,
+            },
             outcome,
             now_ms,
             document_read,
             |store, source| store.catalog_counts(source, None),
-        )
+            &mut next_date_boundary_ms,
+        )?;
+        Ok::<_, TickError>((report, next_date_boundary_ms))
     })
     .await
     .map_err(TickError::ApplyTask)??;
@@ -187,6 +196,8 @@ async fn fetch_and_apply(ctx: &PollContext, now_ms: i64) -> Result<TickReport, T
         report.outcome,
         TickOutcome::Changed { .. } | TickOutcome::Unchanged
     ) {
+        ctx.next_date_boundary_ms
+            .store(next_date_boundary_ms.unwrap_or(i64::MAX), Ordering::Release);
         ctx.document_read.store(true, Ordering::Release);
     }
     Ok(report)
@@ -216,40 +227,42 @@ pub fn apply(
     now_ms: i64,
 ) -> Result<TickReport, TickError> {
     apply_with_count_reader(
-        store,
-        signals,
-        source,
+        &ApplyCtx {
+            store,
+            signals,
+            source,
+        },
         outcome,
         now_ms,
         false,
         |store, source| store.catalog_counts(source, None),
+        &mut None,
     )
 }
 
 fn apply_with_count_reader(
-    store: &CatalogStore,
-    signals: &Signals,
-    source: SourceId,
+    ctx: &ApplyCtx<'_>,
     outcome: FetchOutcome,
     now_ms: i64,
     trust_saved_hash: bool,
     read_counts: impl FnMut(&CatalogStore, SourceId) -> Result<(usize, usize), CatalogError>,
+    next_date_boundary_ms: &mut Option<i64>,
 ) -> Result<TickReport, TickError> {
-    let ctx = ApplyCtx {
-        store,
-        signals,
-        source,
-    };
     apply_with_normalizer(
-        &ctx,
+        ctx,
         outcome,
         now_ms,
         trust_saved_hash,
         read_counts,
         |bytes| {
             // Only separately documented unconditional token prices become audio facts.
-            let outcome = normalize_models_dev_with(bytes, &crate::input_audio::evidence())?;
-            let counts = crate::normalization::log_findings("poll", &outcome.findings);
+            let outcome = normalize_models_dev_with(
+                bytes,
+                &crate::input_audio::evidence(),
+                Timestamp(now_ms),
+            )?;
+            let counts = crate::normalization::log_findings("poll", &outcome);
+            *next_date_boundary_ms = outcome.next_date_boundary_ms;
             Ok((outcome.catalog, counts))
         },
     )
@@ -613,7 +626,7 @@ mod tests {
     use fusiform_core::SourceId;
     use fusiform_store::{CatalogError, CatalogStore};
 
-    use super::{apply_with_count_reader, FetchOutcome, TickOutcome};
+    use super::{apply_with_count_reader, ApplyCtx, FetchOutcome, TickOutcome};
     use crate::{health, signals::Signals};
 
     #[test]
@@ -633,11 +646,13 @@ mod tests {
         signals.set_model_counts(50, 30);
 
         let report = apply_with_count_reader(
-            &store,
-            &signals,
-            SourceId::ModelsDev,
+            &ApplyCtx {
+                store: &store,
+                signals: &signals,
+                source: SourceId::ModelsDev,
+            },
             FetchOutcome::Body {
-                bytes: include_bytes!("../../fusiform-core/fixtures/models-dev-excerpt.json")
+                bytes: br#"{"p":{"models":{"m":{"type":"chat","api":{},"capabilities":{}}}}}"#
                     .to_vec(),
                 etag: None,
                 duration: Duration::from_millis(10),
@@ -653,6 +668,7 @@ mod tests {
                     "injected catalog count read failure".to_string(),
                 ))
             },
+            &mut None,
         )
         .unwrap();
 

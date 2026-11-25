@@ -22,19 +22,23 @@
 //!   missing rate is `Unpriced`, and an unattributable charge unit is
 //!   `UnknownChargeBasis` — never a number a consumer would spend against.
 
+#[cfg(any(test, feature = "legacy-test-parser"))]
 mod raw;
 pub mod v2;
 
-use std::collections::{BTreeMap, BTreeSet};
+#[cfg(any(test, feature = "legacy-test-parser"))]
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use crate::money::{
     decimal_str_to_minor_units, Amount, CurrencyCode, PolicyId, UnitProvenance, NANO_EXPONENT,
 };
 use crate::upstream_facts::{prefix, rate_key, FactKey};
-use crate::{
-    ChargeBasis, Modality, ModelKey, RateCondition, RateValue, SourceId, TokenClass, UnpricedReason,
-};
+use crate::{ChargeBasis, Modality, ModelKey, RateCondition, RateValue, SourceId};
+#[cfg(any(test, feature = "legacy-test-parser"))]
+use crate::{TokenClass, UnpricedReason};
 
+#[cfg(any(test, feature = "legacy-test-parser"))]
 pub use raw::{RawModel, RawProvider};
 pub use v2::{normalize_models_dev_v2_with, NormalizeV2Outcome};
 
@@ -377,6 +381,7 @@ impl std::error::Error for NormalizeError {}
 /// forgotten: a rate that could not be attributed to a charge unit is a fact an
 /// operator needs to see counted, not a line in a file nobody greps.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(any(test, feature = "legacy-test-parser"))]
 pub struct NormalizeOutcome {
     pub catalog: NormalizedCatalog,
     pub findings: Vec<NormalizeError>,
@@ -406,6 +411,7 @@ pub struct ChargeUnitEvidence {
     /// is listed.
     input_audio_excluded: std::collections::BTreeSet<(String, String)>,
     output_audio_per_token: std::collections::BTreeSet<String>,
+    output_audio_models: std::collections::BTreeSet<(String, String)>,
     output_audio_excluded: std::collections::BTreeSet<(String, String)>,
 }
 
@@ -485,28 +491,60 @@ impl ChargeUnitEvidence {
         self
     }
 
+    /// Attribute audio output only to the model whose token unit was established.
+    pub fn with_output_audio_model(
+        mut self,
+        provider_id: impl Into<String>,
+        model_id: impl Into<String>,
+    ) -> Self {
+        self.output_audio_models
+            .insert((provider_id.into(), model_id.into()));
+        self
+    }
+
     /// Whether this row's output-audio cost has an established token unit.
     pub fn bills_output_audio_per_token(&self, provider_id: &str, model_id: &str) -> bool {
-        self.output_audio_per_token.contains(provider_id)
+        (self.output_audio_per_token.contains(provider_id)
+            || self
+                .output_audio_models
+                .contains(&(provider_id.to_owned(), model_id.to_owned())))
             && !self
                 .output_audio_excluded
                 .contains(&(provider_id.to_string(), model_id.to_string()))
     }
 }
 
+/// Normalize a v2 provider map at the upstream observation time.
+pub fn normalize_models_dev_with(
+    bytes: &[u8],
+    evidence: &ChargeUnitEvidence,
+    observed_at: crate::Timestamp,
+) -> Result<NormalizeV2Outcome, NormalizeError> {
+    v2::normalize_models_dev_at(bytes, evidence, observed_at)
+}
+
 /// Normalize a models.dev document with no charge-unit evidence.
 ///
 /// Every audio cost key stays unpriced. Production ingest uses
 /// [`normalize_models_dev_with`] and the curated evidence.
-pub fn normalize_models_dev(bytes: &[u8]) -> Result<NormalizeOutcome, NormalizeError> {
-    normalize_models_dev_with(bytes, &ChargeUnitEvidence::none())
+pub fn normalize_models_dev(bytes: &[u8]) -> Result<NormalizeV2Outcome, NormalizeError> {
+    normalize_models_dev_v2_with(bytes, &ChargeUnitEvidence::none())
+}
+
+/// Normalize a legacy fixture without charge-unit evidence for tests only.
+#[cfg(any(test, feature = "legacy-test-parser"))]
+pub fn normalize_legacy_models_dev_for_tests(
+    bytes: &[u8],
+) -> Result<NormalizeOutcome, NormalizeError> {
+    normalize_legacy_models_dev_for_tests_with(bytes, &ChargeUnitEvidence::none())
 }
 
 /// Normalize a models.dev document, using `evidence` to attribute eligible
 /// input/output audio values as per-token rates. Excluded models, and cost blocks
 /// that also price audio in a context tier or the legacy `context_over_200k`
 /// block, stay unattributed.
-pub fn normalize_models_dev_with(
+#[cfg(any(test, feature = "legacy-test-parser"))]
+pub fn normalize_legacy_models_dev_for_tests_with(
     bytes: &[u8],
     evidence: &ChargeUnitEvidence,
 ) -> Result<NormalizeOutcome, NormalizeError> {
@@ -569,12 +607,14 @@ pub fn normalize_models_dev_with(
     })
 }
 
+#[cfg(any(test, feature = "legacy-test-parser"))]
 struct ModelRead<'a> {
     label: &'a str,
     findings: &'a mut Vec<NormalizeError>,
     refused: BTreeSet<RefusedFactScope>,
 }
 
+#[cfg(any(test, feature = "legacy-test-parser"))]
 impl ModelRead<'_> {
     fn read<'raw, T, const OBJECT: bool, const N: usize>(
         &mut self,
@@ -605,6 +645,7 @@ impl ModelRead<'_> {
     }
 }
 
+#[cfg(any(test, feature = "legacy-test-parser"))]
 fn normalize_model(
     provider_id: &str,
     model_id: &str,
@@ -923,6 +964,7 @@ fn absent_if_zero(value: Option<u64>) -> Option<u64> {
     }
 }
 
+#[cfg(any(test, feature = "legacy-test-parser"))]
 fn normalize_rates(
     label: &str,
     cost: &raw::RawCost,
@@ -1114,6 +1156,7 @@ pub fn is_servable_mode_name(name: &str) -> bool {
 /// All or nothing per mode: if any key in the cost block is unusable the whole
 /// mode is refused, because serving the dimensions that happened to parse would
 /// present a partial schedule as the complete one.
+#[cfg(any(test, feature = "legacy-test-parser"))]
 fn normalize_mode_rates(
     label: &str,
     name: &str,
@@ -1172,6 +1215,7 @@ fn normalize_mode_rates(
 const INPUT_AUDIO_COST_KEY: &str = "input_audio";
 
 /// The cost keys whose charge unit is established: per million tokens.
+#[cfg(any(test, feature = "legacy-test-parser"))]
 const TOKEN_COST_KEYS: &[(&str, TokenClass)] = &[
     ("input", TokenClass::Input),
     ("output", TokenClass::Output),

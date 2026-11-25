@@ -1843,6 +1843,78 @@
       "ovhcloud/qwen3-vl-30b-a3b": ["qwen", "other"]
     }
   }
+    ,{
+      "reason": "The Alibaba provider glob called every row Qwen. These exact rows are reseller offerings of the DeepSeek and Moonshot families, which their upstream family and canonical identities distinguish.",
+      "rows": {
+        "alibaba-cn/deepseek-v4-pro-0813": ["qwen", "deepseek"],
+        "alibaba-cn/deepseek-v4.1-flash-1017": ["qwen", "deepseek"],
+        "alibaba-cn/kimi-k2.7-code": ["qwen", "kimi"]
+      }
+    },
+    {
+      "reason": "The Alibaba provider globs did not distinguish Qwen from the HappyHorse and Wan image/video families or GTE embeddings. Those family tokens establish no Qwen lineage.",
+      "rows": {
+        "alibaba-cn/happyhorse-1.0-i2v": ["qwen", "other"],
+        "alibaba-cn/happyhorse-1.0-r2v": ["qwen", "other"],
+        "alibaba-cn/happyhorse-1.0-t2v": ["qwen", "other"],
+        "alibaba-cn/happyhorse-1.0-video-edit": ["qwen", "other"],
+        "alibaba-cn/happyhorse-1.1-i2v": ["qwen", "other"],
+        "alibaba-cn/happyhorse-1.1-r2v": ["qwen", "other"],
+        "alibaba-cn/happyhorse-1.1-t2v": ["qwen", "other"],
+        "alibaba-cn/text-embedding-v3": ["qwen", "other"],
+        "alibaba-cn/wan2.6-i2v": ["qwen", "other"],
+        "alibaba-cn/wan2.6-i2v-flash": ["qwen", "other"],
+        "alibaba-cn/wan2.6-r2v": ["qwen", "other"],
+        "alibaba-cn/wan2.6-r2v-flash": ["qwen", "other"],
+        "alibaba-cn/wan2.6-t2v": ["qwen", "other"],
+        "alibaba-cn/wan2.7-i2v": ["qwen", "other"],
+        "alibaba-cn/wan2.7-image": ["qwen", "other"],
+        "alibaba-cn/wan2.7-image-pro": ["qwen", "other"],
+        "alibaba-cn/wan2.7-r2v": ["qwen", "other"],
+        "alibaba-cn/wan2.7-t2v": ["qwen", "other"],
+        "alibaba-cn/wan2.7-videoedit": ["qwen", "other"],
+        "alibaba-cn/wan3.0-video": ["qwen", "other"],
+        "alibaba-cn/wan3.0-video-prime": ["qwen", "other"],
+        "alibaba-token-plan/wan3.0-video": ["qwen", "other"],
+        "alibaba-token-plan-cn/wan3.0-video": ["qwen", "other"]
+      }
+    },
+    {
+      "reason": "Genie and Lyria are distinct world-generation and music families, not Gemini. The old glob matched their Google provider rather than a Gemini identity.",
+      "rows": {
+        "google/genie-4": ["gemini", "other"],
+        "google/lyria-3.5": ["gemini", "other"],
+        "google/lyria-realtime-exp": ["gemini", "other"]
+      }
+    },
+    {
+      "reason": "NVIDIA publishes the Nemotron Embed family, not a Llama family. A Llama substring in the reseller's embedding model ID is not enough to map that family.",
+      "rows": {
+        "deepinfra/nvidia/llama-nemotron-embed-vl-1b-v2": ["llama", "other"]
+      }
+    },
+    {
+      "reason": "Whisper transcription and Omni Moderation are separately named OpenAI families, not GPT. The OpenAI provider glob did not distinguish them.",
+      "rows": {
+        "openai/gpt-realtime-whisper": ["gpt", "other"],
+        "openai/omni-moderation-latest": ["gpt", "other"],
+        "openai/whisper-1": ["gpt", "other"]
+      }
+    },
+    {
+      "reason": "These reseller rows carry neither an upstream family nor a canonical model identity. A reseller's display ID alone does not establish lineage.",
+      "rows": {
+        "openrouter/qwen/qwen3-tts-1.7b": ["qwen", "other"],
+        "openrouter/x-ai/grok-stt-2.0": ["grok", "other"]
+      }
+    },
+    {
+      "reason": "CogVideoX and CogView are Zhipu's separate image and video families, not GLM. The Z.ai provider glob matched the lab rather than either family.",
+      "rows": {
+        "zai/cogvideox-3": ["glm", "other"],
+        "zai/cogview-4-250304": ["glm", "other"]
+      }
+    }
   ],
   "counts": {
     "coverage": {

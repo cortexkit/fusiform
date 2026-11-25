@@ -12,7 +12,7 @@ fn document(model_count: usize) -> Vec<u8> {
         .map(|n| {
             (
                 format!("model-{n:03}"),
-                json!({"name": format!("Model {n:03}")}),
+                json!({"name": format!("Model {n:03}"), "type":"chat", "capabilities":{}, "api":{}}),
             )
         })
         .collect();
@@ -23,22 +23,22 @@ fn document(model_count: usize) -> Vec<u8> {
 fn an_identical_observation_has_no_ops_even_after_the_index_round_trips() {
     let evidence = ChargeUnitEvidence::default();
     let json = document(2);
-    let first = publish_step(&json, &empty_snapshot_index(), &evidence).unwrap();
+    let first = publish_step(&json, &empty_snapshot_index(), &evidence, 0).unwrap();
     let stored = FactIndex::from_bytes(&first.index.to_bytes()).unwrap();
     assert_eq!(stored, first.index);
     assert_eq!(stored.upstream_hash(), first.upstream_hash);
-    let same = publish_step(&json, &stored, &evidence).unwrap();
+    let same = publish_step(&json, &stored, &evidence, 0).unwrap();
     assert!(same.ops.is_empty());
     assert_eq!(same.upstream_hash, first.upstream_hash);
 }
 
 #[test]
 fn a_changed_fact_withdrawal_and_an_arrival_remain_sorted() {
-    let initial = br#"{"p":{"models":{"a":{"name":"Remove this"},"c":{}}}}"#;
-    let changed = br#"{"p":{"models":{"a":{"limit":{"context":100}},"b":{}}}}"#;
+    let initial = br#"{"p":{"models":{"a":{"name":"Remove this","type":"chat","capabilities":{},"api":{}},"c":{"type":"chat","capabilities":{},"api":{}}}}}"#;
+    let changed = br#"{"p":{"models":{"a":{"limit":{"context":100},"type":"chat","capabilities":{},"api":{}},"b":{"type":"chat","capabilities":{},"api":{}}}}}"#;
     let evidence = ChargeUnitEvidence::default();
-    let previous = publish_step(initial, &empty_snapshot_index(), &evidence).unwrap();
-    let next = publish_step(changed, &previous.index, &evidence).unwrap();
+    let previous = publish_step(initial, &empty_snapshot_index(), &evidence, 0).unwrap();
+    let next = publish_step(changed, &previous.index, &evidence, 0).unwrap();
     assert!(
         next.ops
             .windows(2)
@@ -70,19 +70,24 @@ fn a_changed_fact_withdrawal_and_an_arrival_remain_sorted() {
 #[test]
 fn refusals_separate_parse_errors_from_a_drop_beyond_the_guard() {
     let evidence = ChargeUnitEvidence::default();
-    let first = publish_step(&document(100), &empty_snapshot_index(), &evidence).unwrap();
-    let parse = publish_step(b"{", &first.index, &evidence).unwrap_err();
+    let first = publish_step(&document(100), &empty_snapshot_index(), &evidence, 0).unwrap();
+    let parse = publish_step(b"{", &first.index, &evidence, 0).unwrap_err();
     assert!(matches!(parse, PublishRefusal::Parse(_)));
     assert_eq!(parse.class(), "parse");
+    let legacy = br#"{"p":{"models":{"m":{"type":"chat","cost":{"input":1}}}}}"#;
+    assert!(matches!(
+        publish_step(legacy, &first.index, &evidence, 0),
+        Err(PublishRefusal::Parse(_))
+    ));
 
-    assert!(publish_step(&document(75), &first.index, &evidence).is_ok());
-    let shrink = publish_step(&document(74), &first.index, &evidence).unwrap_err();
+    assert!(publish_step(&document(75), &first.index, &evidence, 0).is_ok());
+    let shrink = publish_step(&document(74), &first.index, &evidence, 0).unwrap_err();
     assert!(matches!(shrink, PublishRefusal::Implausible(_)));
     assert_eq!(shrink.class(), "implausible");
 
-    let small = publish_step(&document(99), &empty_snapshot_index(), &evidence).unwrap();
-    assert!(publish_step(&document(1), &small.index, &evidence).is_ok());
-    assert!(publish_step(&document(101), &first.index, &evidence).is_ok());
+    let small = publish_step(&document(99), &empty_snapshot_index(), &evidence, 0).unwrap();
+    assert!(publish_step(&document(1), &small.index, &evidence, 0).is_ok());
+    assert!(publish_step(&document(101), &first.index, &evidence, 0).is_ok());
 }
 
 #[test]
@@ -91,14 +96,17 @@ fn refuses_empty_upstream_ids() {
     let evidence = ChargeUnitEvidence::default();
     for (input, detail) in [
         (
-            br#"{"":{"models":{"m":{}}}}"#.as_slice(),
+            br#"{"":{"models":{"m":{"type":"chat","capabilities":{},"api":{}}}}}"#.as_slice(),
             "empty provider id",
         ),
-        (br#"{"p":{"models":{"":{}}}}"#.as_slice(), "empty model id"),
+        (
+            br#"{"p":{"models":{"":{"type":"chat","capabilities":{},"api":{}}}}}"#.as_slice(),
+            "empty model id",
+        ),
     ] {
         assert!(
             matches!(
-                publish_step(input, &previous, &evidence),
+                publish_step(input, &previous, &evidence, 0),
                 Err(PublishRefusal::Parse(reason)) if reason.contains(detail)
             ),
             "expected a refusal for {detail}"
@@ -112,6 +120,7 @@ fn the_index_refuses_corruption_truncation_and_unsupported_versions() {
         &document(2),
         &empty_snapshot_index(),
         &ChargeUnitEvidence::default(),
+        0,
     )
     .unwrap();
     let mut bytes = step.index.to_bytes();

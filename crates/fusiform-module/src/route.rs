@@ -1021,6 +1021,15 @@ fn serve_catalog_get_snapshot(
                 wide.push(fact.to_owned());
             }
         }
+        if prefixes.iter().any(|p| "model.kind".starts_with(p)) {
+            wide.push("model.type".to_string());
+            wide.push("existence".to_string());
+        }
+        if prefixes.iter().any(|p| "wire.family".starts_with(p)) {
+            // The recorded protocol also identifies the family on dated reads.
+            wide.push("wire.".to_string());
+            wide.push("existence".to_string());
+        }
         wide
     });
     if request.at_ms.is_none() {
@@ -1069,12 +1078,6 @@ fn serve_catalog_get_snapshot(
                 // when the caller selected only a derived bound.
                 wide.push("capability.input_modalities".to_string());
                 wide.push("limit.context".to_string());
-                wide.push("existence".to_string());
-            }
-            if prefixes.iter().any(|p| "wire.family".starts_with(p)) {
-                // Protocol verification needs the package and shape, and endpoint
-                // corrections must run before a route can advertise its protocol.
-                wide.push("wire.".to_string());
                 wide.push("existence".to_string());
             }
             wide

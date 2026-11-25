@@ -34,13 +34,15 @@ use fusiform_module::route::serve_tool_call;
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, FactKey, NewEra, NewObservation};
 
-/// Normalize as production ingest does: with the shipped input-audio
-/// evidence, so the pinned bytes are the bytes a deployed store serves, and
-/// a second ingest in a case does not withdraw a rate the first one wrote.
-fn normalize_models_dev(
+/// Keep the legacy test fixtures on their measured projection; current seed
+/// cases use the v2 normalization path with the seed's observation time.
+fn normalize_legacy_models_dev_for_tests(
     bytes: &[u8],
 ) -> Result<fusiform_core::NormalizeOutcome, fusiform_core::NormalizeError> {
-    fusiform_core::normalize_models_dev_with(bytes, &fusiform_module::input_audio::evidence())
+    fusiform_core::normalize_legacy_models_dev_for_tests_with(
+        bytes,
+        &fusiform_module::input_audio::evidence(),
+    )
 }
 
 const UPSTREAM: &str = include_str!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
@@ -271,9 +273,10 @@ fn plane_store() -> (CatalogStore, tempfile::TempDir, Vec<(String, String)>) {
         },
     })
     .unwrap();
-    let catalog = normalize_models_dev(serde_json::to_string(&doc).unwrap().as_bytes())
-        .unwrap()
-        .catalog;
+    let catalog =
+        normalize_legacy_models_dev_for_tests(serde_json::to_string(&doc).unwrap().as_bytes())
+            .unwrap()
+            .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     (store, dir, cuts)
@@ -575,7 +578,7 @@ pub(super) fn speed_twin_store() -> (CatalogStore, tempfile::TempDir) {
         .remove("kimi-k3.1-pro-highspeed")
         .unwrap();
     let (store, dir) = super::temperature::store(before_launch);
-    let catalog = normalize_models_dev(&serde_json::to_vec(&seed).unwrap())
+    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&seed).unwrap())
         .unwrap()
         .catalog;
     let launch = Timestamp(1_792_782_357_000); // 2026-10-23 19:05:57 UTC
@@ -1201,7 +1204,7 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
             }
         }
     }});
-    let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
         .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
@@ -1671,7 +1674,7 @@ pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Valu
             "synthetic-multimodal":{"id":"synthetic-multimodal", "type":"chat", "modalities":{"input":["audio"],"output":["text","audio","image","video"]}}
         }
     }});
-    let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
         .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
@@ -1817,7 +1820,7 @@ fn render_canonical_identity(
         },
     })
     .unwrap();
-    let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
         .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
@@ -1877,7 +1880,7 @@ fn render_paged() -> serde_json::Value {
         "001-page": {"id":"001-page","name":"Synthetic page boundary","models":{
             "m":{"id":"m","name":"Synthetic model","family":"x".repeat(3 * 1024 * 1024)}}}
     });
-    let catalog = normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
+    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&upstream).unwrap())
         .unwrap()
         .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
@@ -2598,7 +2601,7 @@ pub(super) fn store() -> (CatalogStore, tempfile::TempDir) {
     // ingest treats "absent from this document" as a withdrawal, which is
     // correct and is exactly why a fixture must present one document rather
     // than two. Caught by the schema's uniqueness constraint on first run.
-    let catalog = normalize_models_dev(merged_upstream().as_bytes())
+    let catalog = normalize_legacy_models_dev_for_tests(merged_upstream().as_bytes())
         .unwrap()
         .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
@@ -2683,7 +2686,7 @@ pub(super) fn store() -> (CatalogStore, tempfile::TempDir) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_models_dev(withdrawn.as_bytes())
+    let catalog = normalize_legacy_models_dev_for_tests(withdrawn.as_bytes())
         .expect("the withdrawn document normalises")
         .catalog;
     let plan = plan_ingest(
@@ -3652,7 +3655,7 @@ fn anthropic_gateway_store() -> (CatalogStore, tempfile::TempDir) {
     // billing must preserve each published card, including its tier variants.
     let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
     let upstream = serde_json::json!({"anthropic": seed["anthropic"]});
-    let catalog = normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
+    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&upstream).unwrap())
         .unwrap()
         .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();

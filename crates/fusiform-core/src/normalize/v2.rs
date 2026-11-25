@@ -17,7 +17,7 @@ use super::{
     WireFacts,
 };
 use crate::upstream_facts::FactKey;
-use crate::{Modality, ModelKey, SourceId};
+use crate::{Modality, ModelKey, SourceId, Timestamp};
 use inventory::Kind;
 use raw::{Object, RawModel, RawProvider};
 
@@ -66,6 +66,7 @@ pub struct Finding {
 pub struct NormalizeV2Outcome {
     pub catalog: NormalizedCatalog,
     pub findings: Vec<Finding>,
+    pub next_date_boundary_ms: Option<i64>,
 }
 
 impl NormalizeV2Outcome {
@@ -106,6 +107,14 @@ pub fn normalize_models_dev_v2_with(
     bytes: &[u8],
     evidence: &ChargeUnitEvidence,
 ) -> Result<NormalizeV2Outcome, NormalizeError> {
+    normalize_models_dev_at(bytes, evidence, Timestamp(0))
+}
+
+pub(super) fn normalize_models_dev_at(
+    bytes: &[u8],
+    evidence: &ChargeUnitEvidence,
+    observed_at: Timestamp,
+) -> Result<NormalizeV2Outcome, NormalizeError> {
     let document_parse = |error: serde_json::Error| NormalizeError::DocumentParse {
         diagnostic: error.to_string(),
     };
@@ -119,7 +128,10 @@ pub fn normalize_models_dev_v2_with(
     }
     let mut decoder = serde_json::Deserializer::from_slice(bytes);
     let outcome = decoder
-        .deserialize_map(ProviderMap { evidence })
+        .deserialize_map(ProviderMap {
+            evidence,
+            observed_at,
+        })
         .map_err(document_parse)?;
     decoder.end().map_err(document_parse)?;
     Ok(outcome)
@@ -127,6 +139,31 @@ pub fn normalize_models_dev_v2_with(
 
 struct ProviderMap<'a> {
     evidence: &'a ChargeUnitEvidence,
+    observed_at: Timestamp,
+}
+
+struct DateBoundaries {
+    observed_at: Timestamp,
+    next_ms: Option<i64>,
+}
+
+impl DateBoundaries {
+    fn is_active(&mut self, boundary_ms: i64) -> bool {
+        if self.observed_at.0 >= boundary_ms {
+            return true;
+        }
+        self.next_ms = Some(
+            self.next_ms
+                .map_or(boundary_ms, |next| next.min(boundary_ms)),
+        );
+        false
+    }
+}
+
+struct Context<'a> {
+    evidence: &'a ChargeUnitEvidence,
+    findings: Findings,
+    dates: DateBoundaries,
 }
 
 impl<'de> Visitor<'de> for ProviderMap<'_> {
@@ -140,15 +177,21 @@ impl<'de> Visitor<'de> for ProviderMap<'_> {
         use de::Error;
 
         let mut providers = BTreeMap::new();
-        let mut findings = Findings::new();
+        let mut ctx = Context {
+            evidence: self.evidence,
+            findings: Findings::new(),
+            dates: DateBoundaries {
+                observed_at: self.observed_at,
+                next_ms: None,
+            },
+        };
         let mut model_count = 0;
         // Borrow each provider's JSON directly. Keeping its raw fields out of
         // the rest of the loop bounds temporary allocations to one provider.
         while let Some((id, raw)) = map.next_entry::<String, &RawValue>()? {
             let provider = RawProvider::parse(raw)
                 .map_err(|error| M::Error::custom(format_args!("provider {id:?}: {error}")))?;
-            let provider = normalize_provider(&id, provider, self.evidence, &mut findings)
-                .map_err(M::Error::custom)?;
+            let provider = normalize_provider(&id, provider, &mut ctx).map_err(M::Error::custom)?;
             model_count += provider.models.len();
             if providers.insert(id, provider).is_some() {
                 return Err(M::Error::custom("duplicate provider id"));
@@ -162,7 +205,9 @@ impl<'de> Visitor<'de> for ProviderMap<'_> {
                 source: SourceId::ModelsDev,
                 providers: providers.into_values().collect(),
             },
-            findings: findings
+            next_date_boundary_ms: ctx.dates.next_ms,
+            findings: ctx
+                .findings
                 .into_iter()
                 .map(|(key, (occurrences, first_model_id))| Finding {
                     key,
@@ -177,8 +222,7 @@ impl<'de> Visitor<'de> for ProviderMap<'_> {
 fn normalize_provider(
     id: &str,
     provider: RawProvider<'_>,
-    evidence: &ChargeUnitEvidence,
-    findings: &mut Findings,
+    ctx: &mut Context<'_>,
 ) -> Result<NormalizedProvider, String> {
     let name = provider
         .fields
@@ -188,13 +232,13 @@ fn normalize_provider(
         "provider",
         &provider.fields,
         provider.models.first().map(|(model, _)| model.as_str()),
-        findings,
+        &mut ctx.findings,
     );
     let mut models = BTreeMap::new();
     for (model_id, raw) in provider.models {
         let raw =
             RawModel::parse(raw).map_err(|error| format!("model {id}/{model_id}: {error}"))?;
-        let model = normalize_model(id, &model_id, name.as_deref(), raw, evidence, findings);
+        let model = normalize_model(id, &model_id, name.as_deref(), raw, ctx);
         if models.insert(model_id, model).is_some() {
             return Err(format!("duplicate model id in provider {id:?}"));
         }
@@ -213,9 +257,9 @@ fn normalize_model(
     model: &str,
     provider_name: Option<&str>,
     raw: RawModel<'_>,
-    evidence: &ChargeUnitEvidence,
-    findings: &mut Findings,
+    ctx: &mut Context<'_>,
 ) -> NormalizedModel {
+    let findings = &mut ctx.findings;
     let RawModel {
         fields,
         model_type,
@@ -260,14 +304,7 @@ fn normalize_model(
         provider_id: provider.to_owned(),
         model_id: model.to_owned(),
     };
-    let rates = rates::normalize_rates(
-        &key,
-        fields.raw("cost"),
-        modes.as_ref(),
-        evidence,
-        findings,
-        &mut refused,
-    );
+    let rates = rates::normalize_rates(&key, fields.raw("cost"), modes.as_ref(), ctx, &mut refused);
     NormalizedModel {
         key,
         provider_name: provider_name.map(str::to_owned),
@@ -300,7 +337,7 @@ fn normalize_model(
             context_tokens: absent_if_zero(limit.as_ref().and_then(|limit| limit.read("context"))),
             output_tokens: absent_if_zero(limit.as_ref().and_then(|limit| limit.read("output"))),
         },
-        wire: normalize_api(model, &api, findings, &mut refused),
+        wire: normalize_api(model, &api, &mut ctx.findings, &mut refused),
         rates,
         refused,
         quarantined: Quarantine {
@@ -396,18 +433,24 @@ fn normalize_api(
                 let npm = entry
                     .object("sdk")
                     .and_then(|sdk| sdk.read::<String>("aisdk"));
-                let api = entry.read::<String>("base_url");
+                let base_url = entry.read::<String>("base_url");
                 let defaults_to_responses = matches!(
                     npm.as_deref(),
                     Some("@ai-sdk/openai" | "@ai-sdk/azure" | "@ai-sdk/xai")
                 );
                 let shape = match (protocol.as_str(), defaults_to_responses) {
+                    ("images", _) => Some("images"),
+                    ("interactions", _) => Some("interactions"),
+                    ("speech", _) if npm.as_deref() == Some("@ai-sdk/elevenlabs") => Some("speech"),
+                    ("videos", _) if api_has_matching_interactions(&entry, &api.0) => {
+                        Some("interactions")
+                    }
                     ("chat-completions", true) => Some("completions"),
                     ("responses", false) => Some("responses"),
                     _ => None,
                 };
                 wire = WireFacts {
-                    api: wire_claim(api.as_deref(), None),
+                    api: wire_claim(base_url.as_deref(), None),
                     npm: wire_claim(npm.as_deref(), None),
                     shape: wire_claim(shape, None),
                 };
@@ -415,6 +458,29 @@ fn normalize_api(
         }
     }
     wire
+}
+
+fn api_has_matching_interactions(primary: &Object<'_>, apis: &[(String, &RawValue)]) -> bool {
+    let Some(url) = primary.read::<String>("base_url") else {
+        return false;
+    };
+    let Some(sdk) = primary
+        .object("sdk")
+        .and_then(|sdk| sdk.read::<String>("aisdk"))
+    else {
+        return false;
+    };
+    apis.iter().skip(1).any(|(name, raw)| {
+        name == "interactions"
+            && Object::parse(raw).is_ok_and(|entry| {
+                entry.read::<String>("base_url").as_deref() == Some(&url)
+                    && entry
+                        .object("sdk")
+                        .and_then(|sdk| sdk.read::<String>("aisdk"))
+                        .as_deref()
+                        == Some(&sdk)
+            })
+    })
 }
 
 fn known_api_protocol(value: &str) -> bool {

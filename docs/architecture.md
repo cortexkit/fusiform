@@ -21,7 +21,7 @@ tools over the supervisor's route.
 ## 2. Data flow
 
 ```text
-models.dev/api.json
+models.dev/experimental/v2.0/api.json
         │  conditional GET every 30 minutes (fusiform-module: fetch, loop_)
         ▼
   normalize (fusiform-core) ── connection claims preserved; transport not inferred

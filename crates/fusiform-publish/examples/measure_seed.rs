@@ -22,6 +22,13 @@ use fusiform_release::{
 use serde_json::{Value, json};
 
 const SEED: &[u8] = include_bytes!("../../fusiform-module/data/models-dev-seed.json");
+const SEED_META: &str = include_str!("../../fusiform-module/data/models-dev-seed.meta.json");
+
+fn seed_observed_at_ms() -> i64 {
+    serde_json::from_str::<Value>(SEED_META).unwrap()["fetched_at_ms"]
+        .as_i64()
+        .unwrap()
+}
 const INPUT_AUDIO: &str = include_str!("../../fusiform-module/data/input-audio-per-token.json");
 const OUTPUT_AUDIO: &str = include_str!("../../fusiform-module/data/output-audio-per-token.json");
 
@@ -79,9 +86,13 @@ fn main() {
 
 fn prepare(path: &Path) {
     fs::create_dir_all(path).unwrap();
-    let catalog = normalize_models_dev_with(SEED, &evidence())
-        .unwrap()
-        .catalog;
+    let catalog = normalize_models_dev_with(
+        SEED,
+        &evidence(),
+        fusiform_core::Timestamp(seed_observed_at_ms()),
+    )
+    .unwrap()
+    .catalog;
     let model_count = catalog.model_count();
     let upstream: Upstream = catalog
         .providers
@@ -180,9 +191,13 @@ fn write_snapshot(path: &Path, upstream: Upstream) {
 
 fn audit_tiers(bytes: &[u8]) {
     use fusiform_core::{ChargeBasis, RateCondition};
-    let catalog = normalize_models_dev_with(bytes, &evidence())
-        .unwrap()
-        .catalog;
+    let catalog = normalize_models_dev_with(
+        bytes,
+        &evidence(),
+        fusiform_core::Timestamp(seed_observed_at_ms()),
+    )
+    .unwrap()
+    .catalog;
     let mut repeated_keys = 0;
     let mut conflicts = 0;
     for model in catalog.models() {
@@ -224,7 +239,7 @@ fn rebuild(path: &Path) -> FactIndex {
 
 fn measure(bytes: &[u8], previous: &FactIndex, evidence: &ChargeUnitEvidence, expected_ops: usize) {
     let start = Instant::now();
-    let result = publish_step(bytes, previous, evidence).unwrap();
+    let result = publish_step(bytes, previous, evidence, seed_observed_at_ms()).unwrap();
     let elapsed = start.elapsed();
     assert_eq!(result.ops.len(), expected_ops);
     println!(

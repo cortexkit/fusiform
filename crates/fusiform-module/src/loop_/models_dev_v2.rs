@@ -235,7 +235,7 @@ fn apply_v2(store: &CatalogStore, signals: &Signals, bytes: Vec<u8>, at: Timesta
         false,
         |store, source| store.catalog_counts(source, None),
         |bytes| {
-            let outcome = normalize_models_dev_v2_with(bytes, &crate::input_audio::evidence())?;
+            let outcome = normalize_models_dev_with(bytes, &crate::input_audio::evidence(), at)?;
             let counts = outcome.finding_counts();
             Ok((outcome.catalog, counts))
         },
@@ -281,6 +281,203 @@ fn served_model(store: &CatalogStore, provider: &str, model: &str) -> BTreeMap<S
         .models
         .remove(&format!("{provider}/{model}"))
         .unwrap()
+}
+
+#[test]
+fn owner_media_date_schedule_opens_an_era_for_the_same_bytes() {
+    // The publisher announced the price change for 2027-01-01 UTC.
+    const JAN_1_2027: Timestamp = Timestamp(1_798_761_600_000);
+    let bytes = saved_gzip("api-v2-20261125.json.gz");
+    let (store, _dir) = empty_store();
+    let signals = Signals::new();
+    let before = Timestamp(JAN_1_2027.0 - 1);
+    apply_v2(&store, &signals, bytes.clone(), before);
+    let amount = |at, key| {
+        let (row, _) = store
+            .read_model(SOURCE, "google", "gemini-3.8-flash-tts", Some(at))
+            .unwrap();
+        row.and_then(|row| {
+            row.facts
+                .get(&FactKey::from_stored(key))
+                .and_then(|rate| serde_json::from_str::<Value>(rate).unwrap()["units"].as_i64())
+        })
+    };
+    assert_eq!(amount(before, "rate.input".into()), Some(500_000_000));
+    assert_eq!(
+        amount(before, "rate.output_audio".into()),
+        Some(9_000_000_000)
+    );
+    let changed = apply_v2(&store, &signals, bytes.clone(), JAN_1_2027);
+    assert!(changed.eras_written > 0);
+    assert_eq!(amount(before, "rate.input".into()), Some(500_000_000));
+    assert_eq!(amount(JAN_1_2027, "rate.input".into()), Some(1_000_000_000));
+    assert_eq!(
+        amount(JAN_1_2027, "rate.output_audio".into()),
+        Some(18_000_000_000)
+    );
+    let replay = apply_v2(&store, &signals, bytes, Timestamp(JAN_1_2027.0 + 1));
+    assert_eq!(replay.eras_written, 0);
+}
+
+#[test]
+fn owner_media_regressions_on_the_saved_snapshot_after_curation() {
+    let bytes = saved_gzip("api-v2-20261125.json.gz");
+    let (store, _dir) = empty_store();
+    apply_v2(&store, &Signals::new(), bytes, SWITCH_AT);
+    let mut differences = Vec::new();
+    for (provider, model, expected) in [
+        (
+            "openai",
+            "gpt-realtime-2.1",
+            json!({"model.type":"realtime","rate.input_audio":{"units":32_000_000_000_i64},"rate.output_audio":{"units":64_000_000_000_i64},"rate.cached_input_audio":{"units":400_000_000}}),
+        ),
+        (
+            "openai",
+            "gpt-transcribe",
+            json!({"model.type":"transcription","rate.input_audio.per_second":{"units":4_500_000,"per":60}}),
+        ),
+        (
+            "openai",
+            "gpt-live-transcribe",
+            json!({"model.type":"transcription","rate.input_audio.per_second":{"units":17_000_000,"per":60}}),
+        ),
+        (
+            "google",
+            "gemini-3.5-transcribe",
+            json!({"model.type":"transcription","limit.audio_tokens_per_second":25}),
+        ),
+        (
+            "google",
+            "gemini-3.5-transcribe-live",
+            json!({"limit.audio_tokens_per_second":25}),
+        ),
+        (
+            "google",
+            "gemini-3.8-flash-tts",
+            json!({"model.type":"speech","limit.output_audio_tokens_per_second":25}),
+        ),
+        (
+            "google",
+            "gemini-omni-1.2-flash",
+            json!({"model.type":"video","wire.family":"google.interactions","capability.aspect_ratios":["9:16","16:9"],"capability.output_audio":true,"limit.output_duration_ms":15000,"limit.output_video_tokens_per_second.resolution.360p":1931,"limit.output_video_tokens_per_second.resolution.720p":5792,"limit.output_video_tokens_per_second.resolution.1080p":8688,"limit.output_video_tokens_per_second.resolution.4k":17376}),
+        ),
+        (
+            "google",
+            "gemini-decision-1",
+            json!({"model.type":"decision","model.kind":"decision"}),
+        ),
+        (
+            "openai",
+            "gpt-image-2.6-flare",
+            json!({"wire.family":"openai.images"}),
+        ),
+        (
+            "elevenlabs",
+            "eleven_flash_v2_5",
+            json!({"wire.family":"elevenlabs.text_to_speech","wire.api":{"value":"https://api.elevenlabs.io/v1"}}),
+        ),
+        (
+            "cloudflare-workers-ai",
+            "@cf/cloudflare/clairic",
+            json!({"model.kind":"extraction"}),
+        ),
+        (
+            "cloudflare-workers-ai",
+            "@cf/cloudflare/clef",
+            json!({"model.kind":"decision"}),
+        ),
+        (
+            "cloudflare-workers-ai",
+            "@cf/cloudflare/clef-flash",
+            json!({"model.kind":"decision"}),
+        ),
+        ("typesafe", "jev-1.13.0", json!({"model.kind":"decision"})),
+        ("typesafe", "jev-1.14.0", json!({"model.kind":"decision"})),
+    ] {
+        let facts = served_model(&store, provider, model);
+        for (key, expected) in expected.as_object().unwrap() {
+            let actual = facts.get(key).unwrap_or(&Value::Null);
+            let matches = if let Some(fields) = expected.as_object() {
+                fields
+                    .iter()
+                    .all(|(field, value)| actual.get(field) == Some(value))
+            } else {
+                actual == expected
+            };
+            if !matches {
+                differences.push(format!(
+                    "{provider}/{model}: {key}: expected {expected}, got {actual}"
+                ));
+            }
+        }
+    }
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
+}
+
+#[test]
+fn owner_media_replaced_curated_rows_keep_their_existing_prices_and_facts() {
+    use crate::curated_models;
+
+    let old = fixture();
+    let (store, _dir) = seed(&old);
+    let bytes = saved_gzip("api-v2-20261125.json.gz");
+    let identities = published_identities(&bytes);
+    let document = curated_models::document_with_retired_test_models().to_string();
+    let curated = curated_models::load_reporting_rejects(&document).0;
+    let rows: Vec<_> = curated
+        .keys()
+        .filter(|key| identities.contains(*key))
+        .collect();
+    assert_eq!(rows.len(), 14);
+    let before: Vec<_> = {
+        let _plan = curated_models::plant(&document);
+        rows.iter()
+            .map(|(p, m)| served_model(&store, p, m))
+            .collect()
+    };
+    apply_v2(&store, &Signals::new(), bytes, Timestamp(1_795_629_037_000));
+    for ((p, m), old) in rows.into_iter().zip(before) {
+        let new = served_model(&store, p, m);
+        assert_eq!(new["existence"], "present");
+        assert!(!curated_models::models().contains_key(&(p.clone(), m.clone())));
+        for (key, old) in &old {
+            let actual = new.get(key);
+            if key.starts_with("rate.") && old["state"] == "priced" {
+                let amount = |rate: &Value| {
+                    assert_eq!(rate["state"], "priced", "{p}/{m}: {key}");
+                    let units = i128::from(rate["units"].as_i64().unwrap());
+                    let exponent = rate["exponent"].as_u64().unwrap() as u32;
+                    let per = i128::from(rate["per"].as_u64().unwrap_or(1));
+                    (units, 10_i128.pow(exponent) * per)
+                };
+                let (n, d) = amount(old);
+                let (n2, d2) = amount(actual.unwrap_or(&Value::Null));
+                assert_eq!(old["currency"], new[key]["currency"]);
+                assert_eq!(n * d2, n2 * d, "{p}/{m}: {key}");
+            } else if key == "wire.api" {
+                assert_eq!(old["value"], new[key]["value"], "{p}/{m}: {key}");
+            } else if key == "model.name"
+                && matches!(m.as_str(), "@cf/cloudflare/clef-flash" | "gpt-transcribe")
+            {
+                assert_eq!(
+                    if m == "gpt-transcribe" {
+                        "GPT-Transcribe"
+                    } else {
+                        "Clef Flash"
+                    },
+                    new[key]
+                );
+            } else if matches!(
+                key.as_str(),
+                "limit.temperature_min" | "limit.temperature_max"
+            ) && new.get("capability.temperature") == Some(&Value::Bool(false))
+            {
+                assert!(actual.is_none(), "{p}/{m}: {key}");
+            } else {
+                assert_eq!(actual, Some(old), "{p}/{m}: {key}");
+            }
+        }
+    }
 }
 
 #[test]

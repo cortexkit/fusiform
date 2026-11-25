@@ -17,6 +17,7 @@ pub struct WireCorrection {
     pub model: String,
     pub field: String,
     pub value: Option<String>,
+    pub replaces: Option<String>,
     pub withheld: bool,
     pub source_ref: fusiform_protocol::WireSourceRef,
     pub quote: Option<String>,
@@ -89,6 +90,10 @@ pub fn load_reporting_rejects(doc: &str) -> (WireCorrections, Vec<String>) {
             || row.value.as_ref().is_some_and(|v| v.trim().is_empty())
         {
             Some("withheld requires no value; a correction requires a nonempty value")
+        } else if row.replaces.as_ref().is_some_and(|base| {
+            row.model != "*" || base.trim().is_empty() || Some(base) == row.value.as_ref()
+        }) {
+            Some("replaces must name a different, nonempty observed base on a provider correction")
         } else if row.model == "*"
             && (row.withheld
                 || row
@@ -240,6 +245,7 @@ fn withhold_unrouted(
     prefixes: Option<&Vec<String>>,
 ) -> Option<fusiform_protocol::WireCorrectionWire> {
     let row = WireCorrection {
+        replaces: None,
         provider: complete.provider.clone(),
         model: model.to_string(),
         field: complete.field.clone(),
@@ -255,7 +261,7 @@ fn withhold_unrouted(
     apply_row(&row, model, facts, prefixes, Some(&complete.notes))
 }
 
-/// Fill a missing endpoint only; upstream claims and per-model corrections win.
+/// Fill an absent endpoint or correct an exact, sourced upstream base.
 pub fn apply_provider_api(
     corrections: &WireCorrections,
     provider: &str,
@@ -263,12 +269,17 @@ pub fn apply_provider_api(
     facts: &mut BTreeMap<String, serde_json::Value>,
     prefixes: Option<&Vec<String>>,
 ) -> Option<fusiform_protocol::WireCorrectionWire> {
-    if facts.contains_key("wire.api")
-        || corrections.contains_key(&(provider.to_string(), model.to_string()))
-    {
+    if corrections.contains_key(&(provider.to_string(), model.to_string())) {
         return None;
     }
     let row = corrections.get(&(provider.to_string(), "*".to_string()))?;
+    let upstream = facts.get("wire.api");
+    if match row.replaces.as_deref() {
+        Some(base) => upstream.and_then(|claim| claim["value"].as_str()) != Some(base),
+        None => upstream.is_some(),
+    } {
+        return None;
+    }
     apply_row(row, model, facts, prefixes, None)
 }
 
