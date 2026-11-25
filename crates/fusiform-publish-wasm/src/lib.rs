@@ -8,7 +8,7 @@ use fusiform_curate::input_audio::{
     add_output_evidence, evidence_from, load_for_schema, load_reporting_rejects,
 };
 use fusiform_publish::{FactIndex, ReplayRefusal};
-use fusiform_release::{Change, ReleaseEnvelope, Signatures, canonical_json};
+use fusiform_release::{Change, ReleaseEnvelope, Signatures, canonical_json, write_canonical_json};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, value::RawValue};
 
@@ -72,13 +72,28 @@ fn publish_step(
             })
         })
         .collect();
-    let summary = canonical_json(&json!({
-        "ops": step.ops,
-        "upstream_hash": step.upstream_hash,
-        "model_count": step.model_count,
-        "conflicts": conflicts,
-    }));
+    let mut summary = b"{\"conflicts\":".to_vec();
+    write_json(&mut summary, conflicts);
+    summary.extend_from_slice(b",\"model_count\":");
+    write_json(&mut summary, step.model_count);
+    // Ops are already sorted. Consume them one at a time so the encoder
+    // never holds a second tree for the whole diff.
+    summary.extend_from_slice(b",\"ops\":[");
+    for (i, op) in step.ops.into_iter().enumerate() {
+        if i != 0 {
+            summary.push(b',');
+        }
+        write_json(&mut summary, op);
+    }
+    summary.extend_from_slice(b"],\"upstream_hash\":");
+    write_json(&mut summary, step.upstream_hash);
+    summary.push(b'}');
     Ok((summary, Some(step.index.to_bytes())))
+}
+
+fn write_json(out: &mut Vec<u8>, value: impl Serialize) {
+    let value = serde_json::to_value(value).expect("publish summary fields are JSON");
+    write_canonical_json(out, &value).expect("writing to a Vec cannot fail");
 }
 
 fn decode_index(bytes: &[u8]) -> Result<FactIndex, Failure> {
