@@ -266,8 +266,8 @@ fn saved_gzip(file: &str) -> Vec<u8> {
 }
 
 // The v2 inventory classifies both read and declared-unread keys in the
-// normalizer. The fence consumes that inventory so it cannot have a second
-// allowlist that falls out of sync with the keys accepted at runtime.
+// normalizer. This test reads that inventory instead of keeping its own
+// allowlist, which could fall out of sync with the keys accepted at runtime.
 fn v2_unaccounted(outcome: &fusiform_core::NormalizeV2Outcome) -> Vec<&str> {
     use fusiform_core::normalize::v2::FindingKey;
     outcome
