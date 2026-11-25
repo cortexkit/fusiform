@@ -1,10 +1,12 @@
 use std::{
+    borrow::Borrow,
     collections::{BTreeMap, BTreeSet},
-    io::{Read, Seek},
+    io::{Read, Seek, Write},
 };
 
 use fusiform_core::Timestamp;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::history_base::{self, Tables};
@@ -36,7 +38,7 @@ const LOCAL_TABLES: &[&str] = &[
 
 pub type ImportedTables = BTreeMap<String, Vec<Map<String, Value>>>;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct StoreRelease {
     pub release: u64,
     pub state_hash: String,
@@ -44,6 +46,7 @@ pub struct StoreRelease {
     pub applied_at_ms: i64,
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct ReleaseArrival {
     pub published_at_ms: i64,
     pub release: StoreRelease,
@@ -51,11 +54,64 @@ pub struct ReleaseArrival {
     pub upstream: Option<ReleaseObservation>,
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct ReleaseObservation {
     pub id: i64,
     pub at: Timestamp,
     pub prior_at: Timestamp,
+    #[serde(with = "spooled_models")]
     pub models: TouchedModels,
+}
+
+impl ReleaseArrival {
+    /// Append to an ephemeral replay spool, not to the published store format.
+    pub fn spool(&self, mut writer: impl Write) -> std::io::Result<()> {
+        serde_json::to_writer(&mut writer, self)?;
+        writer.write_all(b"\n")
+    }
+}
+
+mod spooled_models {
+    use super::TouchedModels;
+    use crate::FactKey;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    // Model identity is a pair, which JSON cannot represent as an object key.
+    type Entry = ((String, String), Option<Vec<(String, String)>>);
+
+    pub(super) fn serialize<S: Serializer>(
+        models: &TouchedModels,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        s.collect_seq(models.iter().map(|(model, facts)| {
+            (
+                model,
+                facts.as_ref().map(|facts| {
+                    facts
+                        .iter()
+                        .map(|(f, v)| (f.as_str(), v))
+                        .collect::<Vec<_>>()
+                }),
+            )
+        }))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<TouchedModels, D::Error> {
+        Ok(Vec::<Entry>::deserialize(d)?
+            .into_iter()
+            .map(|(model, facts)| {
+                (
+                    model,
+                    facts.map(|facts| {
+                        facts
+                            .into_iter()
+                            .map(|(f, v)| (FactKey::from_stored(f), v))
+                            .collect()
+                    }),
+                )
+            })
+            .collect())
+    }
 }
 
 pub type PlanMetadata = (Option<String>, Option<String>, Option<String>);
@@ -324,7 +380,8 @@ impl CatalogStore {
     ) -> Result<(), CatalogError> {
         self.apply_releases(
             base.map(|base| move |writer: &mut RowWriter<'_>| write_tables(writer, base, None)),
-            arrivals,
+            arrivals.iter().map(Ok),
+            None,
         )
     }
 
@@ -343,30 +400,39 @@ impl CatalogStore {
     /// Stream an already verified v1 history base into the release transaction.
     pub fn apply_streamed_store_releases(
         &self,
-        mut input: impl Read + Seek,
+        input: impl Read + Seek,
         arrivals: &[ReleaseArrival],
     ) -> Result<(), CatalogError> {
         self.apply_releases(
-            Some(|writer: &mut RowWriter<'_>| {
-                // The wire orders tables by name. Install observations first so
-                // SQLite checks era and artifact foreign keys on each insert.
-                for tables in [Tables::Observations, Tables::Rest] {
-                    input.rewind().map_err(|error| invalid(error.to_string()))?;
-                    history_base::read(&mut input, tables, |table, row| {
-                        writer.write(table, &row, None)
-                    })
-                    .map_err(|error| invalid(error.to_string()))?;
-                }
-                Ok(())
-            }),
+            Some(|writer: &mut RowWriter<'_>| write_streamed_base(input, writer)),
+            arrivals.iter().map(Ok),
+            None,
+        )
+    }
+
+    /// Apply a verified spool one arrival at a time. Any read/decode error or
+    /// a spool that ends before the verified head rolls back the entire batch.
+    pub fn apply_spooled_store_releases(
+        &self,
+        base: Option<impl Read + Seek>,
+        spool: impl Read,
+        head_release: u64,
+    ) -> Result<(), CatalogError> {
+        let arrivals = serde_json::Deserializer::from_reader(spool)
+            .into_iter::<ReleaseArrival>()
+            .map(|entry| entry.map_err(|err| invalid(format!("read replay spool: {err}"))));
+        self.apply_releases(
+            base.map(|input| move |writer: &mut RowWriter<'_>| write_streamed_base(input, writer)),
             arrivals,
+            Some(head_release),
         )
     }
 
     fn apply_releases(
         &self,
         write_base: Option<impl FnOnce(&mut RowWriter<'_>) -> rusqlite::Result<()>>,
-        arrivals: &[ReleaseArrival],
+        arrivals: impl IntoIterator<Item = rusqlite::Result<impl Borrow<ReleaseArrival>>>,
+        head_release: Option<u64>,
     ) -> Result<(), CatalogError> {
         if !self.is_store_mode() {
             return Err(CatalogError::Invariant(
@@ -387,7 +453,8 @@ impl CatalogStore {
             };
             let mut writer = RowWriter::new(tx, &insert);
             let current = cursor(tx)?;
-            if current.is_none() != write_base.is_some() || arrivals.is_empty() {
+            let mut arrivals = arrivals.into_iter().peekable();
+            if current.is_none() != write_base.is_some() || arrivals.peek().is_none() {
                 return Err(invalid("store bootstrap needs a base and releases; incremental apply needs an existing cursor"));
             }
             if let Some(write_base) = write_base {
@@ -395,9 +462,11 @@ impl CatalogStore {
                 write_base(&mut writer)?;
             }
             let mut previous = current.as_ref().map_or(0, |r| r.release);
-            let mut previous_curation = current.as_ref().map(|r| r.curation_hash.as_str());
+            let mut previous_curation = current.map(|r| r.curation_hash);
             let mut rates_version = None;
             for arrival in arrivals {
+                let arrival = arrival?;
+                let arrival = arrival.borrow();
                 let release = &arrival.release;
                 if previous.checked_add(1) != Some(release.release) {
                     return Err(invalid(format!("release {} does not follow {previous}", release.release)));
@@ -408,7 +477,7 @@ impl CatalogStore {
                     params![release.release, release.state_hash, release.curation_hash, release.applied_at_ms])?;
                 let issued = advance_catalog_version_in(tx, None, Timestamp(release.applied_at_ms))?;
                 // Release one installs the base and has no prior curation hash.
-                if previous_curation != Some(release.curation_hash.as_str())
+                if previous_curation.as_deref() != Some(release.curation_hash.as_str())
                     || upstream_rates_changed
                     || arrival.rows.get("era").into_iter().flatten().any(|row| {
                         row.get("fact_key").and_then(Value::as_str).is_some_and(is_rate_relevant_fact)
@@ -417,7 +486,10 @@ impl CatalogStore {
                     rates_version = Some(issued);
                 }
                 previous = release.release;
-                previous_curation = Some(&release.curation_hash);
+                previous_curation = Some(release.curation_hash.clone());
+            }
+            if head_release.is_some_and(|head| head != previous) {
+                return Err(invalid("replay spool did not end at the verified head"));
             }
             Ok(rates_version)
         })?;
@@ -440,6 +512,22 @@ impl CatalogStore {
             documents
         })
     }
+}
+
+fn write_streamed_base(
+    mut input: impl Read + Seek,
+    writer: &mut RowWriter<'_>,
+) -> rusqlite::Result<()> {
+    // The wire orders tables by name. Install observations first so SQLite
+    // checks era and artifact foreign keys on each insert.
+    for tables in [Tables::Observations, Tables::Rest] {
+        input.rewind().map_err(|error| invalid(error.to_string()))?;
+        history_base::read(&mut input, tables, |table, row| {
+            writer.write(table, &row, None)
+        })
+        .map_err(|error| invalid(error.to_string()))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -596,6 +684,22 @@ mod tests {
             .apply_streamed_store_releases(input(&base), &[arrival(1), arrival(3)])
             .unwrap_err();
         assert!(error.to_string().contains("release 3 does not follow 1"));
+        assert_empty();
+
+        let mut spool = Vec::new();
+        arrival(1).spool(&mut spool).unwrap();
+        let error = store
+            .apply_spooled_store_releases(Some(input(&base)), spool.as_slice(), 2)
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("did not end at the verified head"));
+        assert_empty();
+        spool.extend_from_slice(b"{");
+        let error = store
+            .apply_spooled_store_releases(Some(input(&base)), spool.as_slice(), 2)
+            .unwrap_err();
+        assert!(error.to_string().contains("read replay spool"));
         assert_empty();
 
         assert_eq!(

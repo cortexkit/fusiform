@@ -116,6 +116,118 @@ fn next_named_release(snapshot: &mut Snapshot, key: &SigningKey) -> Release {
     }
 }
 
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "measures peak RSS; run alone so other tests do not affect it"]
+async fn store_poll_large_curation_backlog_has_bounded_peak_rss() {
+    fn peak_kib() -> u64 {
+        let status = std::fs::read_to_string("/proc/self/status").unwrap();
+        status
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("VmHWM:")?
+                    .split_whitespace()
+                    .next()?
+                    .parse()
+                    .ok()
+            })
+            .unwrap()
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("http");
+    for folder in ["v1/history/days", "v1/releases", "v1/snapshots"] {
+        std::fs::create_dir_all(root.join(folder)).unwrap();
+    }
+    let key = SigningKey::from_bytes(&[42; 32]);
+    let mut snapshot: Snapshot = serde_json::from_slice(SNAPSHOT).unwrap();
+    for (path, bytes) in [
+        ("v1/head", signed_head(&snapshot, 2, &key).as_slice()),
+        ("v1/snapshots/2", SNAPSHOT),
+        ("v1/releases/1", FIRST),
+        ("v1/history/base.json", BASE),
+        ("v1/history/days/2026-11-19.json", DAY),
+    ] {
+        std::fs::write(root.join(path), bytes).unwrap();
+    }
+    // Serve response files from disk so the server does not contribute a
+    // copy of the backlog to the consumer's measured peak.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+    let server_root = root.clone();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut request = String::new();
+            let mut reader = BufReader::new(&mut stream);
+            if reader.read_line(&mut request).unwrap() == 0 {
+                continue;
+            }
+            let file = request
+                .split_ascii_whitespace()
+                .nth(1)
+                .unwrap()
+                .trim_start_matches('/');
+            while {
+                let mut header = String::new();
+                reader.read_line(&mut header).unwrap() > 0 && header != "\r\n"
+            } {}
+            let mut response = File::open(server_root.join(file)).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                response.metadata().unwrap().len()
+            )
+            .unwrap();
+            std::io::copy(&mut response, &mut stream).unwrap();
+        }
+    });
+    let store = CatalogStore::open_for_store(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into_owned(),
+        },
+    })
+    .unwrap();
+    let mut poller =
+        StorePoller::new(url, BTreeMap::from([(KID.into(), key.verifying_key())])).unwrap();
+    assert_eq!(poller.poll(&store).await.unwrap(), 2);
+
+    const BACKLOG: u64 = 32;
+    snapshot.state.curation_set.vendor_facts.insert(
+        "curated-providers".into(),
+        json!({"schema":"curated-providers/v1", "providers":[], "padding":"x".repeat(1024 * 1024)}),
+    );
+    for n in 3..3 + BACKLOG {
+        let mut release = next_named_release(&mut snapshot, &key);
+        let set = &mut snapshot.state.curation_set;
+        set.version += 1;
+        release.change.curation_set = Some(set.clone());
+        let envelope = &mut snapshot.envelope;
+        envelope.curation_version = set.version;
+        envelope.curation_hash = set.curation_hash();
+        envelope.state_hash =
+            fusiform_release::state_hash(envelope.curation_hash, envelope.upstream_hash);
+        envelope.change_hash = release.change.change_hash();
+        release.signatures = sign_envelope(envelope, KID, &key).unwrap();
+        release.envelope = envelope.clone();
+        let mut output =
+            std::io::BufWriter::new(File::create(root.join(format!("v1/releases/{n}"))).unwrap());
+        serde_json::to_writer(&mut output, &release).unwrap();
+        output.flush().unwrap();
+    }
+    std::fs::write(root.join("v1/head"), signed_head(&snapshot, 2, &key)).unwrap();
+    let before = peak_kib();
+    assert_eq!(poller.poll(&store).await.unwrap(), 2 + BACKLOG);
+    let after = peak_kib();
+    println!("{BACKLOG} releases × 1 MiB: peak RSS before catch-up {before} KiB, after catch-up {after} KiB");
+    assert!(
+        after - before < 20 * 1024,
+        "peak RSS grew by {} KiB",
+        after - before
+    );
+}
+
 fn publish_snapshot_day(
     files: &mut BTreeMap<String, Vec<u8>>,
     snapshot: &mut Snapshot,
