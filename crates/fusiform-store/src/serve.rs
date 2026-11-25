@@ -517,8 +517,9 @@ impl CatalogStore {
         // read it as data.
         let corrections = self.all_corrections_covering(query.source, resolved_at)?;
 
-        // Only a dated read needs to check later eras for windows that
-        // contain the requested instant.
+        // Only a dated read can fall inside an uncertainty window (the gap
+        // between the last poll that confirmed a value and the poll that saw
+        // it change); a current read never does.
         let uncertainty = if let Some(at) = query.at {
             self.uncertain_facts_in_range(query.source, at, after, through)?
         } else {

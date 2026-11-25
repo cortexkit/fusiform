@@ -365,7 +365,9 @@ fn upstream_history(
         }
         // Known model, nothing recorded for this fact: a real answer, and now
         // the only remaining cause is the fact key. The empty response says
-        // which of the three it is by elimination. Inherited rates have no
+        // which of the three it is by elimination: an unknown fact key, a fact
+        // this model never published, or a rate inherited from the model's
+        // creator. Inherited rates have no
         // era on this provider, so use the same creator table as catalog.get
         // to explain that case.
         inheritance_origin(

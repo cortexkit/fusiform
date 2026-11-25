@@ -9,16 +9,18 @@ pub struct PlanPrice {
     /// `source_ref`. That is a claim rather than a gap, which is why
     /// `refusal_reason` is required alongside it.
     pub price: Option<Amount>,
-    /// Joined onto served rows, never part of the stored price claim.
+    /// Served on this plan's `plan.prices` row, never part of the stored price claim.
     pub quota_value: Option<fusiform_protocol::QuotaValueWire>,
-    /// Current-read entitlements, independent of the stored price claim.
+    /// Speed tiers the plan includes, served on its `plan.prices` row and not
+    /// part of the stored price claim.
     pub service_tiers: Option<fusiform_protocol::ServiceTiersWire>,
-    /// Current-read request caps, never part of the stored price claim.
+    /// Concurrent-request limits, served on the plan's `plan.prices` row and
+    /// not part of the stored price claim.
     pub concurrency: Option<fusiform_protocol::ConcurrencyWire>,
     pub refusal_reason: Option<String>,
     /// When the price took effect, as best the source allows.
     ///
-    /// No vendor in this plane publishes effective dates, so in practice this
+    /// No vendor of these subscription plans publishes effective dates, so in practice this
     /// is when the source was read, the earliest instant the price can be
     /// defended from. An effective date would imply a date the vendor stated.
     pub boundary_at_ms: i64,

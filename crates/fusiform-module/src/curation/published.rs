@@ -460,9 +460,10 @@ fn plan_price_changes(
                 row["boundary_at_ms"] = json!(at);
                 reassert_latest = false;
             } else if has_previous_release && boundary == latest && boundary < at {
-                // The first release reconciles its vendor boundaries with the
-                // imported base. Only later releases can restore a claim that
-                // a prior signed release withdrew or replaced at publication.
+                // Release 1 keeps the vendor boundaries already in the history
+                // imported from the first computer's models.dev store. Only later releases
+                // can restore a claim that an earlier signed release withdrew or
+                // replaced at its publication time.
                 reassert_latest = true;
             }
             emit(row);

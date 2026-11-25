@@ -80,7 +80,7 @@ One `observation` row is written per poll, whatever happened. Columns:
 | `outcome` | `changed`, `unchanged`, `not_modified`, `failed` or `seeded` |
 | `failure_class` | set only for `failed`: `network`, `http_status`, `parse`, `implausible` or `transient` |
 | `detail` | producer detail for diagnostics; consumers do not branch on it |
-| `normalized_hash` | hash of normalized upstream claims and the scopes the parser had to refuse |
+| `normalized_hash` | hash of normalized upstream claims, plus the facts and price schedules the parser had to refuse as unreadable |
 | `raw_hash` | hash of the fetched bytes; moves when the upstream reformats |
 | `etag` | the upstream's validator, sent as `If-None-Match` on the next poll |
 | `duration_ms` | how long the fetch took |

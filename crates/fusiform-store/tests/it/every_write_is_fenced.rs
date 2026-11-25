@@ -34,8 +34,8 @@ use std::path::{Path, PathBuf};
 /// Statements that modify the database, as they appear in SQL.
 const WRITE_KEYWORDS: [&str; 3] = ["INSERT INTO", "UPDATE ", "DELETE FROM"];
 const EXEMPT_STORE_SOURCES: &[&str] = &[
-    // The migration check below verifies that imports run through the same
-    // lease-holding database handle the store opened.
+    // Migrations run through cortexkit_store's own handle, which holds the
+    // store's single-writer lease; the migration check below verifies that.
     "schema.rs",
     // Deliberately sends a write to a read-only connection to prove SQLite refuses it.
     "tests/read_connections.rs",

@@ -113,8 +113,9 @@ impl CatalogStore {
             for row in rows {
                 let rule = per_model_rule(&row.model_id, row.rule.clone());
                 let boundary = match newest(&row.provider_id, &row.model_id)? {
-                    // Keep the first evidence for an unchanged claim. Edits to
-                    // the source quote or review date do not change the rule.
+                    // Keep the existing era when the served rule (lifetimes and
+                    // multipliers) is unchanged. Edits to the source quote or
+                    // review date do not change what is served.
                     Some((_, Some(previous)))
                         if previous == rule || same_served_claim(&previous, &rule) =>
                     {

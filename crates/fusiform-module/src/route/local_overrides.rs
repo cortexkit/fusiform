@@ -148,7 +148,8 @@ pub(super) fn comparison_rows(
             .filter(|(id, facts)| metadata.contains_key(model_key(id, facts)))
             .map(|(id, facts)| (id.clone(), facts.clone()))
             .collect();
-        // A judgment can join an alias by its canonical key, but not by its alias ID.
+        // A local grade or mark reaches an alias row through the alias's
+        // canonical model key, never through the alias's own ID.
         published.aliased.extend(
             local
                 .aliased

@@ -2384,7 +2384,8 @@ pub struct StatusRequest {
 /// One recorded poll.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StatusPoll {
-    /// Store-local observation ID accepted by mark and retract requests.
+    /// This store's ID for the poll, the `--observation` value that
+    /// `catalog.mark_artifact` and `catalog.retract_artifact` take.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observation_id: Option<i64>,
     pub observed_at_ms: i64,

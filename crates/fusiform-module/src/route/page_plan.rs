@@ -161,7 +161,8 @@ pub(super) fn serve_planned_page(
         }),
     )?;
     if let Some(cursor) = cursor {
-        // Current reads keep their derivations but report page one's instant.
+        // A continuation page reports page one's resolved_at_ms, so every page
+        // of one read names the same instant.
         response.resolved_at_ms = cursor.resolved_at_ms;
     }
     retain_range(&mut response, &range);

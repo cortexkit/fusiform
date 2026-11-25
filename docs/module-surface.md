@@ -52,7 +52,7 @@ already holds local catalog history. It checks `{base}/v1/head` every minute
 (the edge caches it for 30 seconds). Immutable objects are at
 `{base}/v1/releases/{n}`, `{base}/v1/snapshots/{n}` and
 `{base}/v1/history/base.json`. A file at `{base}/v1/history/days/{YYYY-MM-DD}.json`
-can change as releases are added to its day. The listed history files must
+can change as releases are added to its day. The history files a snapshot's attestation lists must
 replay to exactly the snapshot's release, and their bytes must match its
 attestation. Replacing a day file invalidates attestations over the old bytes.
 Release and snapshot numbers are canonical positive decimals. The daemon does

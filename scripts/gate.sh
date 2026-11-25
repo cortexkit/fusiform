@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Run exactly what CI runs (.github/workflows/ci.yml), so CI confirms a push
-# instead of discovering what is wrong with it. Run it before every push; a
-# worker delivery cites its final line.
+# instead of discovering what is wrong with it. Run it before every push and
+# quote its final GATE_OK or GATE_FAILED line when reporting the result.
 #
 # Phase 1 runs on this machine in seconds and compiles nothing: lock parity,
 # formatting, lock resolution, the path-dependency check, the shell-script

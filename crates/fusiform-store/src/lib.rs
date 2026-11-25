@@ -729,7 +729,7 @@ impl CatalogStore {
                                 source,
                                 |r| Ok((r.get(0)?, r.get(1)?)),
                             )?;
-                        // An unchanged poll or 304 can confirm the old value
+                        // An unchanged poll or an HTTP 304 Not Modified can confirm the old value
                         // without opening a new era. Do not write a change
                         // before that observation.
                         let latest_observation: Option<i64> = tx.query_row(
