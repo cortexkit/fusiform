@@ -367,7 +367,7 @@ impl StorePoller {
             Some(replay) => (replay, None),
             None => {
                 // A missing individual object covered by the snapshot makes
-                // the warm spool unusable. Replay the attested history instead.
+                // the warm spool unusable. Replay the signed history files instead.
                 let (mut replay, base) = self
                     .history(head.latest_snapshot, store, cursor.as_ref())
                     .await?;
@@ -384,8 +384,9 @@ impl StorePoller {
         let retained = Retained::encode(current)?;
         let mut arrivals = step("flush release replay spool", arrivals.into_inner())?;
         step("rewind release replay spool", arrivals.rewind())?;
-        // All network and verification work finishes before taking the write
-        // fence. SQLite imports the verified spool in one transaction.
+        // All network and verification work finishes before the store's
+        // single-writer lock is taken, so no download waits under it. SQLite
+        // then imports the verified spool in one transaction.
         step(
             "commit verified store history",
             store.apply_spooled_store_releases(base, BufReader::new(arrivals), head.release.get()),

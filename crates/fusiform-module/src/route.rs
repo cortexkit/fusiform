@@ -1664,8 +1664,9 @@ fn page_catalog(
     response.next_page_token = None;
     let mut sized = Vec::with_capacity(providers.len());
     let mut token_reserve = 0;
-    // A whole response supplies only the catalog-wide disclosure; the range
-    // renderer measures each provider's own timestamp before packing.
+    // A whole-catalog response carries one disclosure, for the newest grade
+    // anywhere. Each page must instead be charged for the newest grade among
+    // its own providers, so each provider's timestamp is measured before packing.
     let quality = QualityContribution::measure(response.quality_scores.as_ref())?;
     for (provider, rows) in providers {
         let contribution = rows.contribution(quality)?;
@@ -2098,7 +2099,7 @@ impl CatalogJudgments {
         at: Option<i64>,
         prefixes: Option<&[String]>,
     ) -> Result<Self, RouteError> {
-        // Judgments and their disclosures are served only with selected judgment facts.
+        // Judgments and their disclosures are served only when the prefixes select judgments.
         if prefixes.is_some_and(|p| !selects_judgments(p)) {
             return Ok(Self::default());
         }
@@ -2466,7 +2467,7 @@ fn single_model_snapshot(
         None => store.catalog_version().map_err(|e| store_error(&e))?,
     };
 
-    // Qualify only values in force that no correction withheld. Use the
+    // Qualify only values in force that a correction has not withheld from this read. Use the
     // facts before the caller's filter so narrowing the card does not hide
     // their uncertainty disclosures.
     let prepared_uncertain = prepared.map(|prepared| {

@@ -82,7 +82,8 @@ pub enum CatalogError {
     /// response: this process is superseded and must stop writing, not retry.
     Fenced,
     /// The poll has fact changes, but its timestamp is not after the newest
-    /// era already recorded for that source.
+    /// fact boundary (the time a recorded value took effect) already written
+    /// for that source, as happens when the clock moves backwards.
     PollBoundaryNotIncreasing {
         observed_at: Timestamp,
         latest: Timestamp,
@@ -2240,7 +2241,9 @@ impl CatalogStore {
             .collect())
     }
 
-    /// The price and metadata from the same row, even during a release commit.
+    /// The price and its plan details read from the same row, so a store
+    /// release landing during the read can't pair one release's price with
+    /// another's details.
     pub fn plan_prices_with_metadata_at(
         &self,
         at_ms: i64,

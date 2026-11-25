@@ -371,9 +371,10 @@ fn render_withheld(response: &serde_json::Value) -> String {
 /// an interval containing the read instant, and it did not look again until the
 /// end.
 ///
-/// Empty for a read of the current catalog, always: an era covering now has no
-/// successor. So this only appears on a historical read, which is the question
-/// a wrong answer costs money on.
+/// Empty for a read of the current catalog, always: uncertainty needs a later
+/// recorded value to bound the interval, and the value in force now has none
+/// yet. So this only appears on a historical read, which is the question a
+/// wrong answer costs money on.
 fn render_uncertain(response: &serde_json::Value) -> String {
     let mut out = String::new();
     let Some(uncertain) = response.get("uncertain").and_then(|v| v.as_array()) else {

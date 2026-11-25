@@ -1163,7 +1163,7 @@ model has no record at that instant. `absent` means the dated read succeeds but
 does not include the fact. Adjacent results merge only if all fields, including
 the full correction list, match apart from the segment times.
 The timeline uses the dated `catalog.get` resolver. It does not apply aliases,
-rate inheritance, login-specific billing planes, or wire protocol corrections
+rate inheritance, billing planes (the per-login pricing views a read selects with `auth_method`), or wire protocol corrections
 from the current catalog.
 Judgments (quality grades, marks, effort grades, workload efforts, and local
 judgment overrides) may appear in dated `catalog.get`, but `catalog.history`

@@ -288,8 +288,9 @@ pub fn plan_correction(
         // values on both sides. See `ValueUnchangedAcrossWindow`.
         let entering =
             store.recorded_value_at(source, provider_id, model_id, fact_key, affected_from)?;
-        // A conservative lower bound may be before the first record, but the
-        // window must reach an instant at which the fact was recorded.
+        // The window may start before the first record of the fact, but it
+        // must reach an instant at which the fact was recorded; otherwise
+        // there is nothing to correct.
         if entering.is_none()
             && store
                 .recorded_value_at(source, provider_id, model_id, fact_key, affected_until)?
