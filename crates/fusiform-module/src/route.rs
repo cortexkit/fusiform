@@ -1646,8 +1646,11 @@ fn page_catalog(
     response.next_page_token = None;
     let mut sized = Vec::with_capacity(providers.len());
     let mut token_reserve = 0;
+    // A whole response supplies only the catalog-wide disclosure; the range
+    // renderer measures each provider's own timestamp before packing.
+    let quality = QualityContribution::measure(response.quality_scores.as_ref())?;
     for (provider, rows) in providers {
-        let contribution = rows.contribution()?;
+        let contribution = rows.contribution(quality)?;
         let token = format!(
             "v1:{}:{}:{}",
             response.catalog_version, response.resolved_at_ms, provider
@@ -1659,11 +1662,10 @@ fn page_catalog(
     // Reserve the largest encoded token before packing. Replacing that reserve
     // with each boundary's actual token cost preserves exact greedy boundaries,
     // including the final page, which needs no token at all.
-    let pending_quality_bytes = quality_disclosure_size(response.quality_scores.as_ref())?;
     let mut estimate = PageEstimate {
-        bytes: compact_size(&response)? - pending_quality_bytes + token_reserve,
+        bytes: compact_size(&response)? - quality.map_or(0, |q| q.bytes) + token_reserve,
         present: [false; 12],
-        pending_quality_bytes,
+        quality: None,
     };
     let mut count = 0;
     for (index, (_, _, contribution, _, token_bytes)) in sized.iter().enumerate() {
@@ -1771,23 +1773,50 @@ const DISCLOSURE_HEADERS: [&str; 11] = [
 struct ProviderContribution {
     bytes: usize,
     present: [bool; 12],
-    has_quality: bool,
+    quality: Option<QualityContribution>,
+}
+
+#[derive(Clone, Copy)]
+struct QualityContribution {
+    graded_at_ms: i64,
+    bytes: usize,
+}
+
+impl QualityContribution {
+    fn measure(
+        quality: Option<&fusiform_protocol::QualityScoresWire>,
+    ) -> Result<Option<Self>, RouteError> {
+        quality
+            .map(|quality| {
+                Ok(Self {
+                    graded_at_ms: quality.graded_at_ms,
+                    bytes: compact_size(quality)? + r#","quality_scores":"#.len(),
+                })
+            })
+            .transpose()
+    }
 }
 
 #[derive(Clone, Copy)]
 struct PageEstimate {
     bytes: usize,
     present: [bool; 12],
-    pending_quality_bytes: usize,
+    quality: Option<QualityContribution>,
 }
 
 impl PageEstimate {
     fn with_provider(mut self, provider: &ProviderContribution) -> Result<Self, RouteError> {
         let mut added = provider.bytes;
-        // Quality attribution is page-local. Charge its envelope once, when
-        // the first provider with a graded fact is actually included.
-        if provider.has_quality {
-            added += std::mem::take(&mut self.pending_quality_bytes);
+        // The page has one disclosure, from the newest judgment it serves.
+        if let Some(quality) = provider.quality {
+            if self
+                .quality
+                .is_none_or(|prior| quality.graded_at_ms > prior.graded_at_ms)
+            {
+                self.bytes -= self.quality.map_or(0, |prior| prior.bytes);
+                self.quality = Some(quality);
+                added += quality.bytes;
+            }
         }
         for (index, present) in provider.present.iter().enumerate() {
             if *present {
@@ -1810,7 +1839,10 @@ impl PageEstimate {
 }
 
 impl ProviderRows {
-    fn contribution(&self) -> Result<ProviderContribution, RouteError> {
+    fn contribution(
+        &self,
+        quality: Option<QualityContribution>,
+    ) -> Result<ProviderContribution, RouteError> {
         let present = [
             !self.models.is_empty(),
             !self.curated.is_empty(),
@@ -1833,16 +1865,14 @@ impl ProviderRows {
         // This serializes each provider's map entries and disclosure rows once,
         // including escaped keys, values, and separators within each collection.
         let bytes = compact_size(self)? - r#"{"models":{}}"#.len() - headers;
-        let has_quality = self.models.values().any(|facts| {
-            facts.contains_key("quality.elo")
-                || facts.contains_key("quality.eq")
-                || facts.keys().any(|key| key.starts_with("quality.grade."))
-                || facts.keys().any(|key| curate::is_effort_fact(key))
-        });
         Ok(ProviderContribution {
             bytes,
             present,
-            has_quality,
+            quality: quality.filter(|_| {
+                self.models
+                    .values()
+                    .any(curate::counts_for_quality_disclosure)
+            }),
         })
     }
 
@@ -1881,15 +1911,6 @@ fn compact_size<T: serde::Serialize>(value: &T) -> Result<usize, RouteError> {
     let mut count = CountBytes(0);
     serde_json::to_writer(&mut count, value).map_err(|e| RouteError::unavailable(e.to_string()))?;
     Ok(count.0)
-}
-
-fn quality_disclosure_size(
-    quality: Option<&fusiform_protocol::QualityScoresWire>,
-) -> Result<usize, RouteError> {
-    match quality {
-        Some(quality) => Ok(compact_size(quality)? + r#","quality_scores":"#.len()),
-        None => Ok(0),
-    }
 }
 
 fn partition_providers(response: &mut CatalogGetResponse) -> BTreeMap<String, ProviderRows> {

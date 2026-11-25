@@ -34,7 +34,6 @@ struct PagePlan {
     providers: Vec<(String, ProviderContribution)>,
     ranges: Vec<ProviderRange>,
     envelope_bytes: usize,
-    quality_bytes: usize,
 }
 
 static PAGE_PLAN: Mutex<Option<Arc<PagePlan>>> = Mutex::new(None);
@@ -58,7 +57,7 @@ impl PagePlan {
         let mut estimate = PageEstimate {
             bytes: self.envelope_bytes,
             present: [false; 12],
-            pending_quality_bytes: self.quality_bytes,
+            quality: None,
         };
         let mut through = None;
         for (index, (provider, contribution)) in remaining.iter().enumerate() {
@@ -301,7 +300,6 @@ fn build_plan(
         identities.insert(row.provider_id.clone());
     }
     let mut providers = Vec::new();
-    let mut quality = None;
     let mut previous = None;
     let mut raw = request.clone();
     raw.page_token = None;
@@ -322,18 +320,9 @@ fn build_plan(
             }),
         )?;
         retain_range(&mut response, &range);
-        if let Some(disclosure) = &response.quality_scores {
-            if quality
-                .as_ref()
-                .is_none_or(|q: &fusiform_protocol::QualityScoresWire| {
-                    q.graded_at_ms.to_string().len() < disclosure.graded_at_ms.to_string().len()
-                })
-            {
-                quality = Some(disclosure.clone());
-            }
-        }
+        let quality = QualityContribution::measure(response.quality_scores.as_ref())?;
         for (provider, rows) in partition_providers(&mut response) {
-            let mut contribution = rows.contribution()?;
+            let mut contribution = rows.contribution(quality)?;
             if !response.overrides.is_empty() {
                 // Each priced range here is one provider. Charge for its local
                 // disclosures; a multi-provider reply may coalesce duplicates.
@@ -352,7 +341,7 @@ fn build_plan(
         withheld: Vec::new(),
         uncertain: Vec::new(),
     };
-    let mut envelope = render(
+    let envelope = render(
         source,
         snapshot,
         request.at_ms.map(Timestamp),
@@ -361,20 +350,16 @@ fn build_plan(
         None,
         None,
     );
-    envelope.quality_scores = quality.clone();
-    let quality_bytes = quality_disclosure_size(quality.as_ref())?;
     // Width rather than a cached timestamp keeps page one's resolved_at a read
     // instant, while allowing the plan to survive ordinary clock ticks.
     let envelope_bytes =
-        compact_size(&envelope)? - quality_bytes - envelope.resolved_at_ms.to_string().len()
-            + key.timestamp_width;
+        compact_size(&envelope)? - envelope.resolved_at_ms.to_string().len() + key.timestamp_width;
     let mut plan = PagePlan {
         key,
         budget,
         providers,
         ranges: Vec::new(),
         envelope_bytes,
-        quality_bytes,
     };
     let mut after = None;
     loop {
@@ -446,6 +431,66 @@ mod tests {
         );
         assert!(page.quality_scores.is_none());
         assert_eq!(serde_json::to_vec(&page).unwrap().len(), budget);
+    }
+
+    #[test]
+    fn pages_pack_using_their_own_newest_grade_timestamp() {
+        let (store, _dir) = super::super::paging_tests::fixture();
+        for (model, at) in [("p00/m", 9), ("p01/m", 9999)] {
+            store
+                .append_quality_grade(
+                    model,
+                    None,
+                    Some(&fusiform_store::QualityGrade::Chat {
+                        elo: 1.into(),
+                        eq: 2.into(),
+                    }),
+                    "operator",
+                    "fixture",
+                    at,
+                )
+                .unwrap();
+        }
+        let cache = Mutex::new(None);
+        let mut request = CatalogGetRequest {
+            at_ms: Some(9999),
+            fact_prefixes: Some(vec!["quality.elo".into(), "model.family".into()]),
+            ..Default::default()
+        };
+        let mut expected = serve_catalog_get_request(
+            &store,
+            request.clone(),
+            usize::MAX,
+            usize::MAX,
+            &cache,
+            None,
+        )
+        .unwrap();
+        assert_eq!(expected.quality_scores.as_ref().unwrap().graded_at_ms, 9999);
+        scope_page(&mut expected, &["google".into(), "p00".into()].into());
+        assert_eq!(expected.models.len(), 2);
+        expected.quality_scores.as_mut().unwrap().graded_at_ms = 9;
+        expected.next_page_token = Some(format!(
+            "v1:{}:{}:p00",
+            expected.catalog_version, expected.resolved_at_ms
+        ));
+        let expected = serde_json::to_vec(&expected).unwrap();
+        let budget = expected.len();
+        request.paged = true;
+        let first =
+            serve_catalog_get_request(&store, request.clone(), budget, usize::MAX, &cache, None)
+                .unwrap();
+        assert_eq!(
+            first.models.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["google/gemini-3.8-flash", "p00/m"],
+            "both providers fit in {budget} bytes"
+        );
+        assert_eq!(serde_json::to_vec(&first).unwrap(), expected);
+        request.page_token = first.next_page_token;
+        let second =
+            serve_catalog_get_request(&store, request, budget, usize::MAX, &cache, None).unwrap();
+        assert_eq!(second.models.keys().collect::<Vec<_>>(), ["p01/m"]);
+        assert_eq!(second.quality_scores.unwrap().graded_at_ms, 9999);
     }
 
     #[test]

@@ -1224,16 +1224,21 @@ fn quality_scores_page_estimate_charges_each_task_disclosure_once() {
             )]),
             ..Default::default()
         };
-        let contribution = rows.contribution().unwrap();
+        let disclosure = QualityContribution {
+            graded_at_ms: -100,
+            bytes: 73,
+        };
+        let contribution = rows.contribution(Some(disclosure)).unwrap();
         let estimate = PageEstimate {
             bytes: 0,
             present: [false; 12],
-            pending_quality_bytes: 73,
+            quality: None,
         }
         .with_provider(&contribution)
         .unwrap();
         assert_eq!(
-            estimate.pending_quality_bytes, 0,
+            estimate.quality.unwrap().graded_at_ms,
+            disclosure.graded_at_ms,
             "{kind} must charge attribution"
         );
         assert_eq!(estimate.bytes, contribution.bytes + 73);
@@ -1242,6 +1247,20 @@ fn quality_scores_page_estimate_charges_each_task_disclosure_once() {
             twice.bytes,
             contribution.bytes * 2 + 74,
             "the second provider adds its separator, not a second attribution"
+        );
+
+        let newer = rows
+            .contribution(Some(QualityContribution {
+                graded_at_ms: 1,
+                bytes: 70,
+            }))
+            .unwrap();
+        let twice_with_newer = estimate.with_provider(&newer).unwrap();
+        assert_eq!(twice_with_newer.quality.unwrap().graded_at_ms, 1);
+        assert_eq!(
+            twice_with_newer.bytes,
+            contribution.bytes * 2 + 71,
+            "replace the older disclosure even when the newer timestamp is shorter"
         );
     }
 }
