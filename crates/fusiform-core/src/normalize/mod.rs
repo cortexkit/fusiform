@@ -23,6 +23,7 @@
 //!   `UnknownChargeBasis` — never a number a consumer would spend against.
 
 mod raw;
+pub mod v2;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -35,6 +36,7 @@ use crate::{
 };
 
 pub use raw::{RawModel, RawProvider};
+pub use v2::{normalize_models_dev_v2_with, NormalizeV2Outcome};
 
 /// The currency models.dev rates are assumed to be in.
 ///
