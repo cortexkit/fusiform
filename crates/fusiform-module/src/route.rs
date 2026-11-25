@@ -172,13 +172,17 @@ pub(crate) fn needs_catalog_permit(body: &[u8]) -> bool {
                 .get("model_id")
                 .and_then(serde_json::Value::as_str)
                 .is_none(),
-            // These tools count or validate the affected rows against a whole
-            // served catalog, including for a dry run.
+            // Catalog keys count or validate affected rows, even on a dry run.
+            // A local engine key does not join any catalog row.
             TOOL_QUALITY_DECOMMISSION
             | TOOL_QUALITY_RESTORE
             | TOOL_QUALITY_GRADE
             | TOOL_QUALITY_WITHDRAW
-            | fusiform_protocol::TOOL_QUALITY_WORKLOAD => true,
+            | fusiform_protocol::TOOL_QUALITY_WORKLOAD => !call
+                .arguments
+                .get("model")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|model| model.starts_with("local:")),
             _ => false,
         }
     })
@@ -289,7 +293,7 @@ fn upstream_history(
     //
     // Reached only when the read found nothing, so the ordinary path pays no
     // extra query.
-    if rows.is_empty() {
+    let inherited_from = if rows.is_empty() {
         let published = crate::curation::PublishedCuration::load(store, None)
             .map_err(RouteError::unavailable)?;
         let tables = published
@@ -361,8 +365,20 @@ fn upstream_history(
         }
         // Known model, nothing recorded for this fact: a real answer, and now
         // the only remaining cause is the fact key. The empty response says
-        // which of the three it is by elimination.
-    }
+        // which of the three it is by elimination. Inherited rates have no
+        // era on this provider, so use the same creator table as catalog.get
+        // to explain that case.
+        inheritance_origin(
+            store,
+            source,
+            tables.creators,
+            &request.provider_id,
+            &request.model_id,
+            &fact,
+        )
+    } else {
+        None
+    };
 
     // Annotated exactly as the catalog path annotates, because the reason for
     // the annotation does not weaken with age.
@@ -407,33 +423,6 @@ fn upstream_history(
         .last_changed_at(source, &request.provider_id, &request.model_id, &fact)
         .map_err(|e| store_error(&e))?
         .map(|t| t.0);
-
-    // Why an empty history can be the RIGHT answer for a fact that is served.
-    //
-    // A rate inherited from the creator has no eras on this row -- the value is
-    // derived at serve time -- so `catalog.get` serves a price and
-    // `catalog.history` finds nothing. Two surfaces disagreeing about whether a
-    // fact exists, both correct, which reads as one of them being broken.
-    //
-    // Answered by running THE SAME derivation `catalog.get` runs, rather than
-    // by re-deriving the eligibility rule here. A second copy of that rule
-    // would be free to drift from the one that decides what is actually
-    // served, and then this surface would explain an absence that is not the
-    // one the consumer met.
-    //
-    // Only consulted when the history is empty: a fact with eras of its own is
-    // this provider's, and inheritance never overwrites a published rate.
-    let inherited_from = if eras.is_empty() {
-        inheritance_origin(
-            store,
-            source,
-            &request.provider_id,
-            &request.model_id,
-            &fact,
-        )
-    } else {
-        None
-    };
 
     Ok(HistoryResponse {
         source: source.as_str().to_string(),
@@ -859,35 +848,7 @@ fn serve_catalog_get_with_cache(
             .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?
     };
 
-    if !store.is_store_mode() {
-        return serve_catalog_get_request(
-            store,
-            request,
-            page_budget,
-            frame_limit,
-            oversized,
-            None,
-        );
-    }
-    // Store releases update upstream and curation together, but rendering uses
-    // several connections. Never return a view that straddled a commit.
-    for _ in 0..2 {
-        let before = store.catalog_version().map_err(|e| store_error(&e))?;
-        let result = serve_catalog_get_request(
-            store,
-            request.clone(),
-            page_budget,
-            frame_limit,
-            oversized,
-            None,
-        );
-        if store.catalog_version().map_err(|e| store_error(&e))? == before {
-            return result;
-        }
-    }
-    Err(RouteError::unavailable(
-        "published catalog changed during the read; retry",
-    ))
+    serve_catalog_get_request(store, request, page_budget, frame_limit, oversized, None)
 }
 
 fn serve_catalog_get_request(
@@ -918,6 +879,8 @@ fn serve_catalog_get_prepared(
     page: Option<PageRender<'_>>,
     prepared: Option<&dated_model::DatedModel>,
 ) -> Result<CatalogGetResponse, RouteError> {
+    // with_read_snapshot pins one commit for upstream rows, curation, and all
+    // nested reads used to build page plans, resolve aliases, or join judgments.
     store
         .with_read_snapshot(|| {
             serve_catalog_get_snapshot(
@@ -961,15 +924,15 @@ fn serve_catalog_get_snapshot(
         .map(parse_page_token)
         .transpose()?;
     if let Some(cursor) = &cursor {
+        if request.at_ms != cursor.dated.then_some(cursor.resolved_at_ms) {
+            return Err(RouteError::bad_request(
+                "repeat page one's at_ms, or omit it if page one omitted it",
+            ));
+        }
         check_page_version(
             store.catalog_version().map_err(|e| store_error(&e))?,
             cursor,
         )?;
-        if request.at_ms.is_some_and(|at| at != cursor.resolved_at_ms) {
-            return Err(RouteError::bad_request(
-                "at_ms must match the first page's instant",
-            ));
-        }
     }
 
     if request.paged && page.is_none() {
@@ -1419,7 +1382,14 @@ fn serve_catalog_get_snapshot(
 
     // Count the route's main render, not nested renders used to derive aliases.
     #[cfg(test)]
-    CATALOG_RENDER_COUNT.with(|count| count.set(count.get() + 1));
+    {
+        CATALOG_RENDER_COUNT.with(|count| count.set(count.get() + 1));
+        serving_regression_tests::AFTER_UPSTREAM_READ.with(|hook| {
+            if let Some(hook) = hook.get() {
+                hook(store);
+            }
+        });
+    }
     let historical_overrides = at
         .map(|at| match prepared {
             Some(prepared) => Ok(prepared.overrides_at(at)),
@@ -1544,13 +1514,9 @@ fn serve_catalog_get_snapshot(
         let size = compact_size(&response)?;
         if size > frame_limit {
             if let Some(key) = whole_key {
-                // Aliases and curated rows consult the store after the snapshot.
-                // Do not remember a render that straddled a version change.
-                if response.catalog_version == key.catalog_version
-                    && store.catalog_version().map_err(|e| store_error(&e))? == key.catalog_version
-                    && store.latest_era_id().map_err(|e| store_error(&e))? == key.latest_era_id
-                    && response.resolved_at_ms.to_string().len() == key.timestamp_width
-                {
+                // with_read_snapshot pins the key and the render to one commit;
+                // only the wall-clock timestamp's serialized width can change.
+                if response.resolved_at_ms.to_string().len() == key.timestamp_width {
                     *oversized.lock().unwrap_or_else(|e| e.into_inner()) =
                         Some(OversizedCatalog { key, size });
                 }
@@ -1565,16 +1531,28 @@ struct PageCursor {
     catalog_version: i64,
     resolved_at_ms: i64,
     provider: String,
+    dated: bool,
+}
+
+fn page_token(
+    dated: bool,
+    version: i64,
+    resolved_at: impl std::fmt::Display,
+    provider: &str,
+) -> String {
+    let prefix = if dated { "v1-at" } else { "v1" };
+    format!("{prefix}:{version}:{resolved_at}:{provider}")
 }
 
 fn parse_page_token(token: &str) -> Result<PageCursor, RouteError> {
-    // v1:<catalog_version>:<resolved_at_ms>:<last_provider>; split only the
-    // first three separators so future provider ids may themselves contain ':'.
+    // Split only the first three separators so provider ids may contain ':'.
     let invalid = || RouteError::bad_request("malformed page_token: expected v1 snapshot token");
     let mut parts = token.splitn(4, ':');
-    if parts.next() != Some("v1") {
-        return Err(invalid());
-    }
+    let dated = match parts.next() {
+        Some("v1") => false,
+        Some("v1-at") => true,
+        _ => return Err(invalid()),
+    };
     let number = |text: Option<&str>| -> Result<i64, RouteError> {
         let text = text.ok_or_else(invalid)?;
         let value: i64 = text.parse().map_err(|_| invalid())?;
@@ -1590,6 +1568,7 @@ fn parse_page_token(token: &str) -> Result<PageCursor, RouteError> {
         catalog_version,
         resolved_at_ms,
         provider: provider.to_string(),
+        dated,
     })
 }
 
@@ -1656,6 +1635,7 @@ fn page_catalog(
     mut response: CatalogGetResponse,
     cursor: Option<&PageCursor>,
     budget: usize,
+    dated: bool,
 ) -> Result<CatalogGetResponse, RouteError> {
     let mut providers = partition_providers(&mut response);
     if let Some(cursor) = cursor {
@@ -1670,9 +1650,11 @@ fn page_catalog(
     let quality = QualityContribution::measure(response.quality_scores.as_ref())?;
     for (provider, rows) in providers {
         let contribution = rows.contribution(quality)?;
-        let token = format!(
-            "v1:{}:{}:{}",
-            response.catalog_version, response.resolved_at_ms, provider
+        let token = page_token(
+            dated,
+            response.catalog_version,
+            response.resolved_at_ms,
+            &provider,
         );
         let token_bytes = compact_size(&token)? + r#","next_page_token":"#.len();
         token_reserve = token_reserve.max(token_bytes);
@@ -1683,8 +1665,7 @@ fn page_catalog(
     // including the final page, which needs no token at all.
     let mut estimate = PageEstimate {
         bytes: compact_size(&response)? - quality.map_or(0, |q| q.bytes) + token_reserve,
-        present: [false; 12],
-        quality: None,
+        ..Default::default()
     };
     let mut count = 0;
     for (index, (_, _, contribution, _, token_bytes)) in sized.iter().enumerate() {
@@ -1774,7 +1755,7 @@ struct ProviderRows {
 
 // The empty models object is already in the envelope. Optional array headers
 // appear only once per page; provider payloads supply their interior JSON bytes.
-const DISCLOSURE_HEADERS: [&str; 11] = [
+const DISCLOSURE_HEADERS: [&str; 12] = [
     r#","curated":[]"#,
     r#","withheld":[]"#,
     r#","retired":[]"#,
@@ -1786,13 +1767,16 @@ const DISCLOSURE_HEADERS: [&str; 11] = [
     r#","wire_corrections":[]"#,
     r#","fact_overrides":[]"#,
     r#","login_methods":[]"#,
+    r#","overrides":[]"#,
 ];
+const PAGE_COLLECTIONS: usize = DISCLOSURE_HEADERS.len() + 1;
+const OVERRIDES_INDEX: usize = PAGE_COLLECTIONS - 1;
 
-#[derive(Clone, Copy)]
 struct ProviderContribution {
     bytes: usize,
-    present: [bool; 12],
+    present: [bool; PAGE_COLLECTIONS],
     quality: Option<QualityContribution>,
+    overrides: Vec<(String, String, usize)>,
 }
 
 #[derive(Clone, Copy)]
@@ -1816,15 +1800,16 @@ impl QualityContribution {
     }
 }
 
-#[derive(Clone, Copy)]
-struct PageEstimate {
+#[derive(Default)]
+struct PageEstimate<'a> {
     bytes: usize,
-    present: [bool; 12],
+    present: [bool; PAGE_COLLECTIONS],
     quality: Option<QualityContribution>,
+    overrides: BTreeMap<(&'a str, &'a str), usize>,
 }
 
-impl PageEstimate {
-    fn with_provider(mut self, provider: &ProviderContribution) -> Result<Self, RouteError> {
+impl<'a> PageEstimate<'a> {
+    fn with_provider(mut self, provider: &'a ProviderContribution) -> Result<Self, RouteError> {
         let mut added = provider.bytes;
         // The page has one disclosure, from the newest judgment it serves.
         if let Some(quality) = provider.quality {
@@ -1848,6 +1833,19 @@ impl PageEstimate {
                 };
                 self.present[index] = true;
             }
+        }
+        for (key, fact, bytes) in &provider.overrides {
+            // Providers can share a canonical key. If both disclose the same
+            // (key, fact), the later provider supplies the page's value.
+            if let Some(previous) = self.overrides.insert((key, fact), *bytes) {
+                self.bytes -= previous;
+            } else if self.present[OVERRIDES_INDEX] {
+                added += 1;
+            } else {
+                added += DISCLOSURE_HEADERS[OVERRIDES_INDEX - 1].len();
+                self.present[OVERRIDES_INDEX] = true;
+            }
+            added += bytes;
         }
         self.bytes = self
             .bytes
@@ -1875,6 +1873,7 @@ impl ProviderRows {
             !self.wire_corrections.is_empty(),
             !self.fact_overrides.is_empty(),
             !self.login_methods.is_empty(),
+            false, // Overrides are accounted for by distinct key and fact.
         ];
         let headers = DISCLOSURE_HEADERS
             .iter()
@@ -1887,6 +1886,7 @@ impl ProviderRows {
         Ok(ProviderContribution {
             bytes,
             present,
+            overrides: Vec::new(),
             quality: quality.filter(|_| {
                 self.models
                     .values()
@@ -2152,16 +2152,10 @@ fn finish_plane_view(
     };
     let published_quality = &judgments.published;
     let (quality, metadata) = local_overrides::overlay(published_quality, &judgments.local);
-    if metadata.is_empty() {
-        curate::derive_row_facts(
-            &mut response,
-            current,
-            lifetimes,
-            published_quality,
-            requested_prefixes,
-        );
-    } else {
-        let mut published = response.clone();
+    let mut published = local_overrides::comparison_rows(source, &response, &metadata);
+    #[cfg(test)]
+    quality_score_tests::PUBLISHED_OVERRIDE_ROWS.with(|count| count.set(published.models.len()));
+    if !published.models.is_empty() {
         curate::derive_row_facts(
             &mut published,
             current,
@@ -2169,13 +2163,15 @@ fn finish_plane_view(
             published_quality,
             requested_prefixes,
         );
-        curate::derive_row_facts(
-            &mut response,
-            current,
-            lifetimes,
-            &quality,
-            requested_prefixes,
-        );
+    }
+    curate::derive_row_facts(
+        &mut response,
+        current,
+        lifetimes,
+        &quality,
+        requested_prefixes,
+    );
+    if !published.models.is_empty() {
         local_overrides::disclose(&published, &mut response, &metadata);
     }
     if let Some(plane) = plane {
@@ -2582,12 +2578,11 @@ fn single_model_snapshot(
 
     let uncertain = if let Some(uncertain) = prepared_uncertain {
         uncertain
-    } else {
+    } else if let Some(at) = at {
         store
-            .uncertain_facts_at(source, resolved_at)
+            .uncertain_model_facts_at(source, at, provider_id, model_id)
             .map_err(|e| store_error(&e))?
             .into_iter()
-            .filter(|((p, m, _), _)| p == provider_id && m == model_id)
             .map(|((provider_id, model_id, fact_key), (prior, boundary))| {
                 fusiform_store::serve::UncertainFact {
                     provider_id,
@@ -2598,6 +2593,8 @@ fn single_model_snapshot(
                 }
             })
             .collect()
+    } else {
+        Vec::new()
     };
 
     Ok((
@@ -3274,6 +3271,7 @@ fn widened_for_inheritance(prefixes: &[String]) -> Vec<String> {
 fn inheritance_origin(
     store: &CatalogStore,
     source: SourceId,
+    creators: &crate::creators::Creators,
     provider_id: &str,
     model_id: &str,
     fact: &FactKey,
@@ -3293,13 +3291,7 @@ fn inheritance_origin(
         })
         .collect();
 
-    inherit_rate_for(
-        store,
-        source,
-        crate::creators::creators(),
-        &mut facts,
-        model_id,
-    );
+    inherit_rate_for(store, source, creators, &mut facts, model_id);
 
     serde_json::from_value(facts.get(fact.as_str())?.get("inherited_from")?.clone()).ok()
 }

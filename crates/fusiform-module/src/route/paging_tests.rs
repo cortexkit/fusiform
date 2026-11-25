@@ -5,15 +5,24 @@ use fusiform_store::{ingest::plan_ingest, NewEra, NewObservation};
 use serde_json::{json, Value};
 
 fn empty_store() -> (CatalogStore, tempfile::TempDir) {
+    empty_store_in_mode(false)
+}
+
+fn empty_store_in_mode(store_mode: bool) -> (CatalogStore, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let store = CatalogStore::open(&StorageDescriptor {
+    let descriptor = StorageDescriptor {
         module_id: "fusiform".into(),
         storage_namespace: "default".into(),
         isolation: Isolation::Module,
         backend: StorageBackend::Sqlite {
             path: dir.path().join("paging.db").to_string_lossy().into(),
         },
-    })
+    };
+    let store = if store_mode {
+        CatalogStore::open_for_store(&descriptor)
+    } else {
+        CatalogStore::open(&descriptor)
+    }
     .unwrap();
     (store, dir)
 }
@@ -34,7 +43,11 @@ fn observation(store: &CatalogStore, at: i64) -> i64 {
 }
 
 pub(super) fn fixture() -> (CatalogStore, tempfile::TempDir) {
-    let (store, dir) = empty_store();
+    fixture_in_mode(false)
+}
+
+pub(super) fn fixture_in_mode(store_mode: bool) -> (CatalogStore, tempfile::TempDir) {
+    let (store, dir) = empty_store_in_mode(store_mode);
     let mut upstream = serde_json::Map::new();
     for i in 0..6 {
         let provider = format!("p{i:02}");
@@ -246,9 +259,11 @@ fn pages_cover_whole_providers_in_order_and_scope_disclosures() {
                 expanded.resolved_at_ms = page.resolved_at_ms;
                 scope_page(&mut expanded, &expanded_providers);
                 expanded.next_page_token = all.iter().any(|p| p > next).then(|| {
-                    format!(
-                        "v1:{}:{}:{}",
-                        page.catalog_version, page.resolved_at_ms, next
+                    page_token(
+                        cursor.dated,
+                        page.catalog_version,
+                        page.resolved_at_ms,
+                        next,
                     )
                 });
                 assert!(
@@ -351,6 +366,95 @@ fn disclosure_only_providers_survive_and_oversized_providers_are_not_split() {
     }
     assert!(pages >= 6);
     assert_eq!(withheld, full.withheld);
+}
+
+#[test]
+fn named_uncertainty_is_only_read_for_a_requested_instant() {
+    let (store, dir) = fixture();
+    let future = now_ms() + 86_400_000;
+    for provider in ["p00", "p01"] {
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: provider.into(),
+                model_id: "m".into(),
+                fact_key: FactKey::from_stored("limit.context".into()),
+                value_json: "2000".into(),
+                boundary_at: Timestamp(future),
+                boundary_kind: BoundaryKind::Observed,
+                observation_id: None,
+            }])
+            .unwrap();
+    }
+    let db = rusqlite::Connection::open(dir.path().join("paging.db")).unwrap();
+    db.execute(
+        "UPDATE era SET prior_observation_at_ms=8000 WHERE boundary_at_ms=?1",
+        [future],
+    )
+    .unwrap();
+    assert_eq!(
+        store
+            .uncertain_facts_at(SourceId::ModelsDev, Timestamp(9000))
+            .unwrap()
+            .len(),
+        2
+    );
+    let dated = get(
+        &store,
+        json!({"provider_id":"p00","model_id":"m","at_ms":9000}),
+        usize::MAX,
+    );
+    assert_eq!(dated.uncertain.len(), 1);
+    assert_eq!(dated.uncertain[0].provider_id, "p00");
+    let current = get(
+        &store,
+        json!({"provider_id":"p00","model_id":"m"}),
+        usize::MAX,
+    );
+    assert!(
+        current.uncertain.is_empty(),
+        "current read included a historical uncertainty window"
+    );
+}
+
+#[test]
+fn continuation_must_repeat_the_first_pages_at_ms() {
+    let (store, _dir) = fixture();
+    let budget = 2600;
+    let at = 5000;
+    let first = get(&store, json!({"paged":true,"at_ms":at}), budget);
+    let token = first.next_page_token.unwrap();
+    let second = get(
+        &store,
+        json!({"paged":true,"page_token":token,"at_ms":at}),
+        budget,
+    );
+    assert_eq!(second.resolved_at_ms, at);
+    let assert_refused = |args: Value| {
+        let error =
+            serve_catalog_get_with_budget(&store, &serde_json::to_vec(&args).unwrap(), budget)
+                .expect_err("continuation silently switched the first page's read mode or instant");
+        assert_eq!(error.code, "bad_request");
+        assert!(
+            error.message.contains("repeat page one's at_ms"),
+            "{}",
+            error.message
+        );
+    };
+    assert_refused(json!({"paged":true,"page_token":token}));
+    assert_refused(json!({"paged":true,"page_token":token,"at_ms":at + 1}));
+
+    let current = get(&store, json!({"paged":true}), budget);
+    let token = current.next_page_token.unwrap();
+    assert!(token.starts_with(&format!(
+        "v1:{}:{}:",
+        current.catalog_version, current.resolved_at_ms
+    )));
+    assert_eq!(
+        get(&store, json!({"paged":true,"page_token":token}), budget).resolved_at_ms,
+        current.resolved_at_ms
+    );
+    assert_refused(json!({"paged":true,"page_token":token,"at_ms":current.resolved_at_ms}));
 }
 
 #[test]
@@ -768,6 +872,7 @@ fn candidate_reference_page(
     response: CatalogGetResponse,
     cursor: Option<&PageCursor>,
     budget: usize,
+    dated: bool,
 ) -> CatalogGetResponse {
     let mut providers: BTreeSet<String> = response
         .models
@@ -800,9 +905,11 @@ fn candidate_reference_page(
         let mut candidate = response.clone();
         scope_page(&mut candidate, &selected);
         candidate.next_page_token = (index + 1 < providers.len()).then(|| {
-            format!(
-                "v1:{}:{}:{}",
-                response.catalog_version, response.resolved_at_ms, provider
+            page_token(
+                dated,
+                response.catalog_version,
+                response.resolved_at_ms,
+                provider,
             )
         });
         let size = serde_json::to_vec(&candidate).unwrap().len();
@@ -825,6 +932,7 @@ fn linear_packing_matches_candidate_reference_boundaries() {
         json!({"at_ms":5000}),
         json!({"at_ms":5000,"fact_prefixes":["rate.input"]}),
     ] {
+        let dated = args.get("at_ms").is_some();
         let mut full = get(&store, args, usize::MAX);
         // JSON escaping changes byte counts in both entry keys and page tokens.
         full.models.insert(
@@ -922,12 +1030,8 @@ fn linear_packing_matches_candidate_reference_boundaries() {
             selected.insert(provider.clone());
             let mut candidate = full.clone();
             scope_page(&mut candidate, &selected);
-            candidate.next_page_token = (index + 1 < all.len()).then(|| {
-                format!(
-                    "v1:{}:{}:{}",
-                    full.catalog_version, full.resolved_at_ms, provider
-                )
-            });
+            candidate.next_page_token = (index + 1 < all.len())
+                .then(|| page_token(dated, full.catalog_version, full.resolved_at_ms, provider));
             let size = serde_json::to_vec(&candidate).unwrap().len();
             budgets.extend([size - 1, size, size + 1]);
         }
@@ -936,8 +1040,9 @@ fn linear_packing_matches_candidate_reference_boundaries() {
             let mut cursor = None;
             let mut page_count = 0;
             loop {
-                let expected = candidate_reference_page(full.clone(), cursor.as_ref(), budget);
-                let actual = page_catalog(full.clone(), cursor.as_ref(), budget).unwrap();
+                let expected =
+                    candidate_reference_page(full.clone(), cursor.as_ref(), budget, dated);
+                let actual = page_catalog(full.clone(), cursor.as_ref(), budget, dated).unwrap();
                 assert_eq!(
                     actual.models.keys().collect::<Vec<_>>(),
                     expected.models.keys().collect::<Vec<_>>(),

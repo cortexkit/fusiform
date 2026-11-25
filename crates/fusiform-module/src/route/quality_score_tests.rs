@@ -4,6 +4,148 @@ use fusiform_core::BoundaryKind;
 use fusiform_store::NewEra;
 use serde_json::{json, Value};
 
+thread_local! {
+    pub(super) static PUBLISHED_OVERRIDE_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[test]
+fn local_override_comparison_only_derives_matching_catalog_rows() {
+    let (store, _dir) = fixture_in_mode(true, true);
+    store
+        .append_quality_grade(
+            "local:fixture/stt",
+            Some("transcription"),
+            Some(&fusiform_store::QualityGrade::NonChat { grade: 11.into() }),
+            "user",
+            "local engine",
+            2000,
+        )
+        .unwrap();
+    let count = || PUBLISHED_OVERRIDE_ROWS.with(std::cell::Cell::get);
+    let unrelated = get(&store, json!({}));
+    assert!(unrelated.models.len() >= 3);
+    assert!(unrelated.overrides.is_empty());
+    assert_eq!(
+        count(),
+        0,
+        "unrelated local engine grade caused a second catalog derivation"
+    );
+
+    store
+        .append_quality_grade(
+            "lab/shared",
+            None,
+            Some(&fusiform_store::QualityGrade::Chat {
+                elo: 123.into(),
+                eq: 456.into(),
+            }),
+            "user",
+            "catalog grade",
+            2001,
+        )
+        .unwrap();
+    let matched = get(&store, json!({}));
+    assert_eq!(
+        count(),
+        2,
+        "published comparison should only derive the two matching rows"
+    );
+    assert_eq!(matched.overrides.len(), 2);
+    assert!(matched.overrides.iter().all(|row| row.key == "lab/shared"));
+}
+
+#[test]
+fn store_mode_effort_write_reports_the_recorded_grader() {
+    let (store, dir) = fixture_in_mode(false, true);
+    store
+        .append_eras(&[NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "reseller".into(),
+            model_id: "own".into(),
+            fact_key: FactKey::from_stored("capability.reasoning_options".into()),
+            value_json: r#"[{"type":"effort","values":["high"]}]"#.into(),
+            boundary_at: Timestamp(1000),
+            boundary_kind: BoundaryKind::Seed,
+            observation_id: None,
+        }])
+        .unwrap();
+    let ToolResponse::QualityWrite(write) = serve_tool_call(
+        &store,
+        br#"{
+        "name":"quality.grade","arguments":{"model":"reseller/own","effort_grade":"high",
+        "elo":1200,"eq":1000,"reason":"measured","dry_run":false}
+    }"#,
+    )
+    .unwrap() else {
+        panic!("expected grade response")
+    };
+    let db = rusqlite::Connection::open(dir.path().join("quality.db")).unwrap();
+    let grader: String = db
+        .query_row(
+            "SELECT graded_by FROM override_effort_grade_era WHERE model='reseller/own'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        write.new.graded_by, grader,
+        "effort write misreports the stored grader"
+    );
+}
+
+#[test]
+fn operator_preview_keeps_key_resolution_without_loading_judgments() {
+    let (store, _dir) = fixture(true);
+    let checks = [
+        (
+            "quality.decommission",
+            json!({"model":"lab/shared","reason":"fixture"}),
+            json!([
+                "google/antigravity-gemini-4-argon",
+                "google/gemini-4-argon",
+                "reseller/shared"
+            ]),
+        ),
+        (
+            "quality.restore",
+            json!({"model":"reseller/own","reason":"fixture"}),
+            json!(["reseller/own"]),
+        ),
+        (
+            "quality.grade",
+            json!({"model":"reseller/own","elo":1200,"eq":900,"reason":"fixture"}),
+            json!(["reseller/own"]),
+        ),
+        (
+            "quality.grade",
+            json!({"model":"local:fixture/stt","kind":"transcription","grade":42,"reason":"fixture"}),
+            json!([]),
+        ),
+    ];
+    let mut actual = Vec::new();
+    for (name, arguments, affected) in checks {
+        let local = arguments["model"].as_str().unwrap().starts_with("local:");
+        let body = serde_json::to_vec(&json!({"name":name,"arguments":arguments})).unwrap();
+        paging_tests::PUBLISHED_QUALITY_READS.with(|count| count.set(0));
+        let preview = serde_json::to_value(serve_tool_call(&store, &body).unwrap()).unwrap();
+        assert_eq!(preview["dry_run"], true);
+        assert_eq!(preview["affected_ids"], affected, "{name} {arguments}");
+        assert_eq!(
+            preview["affected_count"],
+            affected.as_array().unwrap().len()
+        );
+        actual.push((
+            needs_catalog_permit(&body) != local,
+            paging_tests::PUBLISHED_QUALITY_READS.with(std::cell::Cell::get),
+        ));
+    }
+    assert_eq!(
+        actual,
+        [(true, 0); 4],
+        "previews rendered unrelated judgments or took the catalog permit for a local key"
+    );
+}
+
 #[test]
 fn effort_curation_is_row_gated_and_dated() {
     let (store, _dir) = fixture(true);
@@ -744,6 +886,61 @@ fn quality_grades_lists_current_or_newest_first_history_and_response_dates() {
 }
 
 #[test]
+fn store_mode_marks_list_and_history_follow_local_decommission() {
+    let (store, dir) = fixture_in_mode(false, true);
+    let db = rusqlite::Connection::open(dir.path().join("quality.db")).unwrap();
+    db.execute(
+        "INSERT INTO model_mark_era (model, decommissioned, marked_by, reason, recorded_at_ms)
+         VALUES ('reseller/shared', 1, 'operator', 'published fixture', 1000)",
+        [],
+    )
+    .unwrap();
+    let call = |name, arguments| {
+        serve_tool_call(
+            &store,
+            &serde_json::to_vec(&json!({"name": name, "arguments": arguments})).unwrap(),
+        )
+        .unwrap()
+    };
+    let list = |arguments| {
+        let ToolResponse::QualityMarks(response) = call("quality.marks", arguments) else {
+            panic!("expected marks response");
+        };
+        response.marks
+    };
+    let model = "reseller/own";
+    call(
+        "quality.decommission",
+        json!({"model": model, "reason": "retired", "dry_run": false}),
+    );
+    assert_eq!(
+        get(&store, json!({})).models[model]["quality.decommissioned"],
+        true
+    );
+    let listed = list(json!({}));
+    let local = listed
+        .iter()
+        .find(|row| row.model == model)
+        .expect("committed local decommission missing from quality.marks");
+    assert_eq!(local.marked_by, "user");
+    assert_eq!(list(json!({"model": model})), vec![local.clone()]);
+
+    for key in [model, "reseller/shared"] {
+        call(
+            "quality.restore",
+            json!({"model": key, "reason": "restored", "dry_run": false}),
+        );
+        assert!(!get(&store, json!({})).models[key].contains_key("quality.decommissioned"));
+        assert!(!list(json!({})).iter().any(|row| row.model == key));
+        let history = list(json!({"model": key}));
+        assert_eq!(history.len(), 2);
+        assert!(!history[0].decommissioned);
+        assert_eq!(history[0].marked_by, "user");
+        assert!(history[1].decommissioned);
+    }
+}
+
+#[test]
 fn store_mode_grade_refresh_and_history_follow_local_writes() {
     let (store, dir) = fixture_in_mode(false, true);
     let db = rusqlite::Connection::open(dir.path().join("quality.db")).unwrap();
@@ -1196,11 +1393,11 @@ fn quality_scores_pages_without_graded_rows_omit_disclosure() {
         &mut response,
         &BTreeSet::from(["google".into(), "reseller".into()]),
     );
-    let first = page_catalog(response.clone(), None, 1).unwrap();
+    let first = page_catalog(response.clone(), None, 1, false).unwrap();
     assert!(first.models.keys().all(|key| key.starts_with("google/")));
     assert!(first.quality_scores.is_none());
     let cursor = parse_page_token(first.next_page_token.as_deref().unwrap()).unwrap();
-    let second = page_catalog(response.clone(), Some(&cursor), 1).unwrap();
+    let second = page_catalog(response.clone(), Some(&cursor), 1, false).unwrap();
     assert!(second.models.contains_key("reseller/own"));
     assert!(second.quality_scores.is_some());
     scope_page(&mut response, &BTreeSet::from(["missing".into()]));
@@ -1229,20 +1426,18 @@ fn quality_scores_page_estimate_charges_each_task_disclosure_once() {
             bytes: 73,
         };
         let contribution = rows.contribution(Some(disclosure)).unwrap();
-        let estimate = PageEstimate {
-            bytes: 0,
-            present: [false; 12],
-            quality: None,
-        }
-        .with_provider(&contribution)
-        .unwrap();
+        let estimate = || {
+            PageEstimate::default()
+                .with_provider(&contribution)
+                .unwrap()
+        };
         assert_eq!(
-            estimate.quality.unwrap().graded_at_ms,
+            estimate().quality.unwrap().graded_at_ms,
             disclosure.graded_at_ms,
             "{kind} must charge attribution"
         );
-        assert_eq!(estimate.bytes, contribution.bytes + 73);
-        let twice = estimate.with_provider(&contribution).unwrap();
+        assert_eq!(estimate().bytes, contribution.bytes + 73);
+        let twice = estimate().with_provider(&contribution).unwrap();
         assert_eq!(
             twice.bytes,
             contribution.bytes * 2 + 74,
@@ -1255,7 +1450,7 @@ fn quality_scores_page_estimate_charges_each_task_disclosure_once() {
                 bytes: 70,
             }))
             .unwrap();
-        let twice_with_newer = estimate.with_provider(&newer).unwrap();
+        let twice_with_newer = estimate().with_provider(&newer).unwrap();
         assert_eq!(twice_with_newer.quality.unwrap().graded_at_ms, 1);
         assert_eq!(
             twice_with_newer.bytes,

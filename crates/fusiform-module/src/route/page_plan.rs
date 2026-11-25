@@ -56,19 +56,18 @@ impl PagePlan {
             .collect();
         let mut estimate = PageEstimate {
             bytes: self.envelope_bytes,
-            present: [false; 12],
-            quality: None,
+            ..Default::default()
         };
         let mut through = None;
         for (index, (provider, contribution)) in remaining.iter().enumerate() {
             let candidate = estimate.with_provider(contribution)?;
             let token_bytes = if index + 1 < remaining.len() {
-                let token = format!(
-                    "v1:{}:{}:{}",
+                let token = page_token(
+                    self.key.at_ms.is_some(),
                     self.key.catalog_version,
                     // Only the width affects packing. No request instant is cached.
                     "0".repeat(self.key.timestamp_width),
-                    provider
+                    provider,
                 );
                 compact_size(&token)? + r#","next_page_token":"#.len()
             } else {
@@ -131,37 +130,25 @@ pub(super) fn serve_planned_page(
         {
             plan.clone()
         } else {
-            loop {
-                let plan = Arc::new(build_plan(
-                    store,
-                    &request,
-                    key.clone(),
-                    budget,
-                    frame_limit,
-                    oversized,
-                    &inputs,
-                )?);
-                check_page_version(
-                    store.catalog_version().map_err(|e| store_error(&e))?,
-                    &PageCursor {
-                        catalog_version: key.catalog_version,
-                        resolved_at_ms: 0,
-                        provider: String::new(),
-                    },
-                )?;
-                let latest = store.latest_era_id().map_err(|e| store_error(&e))?;
-                if latest != key.latest_era_id {
-                    // Low-level era appends need not issue a version. Do not
-                    // publish a plan measured across such a write.
-                    key.latest_era_id = latest;
-                    continue;
-                }
-                *cached = Some(plan.clone());
-                break plan;
-            }
+            // with_read_snapshot pins both the key and every measured provider.
+            let plan = Arc::new(build_plan(
+                store,
+                &request,
+                key,
+                budget,
+                frame_limit,
+                oversized,
+                &inputs,
+            )?);
+            *cached = Some(plan.clone());
+            plan
         }
     };
     let range = plan.range_after(cursor.map(|c| c.provider.as_str()))?;
+    // The enclosing snapshot already validated the cursor. Nested range reads
+    // reuse it and need no token of their own.
+    let mut request = request;
+    request.page_token = None;
     let mut response = serve_catalog_get_request(
         store,
         request.clone(),
@@ -173,25 +160,8 @@ pub(super) fn serve_planned_page(
             inputs: &inputs,
         }),
     )?;
-    let rendered = PageCursor {
-        catalog_version: response.catalog_version,
-        resolved_at_ms: response.resolved_at_ms,
-        provider: String::new(),
-    };
-    check_page_version(
-        store.catalog_version().map_err(|e| store_error(&e))?,
-        &rendered,
-    )?;
-    check_page_version(
-        response.catalog_version,
-        &PageCursor {
-            catalog_version: plan.key.catalog_version,
-            ..rendered
-        },
-    )?;
     if let Some(cursor) = cursor {
-        check_page_version(response.catalog_version, cursor)?;
-        // Keep current derivations, but report the instant resolved by page one.
+        // Current reads keep their derivations but report page one's instant.
         response.resolved_at_ms = cursor.resolved_at_ms;
     }
     retain_range(&mut response, &range);
@@ -201,9 +171,11 @@ pub(super) fn serve_planned_page(
         .is_some_and(|last| plan.providers.last().is_some_and(|(p, _)| p > last));
     response.next_page_token = if has_more {
         range.through.map(|provider| {
-            format!(
-                "v1:{}:{}:{provider}",
-                response.catalog_version, response.resolved_at_ms
+            page_token(
+                request.at_ms.is_some(),
+                response.catalog_version,
+                response.resolved_at_ms,
+                &provider,
             )
         })
     } else {
@@ -240,9 +212,11 @@ pub(super) fn serve_planned_page(
         if let Some(cursor) = cursor {
             response.resolved_at_ms = cursor.resolved_at_ms;
         }
-        response.next_page_token = Some(format!(
-            "v1:{}:{}:{last}",
-            response.catalog_version, response.resolved_at_ms
+        response.next_page_token = Some(page_token(
+            request.at_ms.is_some(),
+            response.catalog_version,
+            response.resolved_at_ms,
+            &last,
         ));
     }
     Ok(response)
@@ -323,11 +297,9 @@ fn build_plan(
         let quality = QualityContribution::measure(response.quality_scores.as_ref())?;
         for (provider, rows) in partition_providers(&mut response) {
             let mut contribution = rows.contribution(quality)?;
-            if !response.overrides.is_empty() {
-                // Each priced range here is one provider. Charge for its local
-                // disclosures; a multi-provider reply may coalesce duplicates.
-                contribution.bytes +=
-                    compact_size(&response.overrides)? + r#",\"overrides\":"#.len();
+            for row in std::mem::take(&mut response.overrides) {
+                let bytes = compact_size(&row)?;
+                contribution.overrides.push((row.key, row.fact, bytes));
             }
             providers.push((provider, contribution));
         }
@@ -471,7 +443,7 @@ mod tests {
         assert_eq!(expected.models.len(), 2);
         expected.quality_scores.as_mut().unwrap().graded_at_ms = 9;
         expected.next_page_token = Some(format!(
-            "v1:{}:{}:p00",
+            "v1-at:{}:{}:p00",
             expected.catalog_version, expected.resolved_at_ms
         ));
         let expected = serde_json::to_vec(&expected).unwrap();
@@ -491,6 +463,87 @@ mod tests {
             serve_catalog_get_request(&store, request, budget, usize::MAX, &cache, None).unwrap();
         assert_eq!(second.models.keys().collect::<Vec<_>>(), ["p01/m"]);
         assert_eq!(second.quality_scores.unwrap().graded_at_ms, 9999);
+    }
+
+    #[test]
+    fn planned_store_pages_match_serialized_pages_with_local_overrides() {
+        let (store, _dir) = super::super::paging_tests::fixture_in_mode(true);
+        for (provider, key) in [
+            ("p00", "lab/shared"),
+            ("p01", "lab/shared"),
+            ("p02", "lab/other"),
+        ] {
+            store
+                .append_eras(&[fusiform_store::NewEra {
+                    source: SourceId::ModelsDev,
+                    provider_id: provider.into(),
+                    model_id: "m".into(),
+                    fact_key: FactKey::from_stored("model.canonical_id".into()),
+                    value_json: serde_json::to_string(key).unwrap(),
+                    boundary_at: Timestamp(2000),
+                    boundary_kind: fusiform_core::BoundaryKind::Asserted,
+                    observation_id: None,
+                }])
+                .unwrap();
+        }
+        store
+            .append_model_mark(
+                "lab/shared",
+                true,
+                "user",
+                "reviewed \"matching\" offers",
+                9000,
+            )
+            .unwrap();
+        store
+            .append_model_mark("lab/other", true, "user", "second judgment", 9000)
+            .unwrap();
+        let cache = Mutex::new(None);
+        let read = |request, budget| {
+            serve_catalog_get_request(&store, request, budget, usize::MAX, &cache, None).unwrap()
+        };
+        let request = CatalogGetRequest::default();
+        let whole = read(request.clone(), usize::MAX);
+        assert_eq!(whole.overrides.len(), 2);
+        let mut providers = BTreeSet::from(["google".into()]);
+        for last in ["p00", "p01", "p02"] {
+            providers.insert(last.into());
+            let mut expected = whole.clone();
+            scope_page(&mut expected, &providers);
+            if last != "p02" {
+                expected.overrides.retain(|row| row.key == "lab/shared");
+            }
+            expected.next_page_token = Some(page_token(
+                false,
+                expected.catalog_version,
+                expected.resolved_at_ms,
+                last,
+            ));
+            let budget = compact_size(&expected).unwrap();
+            let actual = read(
+                CatalogGetRequest {
+                    paged: true,
+                    ..request.clone()
+                },
+                budget,
+            );
+            assert_eq!(
+                actual.models.keys().collect::<Vec<_>>(),
+                expected.models.keys().collect::<Vec<_>>(),
+                "the serialized page fits through {last} in {budget} bytes"
+            );
+            expected.resolved_at_ms = actual.resolved_at_ms;
+            expected.next_page_token = Some(page_token(
+                false,
+                expected.catalog_version,
+                expected.resolved_at_ms,
+                last,
+            ));
+            assert_eq!(
+                serde_json::to_value(actual).unwrap(),
+                serde_json::to_value(expected).unwrap()
+            );
+        }
     }
 
     #[test]
@@ -547,7 +600,7 @@ mod tests {
                 let mut reference = whole.clone();
                 reference.resolved_at_ms = page.resolved_at_ms;
                 let reference =
-                    page_catalog(reference, cursor.as_ref(), CATALOG_PAGE_BYTES).unwrap();
+                    page_catalog(reference, cursor.as_ref(), CATALOG_PAGE_BYTES, false).unwrap();
                 assert_eq!(
                     serde_json::to_vec(&page).unwrap(),
                     serde_json::to_vec(&reference).unwrap()
@@ -653,7 +706,7 @@ mod correction_tests {
             None,
         )
         .unwrap();
-        let expected = page_catalog(whole, None, 1_000).unwrap();
+        let expected = page_catalog(whole, None, 1_000, true).unwrap();
         assert_eq!(
             serde_json::to_vec(&after).unwrap(),
             serde_json::to_vec(&expected).unwrap()

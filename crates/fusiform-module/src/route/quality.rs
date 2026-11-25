@@ -9,6 +9,19 @@ use fusiform_protocol::{
 };
 use fusiform_store::{QualityGrade, QualityGradeEra};
 
+/// Read all identities and only the facts used to resolve a judgment target.
+/// Only the affected IDs and count go on the wire, so this read has no size limit.
+pub(super) fn judgment_targets(store: &CatalogStore) -> Result<CatalogGetResponse, RouteError> {
+    serve_catalog_get_with_limits(
+        store,
+        br#"{"fact_prefixes":["model.canonical_id","model.type","model.kind",
+            "capability.input_modalities","capability.output_modalities",
+            "capability.reasoning_options","existence"]}"#,
+        usize::MAX,
+        usize::MAX,
+    )
+}
+
 fn local_key(model: &str) -> Result<bool, RouteError> {
     let Some(key) = model.strip_prefix("local:") else {
         return Ok(false);
@@ -29,6 +42,16 @@ fn mark_wire(row: fusiform_store::ModelMarkEra) -> ModelMarkWire {
     }
 }
 
+fn local_mark_wire(row: fusiform_store::LocalMark) -> ModelMarkWire {
+    ModelMarkWire {
+        model: row.model,
+        decommissioned: row.decommissioned,
+        marked_by: "user".into(),
+        reason: row.reason,
+        recorded_at_ms: row.recorded_at_ms,
+    }
+}
+
 pub(super) fn marks(store: &CatalogStore, body: &[u8]) -> Result<QualityMarksResponse, RouteError> {
     let request: QualityMarksRequest = if body.is_empty() {
         QualityMarksRequest::default()
@@ -36,10 +59,29 @@ pub(super) fn marks(store: &CatalogStore, body: &[u8]) -> Result<QualityMarksRes
         serde_json::from_slice(body)
             .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?
     };
-    let rows = if let Some(model) = request.model {
+    let read = || mark_rows(store, request.model.as_deref());
+    let marks = if store.is_store_mode() {
+        store
+            .with_read_snapshot(read)
+            .map_err(|e| store_error(&e))??
+    } else {
+        read()?
+    };
+    Ok(QualityMarksResponse { marks })
+}
+
+fn mark_rows(store: &CatalogStore, model: Option<&str>) -> Result<Vec<ModelMarkWire>, RouteError> {
+    if let Some(model) = model {
         let mut history = store
-            .model_mark_history(&model)
+            .model_mark_history(model)
             .map_err(|e| store_error(&e))?;
+        if store.is_store_mode() {
+            history.extend(
+                store
+                    .local_mark_history(model)
+                    .map_err(|e| store_error(&e))?,
+            );
+        }
         if history.is_empty() {
             return Err(RouteError {
                 code: "no_coverage",
@@ -47,13 +89,31 @@ pub(super) fn marks(store: &CatalogStore, body: &[u8]) -> Result<QualityMarksRes
             });
         }
         history.reverse();
-        history
-    } else {
-        store.model_marks().map_err(|e| store_error(&e))?
-    };
-    Ok(QualityMarksResponse {
-        marks: rows.into_iter().map(mark_wire).collect(),
-    })
+        if store.is_store_mode() {
+            // The reverse insertion order breaks timestamp ties, putting local marks first.
+            history.sort_by_key(|row| std::cmp::Reverse(row.recorded_at_ms));
+        }
+        return Ok(history.into_iter().map(mark_wire).collect());
+    }
+
+    let published = store.model_marks().map_err(|e| store_error(&e))?;
+    if !store.is_store_mode() {
+        return Ok(published.into_iter().map(mark_wire).collect());
+    }
+    let local = store
+        .local_overrides_at(None)
+        .map_err(|e| store_error(&e))?
+        .marks;
+    let effective: BTreeMap<_, _> = published
+        .into_iter()
+        .map(mark_wire)
+        .chain(local.into_iter().map(local_mark_wire))
+        .map(|row| (row.model.clone(), row))
+        .collect();
+    Ok(effective
+        .into_values()
+        .filter(|row| row.decommissioned)
+        .collect())
 }
 
 pub(super) fn mark(
@@ -76,8 +136,7 @@ pub(super) fn mark(
     if request.reason.trim().is_empty() {
         return Err(RouteError::bad_request("reason must not be empty"));
     }
-    // Count all served identities, independent of the public reply frame budget.
-    let catalog = serve_catalog_get_with_limits(store, b"{}", usize::MAX, usize::MAX)?;
+    let catalog = judgment_targets(store)?;
     let affected: Vec<_> = catalog
         .models
         .iter()
@@ -106,13 +165,7 @@ pub(super) fn mark(
         .marks
         .into_iter()
         .find(|row| row.model == request.model)
-        .map(|row| ModelMarkWire {
-            model: row.model,
-            decommissioned: row.decommissioned,
-            marked_by: "user".into(),
-            reason: row.reason,
-            recorded_at_ms: row.recorded_at_ms,
-        });
+        .map(local_mark_wire);
     if request.withdraw && local_override.is_none() {
         return Err(RouteError::no_coverage(
             "no current local override to withdraw",
@@ -426,17 +479,10 @@ fn write(
             message: format!("no current quality grade for {model:?}"),
         });
     }
-    // Operator previews need the full served identity set, not the public reply
-    // frame budget. Nothing from this read is returned except ten row ids.
     let catalog = if local {
         None
     } else {
-        Some(serve_catalog_get_with_limits(
-            store,
-            b"{}",
-            usize::MAX,
-            usize::MAX,
-        )?)
+        Some(judgment_targets(store)?)
     };
     let mut affected: Vec<_> = catalog
         .as_ref()
@@ -472,7 +518,7 @@ fn write(
     } else if !withdraw && !local {
         let catalog = catalog.as_ref().expect("catalog keys resolve current rows");
         if let Some(effort) = &graded_effort {
-            super::quality_efforts::require_effort(catalog, &affected, effort)?;
+            super::quality_efforts::require_effort(&catalog.models, &affected, effort)?;
         }
         if affected.iter().any(|id| {
             catalog.models[id]

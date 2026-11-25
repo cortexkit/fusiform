@@ -6,15 +6,20 @@ use fusiform_protocol::{
 use fusiform_store::{EffortGradeEra, WorkloadEffortEra};
 use serde_json::Number;
 
+type TargetModels = BTreeMap<String, curate::Facts>;
+
 fn target(
     store: &CatalogStore,
     model: &str,
     reason: &str,
-) -> Result<(CatalogGetResponse, Vec<String>), RouteError> {
+) -> Result<(TargetModels, Vec<String>), RouteError> {
     if reason.trim().is_empty() {
         return Err(RouteError::bad_request("reason must not be empty"));
     }
-    let catalog = serve_catalog_get_with_limits(store, b"{}", usize::MAX, usize::MAX)?;
+    if model.starts_with("local:") {
+        return Ok((BTreeMap::new(), Vec::new()));
+    }
+    let catalog = super::quality::judgment_targets(store)?;
     let affected = catalog
         .models
         .iter()
@@ -28,18 +33,18 @@ fn target(
             (canonical.unwrap_or(id) == model).then(|| id.clone())
         })
         .collect();
-    Ok((catalog, affected))
+    Ok((catalog.models, affected))
 }
 
 pub(super) fn require_effort(
-    catalog: &CatalogGetResponse,
+    models: &TargetModels,
     ids: &[String],
     effort: &str,
 ) -> Result<(), RouteError> {
     if effort.trim().is_empty()
         || !ids.iter().any(|id| {
             curate::fact_overrides::options_list_effort(
-                catalog.models[id].get("capability.reasoning_options"),
+                models[id].get("capability.reasoning_options"),
                 effort,
             )
         })
@@ -56,7 +61,7 @@ fn missing() -> RouteError {
     }
 }
 
-fn grade_wire(row: EffortGradeEra) -> QualityGradeWire {
+fn grade_wire(row: EffortGradeEra, graded_by: &str) -> QualityGradeWire {
     QualityGradeWire {
         model: row.model,
         kind: None,
@@ -66,7 +71,7 @@ fn grade_wire(row: EffortGradeEra) -> QualityGradeWire {
         elo: row.elo,
         eq: row.eq,
         grade: None,
-        graded_by: "operator".into(),
+        graded_by: graded_by.into(),
         reason: row.reason,
         recorded_at_ms: row.recorded_at_ms,
     }
@@ -80,7 +85,7 @@ pub(super) fn grade(
     reason: String,
     dry_run: bool,
 ) -> Result<QualityWriteResponse, RouteError> {
-    let (catalog, affected) = target(store, &model, &reason)?;
+    let (models, affected) = target(store, &model, &reason)?;
     let local = store
         .local_overrides_at(None)
         .map_err(|e| store_error(&e))?
@@ -88,17 +93,17 @@ pub(super) fn grade(
         .into_iter()
         .find(|row| row.model == model && row.effort == effort);
     let current = if local.is_some() || store.is_store_mode() && pair.is_none() {
-        local.map(grade_wire)
+        local.map(|row| grade_wire(row, "user"))
     } else {
         store
             .effort_grades_at(None)
             .map_err(|e| store_error(&e))?
             .into_iter()
             .find(|row| row.model == model && row.effort == effort)
-            .map(grade_wire)
+            .map(|row| grade_wire(row, "operator"))
     };
     if pair.is_some() {
-        require_effort(&catalog, &affected, &effort)?;
+        require_effort(&models, &affected, &effort)?;
     } else if current.is_none() {
         return Err(missing());
     }
@@ -122,7 +127,14 @@ pub(super) fn grade(
         dry_run,
         model,
         current,
-        new: grade_wire(row),
+        new: grade_wire(
+            row,
+            if store.is_store_mode() {
+                "user"
+            } else {
+                "operator"
+            },
+        ),
         affected_count: affected.len(),
         affected_ids: affected.into_iter().take(10).collect(),
     })
@@ -165,7 +177,7 @@ pub(super) fn workload(
             "specify a default effort (and optionally minimum), exclude, or withdraw; exclude and withdraw take no effort",
         ));
     }
-    let (catalog, affected) = target(store, &request.model, &request.reason)?;
+    let (models, affected) = target(store, &request.model, &request.reason)?;
     if request.exclude && affected.is_empty() {
         return Err(RouteError::bad_request(
             "no current row reached by this key",
@@ -191,11 +203,11 @@ pub(super) fn workload(
         return Err(missing());
     }
     if let Some(effort) = &request.effort_default {
-        require_effort(&catalog, &affected, effort)?;
+        require_effort(&models, &affected, effort)?;
     }
     if let Some(effort) = &request.effort_minimum {
         if effort.trim().is_empty()
-            || !catalog.models.values().any(|facts| {
+            || !models.values().any(|facts| {
                 curate::fact_overrides::options_list_effort(
                     facts.get("capability.reasoning_options"),
                     effort,
