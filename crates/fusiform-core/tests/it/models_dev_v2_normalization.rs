@@ -220,7 +220,7 @@ fn v2_mode_audio_needs_directional_evidence_and_does_not_reprice_unit_audio() {
     }}});
     add_refused_mode(&mut input);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "broken", "region");
+    assert_mode_refused(&outcome, "ultrafast", "region");
     let actual = facts(&outcome);
     assert_unaffected(&actual);
     assert_eq!(actual["rate.input_audio.per_second"]["per"], 60);
@@ -249,7 +249,7 @@ fn v2_unconditional_price_uses_base_key_beside_a_refused_mode() {
     let mut input = document();
     add_refused_mode(&mut input);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "broken", "region");
+    assert_mode_refused(&outcome, "ultrafast", "region");
     assert_unaffected(&facts(&outcome));
 }
 
@@ -262,7 +262,7 @@ fn v2_context_gt_and_gte_use_exclusive_selector_keys() {
     ]);
     add_refused_mode(&mut input);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "broken", "region");
+    assert_mode_refused(&outcome, "ultrafast", "region");
     let actual = facts(&outcome);
     assert_unaffected(&actual);
     assert_eq!(
@@ -284,7 +284,7 @@ fn v2_service_tier_override_uses_the_tier_unless_it_has_a_declared_mode() {
     ]);
     add_refused_mode(&mut input);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "broken", "region");
+    assert_mode_refused(&outcome, "ultrafast", "region");
     assert_eq!(
         facts(&outcome)["rate.output.mode.priority"]["units"],
         2_000_000_000
@@ -308,7 +308,7 @@ fn v2_service_tier_multiplier_is_exact_and_prices_only_named_roles() {
     ]);
     add_refused_mode(&mut input);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "broken", "region");
+    assert_mode_refused(&outcome, "ultrafast", "region");
     let actual = facts(&outcome);
     assert_unaffected(&actual);
     // Rounding the base to two nanodollars before multiplying would give four.
@@ -328,10 +328,10 @@ fn v2_declared_multiplier_mode_keeps_v1_base_scaling_without_tier_keys() {
     ]);
     row["cost"]["multipliers"] = json!([
         {"when": {"service_tier": {"equals": "priority"}}, "factor": {"text": 2}},
-        {"when": {"service_tier": {"equals": "standby"}}, "factor": {"text": 2}}
+        {"when": {"service_tier": {"equals": "flex"}}, "factor": {"text": 2}}
     ]);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "standby", "tiered price");
+    assert_mode_refused(&outcome, "flex", "tiered price");
     let actual = facts(&outcome);
     assert_unaffected(&actual);
     assert_eq!(actual["rate.output.mode.fast"]["units"], 250_000_000);
@@ -365,7 +365,7 @@ fn v2_same_spelling_different_tiers_do_not_chain_multipliers() {
     ]);
     add_refused_mode(&mut input);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "broken", "region");
+    assert_mode_refused(&outcome, "ultrafast", "region");
     let actual = facts(&outcome);
     assert_unaffected(&actual);
     assert_eq!(actual["rate.output.mode.fast"]["units"], 250_000_000);
@@ -412,7 +412,7 @@ fn model(document: &mut Value) -> &mut Value {
 }
 
 fn add_refused_mode(document: &mut Value) {
-    model(document)["experimental"]["modes"]["broken"] = json!({"cost": {"text": {"output": {
+    model(document)["experimental"]["modes"]["ultrafast"] = json!({"cost": {"text": {"output": {
         "price": 8, "overrides": [{"when": {"region": {"equals": "us"}}, "price": 9}]
     }}}});
 }

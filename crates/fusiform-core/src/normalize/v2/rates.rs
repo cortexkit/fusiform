@@ -8,9 +8,7 @@ use serde_json::value::RawValue;
 
 use super::raw::Object;
 use super::{FindingKey, Findings, RecordFinding};
-use crate::normalize::{
-    is_servable_mode_name, rate_value, ChargeUnitEvidence, NormalizedRate, RefusedFactScope,
-};
+use crate::normalize::{rate_value, ChargeUnitEvidence, NormalizedRate, RefusedFactScope};
 use crate::{ChargeBasis, MediaTokenClass, ModelKey, RateCondition, RateValue, TokenClass};
 use condition::{factor_at, Decimal};
 
@@ -91,6 +89,18 @@ impl<'raw> Prices<'_, 'raw> {
         });
     }
 
+    fn admit_mode(&mut self, name: &str) -> bool {
+        if matches!(name, "fast" | "flex" | "priority" | "ultrafast") {
+            return true;
+        }
+        self.refuse(
+            scope(Some(name)),
+            name,
+            format!("unsupported mode name {name:?}"),
+        );
+        false
+    }
+
     fn cost(&mut self, raw: &'raw RawValue, owner: Option<&str>) -> Option<Object<'raw>> {
         match Object::parse(raw) {
             Ok(cost) => Some(cost),
@@ -126,9 +136,10 @@ impl<'raw> Prices<'_, 'raw> {
                 tier,
                 cost,
             });
-            if !is_servable_mode_name(name) {
-                self.refuse(scope(Some(name)), name, "mode name cannot form a fact key");
-            } else if let Some(cost) = cost.and_then(|raw| self.cost(raw, Some(name))) {
+            if !self.admit_mode(name) {
+                continue;
+            }
+            if let Some(cost) = cost.and_then(|raw| self.cost(raw, Some(name))) {
                 self.read_cost(&cost, Some(name));
                 if cost.raw("multipliers").is_some() {
                     self.refuse(
@@ -500,7 +511,7 @@ impl<'raw> Prices<'_, 'raw> {
         }
     }
 
-    fn targets(&self, tier: &str) -> Vec<(String, ModeSource)> {
+    fn targets(&mut self, tier: &str) -> Vec<(String, ModeSource)> {
         // A declared alias is the spelling clients already use. A synthetic
         // tier key alongside it would describe the same request twice.
         let mut targets: Vec<_> = self
@@ -528,6 +539,9 @@ impl<'raw> Prices<'_, 'raw> {
             };
             targets.push((tier.to_owned(), source));
         }
+        // The tier label may be an internal alias for a supported request
+        // mode; admission applies to the name that would reach the fact key.
+        targets.retain(|(name, _)| self.admit_mode(name));
         targets
     }
 

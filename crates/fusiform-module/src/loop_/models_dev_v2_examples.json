@@ -1,0 +1,640 @@
+{
+  "google/gemini-3.5-transcribe": {
+    "normalized": {
+      "capability.attachment": "true",
+      "capability.input_modalities": "[\"audio\"]",
+      "capability.output_modalities": "[\"text\"]",
+      "capability.reasoning": "false",
+      "capability.reasoning_options": "null",
+      "capability.temperature": "true",
+      "capability.tool_call": "false",
+      "limit.context": "98304",
+      "limit.output": "32768",
+      "model.canonical_id": "\"google/gemini-3.5-transcribe\"",
+      "model.family": "\"gemini-transcribe\"",
+      "model.name": "\"Gemini 3.5 Transcribe\"",
+      "model.open_weights": "false",
+      "model.status": "null",
+      "model.type": "\"transcription\"",
+      "provider.name": "\"Google\"",
+      "rate.input": "{\"state\":\"priced\",\"units\":2000000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.input_audio": "{\"state\":\"priced\",\"units\":2000000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.output": "{\"state\":\"priced\",\"units\":12000000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "wire.api": "{\"value\":\"https://generativelanguage.googleapis.com/v1beta\",\"from\":\"model\"}",
+      "wire.npm": "{\"value\":\"@ai-sdk/google\",\"from\":\"model\"}"
+    },
+    "served": {
+      "capability.attachment": true,
+      "capability.input_modalities": [
+        "audio"
+      ],
+      "capability.output_modalities": [
+        "text"
+      ],
+      "capability.reasoning": false,
+      "capability.reasoning_options": null,
+      "capability.temperature": true,
+      "capability.tool_call": false,
+      "existence": "present",
+      "limit.audio_tokens_per_second": 32,
+      "limit.context": 98304,
+      "limit.output": 32768,
+      "limit.temperature_max": 2.0,
+      "limit.temperature_min": 0.0,
+      "model.canonical_id": "google/gemini-3.5-transcribe",
+      "model.family": "gemini-transcribe",
+      "model.lineage": "gemini",
+      "model.name": "Gemini 3.5 Transcribe",
+      "model.open_weights": false,
+      "model.status": null,
+      "model.type": "transcription",
+      "provider.name": "Google",
+      "rate.input": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 2000000000
+      },
+      "rate.input_audio": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 2000000000
+      },
+      "rate.output": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 12000000000
+      },
+      "wire.api": {
+        "from": "model",
+        "value": "https://generativelanguage.googleapis.com/v1beta"
+      },
+      "wire.family": "google.generate_content",
+      "wire.npm": {
+        "from": "model",
+        "value": "@ai-sdk/google"
+      }
+    }
+  },
+  "google/gemini-3.8-flash-tts": {
+    "normalized": {
+      "capability.attachment": "false",
+      "capability.input_modalities": "[\"text\"]",
+      "capability.output_modalities": "[\"audio\"]",
+      "capability.reasoning": "false",
+      "capability.reasoning_options": "null",
+      "capability.structured_output": "false",
+      "capability.temperature": "true",
+      "capability.tool_call": "false",
+      "limit.context": "8192",
+      "limit.output": "16384",
+      "model.canonical_id": "\"google/gemini-3.8-flash-tts\"",
+      "model.family": "\"gemini-tts-flash\"",
+      "model.name": "\"Gemini 3.8 Flash TTS\"",
+      "model.open_weights": "false",
+      "model.status": "null",
+      "model.type": "\"speech\"",
+      "provider.name": "\"Google\"",
+      "rate.input.mode.flex": "{\"state\":\"priced\",\"units\":250000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.input.mode.priority": "{\"state\":\"priced\",\"units\":900000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.output.mode.flex": "{\"state\":\"priced\",\"units\":4500000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.output.mode.priority": "{\"state\":\"priced\",\"units\":16200000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.output_audio.mode.flex": "{\"state\":\"priced\",\"units\":4500000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.output_audio.mode.priority": "{\"state\":\"priced\",\"units\":16200000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "wire.api": "{\"value\":\"https://generativelanguage.googleapis.com/v1beta\",\"from\":\"model\"}",
+      "wire.npm": "{\"value\":\"@ai-sdk/google\",\"from\":\"model\"}"
+    },
+    "served": {
+      "capability.attachment": false,
+      "capability.input_modalities": [
+        "text"
+      ],
+      "capability.output_modalities": [
+        "audio"
+      ],
+      "capability.reasoning": false,
+      "capability.reasoning_options": null,
+      "capability.structured_output": false,
+      "capability.temperature": true,
+      "capability.tool_call": false,
+      "existence": "present",
+      "limit.context": 8192,
+      "limit.output": 16384,
+      "limit.temperature_max": 2.0,
+      "limit.temperature_min": 0.0,
+      "model.canonical_id": "google/gemini-3.8-flash-tts",
+      "model.family": "gemini-tts-flash",
+      "model.lineage": "gemini",
+      "model.name": "Gemini 3.8 Flash TTS",
+      "model.open_weights": false,
+      "model.status": null,
+      "model.type": "speech",
+      "provider.name": "Google",
+      "rate.input.mode.flex": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 250000000
+      },
+      "rate.input.mode.priority": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 900000000
+      },
+      "rate.output.mode.flex": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 4500000000
+      },
+      "rate.output.mode.priority": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 16200000000
+      },
+      "rate.output_audio.mode.flex": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 4500000000
+      },
+      "rate.output_audio.mode.priority": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 16200000000
+      },
+      "wire.api": {
+        "from": "model",
+        "value": "https://generativelanguage.googleapis.com/v1beta"
+      },
+      "wire.family": "google.generate_content",
+      "wire.npm": {
+        "from": "model",
+        "value": "@ai-sdk/google"
+      }
+    }
+  },
+  "google/gemini-decision-1": {
+    "normalized": {
+      "capability.attachment": "true",
+      "capability.input_modalities": "[\"audio\",\"image\",\"pdf\",\"text\",\"video\"]",
+      "capability.output_modalities": "[\"text\"]",
+      "capability.reasoning": "false",
+      "capability.reasoning_options": "null",
+      "capability.temperature": "false",
+      "capability.tool_call": "false",
+      "limit.context": "262144",
+      "limit.output": "1",
+      "model.canonical_id": "\"google/gemini-decision-1\"",
+      "model.family": "\"gemini-decision\"",
+      "model.name": "\"Gemini Decision 1\"",
+      "model.open_weights": "false",
+      "model.status": "null",
+      "model.type": "\"decision\"",
+      "provider.name": "\"Google\"",
+      "rate.input": "{\"state\":\"priced\",\"units\":100000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.output": "{\"state\":\"stated_zero\"}",
+      "wire.api": "{\"value\":\"https://generativelanguage.googleapis.com/v1beta\",\"from\":\"model\"}"
+    },
+    "served": {
+      "capability.attachment": true,
+      "capability.input_modalities": [
+        "audio",
+        "image",
+        "pdf",
+        "text",
+        "video"
+      ],
+      "capability.output_modalities": [
+        "text"
+      ],
+      "capability.reasoning": false,
+      "capability.reasoning_options": null,
+      "capability.temperature": false,
+      "capability.tool_call": false,
+      "existence": "present",
+      "limit.context": 262144,
+      "limit.document_bytes": 50000000,
+      "limit.document_pages": 1000,
+      "limit.images_per_request": 3600,
+      "limit.output": 1,
+      "model.canonical_id": "google/gemini-decision-1",
+      "model.family": "gemini-decision",
+      "model.name": "Gemini Decision 1",
+      "model.open_weights": false,
+      "model.status": null,
+      "model.type": "decision",
+      "provider.name": "Google",
+      "rate.input": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 100000000
+      },
+      "rate.output": {
+        "state": "stated_zero"
+      },
+      "wire.api": {
+        "from": "model",
+        "value": "https://generativelanguage.googleapis.com/v1beta"
+      }
+    }
+  },
+  "google/gemini-omni-1.2-flash": {
+    "normalized": {
+      "capability.attachment": "true",
+      "capability.input_modalities": "[\"image\",\"text\",\"video\"]",
+      "capability.output_modalities": "[\"text\",\"video\"]",
+      "capability.reasoning": "true",
+      "capability.reasoning_options": "[]",
+      "capability.temperature": "true",
+      "capability.tool_call": "false",
+      "limit.context": "131072",
+      "limit.output": "65536",
+      "model.canonical_id": "\"google/gemini-omni-1.2-flash\"",
+      "model.family": "\"gemini-omni-flash\"",
+      "model.name": "\"Gemini Omni 1.2 Flash\"",
+      "model.open_weights": "false",
+      "model.status": "null",
+      "model.type": "\"video\"",
+      "provider.name": "\"Google\"",
+      "rate.input": "{\"state\":\"priced\",\"units\":1500000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.output": "{\"state\":\"priced\",\"units\":9000000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.output_video": "{\"state\":\"priced\",\"units\":12000000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "wire.api": "{\"value\":\"https://generativelanguage.googleapis.com/v1beta\",\"from\":\"model\"}",
+      "wire.npm": "{\"value\":\"@ai-sdk/google\",\"from\":\"model\"}"
+    },
+    "served": {
+      "capability.attachment": true,
+      "capability.input_modalities": [
+        "image",
+        "text",
+        "video"
+      ],
+      "capability.output_modalities": [
+        "text",
+        "video"
+      ],
+      "capability.reasoning": true,
+      "capability.reasoning_options": [],
+      "capability.temperature": true,
+      "capability.tool_call": false,
+      "existence": "present",
+      "limit.context": 131072,
+      "limit.images_per_request": 3600,
+      "limit.output": 65536,
+      "limit.temperature_max": 2.0,
+      "limit.temperature_min": 0.0,
+      "model.canonical_id": "google/gemini-omni-1.2-flash",
+      "model.family": "gemini-omni-flash",
+      "model.lineage": "gemini",
+      "model.name": "Gemini Omni 1.2 Flash",
+      "model.open_weights": false,
+      "model.status": null,
+      "model.type": "video",
+      "provider.name": "Google",
+      "rate.input": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 1500000000
+      },
+      "rate.output": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 9000000000
+      },
+      "rate.output_video": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 12000000000
+      },
+      "wire.api": {
+        "from": "model",
+        "value": "https://generativelanguage.googleapis.com/v1beta"
+      },
+      "wire.family": "google.generate_content",
+      "wire.npm": {
+        "from": "model",
+        "value": "@ai-sdk/google"
+      }
+    }
+  },
+  "openai/gpt-live-transcribe": {
+    "normalized": {
+      "capability.attachment": "true",
+      "capability.input_modalities": "[\"audio\",\"text\"]",
+      "capability.output_modalities": "[\"text\"]",
+      "capability.reasoning": "false",
+      "capability.reasoning_options": "null",
+      "capability.temperature": "false",
+      "capability.tool_call": "false",
+      "limit.context": "null",
+      "limit.output": "null",
+      "model.canonical_id": "\"openai/gpt-live-transcribe\"",
+      "model.family": "\"gpt-transcribe\"",
+      "model.name": "\"GPT-Live-Transcribe\"",
+      "model.open_weights": "false",
+      "model.status": "null",
+      "model.type": "\"transcription\"",
+      "provider.name": "\"OpenAI\"",
+      "rate.input_audio.per_second": "{\"state\":\"priced\",\"units\":17000000,\"exponent\":9,\"currency\":\"USD\",\"per\":60}",
+      "wire.api": "{\"value\":\"https://api.openai.com/v1\",\"from\":\"model\"}"
+    },
+    "served": {
+      "capability.attachment": true,
+      "capability.input_modalities": [
+        "audio",
+        "text"
+      ],
+      "capability.output_modalities": [
+        "text"
+      ],
+      "capability.reasoning": false,
+      "capability.reasoning_options": null,
+      "capability.temperature": false,
+      "capability.tool_call": false,
+      "existence": "present",
+      "limit.context": null,
+      "limit.output": null,
+      "model.canonical_id": "openai/gpt-live-transcribe",
+      "model.family": "gpt-transcribe",
+      "model.lineage": "gpt",
+      "model.name": "GPT-Live-Transcribe",
+      "model.open_weights": false,
+      "model.status": null,
+      "model.type": "transcription",
+      "provider.name": "OpenAI",
+      "rate.input_audio.per_second": {
+        "currency": "USD",
+        "exponent": 9,
+        "per": 60,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 17000000
+      },
+      "wire.api": {
+        "from": "model",
+        "value": "https://api.openai.com/v1"
+      }
+    }
+  },
+  "openai/gpt-realtime-2.1": {
+    "normalized": {
+      "capability.attachment": "true",
+      "capability.input_modalities": "[\"audio\",\"image\",\"text\"]",
+      "capability.output_modalities": "[\"audio\",\"text\"]",
+      "capability.reasoning": "true",
+      "capability.reasoning_options": "[{\"type\":\"effort\",\"values\":[\"minimal\",\"low\",\"medium\",\"high\",\"xhigh\"]}]",
+      "capability.structured_output": "false",
+      "capability.temperature": "false",
+      "capability.tool_call": "true",
+      "limit.context": "128000",
+      "limit.output": "32000",
+      "model.canonical_id": "\"openai/gpt-realtime-2.1\"",
+      "model.family": "\"gpt-realtime\"",
+      "model.name": "\"GPT-Realtime-2.1\"",
+      "model.open_weights": "false",
+      "model.status": "null",
+      "model.type": "\"realtime\"",
+      "provider.name": "\"OpenAI\"",
+      "rate.cache_read": "{\"state\":\"priced\",\"units\":400000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.input": "{\"state\":\"priced\",\"units\":4000000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.input_audio": "{\"state\":\"unpriced\",\"reason\":\"unknown_charge_basis\"}",
+      "rate.input_image": "{\"state\":\"priced\",\"units\":5000000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.output": "{\"state\":\"priced\",\"units\":24000000000,\"exponent\":9,\"currency\":\"USD\"}",
+      "rate.output_audio": "{\"state\":\"unpriced\",\"reason\":\"unknown_charge_basis\"}",
+      "wire.api": "{\"value\":\"https://api.openai.com/v1\",\"from\":\"model\"}",
+      "wire.npm": "{\"value\":\"@ai-sdk/openai\",\"from\":\"model\"}"
+    },
+    "served": {
+      "capability.attachment": true,
+      "capability.input_modalities": [
+        "audio",
+        "image",
+        "text"
+      ],
+      "capability.output_modalities": [
+        "audio",
+        "text"
+      ],
+      "capability.reasoning": true,
+      "capability.reasoning_options": [
+        {
+          "type": "effort",
+          "values": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ],
+      "capability.structured_output": false,
+      "capability.temperature": false,
+      "capability.tool_call": true,
+      "existence": "present",
+      "limit.context": 128000,
+      "limit.images_per_request": 1500,
+      "limit.output": 32000,
+      "model.canonical_id": "openai/gpt-realtime-2.1",
+      "model.family": "gpt-realtime",
+      "model.lineage": "gpt",
+      "model.name": "GPT-Realtime-2.1",
+      "model.open_weights": false,
+      "model.status": null,
+      "model.type": "realtime",
+      "provider.name": "OpenAI",
+      "rate.cache_read": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 400000000
+      },
+      "rate.input": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 4000000000
+      },
+      "rate.input_audio": {
+        "reason": "unknown_charge_basis",
+        "state": "unpriced"
+      },
+      "rate.input_image": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 5000000000
+      },
+      "rate.output": {
+        "currency": "USD",
+        "exponent": 9,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 24000000000
+      },
+      "rate.output_audio": {
+        "reason": "unknown_charge_basis",
+        "state": "unpriced"
+      },
+      "wire.api": {
+        "from": "model",
+        "value": "https://api.openai.com/v1"
+      },
+      "wire.family": "openai.responses",
+      "wire.npm": {
+        "from": "model",
+        "value": "@ai-sdk/openai"
+      }
+    }
+  },
+  "openai/gpt-transcribe": {
+    "normalized": {
+      "capability.attachment": "true",
+      "capability.input_modalities": "[\"audio\",\"text\"]",
+      "capability.output_modalities": "[\"text\"]",
+      "capability.reasoning": "false",
+      "capability.reasoning_options": "null",
+      "capability.temperature": "true",
+      "capability.tool_call": "false",
+      "limit.context": "null",
+      "limit.output": "null",
+      "model.canonical_id": "\"openai/gpt-transcribe\"",
+      "model.family": "\"gpt-transcribe\"",
+      "model.name": "\"GPT-Transcribe\"",
+      "model.open_weights": "false",
+      "model.status": "null",
+      "model.type": "\"transcription\"",
+      "provider.name": "\"OpenAI\"",
+      "rate.input_audio.per_second": "{\"state\":\"priced\",\"units\":4500000,\"exponent\":9,\"currency\":\"USD\",\"per\":60}",
+      "wire.api": "{\"value\":\"https://api.openai.com/v1\",\"from\":\"model\"}",
+      "wire.npm": "{\"value\":\"@ai-sdk/openai\",\"from\":\"model\"}"
+    },
+    "served": {
+      "capability.attachment": true,
+      "capability.input_modalities": [
+        "audio",
+        "text"
+      ],
+      "capability.output_modalities": [
+        "text"
+      ],
+      "capability.reasoning": false,
+      "capability.reasoning_options": null,
+      "capability.temperature": true,
+      "capability.tool_call": false,
+      "existence": "present",
+      "limit.context": null,
+      "limit.output": null,
+      "limit.temperature_max": 2,
+      "limit.temperature_min": 0,
+      "model.canonical_id": "openai/gpt-transcribe",
+      "model.family": "gpt-transcribe",
+      "model.lineage": "gpt",
+      "model.name": "GPT-Transcribe",
+      "model.open_weights": false,
+      "model.status": null,
+      "model.type": "transcription",
+      "provider.name": "OpenAI",
+      "rate.input_audio.per_second": {
+        "currency": "USD",
+        "exponent": 9,
+        "per": 60,
+        "state": "priced",
+        "unit_provenance": {
+          "kind": "assumed_by_policy",
+          "policy": "models-dev-usd-v1"
+        },
+        "units": 4500000
+      },
+      "wire.api": {
+        "from": "model",
+        "value": "https://api.openai.com/v1"
+      },
+      "wire.family": "openai.responses",
+      "wire.npm": {
+        "from": "model",
+        "value": "@ai-sdk/openai"
+      }
+    }
+  }
+}

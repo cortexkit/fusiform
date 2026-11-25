@@ -383,14 +383,14 @@ fn every_saved_v2_key_is_read_or_declared_and_v2_only_facts_are_admitted() {
                     && value == r#""chat""#
                     && prior_model.is_some_and(|row| row.get(key).is_none())
                 {
-                    chat_differences.push(serde_json::json!({
-                        "provider": provider.provider_id,
-                        "model": model.key.model_id,
-                        "fact": key,
-                        "old": null,
-                        "new": value,
-                        "cause": "absent-authored-type",
-                    }));
+                    chat_differences.push(serde_json::json!([
+                        provider.provider_id,
+                        model.key.model_id,
+                        key,
+                        null,
+                        value,
+                        "default_chat",
+                    ]));
                 }
             }
         }
@@ -401,11 +401,16 @@ fn every_saved_v2_key_is_read_or_declared_and_v2_only_facts_are_admitted() {
     assert_eq!(priority_rates, 114);
     let explained: Value =
         serde_json::from_slice(&saved_gzip("explained-differences.json.gz")).unwrap();
-    let expected: Vec<_> = explained["differences"]
+    let expected: Vec<_> = explained["normalized"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|row| row["cause"] == "absent-authored-type")
+        .filter(|row| {
+            row.as_array()
+                .and_then(|fields| fields.last())
+                .and_then(Value::as_str)
+                == Some("default_chat")
+        })
         .collect();
     assert_eq!(chat_differences.len(), 9_611);
     assert_eq!(chat_differences.len(), expected.len());

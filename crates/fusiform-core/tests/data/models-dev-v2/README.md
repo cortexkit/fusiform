@@ -15,10 +15,12 @@ upstream state. The data is models.dev's, published under the MIT license
 [`cost-units.md`](cost-units.md) records the basis and admission for every
 published v2 unit.
 
-`explained-differences.json.gz` records shared-model additions of
-`model.type: "chat"` only. Its rows are sorted by provider, model and fact; `old`
-and `new` carry storage JSON text, or `null` for absence. Each row refers to a
-quoted rule from the upstream's v1 translator in `causes`. The rows were
-generated from the v1 fixture and saved v2 input. Tests compare them with the
-actual normalized facts. This file does not yet account for other differences
-in the cutover.
+`explained-differences.json.gz` pins the reviewed cutover differences against
+the saved v1 fixture and v2 input. Normalized and served wire rows are sorted
+by provider, model and fact, followed by old and new JSON text (`null` for
+absence) and a key into `causes`, which explains each approved change. Rates
+kept in the store because v2 refused to replace their schedules, and provider
+metadata differences, are listed separately.
+
+To regenerate, update the decompressed JSON with reviewed rows from the saved
+pair, then run `gzip -9n -c reviewed.json > explained-differences.json.gz`.

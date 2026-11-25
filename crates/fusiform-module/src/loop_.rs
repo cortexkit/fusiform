@@ -16,16 +16,22 @@
 //! in six hours" from "we have not successfully asked in six hours". Those look
 //! identical from the era table alone.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use fusiform_core::normalize::normalize_models_dev_with;
-use fusiform_core::{FailureClass, ObservationOutcome, SourceId, Timestamp};
+use fusiform_core::{
+    FailureClass, NormalizeError, NormalizedCatalog, ObservationOutcome, SourceId, Timestamp,
+};
 use fusiform_store::ingest::catalog_digest_with_conflicts;
 use fusiform_store::{CatalogError, CatalogStore, NewObservation};
 
 use crate::fetch::{hash_bytes, FetchOutcome, Fetcher, SourceEndpoint};
 use crate::signals::Signals;
+
+#[cfg(test)]
+mod models_dev_v2;
 
 /// The fixed poll interval.
 ///
@@ -227,14 +233,40 @@ fn apply_with_count_reader(
     outcome: FetchOutcome,
     now_ms: i64,
     trust_saved_hash: bool,
-    mut read_counts: impl FnMut(&CatalogStore, SourceId) -> Result<(usize, usize), CatalogError>,
+    read_counts: impl FnMut(&CatalogStore, SourceId) -> Result<(usize, usize), CatalogError>,
 ) -> Result<TickReport, TickError> {
     let ctx = ApplyCtx {
         store,
         signals,
         source,
     };
-    let ctx = &ctx;
+    apply_with_normalizer(
+        &ctx,
+        outcome,
+        now_ms,
+        trust_saved_hash,
+        read_counts,
+        |bytes| {
+            // Only separately documented unconditional token prices become audio facts.
+            let outcome = normalize_models_dev_with(bytes, &crate::input_audio::evidence())?;
+            let counts = crate::normalization::log_findings("poll", &outcome.findings);
+            Ok((outcome.catalog, counts))
+        },
+    )
+}
+
+// The parser can change without changing which documents reach the shrink
+// guard, how observations are committed, or how unchanged polls are detected.
+fn apply_with_normalizer(
+    ctx: &ApplyCtx<'_>,
+    outcome: FetchOutcome,
+    now_ms: i64,
+    trust_saved_hash: bool,
+    mut read_counts: impl FnMut(&CatalogStore, SourceId) -> Result<(usize, usize), CatalogError>,
+    normalize: impl FnOnce(
+        &[u8],
+    ) -> Result<(NormalizedCatalog, BTreeMap<String, usize>), NormalizeError>,
+) -> Result<TickReport, TickError> {
     match outcome {
         FetchOutcome::Failed {
             class,
@@ -274,11 +306,7 @@ fn apply_with_count_reader(
             duration,
         } => {
             let raw_hash = hash_bytes(&bytes);
-            // Pass separately sourced input/output audio evidence so only
-            // documented unconditional token prices become audio rate facts.
-            let outcome_parse = normalize_models_dev_with(&bytes, &crate::input_audio::evidence());
-
-            let outcome = match outcome_parse {
+            let (catalog, counts) = match normalize(&bytes) {
                 Ok(outcome) => outcome,
                 Err(e) => {
                     // The bytes arrived and could not be read. This is a parse
@@ -302,7 +330,6 @@ fn apply_with_count_reader(
                     );
                 }
             };
-            let counts = crate::normalization::log_findings("poll", &outcome.findings);
             let with_findings = |report: TickReport| {
                 ctx.signals.set_normalization_findings(
                     fusiform_protocol::NormalizationFindingsWire {
@@ -312,8 +339,6 @@ fn apply_with_count_reader(
                 );
                 report
             };
-            let catalog = outcome.catalog;
-
             let (digest, conflicts) = catalog_digest_with_conflicts(&catalog);
             for conflict in conflicts {
                 eprintln!(

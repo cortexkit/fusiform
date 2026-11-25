@@ -359,6 +359,9 @@ fn reasoning_options(reasoning: &Object<'_>) -> Option<Value> {
         for field in ["min", "max"] {
             if let Some(tokens) = budget.read::<u64>(field) {
                 option[field] = json!(tokens);
+            } else if field == "min" && budget.read::<i64>(field) == Some(-1) {
+                // Some providers publish -1 as a reasoning-budget sentinel.
+                option[field] = json!(-1);
             }
         }
         options.push(option);
