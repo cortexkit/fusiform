@@ -346,11 +346,44 @@ fn curation_number_spelling_is_hashed_and_version_must_change() {
 }
 
 #[test]
+fn snapshot_builder_refuses_signed_invalid_history_lists() {
+    let (_, r2, _) = two_releases();
+    let models = models_with_rename();
+    let evidence = ChargeUnitEvidence::default();
+    for names in [
+        &[][..],
+        &["days/2026-11-19.json"][..],
+        &["base.json", "days/2026-11-19.txt"][..],
+        &["base.json", "days/2026-11-20.json", "days/2026-11-19.json"][..],
+        &["base.json", "days/2026-11-19.json", "days/2026-11-19.json"][..],
+    ] {
+        let history = names
+            .iter()
+            .map(|&file| HistoryFile {
+                file: file.into(),
+                sha256: sha256(file.as_bytes()),
+            })
+            .collect();
+        let docs = SnapshotDocs::new(&r2, history);
+        let result = snapshot_bytes(docs.inputs(&models, &evidence));
+        assert_eq!(
+            result.err().map(|err| err.class),
+            Some("invalid_history_files"),
+            "accepted signed history list {names:?}"
+        );
+    }
+}
+
+#[test]
 fn snapshot_builder_refuses_mismatching_inputs() {
     let (_, r2, _) = two_releases();
     let models = models_with_rename();
     let evidence = ChargeUnitEvidence::default();
-    let docs = SnapshotDocs::new(&r2, vec![]);
+    let history_base = vec![HistoryFile {
+        file: "base.json".into(),
+        sha256: sha256(b"base"),
+    }];
+    let docs = SnapshotDocs::new(&r2, history_base.clone());
     let inputs = || docs.inputs(&models, &evidence);
     assert_eq!(
         snapshot_bytes(SnapshotInputs {
@@ -392,7 +425,7 @@ fn snapshot_builder_refuses_mismatching_inputs() {
     );
     let history = wire(vec![HistoryFile {
         file: "base.json".into(),
-        sha256: sha256(b"base"),
+        sha256: sha256(b"different base"),
     }]);
     assert_eq!(
         snapshot_bytes(SnapshotInputs {
@@ -451,7 +484,7 @@ fn snapshot_builder_refuses_mismatching_inputs() {
     let mut inconsistent = r2.clone();
     inconsistent.envelope.state_hash = sha256(b"not this state");
     inconsistent.signatures = sign_envelope(&inconsistent.envelope, KID, &key()).unwrap();
-    let inconsistent = SnapshotDocs::new(&inconsistent, vec![]);
+    let inconsistent = SnapshotDocs::new(&inconsistent, history_base);
     assert_eq!(
         snapshot_bytes(inconsistent.inputs(&models, &evidence))
             .unwrap_err()

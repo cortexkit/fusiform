@@ -2,7 +2,7 @@
 // measure_seed -- prepare <work-dir>`. Run each mode in a fresh Node process
 // so retained linear-memory pages from recovery cannot affect publish results.
 import assert from 'node:assert/strict';
-import { webcrypto } from 'node:crypto';
+import { createHash, webcrypto } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -51,7 +51,8 @@ if (mode === 'recovery') {
   const signatures = read('snapshot-signatures.json');
   const { kid } = JSON.parse(signatures);
   const bytes = (value) => Buffer.from(JSON.stringify(value));
-  const history = [];
+  const base = readFileSync(new URL('../../fusiform-release/fixtures/release-format-v1/chain/base.json', import.meta.url));
+  const history = [{ file: 'base.json', sha256: createHash('sha256').update(base).digest('hex') }];
   const pkcs8 = Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.alloc(32, 42)]);
   const key = await webcrypto.subtle.importKey('pkcs8', pkcs8, 'Ed25519', true, ['sign']);
   const { x: public_key } = await webcrypto.subtle.exportKey('jwk', key);

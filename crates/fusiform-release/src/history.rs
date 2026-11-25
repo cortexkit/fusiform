@@ -30,6 +30,42 @@ impl HistoryFile {
     }
 }
 
+/// Split a history list into its base and strictly ordered day files.
+/// This validates paths only; consumers must also verify the file contents.
+pub fn validate_history_files(
+    files: &[HistoryFile],
+) -> Result<(&HistoryFile, &[HistoryFile]), String> {
+    let (base, days) = files.split_first().ok_or("history attestation is empty")?;
+    if base.file != "base.json" {
+        return Err("history attestation must start with base.json".into());
+    }
+    let mut previous_day = "";
+    for file in days {
+        previous_day = day_name(&file.file)
+            .filter(|day| *day > previous_day)
+            .ok_or_else(|| {
+                format!(
+                    "history attestation has an invalid or out-of-order path {:?}",
+                    file.file
+                )
+            })?;
+    }
+    Ok((base, days))
+}
+
+fn day_name(path: &str) -> Option<&str> {
+    let day = path.strip_prefix("days/")?.strip_suffix(".json")?;
+    (day.len() == 10
+        && day.bytes().enumerate().all(|(i, byte)| {
+            if matches!(i, 4 | 7) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        }))
+    .then_some(day)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HistoryAttestationBody {

@@ -14,8 +14,8 @@ use std::{
 };
 
 use fusiform_release::{
-    sha256, verify_head, verify_history_attestation, Hash, Head, HeadBody, HistoryFile, Release,
-    ReleaseEnvelope, Snapshot,
+    sha256, validate_history_files, verify_head, verify_history_attestation, Hash, Head, HeadBody,
+    HistoryFile, Release, ReleaseEnvelope, Snapshot,
 };
 use fusiform_store::{CatalogStore, StoreRelease};
 use reqwest::{StatusCode, Url};
@@ -104,19 +104,6 @@ fn check_head(envelope: &ReleaseEnvelope, head: &HeadBody) -> Result<(), String>
         return Err(format!("verified release does not match {HEAD_PATH}"));
     }
     Ok(())
-}
-
-fn day_name(path: &str) -> Option<&str> {
-    let day = path.strip_prefix("days/")?.strip_suffix(".json")?;
-    (day.len() == 10
-        && day.bytes().enumerate().all(|(i, byte)| {
-            if matches!(i, 4 | 7) {
-                byte == b'-'
-            } else {
-                byte.is_ascii_digit()
-            }
-        }))
-    .then_some(day)
 }
 
 impl StorePoller {
@@ -238,14 +225,7 @@ impl StorePoller {
             return Err("v1/releases/1: wrong release number".into());
         }
         let first = Verified::first(first, &self.keys)?;
-        let (base, days) = attestation
-            .body
-            .history
-            .split_first()
-            .ok_or("history attestation is empty")?;
-        if base.file != "base.json" {
-            return Err("history attestation must start with base.json".into());
-        }
+        let (base, days) = validate_history_files(&attestation.body.history)?;
         let tables = if bootstrap {
             Some(self.history_base(base).await?)
         } else {
@@ -253,21 +233,12 @@ impl StorePoller {
         };
 
         let mut later = Vec::new();
-        let mut previous_day = "";
         for file in days {
-            let day = day_name(&file.file)
-                .filter(|day| *day > previous_day)
-                .ok_or_else(|| {
-                    format!(
-                        "history attestation has an invalid or out-of-order path {:?}",
-                        file.file
-                    )
-                })?;
             let path = format!("v1/history/{}", file.file);
             let bytes = step(&path, self.response(&path).await?.bytes().await)?;
             step(&path, file.verify_bytes(&bytes))?;
             let document: HistoryDay = step(&path, serde_json::from_slice(&bytes))?;
-            if document.day != day || document.releases.is_empty() {
+            if file.file != format!("days/{}.json", document.day) || document.releases.is_empty() {
                 return Err(format!(
                     "{path}: day is empty or does not match its filename"
                 ));
@@ -277,8 +248,10 @@ impl StorePoller {
                 step(&path, serde_json::to_writer(&mut lines, release))?;
                 lines.push(b'\n');
             }
-            step(&path, fusiform_release::history_day_bytes(day, &lines))?;
-            previous_day = day;
+            step(
+                &path,
+                fusiform_release::history_day_bytes(&document.day, &lines),
+            )?;
             later.extend(document.releases);
         }
         if later

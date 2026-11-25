@@ -4,8 +4,8 @@ use fusiform_core::{ChargeUnitEvidence, NormalizedCatalog};
 use fusiform_release::{
     ArtifactRefusal, Hash, HistoryAttestation, HistoryAttestationBody, HistoryFile,
     ReleaseEnvelope, Signatures, UpstreamHasher, VerifyingKey, decode_curation,
-    decode_release_public_key, fact_hash, state_hash, verify_envelope, verify_history_attestation,
-    write_canonical_json,
+    decode_release_public_key, fact_hash, state_hash, validate_history_files, verify_envelope,
+    verify_history_attestation, write_canonical_json,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, value::RawValue};
@@ -100,6 +100,8 @@ fn build_snapshot(
     };
     verify_history_attestation(&attestation, &envelope, &pinned_keys)
         .map_err(|err| ArtifactRefusal::new("invalid_history_signature", err))?;
+    validate_history_files(&attestation.body.history)
+        .map_err(|err| ArtifactRefusal::new("invalid_history_files", err))?;
 
     let (curation, curation_hash) = decode_curation(curation_set_raw)?;
     if curation.version != envelope.curation_version || curation_hash != envelope.curation_hash {
