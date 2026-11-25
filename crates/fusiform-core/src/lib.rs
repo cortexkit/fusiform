@@ -30,11 +30,6 @@ pub mod upstream_facts;
 use serde::{Deserialize, Serialize};
 
 pub use money::{Amount, CurrencyCode, MoneyError, PolicyId, UnitProvenance};
-#[cfg(any(test, feature = "legacy-test-parser"))]
-pub use normalize::{
-    normalize_legacy_models_dev_for_tests, normalize_legacy_models_dev_for_tests_with,
-    NormalizeOutcome,
-};
 pub use normalize::{
     normalize_models_dev, normalize_models_dev_v2_with, normalize_models_dev_with,
     ChargeUnitEvidence, NormalizeError, NormalizeV2Outcome, NormalizedCatalog,

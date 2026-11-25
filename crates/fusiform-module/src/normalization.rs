@@ -2,9 +2,6 @@ use std::collections::BTreeMap;
 
 use fusiform_core::NormalizeV2Outcome;
 
-#[cfg(all(test, target_os = "linux"))]
-mod v1_fixture;
-
 pub(crate) fn log_findings(origin: &str, outcome: &NormalizeV2Outcome) -> BTreeMap<String, usize> {
     for finding in &outcome.findings {
         eprintln!(

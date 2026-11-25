@@ -20,9 +20,7 @@ use fusiform_module::loop_::{apply, TickOutcome};
 use fusiform_module::signals::Signals;
 use fusiform_testkit::mutate;
 
-// Convert fusiform-core/fixtures/models-dev-excerpt.json to the current poll shape
-// rather than use a newer snapshot, so the models, prices and limits stay fixed.
-const FIXTURE: &[u8] = include_bytes!("fixtures/models-dev-v2-excerpt.json");
+const FIXTURE: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
 struct Fixture {
     store: Arc<CatalogStore>,
@@ -1093,6 +1091,17 @@ fn signals_reflect_observations_rather_than_attempts() {
 fn the_reported_failure_class_matches_the_stored_one() {
     let f = fixture();
 
+    let old_catalog = std::process::Command::new("gzip")
+        .args([
+            "-dc",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../fusiform-core/tests/data/models-dev-v2/api-v1-20261125.json.gz"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(old_catalog.status.success());
     let cases = [
         (
             FetchOutcome::Failed {
@@ -1114,10 +1123,7 @@ fn the_reported_failure_class_matches_the_stored_one() {
         ),
         (body(b"{ not json", None), FailureClass::Parse, "parse"),
         (
-            body(
-                include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json"),
-                None,
-            ),
+            body(&old_catalog.stdout, None),
             FailureClass::Parse,
             "parse",
         ),

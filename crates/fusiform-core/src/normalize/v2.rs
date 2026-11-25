@@ -19,7 +19,7 @@ use super::{
 use crate::upstream_facts::FactKey;
 use crate::{Modality, ModelKey, SourceId, Timestamp};
 use inventory::Kind;
-use raw::{Object, RawModel, RawProvider};
+use raw::{ModelObject, Object, ProviderObject};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -192,7 +192,7 @@ impl<'de> Visitor<'de> for ProviderMap<'_> {
         // Borrow each provider's JSON directly. Keeping its raw fields out of
         // the rest of the loop bounds temporary allocations to one provider.
         while let Some((id, raw)) = map.next_entry::<String, &RawValue>()? {
-            let provider = RawProvider::parse(raw)
+            let provider = ProviderObject::parse(raw)
                 .map_err(|error| M::Error::custom(format_args!("provider {id:?}: {error}")))?;
             let provider = normalize_provider(&id, provider, &mut ctx).map_err(M::Error::custom)?;
             model_count += provider.models.len();
@@ -224,7 +224,7 @@ impl<'de> Visitor<'de> for ProviderMap<'_> {
 
 fn normalize_provider(
     id: &str,
-    provider: RawProvider<'_>,
+    provider: ProviderObject<'_>,
     ctx: &mut Context<'_>,
 ) -> Result<NormalizedProvider, String> {
     let name = provider.fields.raw("name").map_or(Ok(None), |raw| {
@@ -239,7 +239,7 @@ fn normalize_provider(
     let mut models = BTreeMap::new();
     for (model_id, raw) in provider.models {
         let raw =
-            RawModel::parse(raw).map_err(|error| format!("model {id}/{model_id}: {error}"))?;
+            ModelObject::parse(raw).map_err(|error| format!("model {id}/{model_id}: {error}"))?;
         let name = name
             .as_ref()
             .map(|name| name.as_deref().filter(|name| !name.is_empty()));
@@ -329,10 +329,10 @@ fn normalize_model(
     provider: &str,
     model: &str,
     provider_name: Result<Option<&str>, ()>,
-    raw: RawModel<'_>,
+    raw: ModelObject<'_>,
     ctx: &mut Context<'_>,
 ) -> NormalizedModel {
-    let RawModel { fields } = raw;
+    let ModelObject { fields } = raw;
     Kind::Model.inventory("model", &fields, Some(model), &mut ctx.findings);
     let mut read = ModelFactRead {
         model,

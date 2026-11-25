@@ -6,7 +6,7 @@
 //! forever, a filtered read that makes every model look retired.
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
+use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::serve::{CatalogQuery, POINT_IN_TIME_SQL, RECENT_OBSERVATIONS_SQL};
@@ -50,18 +50,14 @@ fn observe(f: &Fixture, at: i64) -> i64 {
 
 /// Seed the store from the fixture, then apply a mutated document as a change.
 fn seed(f: &Fixture, at: i64) {
-    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
-        .unwrap()
-        .catalog;
+    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
     let plan = plan_ingest(&f.store, &catalog, Timestamp(at), BoundaryKind::Seed, None).unwrap();
     f.store.append_eras(&plan.eras).unwrap();
 }
 
 fn apply(f: &Fixture, doc: &serde_json::Value, at: i64) {
     let bytes = serde_json::to_vec(doc).unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(&bytes)
-        .unwrap()
-        .catalog;
+    let catalog = normalize_models_dev(&bytes).unwrap().catalog;
     let obs = observe(f, at - 500);
     let plan = plan_ingest(
         &f.store,
@@ -83,9 +79,11 @@ fn set_rate(doc: &mut serde_json::Value, provider: &str, model: &str, key: &str,
         .and_then(|p| p.get_mut("models"))
         .and_then(|m| m.get_mut(model))
         .and_then(|m| m.get_mut("cost"))
+        .and_then(|c| c.get_mut("text"))
+        .and_then(|c| c.get_mut(key))
         .and_then(|c| c.as_object_mut())
-        .expect("the fixture must carry this model's cost block")
-        .insert(key.to_string(), serde_json::json!(value));
+        .expect("the fixture must carry this model's text rate")
+        .insert("price".to_string(), serde_json::json!(value));
 }
 
 /// A point-in-time read returns what the catalog said THEN, not now.
@@ -344,9 +342,11 @@ fn a_withdrawn_rate_does_not_stay_current() {
         .and_then(|p| p.get_mut("models"))
         .and_then(|m| m.get_mut("claude-sonnet-4-5"))
         .and_then(|m| m.get_mut("cost"))
+        .and_then(|c| c.pointer_mut("/text/input/cache"))
         .and_then(|c| c.as_object_mut())
         .unwrap()
-        .remove("cache_read");
+        .remove("read")
+        .expect("the fixture has a cache-read price to withdraw");
     apply(&f, &d, 3_000);
 
     let key = FactKey::rate(fusiform_core::TokenClass::CacheRead);

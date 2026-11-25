@@ -38,7 +38,7 @@
 
 use std::time::Instant;
 
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
+use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, NewObservation};
@@ -91,12 +91,14 @@ fn observe(s: &CatalogStore, at: i64) {
 #[test]
 fn the_unchanged_poll_path_grows_sublinearly_with_history() {
     let Some(bytes) = payload() else {
-        eprintln!("skipped: set FUSIFORM_FULL_PAYLOAD to a captured models.dev document");
+        eprintln!("skipped: set FUSIFORM_FULL_PAYLOAD to a captured models.dev v2 document");
         return;
     };
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
-    let catalog = normalize_legacy_models_dev_for_tests(&bytes)
+    // Normalize the same map order before and after editing prices.
+    let mut doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
         .catalog;
 
@@ -125,8 +127,6 @@ fn the_unchanged_poll_path_grows_sublinearly_with_history() {
     // Moving one model per round would add 40 rows against 67,718 — 0.06%
     // growth, which no scan-shaped defect would show up in. A measurement too
     // small to fail is not a measurement.
-    let mut doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-
     let mut clock = 4_000i64;
     let mut extra_eras = 0usize;
     const ROUNDS: usize = 10;
@@ -137,22 +137,23 @@ fn the_unchanged_poll_path_grows_sublinearly_with_history() {
                 continue;
             };
             for (_, model) in models.iter_mut() {
-                let Some(cost) = model.get_mut("cost").and_then(|c| c.as_object_mut()) else {
+                let Some(cost) = model
+                    .pointer_mut("/cost/text/input")
+                    .and_then(|c| c.as_object_mut())
+                else {
                     continue;
                 };
-                if !cost.contains_key("input") {
+                if !cost.contains_key("price") {
                     continue;
                 }
                 // A distinct value per round, so every round is a real change
                 // rather than a no-op the diff would skip.
-                cost.insert("input".to_string(), serde_json::json!(1000 + round));
+                cost.insert("price".to_string(), serde_json::json!(1000 + round));
             }
         }
 
         let mutated = serde_json::to_vec(&doc).unwrap();
-        let changed = normalize_legacy_models_dev_for_tests(&mutated)
-            .unwrap()
-            .catalog;
+        let changed = normalize_models_dev(&mutated).unwrap().catalog;
 
         observe(&store, clock);
         clock += 1_000;
@@ -170,10 +171,9 @@ fn the_unchanged_poll_path_grows_sublinearly_with_history() {
 
     // The same unchanged poll, now against a store carrying superseded history.
     let current: serde_json::Value = doc.clone();
-    let current_catalog =
-        normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&current).unwrap())
-            .unwrap()
-            .catalog;
+    let current_catalog = normalize_models_dev(&serde_json::to_vec(&current).unwrap())
+        .unwrap()
+        .catalog;
     observe(&store, clock);
     let start = Instant::now();
     let after = plan_ingest(
@@ -229,14 +229,12 @@ fn the_unchanged_poll_path_grows_sublinearly_with_history() {
 #[test]
 fn the_steady_state_read_is_answered_from_an_index() {
     let Some(bytes) = payload() else {
-        eprintln!("skipped: set FUSIFORM_FULL_PAYLOAD to a captured models.dev document");
+        eprintln!("skipped: set FUSIFORM_FULL_PAYLOAD to a captured models.dev v2 document");
         return;
     };
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
-    let catalog = normalize_legacy_models_dev_for_tests(&bytes)
-        .unwrap()
-        .catalog;
+    let catalog = normalize_models_dev(&bytes).unwrap().catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     drop(store);

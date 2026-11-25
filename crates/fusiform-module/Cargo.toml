@@ -39,7 +39,6 @@ tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sync"] }
 
 [dev-dependencies]
-fusiform-core = { path = "../fusiform-core", features = ["legacy-test-parser"] }
 fusiform-publish = { path = "../fusiform-publish" }
 tokio = { workspace = true, features = ["test-util"] }
 fusiform-testkit = { workspace = true }

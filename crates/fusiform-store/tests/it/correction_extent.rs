@@ -256,26 +256,25 @@ fn every_served_fact_has_a_field_id() {
 /// asserting against it would keep passing.
 #[test]
 fn the_closed_vocabulary_matches_the_normalizer() {
-    use fusiform_core::normalize::normalize_legacy_models_dev_for_tests_with;
+    use fusiform_core::normalize::normalize_models_dev_v2_with;
     use fusiform_core::ChargeUnitEvidence;
     use fusiform_store::ingest::{fact_keys_of, SERVED_FACT_NAMESPACE};
 
     const FIXTURE: &[u8] =
         include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
     // With evidence for the fixture's google provider, as the module's shipped
-    // audio source tables state, so both audio rate keys are produced. The
-    // older excerpt predates output audio; use a real seed row as its witness.
+    // audio source tables state, so both audio rate keys are produced.
     let mut fixture: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
-    fixture["anthropic"]["models"]["claude-sonnet-4-5"]["provider"] =
-        serde_json::json!({"shape": "responses"});
+    fixture["anthropic"]["models"]["claude-sonnet-4-5"]["api"] =
+        serde_json::json!({"responses": {"sdk": {"aisdk": "@ai-sdk/anthropic"}}});
     fixture["anthropic"]["models"]["claude-sonnet-4-5"]["type"] =
         serde_json::json!("transcription");
-    let seed: serde_json::Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    fixture["google"]["models"]["gemini-3.1-flash-live-preview"] =
-        seed["google"]["models"]["gemini-3.1-flash-live-preview"].clone();
-    let outcome = normalize_legacy_models_dev_for_tests_with(
+    fixture["google"]["models"]["audio-witness"] = serde_json::json!({
+        "type": "realtime", "api": {}, "capabilities": {},
+        "cost": {"audio": {"input": {"price": 1, "unit": "token"},
+            "output": {"price": 2, "unit": "token"}}}
+    });
+    let outcome = normalize_models_dev_v2_with(
         &serde_json::to_vec(&fixture).unwrap(),
         &ChargeUnitEvidence::input_audio_per_token(["google"])
             .with_output_audio_per_token(["google"]),

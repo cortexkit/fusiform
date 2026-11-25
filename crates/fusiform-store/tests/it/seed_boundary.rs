@@ -9,7 +9,7 @@
 //! Written to observe the shipped behaviour rather than to assert a preference.
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
+use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp, TokenClass};
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, FactKey, NewObservation};
@@ -40,9 +40,7 @@ fn store(dir: &tempfile::TempDir) -> CatalogStore {
 fn a_seed_boundary_claims_no_window() {
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
-    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
-        .unwrap()
-        .catalog;
+    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
 
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     let written = store.append_eras(&plan.eras).unwrap();
@@ -77,9 +75,7 @@ fn a_seed_boundary_claims_no_window() {
 fn a_first_fetch_agreeing_with_the_seed_writes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
-    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
-        .unwrap()
-        .catalog;
+    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
 
     let seed = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&seed.eras).unwrap();
@@ -128,9 +124,7 @@ fn a_first_fetch_agreeing_with_the_seed_writes_nothing() {
 fn eras_without_an_observation_leave_a_later_fetch_with_no_window() {
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
-    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
-        .unwrap()
-        .catalog;
+    let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
 
     // Eras with no observation: what the module produced before it recorded a
     // seeded observation.
@@ -163,10 +157,12 @@ fn eras_without_an_observation_leave_a_later_fetch_with_no_window() {
         .and_then(|p| p.get_mut("models"))
         .and_then(|m| m.get_mut("claude-sonnet-4-5"))
         .and_then(|m| m.get_mut("cost"))
+        .and_then(|c| c.get_mut("text"))
+        .and_then(|c| c.get_mut("input"))
         .and_then(|c| c.as_object_mut())
         .unwrap()
-        .insert("input".to_string(), serde_json::json!(2.5));
-    let moved = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
+        .insert("price".to_string(), serde_json::json!(2.5));
+    let moved = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
         .catalog;
 

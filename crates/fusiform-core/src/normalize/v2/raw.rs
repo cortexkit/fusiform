@@ -7,12 +7,12 @@ use serde::de::{DeserializeOwned, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 
-pub(super) struct RawProvider<'a> {
+pub(super) struct ProviderObject<'a> {
     pub fields: Object<'a>,
     pub models: Vec<(String, &'a RawValue)>,
 }
 
-impl<'a> RawProvider<'a> {
+impl<'a> ProviderObject<'a> {
     pub fn parse(raw: &'a RawValue) -> serde_json::Result<Self> {
         let fields = Object::parse(raw)?;
         let models = Object::parse(fields.required("models")?)?.0;
@@ -20,11 +20,11 @@ impl<'a> RawProvider<'a> {
     }
 }
 
-pub(super) struct RawModel<'a> {
+pub(super) struct ModelObject<'a> {
     pub fields: Object<'a>,
 }
 
-impl<'a> RawModel<'a> {
+impl<'a> ModelObject<'a> {
     pub fn parse(raw: &'a RawValue) -> serde_json::Result<Self> {
         let fields = Object::parse(raw)?;
         // V1 can carry `type` but has neither of these v2 object members. Each

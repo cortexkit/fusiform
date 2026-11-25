@@ -1,756 +1,586 @@
 {
   "anthropic": {
-    "doc": "https://docs.anthropic.com/en/docs/about-claude/models",
-    "env": [
-      "ANTHROPIC_API_KEY"
-    ],
     "id": "anthropic",
+    "name": "Anthropic",
+    "doc": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "env": ["ANTHROPIC_API_KEY"],
     "models": {
       "claude-sonnet-4-5": {
-        "attachment": true,
-        "cost": {
-          "cache_read": 0.3,
-          "cache_write": 3.75,
-          "input": 3,
-          "output": 15
-        },
+        "id": "claude-sonnet-4-5",
+        "type": "chat",
+        "name": "Claude Sonnet 4.5 (latest)",
         "description": "Balanced Claude model for coding, analysis, agent workflows, and cost control",
         "family": "claude-sonnet",
-        "id": "claude-sonnet-4-5",
+        "open_weights": false,
         "knowledge": "2025-07-31",
+        "release_date": "2025-09-29",
         "last_updated": "2025-09-29",
+        "modalities": {
+          "input": ["text","image","application/pdf"],
+          "output": ["text"]
+        },
+        "capabilities": {
+          "tools": {"supported": true},
+          "reasoning": {"supported": true,"budget": {"min": 1024}},
+          "temperature": true,
+          "structured_output": true,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 1000000,
           "output": 64000
         },
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "pdf"
-          ],
-          "output": [
-            "text"
-          ]
+        "cost": {
+          "text": {"input": {"price": 3,"cache": {"read": 0.3,"write": 3.75}},"output": {"price": 15}}
         },
-        "name": "Claude Sonnet 4.5 (latest)",
-        "open_weights": false,
-        "reasoning": true,
-        "reasoning_options": [
-          {
-            "min": 1024,
-            "type": "budget_tokens"
-          }
-        ],
-        "release_date": "2025-09-29",
-        "structured_output": true,
-        "temperature": true,
-        "tool_call": true
+        "api": {
+          "messages": {"sdk": {"aisdk": "@ai-sdk/anthropic"}}
+        },
+        "recommended_api": "messages"
       }
-    },
-    "name": "Anthropic",
-    "npm": "@ai-sdk/anthropic"
+    }
   },
   "anyapi": {
-    "api": "https://api.anyapi.ai/v1",
-    "doc": "https://docs.anyapi.ai",
-    "env": [
-      "ANYAPI_API_KEY"
-    ],
     "id": "anyapi",
+    "name": "AnyAPI",
+    "doc": "https://docs.anyapi.ai",
+    "env": ["ANYAPI_API_KEY"],
     "models": {
       "anthropic/claude-opus-4-6": {
-        "attachment": true,
-        "description": "High-end Claude for difficult coding, planning, and slower expert reasoning",
-        "experimental": {
-          "modes": {
-            "fast": {
-              "cost": {
-                "cache_read": 3,
-                "cache_write": 37.5,
-                "input": 30,
-                "output": 150
-              },
-              "provider": {
-                "body": {
-                  "speed": "fast"
-                },
-                "headers": {
-                  "anthropic-beta": "fast-mode-2026-02-01"
-                }
-              }
-            }
-          }
-        },
-        "family": "claude-opus",
         "id": "anthropic/claude-opus-4-6",
+        "type": "chat",
+        "name": "Claude Opus 4.6",
+        "description": "High-end Claude for difficult coding, planning, and slower expert reasoning",
+        "family": "claude-opus",
+        "open_weights": false,
         "knowledge": "2025-05-31",
+        "release_date": "2026-02-05",
         "last_updated": "2026-03-13",
+        "modalities": {
+          "input": ["text","image","application/pdf"],
+          "output": ["text"]
+        },
+        "capabilities": {
+          "tools": {"supported": true},
+          "reasoning": {
+            "supported": true,
+            "toggle": true,
+            "effort": ["low","medium","high"],
+            "budget": {"max": 127999,"min": 1024}
+          },
+          "temperature": true,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 1000000,
           "output": 128000
         },
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "pdf"
-          ],
-          "output": [
-            "text"
-          ]
+        "api": {
+          "chat-completions": {"base_url": "https://api.anyapi.ai/v1","sdk": {"aisdk": "@ai-sdk/openai-compatible"}}
         },
-        "name": "Claude Opus 4.6",
-        "open_weights": false,
-        "reasoning": true,
-        "reasoning_options": [
-          {
-            "type": "toggle"
-          },
-          {
-            "type": "effort",
-            "values": [
-              "low",
-              "medium",
-              "high"
-            ]
-          },
-          {
-            "max": 127999,
-            "min": 1024,
-            "type": "budget_tokens"
+        "recommended_api": "chat-completions",
+        "experimental": {
+          "modes": {
+            "fast": {
+              "cost": {"text": {"input": {"price": 30,"cache": {"read": 3,"write": 37.5}},"output": {"price": 150}}},
+              "body": {"speed": "fast"},
+              "headers": {"anthropic-beta": "fast-mode-2026-02-01"}
+            }
           }
-        ],
-        "release_date": "2026-02-05",
-        "temperature": true,
-        "tool_call": true
+        }
       },
       "cohere/command-r-plus-08-2024": {
-        "attachment": false,
+        "id": "cohere/command-r-plus-08-2024",
+        "type": "chat",
+        "name": "Command R+",
         "description": "Cohere's RAG workhorse for long-context enterprise search and tool use",
         "family": "command-r",
-        "id": "cohere/command-r-plus-08-2024",
+        "open_weights": true,
         "knowledge": "2024-06-01",
+        "release_date": "2024-08-30",
         "last_updated": "2024-08-30",
+        "modalities": {
+          "input": ["text"],
+          "output": ["text"]
+        },
+        "capabilities": {
+          "tools": {"supported": true},
+          "reasoning": {"supported": false},
+          "temperature": true,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 128000,
           "output": 4000
         },
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
+        "api": {
+          "chat-completions": {"base_url": "https://api.anyapi.ai/v1","sdk": {"aisdk": "@ai-sdk/openai-compatible"}}
         },
-        "name": "Command R+",
-        "open_weights": true,
-        "reasoning": false,
-        "release_date": "2024-08-30",
-        "temperature": true,
-        "tool_call": true
+        "recommended_api": "chat-completions"
       }
-    },
-    "name": "AnyAPI",
-    "npm": "@ai-sdk/openai-compatible"
+    }
   },
   "cerebras": {
-    "doc": "https://inference-docs.cerebras.ai/models/overview",
-    "env": [
-      "CEREBRAS_API_KEY"
-    ],
     "id": "cerebras",
-    "models": {},
     "name": "Cerebras",
-    "npm": "@ai-sdk/cerebras"
+    "doc": "https://inference-docs.cerebras.ai/models/overview",
+    "env": ["CEREBRAS_API_KEY"],
+    "models": {}
   },
   "google": {
-    "doc": "https://ai.google.dev/gemini-api/docs/models",
-    "env": [
-      "GOOGLE_API_KEY",
-      "GOOGLE_GENERATIVE_AI_API_KEY",
-      "GEMINI_API_KEY"
-    ],
     "id": "google",
+    "name": "Google",
+    "doc": "https://ai.google.dev/gemini-api/docs/models",
+    "env": ["GOOGLE_API_KEY","GOOGLE_GENERATIVE_AI_API_KEY","GEMINI_API_KEY"],
     "models": {
       "gemini-flash-latest": {
-        "attachment": true,
-        "cost": {
-          "cache_read": 0.15,
-          "input": 1.5,
-          "input_audio": 1.5,
-          "output": 9
-        },
+        "id": "gemini-flash-latest",
+        "type": "chat",
+        "name": "Gemini Flash Latest",
         "description": "Fast Gemini model balancing multimodal reasoning, tool use, and cost",
         "family": "gemini-flash",
-        "id": "gemini-flash-latest",
+        "open_weights": false,
         "knowledge": "2025-01",
+        "release_date": "2026-05-19",
         "last_updated": "2026-05-19",
+        "modalities": {
+          "input": ["text","image","video","audio","application/pdf"],
+          "output": ["text"]
+        },
+        "capabilities": {
+          "tools": {"supported": true},
+          "reasoning": {"supported": true,"effort": ["minimal","low","medium","high"]},
+          "temperature": true,
+          "structured_output": true,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 1048576,
           "output": 65536
         },
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "video",
-            "audio",
-            "pdf"
-          ],
-          "output": [
-            "text"
-          ]
+        "cost": {
+          "text": {"input": {"price": 1.5,"cache": {"read": 0.15}},"output": {"price": 9}},
+          "audio": {"input": {"price": 1.5,"unit": "token"}}
         },
-        "name": "Gemini Flash Latest",
-        "open_weights": false,
-        "reasoning": true,
-        "reasoning_options": [
-          {
-            "type": "effort",
-            "values": [
-              "minimal",
-              "low",
-              "medium",
-              "high"
-            ]
-          }
-        ],
-        "release_date": "2026-05-19",
-        "structured_output": true,
-        "temperature": true,
-        "tool_call": true
+        "api": {
+          "generate-content": {"sdk": {"aisdk": "@ai-sdk/google"}}
+        },
+        "recommended_api": "generate-content"
       }
-    },
-    "name": "Google",
-    "npm": "@ai-sdk/google"
+    }
   },
   "greenpt": {
-    "api": "https://api.greenpt.ai/v1",
-    "doc": "https://docs.greenpt.ai",
-    "env": [
-      "GREENPT_API_KEY"
-    ],
     "id": "greenpt",
+    "name": "GreenPT",
+    "doc": "https://docs.greenpt.ai",
+    "env": ["GREENPT_API_KEY"],
     "models": {
       "green-s": {
-        "attachment": false,
-        "cost": {
-          "input": 0.00437,
-          "output": 0
-        },
-        "description": "GreenPT speech-to-text model for pre-recorded and live transcription",
         "id": "green-s",
+        "type": "transcription",
+        "name": "Green S",
+        "description": "GreenPT speech-to-text model for pre-recorded and live transcription",
+        "open_weights": false,
+        "release_date": "2025-01",
         "last_updated": "2025-01",
+        "modalities": {
+          "input": ["audio"],
+          "output": ["text"]
+        },
+        "capabilities": {
+          "tools": {"supported": false},
+          "reasoning": {"supported": false},
+          "temperature": false,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 0,
           "output": 8192
         },
-        "modalities": {
-          "input": [
-            "audio"
-          ],
-          "output": [
-            "text"
-          ]
+        "cost": {
+          "text": {"input": {"price": 0.00437},"output": {"price": 0}}
         },
-        "name": "Green S",
-        "open_weights": false,
-        "reasoning": false,
-        "release_date": "2025-01",
-        "temperature": false,
-        "tool_call": false
+        "api": {
+          "chat-completions": {"base_url": "https://api.greenpt.ai/v1","sdk": {"aisdk": "@ai-sdk/openai-compatible"}}
+        },
+        "recommended_api": "chat-completions"
       }
-    },
-    "name": "GreenPT",
-    "npm": "@ai-sdk/openai-compatible"
+    }
   },
   "impossibl": {
-    "api": "https://api.impossibl.com/v1",
-    "doc": "https://impossibl.com/docs/models",
-    "env": [
-      "IMPOSSIBL_API_KEY"
-    ],
     "id": "impossibl",
+    "name": "Impossibl",
+    "doc": "https://impossibl.com/docs/models",
+    "env": ["IMPOSSIBL_API_KEY"],
     "models": {
       "google/gemini-3.1-pro-preview": {
-        "attachment": true,
-        "cost": {
-          "cache_read": 0.2,
-          "context_over_200k": {
-            "cache_read": 0.4,
-            "input": 4,
-            "output": 18
-          },
-          "input": 2,
-          "output": 12,
-          "tiers": [
-            {
-              "cache_read": 0.4,
-              "input": 4,
-              "output": 18,
-              "tier": {
-                "size": 200000,
-                "type": "context"
-              }
-            }
-          ]
-        },
+        "id": "google/gemini-3.1-pro-preview",
+        "type": "chat",
+        "name": "Gemini 3.1 Pro Preview",
         "description": "Reasoning-first Gemini preview for agentic coding and complex problem solving",
         "family": "gemini-pro",
-        "id": "google/gemini-3.1-pro-preview",
+        "open_weights": false,
         "knowledge": "2025-01",
+        "release_date": "2026-02-19",
         "last_updated": "2026-02-19",
+        "modalities": {
+          "input": ["text","image","video","audio","application/pdf"],
+          "output": ["text"]
+        },
+        "capabilities": {
+          "tools": {"supported": true},
+          "reasoning": {"supported": true,"effort": ["low","medium","high"]},
+          "temperature": true,
+          "structured_output": true,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 1048576,
           "output": 65536
         },
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "video",
-            "audio",
-            "pdf"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "name": "Gemini 3.1 Pro Preview",
-        "open_weights": false,
-        "reasoning": true,
-        "reasoning_options": [
-          {
-            "type": "effort",
-            "values": [
-              "low",
-              "medium",
-              "high"
-            ]
+        "cost": {
+          "text": {
+            "input": {
+              "price": 2,
+              "cache": {"read": 0.2},
+              "overrides": [{"when":{"context":{"gt":200000}},"price":4,"cache":{"read":0.4}}]
+            },
+            "output": {"price": 12,"overrides": [{"when": {"context": {"gt": 200000}},"price": 18}]}
           }
-        ],
-        "release_date": "2026-02-19",
-        "structured_output": true,
-        "temperature": true,
-        "tool_call": true
+        },
+        "api": {
+          "chat-completions": {"base_url": "https://api.impossibl.com/v1","sdk": {"aisdk": "@ai-sdk/openai-compatible"}}
+        },
+        "recommended_api": "chat-completions"
       }
-    },
-    "name": "Impossibl",
-    "npm": "@ai-sdk/openai-compatible"
+    }
   },
   "openai": {
-    "doc": "https://platform.openai.com/docs/models",
-    "env": [
-      "OPENAI_API_KEY"
-    ],
     "id": "openai",
+    "name": "OpenAI",
+    "doc": "https://platform.openai.com/docs/models",
+    "env": ["OPENAI_API_KEY"],
     "models": {
       "gpt-5.6-luna": {
-        "attachment": true,
-        "cost": {
-          "cache_read": 0.02,
-          "cache_write": 0.25,
-          "context_over_200k": {
-            "cache_read": 0.04,
-            "cache_write": 0.5,
-            "input": 0.4,
-            "output": 1.8
-          },
-          "input": 0.2,
-          "output": 1.2,
-          "tiers": [
-            {
-              "cache_read": 0.04,
-              "cache_write": 0.5,
-              "input": 0.4,
-              "output": 1.8,
-              "tier": {
-                "size": 272000,
-                "type": "context"
-              }
-            }
-          ]
-        },
-        "description": "Cost-efficient GPT-5.6 model for fast, high-volume workloads",
-        "experimental": {
-          "modes": {
-            "fast": {
-              "cost": {
-                "cache_read": 0.04,
-                "cache_write": 0.5,
-                "input": 0.4,
-                "output": 2.4
-              },
-              "provider": {
-                "body": {
-                  "service_tier": "priority"
-                }
-              }
-            },
-            "pro": {
-              "provider": {
-                "body": {
-                  "reasoning": {
-                    "mode": "pro"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "family": "gpt-luna",
         "id": "gpt-5.6-luna",
+        "type": "chat",
+        "name": "GPT-5.6 Luna",
+        "description": "Cost-efficient GPT-5.6 model for fast, high-volume workloads",
+        "family": "gpt-luna",
+        "open_weights": false,
         "knowledge": "2026-02-16",
+        "release_date": "2026-07-09",
         "last_updated": "2026-07-09",
+        "modalities": {
+          "input": ["text","image","application/pdf"],
+          "output": ["text"]
+        },
+        "capabilities": {
+          "tools": {"supported": true},
+          "reasoning": {"supported": true,"effort": ["none","low","medium","high","xhigh","max"]},
+          "temperature": false,
+          "structured_output": true,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 1050000,
           "input": 922000,
           "output": 128000
         },
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "pdf"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "name": "GPT-5.6 Luna",
-        "open_weights": false,
-        "reasoning": true,
-        "reasoning_options": [
-          {
-            "type": "effort",
-            "values": [
-              "none",
-              "low",
-              "medium",
-              "high",
-              "xhigh",
-              "max"
-            ]
+        "cost": {
+          "text": {
+            "input": {
+              "price": 0.2,
+              "cache": {"read": 0.02,"write": 0.25},
+              "overrides": [{"when":{"context":{"gt":272000}},"price":0.4,"cache":{"read":0.04,"write":0.5}}]
+            },
+            "output": {"price": 1.2,"overrides": [{"when": {"context": {"gt": 272000}},"price": 1.8}]}
           }
-        ],
-        "release_date": "2026-07-09",
-        "structured_output": true,
-        "temperature": false,
-        "tool_call": true
+        },
+        "api": {
+          "responses": {"sdk": {"aisdk": "@ai-sdk/openai"}}
+        },
+        "recommended_api": "responses",
+        "experimental": {
+          "modes": {
+            "fast": {
+              "cost": {"text": {"input": {"price": 0.4,"cache": {"read": 0.04,"write": 0.5}},"output": {"price": 2.4}}},
+              "body": {"service_tier": "priority"}
+            },
+            "pro": {"body": {"reasoning": {"mode": "pro"}}}
+          }
+        }
       },
       "gpt-image-1": {
-        "attachment": true,
+        "id": "gpt-image-1",
+        "type": "image",
+        "name": "gpt-image-1",
         "description": "OpenAI image model for production generation, edits, and brand-safe visual workflows",
         "family": "gpt-image",
-        "id": "gpt-image-1",
+        "open_weights": false,
+        "release_date": "2025-04-24",
         "last_updated": "2025-04-24",
+        "status": "deprecated",
+        "modalities": {
+          "input": ["text","image"],
+          "output": ["image"]
+        },
+        "capabilities": {
+          "tools": {"supported": false},
+          "reasoning": {"supported": false},
+          "temperature": false,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 0,
           "input": 0,
           "output": 0
         },
-        "modalities": {
-          "input": [
-            "text",
-            "image"
-          ],
-          "output": [
-            "image"
-          ]
+        "api": {
+          "images": {"sdk": {"aisdk": "@ai-sdk/openai"}}
         },
-        "name": "gpt-image-1",
-        "open_weights": false,
-        "reasoning": false,
-        "release_date": "2025-04-24",
-        "status": "deprecated",
-        "temperature": false,
-        "tool_call": false
+        "recommended_api": "images"
       }
-    },
-    "name": "OpenAI",
-    "npm": "@ai-sdk/openai"
+    }
   },
   "opencode-go": {
-    "api": "https://opencode.ai/zen/go/v1",
-    "doc": "https://opencode.ai/docs/zen",
-    "env": [
-      "OPENCODE_API_KEY"
-    ],
     "id": "opencode-go",
+    "name": "OpenCode Go",
+    "doc": "https://opencode.ai/docs/zen",
+    "env": ["OPENCODE_API_KEY"],
     "models": {
       "deepseek-v4-flash": {
-        "attachment": false,
-        "cost": {
-          "cache_read": 0.0014,
-          "input": 0.07,
-          "output": 0.14
-        },
+        "id": "deepseek-v4-flash",
+        "type": "chat",
+        "name": "DeepSeek V4 Flash (2x usage)",
         "description": "Official DeepSeek V4 Flash release with enhanced agentic capabilities and integrated DSpark speculative decoding",
         "family": "deepseek-flash",
-        "id": "deepseek-v4-flash",
-        "interleaved": {
-          "field": "reasoning_content"
-        },
+        "open_weights": true,
         "knowledge": "2025-05",
+        "release_date": "2026-07-31",
         "last_updated": "2026-07-31",
+        "modalities": {
+          "input": ["text"],
+          "output": ["text"]
+        },
+        "capabilities": {
+          "tools": {"supported": true},
+          "reasoning": {"supported": true,"effort": ["low","high","max"]},
+          "temperature": true,
+          "structured_output": true,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 1000000,
           "output": 384000
         },
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
+        "cost": {
+          "text": {"input": {"price": 0.07,"cache": {"read": 0.0014}},"output": {"price": 0.14}}
         },
-        "name": "DeepSeek V4 Flash (2x usage)",
-        "open_weights": true,
-        "reasoning": true,
-        "reasoning_options": [
-          {
-            "type": "effort",
-            "values": [
-              "low",
-              "high",
-              "max"
-            ]
-          }
-        ],
-        "release_date": "2026-07-31",
-        "structured_output": true,
-        "temperature": true,
-        "tool_call": true
+        "api": {
+          "chat-completions": {"base_url": "https://opencode.ai/zen/go/v1","sdk": {"aisdk": "@ai-sdk/openai-compatible"}}
+        },
+        "recommended_api": "chat-completions"
       },
       "qwen3.7-plus": {
-        "attachment": true,
-        "cost": {
-          "cache_read": 0.04,
-          "cache_write": 0.5,
-          "context_over_200k": {
-            "cache_read": 0.12,
-            "cache_write": 1.5,
-            "input": 1.2,
-            "output": 4.8
-          },
-          "input": 0.4,
-          "output": 1.6,
-          "tiers": [
-            {
-              "cache_read": 0.12,
-              "cache_write": 1.5,
-              "input": 1.2,
-              "output": 4.8,
-              "tier": {
-                "size": 256000,
-                "type": "context"
-              }
-            }
-          ]
-        },
+        "id": "qwen3.7-plus",
+        "type": "chat",
+        "name": "Qwen3.7 Plus",
         "description": "Multimodal reasoning model for visual analysis, planning, and tool use",
         "family": "qwen3.7-plus",
-        "id": "qwen3.7-plus",
+        "open_weights": false,
+        "release_date": "2026-06-02",
         "last_updated": "2026-06-02",
+        "modalities": {
+          "input": ["text","image","video"],
+          "output": ["text"]
+        },
+        "capabilities": {
+          "tools": {"supported": true},
+          "reasoning": {"supported": true,"toggle": true,"budget": {"max": 262144}},
+          "temperature": true,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 1000000,
           "output": 65536
         },
-        "modalities": {
-          "input": [
-            "text",
-            "image",
-            "video"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "name": "Qwen3.7 Plus",
-        "open_weights": false,
-        "provider": {
-          "npm": "@ai-sdk/anthropic"
-        },
-        "reasoning": true,
-        "reasoning_options": [
-          {
-            "type": "toggle"
-          },
-          {
-            "max": 262144,
-            "type": "budget_tokens"
+        "cost": {
+          "text": {
+            "input": {
+              "price": 0.4,
+              "cache": {"read": 0.04,"write": 0.5},
+              "overrides": [{"when":{"context":{"gt":256000}},"price":1.2,"cache":{"read":0.12,"write":1.5}}]
+            },
+            "output": {"price": 1.6,"overrides": [{"when": {"context": {"gt": 256000}},"price": 4.8}]}
           }
-        ],
-        "release_date": "2026-06-02",
-        "temperature": true,
-        "tool_call": true
+        },
+        "api": {
+          "messages": {"base_url": "https://opencode.ai/zen/go/v1","sdk": {"aisdk": "@ai-sdk/anthropic"}}
+        },
+        "recommended_api": "messages"
       }
-    },
-    "name": "OpenCode Go",
-    "npm": "@ai-sdk/openai-compatible"
+    }
   },
   "poe": {
-    "api": "https://api.poe.com/v1",
-    "doc": "https://creator.poe.com/docs/external-applications/openai-compatible-api",
-    "env": [
-      "POE_API_KEY"
-    ],
     "id": "poe",
+    "name": "Poe",
+    "doc": "https://creator.poe.com/docs/external-applications/openai-compatible-api",
+    "env": ["POE_API_KEY"],
     "models": {
       "google/veo-3": {
-        "attachment": true,
+        "id": "google/veo-3",
+        "type": "video",
+        "name": "Veo-3",
         "description": "Video model for prompt-guided generation, editing, and motion workflows",
         "family": "veo",
-        "id": "google/veo-3",
+        "open_weights": false,
+        "release_date": "2025-05-21",
         "last_updated": "2025-05-21",
+        "modalities": {
+          "input": ["text"],
+          "output": ["video"]
+        },
+        "capabilities": {
+          "tools": {"supported": true},
+          "reasoning": {"supported": false},
+          "temperature": false,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 480,
           "output": 0
         },
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "video"
-          ]
+        "api": {
+          "chat-completions": {"base_url": "https://api.poe.com/v1","sdk": {"aisdk": "@ai-sdk/openai-compatible"}}
         },
-        "name": "Veo-3",
-        "open_weights": false,
-        "reasoning": false,
-        "release_date": "2025-05-21",
-        "temperature": false,
-        "tool_call": true
+        "recommended_api": "chat-completions"
       },
       "stabilityai/stablediffusionxl": {
-        "attachment": true,
+        "id": "stabilityai/stablediffusionxl",
+        "type": "image",
+        "name": "StableDiffusionXL",
         "description": "Image model for prompt-driven generation, editing, and visual design workflows",
         "family": "stable-diffusion",
-        "id": "stabilityai/stablediffusionxl",
+        "open_weights": false,
+        "release_date": "2023-07-09",
         "last_updated": "2023-07-09",
+        "modalities": {
+          "input": ["text","image"],
+          "output": ["image"]
+        },
+        "capabilities": {
+          "tools": {"supported": true},
+          "reasoning": {"supported": false},
+          "temperature": false,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 200,
           "output": 0
         },
-        "modalities": {
-          "input": [
-            "text",
-            "image"
-          ],
-          "output": [
-            "image"
-          ]
+        "api": {
+          "chat-completions": {"base_url": "https://api.poe.com/v1","sdk": {"aisdk": "@ai-sdk/openai-compatible"}}
         },
-        "name": "StableDiffusionXL",
-        "open_weights": false,
-        "reasoning": false,
-        "release_date": "2023-07-09",
-        "temperature": false,
-        "tool_call": true
+        "recommended_api": "chat-completions"
       }
-    },
-    "name": "Poe",
-    "npm": "@ai-sdk/openai-compatible"
+    }
   },
   "zhipuai": {
-    "api": "https://open.bigmodel.cn/api/paas/v4",
-    "doc": "https://docs.z.ai/guides/overview/pricing",
-    "env": [
-      "ZHIPU_API_KEY"
-    ],
     "id": "zhipuai",
+    "name": "Zhipu AI",
+    "doc": "https://docs.z.ai/guides/overview/pricing",
+    "env": ["ZHIPU_API_KEY"],
     "models": {
       "glm-4.5-flash": {
-        "attachment": false,
-        "cost": {
-          "cache_read": 0,
-          "cache_write": 0,
-          "input": 0,
-          "output": 0
-        },
+        "id": "glm-4.5-flash",
+        "type": "chat",
+        "name": "GLM-4.5-Flash",
         "description": "Efficient GLM model for fast reasoning, coding, and agent workflows",
         "family": "glm-flash",
-        "id": "glm-4.5-flash",
+        "open_weights": true,
         "knowledge": "2025-04",
+        "release_date": "2025-07-28",
         "last_updated": "2025-07-28",
+        "modalities": {
+          "input": ["text"],
+          "output": ["text"]
+        },
+        "capabilities": {
+          "tools": {"supported": true},
+          "reasoning": {"supported": true,"toggle": true},
+          "temperature": true,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 131072,
           "output": 98304
         },
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
+        "cost": {
+          "text": {"input": {"price": 0,"cache": {"read": 0,"write": 0}},"output": {"price": 0}}
         },
-        "name": "GLM-4.5-Flash",
-        "open_weights": true,
-        "reasoning": true,
-        "reasoning_options": [
-          {
-            "type": "toggle"
-          }
-        ],
-        "release_date": "2025-07-28",
-        "temperature": true,
-        "tool_call": true
+        "api": {
+          "chat-completions": {"base_url": "https://open.bigmodel.cn/api/paas/v4","sdk": {"aisdk": "@ai-sdk/openai-compatible"}}
+        },
+        "recommended_api": "chat-completions"
       }
-    },
-    "name": "Zhipu AI",
-    "npm": "@ai-sdk/openai-compatible"
+    }
   },
   "nebius": {
     "id": "nebius",
-    "env": [
-      "NEBIUS_API_KEY"
-    ],
-    "npm": "@ai-sdk/openai-compatible",
-    "api": "https://api.tokenfactory.nebius.com/v1",
     "name": "Nebius Token Factory",
     "doc": "https://docs.tokenfactory.nebius.com/",
+    "env": ["NEBIUS_API_KEY"],
     "models": {
       "Qwen/Qwen3-Next-80B-A3B-Thinking": {
         "id": "Qwen/Qwen3-Next-80B-A3B-Thinking",
+        "type": "chat",
         "name": "Qwen3-Next-80B-A3B-Thinking",
         "description": "Qwen reasoning model for deliberate problem solving, math, and coding",
-        "attachment": false,
-        "reasoning": true,
-        "reasoning_options": [],
-        "tool_call": true,
-        "interleaved": {
-          "field": "reasoning_content"
-        },
-        "structured_output": true,
-        "temperature": true,
+        "open_weights": true,
         "knowledge": "2025-12",
         "release_date": "2026-01-28",
         "last_updated": "2026-02-04",
         "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
+          "input": ["text"],
+          "output": ["text"]
         },
-        "open_weights": true,
+        "capabilities": {
+          "tools": {"supported": true},
+          "reasoning": {"supported": true},
+          "temperature": true,
+          "structured_output": true,
+          "system_updates": false,
+          "effort_updates": false
+        },
         "limit": {
           "context": 128000,
           "input": 120000,
           "output": 16384
         },
         "cost": {
-          "input": 0.15,
-          "output": 1.2,
-          "reasoning": 1.2,
-          "cache_read": 0.015,
-          "cache_write": 0.18
-        }
+          "text": {
+            "input": {"price": 0.15,"cache": {"read": 0.015,"write": 0.18}},
+            "output": {"price": 1.2,"reasoning": 1.2}
+          }
+        },
+        "api": {
+          "chat-completions": {"base_url": "https://api.tokenfactory.nebius.com/v1","sdk": {"aisdk": "@ai-sdk/openai-compatible"}}
+        },
+        "recommended_api": "chat-completions"
       }
     }
   }

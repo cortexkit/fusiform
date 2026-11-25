@@ -5,7 +5,5 @@
 // supplies its own main) belongs beside this directory as tests/<name>.rs.
 // Scope a run to one file with `cargo test -p fusiform-core --test it <file>::`.
 
-mod full_payload;
 mod measured_fields_are_read_or_declared;
-mod models_dev_normalization;
 mod models_dev_v2_normalization;

@@ -7,7 +7,7 @@
 //! Skipped when the payload is absent, so the suite stays runnable without a
 //! capture.
 
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
+use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, NewObservation};
@@ -54,12 +54,12 @@ fn observe(s: &CatalogStore, at: i64, outcome: ObservationOutcome) -> i64 {
 #[test]
 fn a_whole_document_seeds_once_and_is_then_stable() {
     let Some(bytes) = payload() else {
-        eprintln!("skipped: set FUSIFORM_FULL_PAYLOAD to a captured models.dev document");
+        eprintln!("skipped: set FUSIFORM_FULL_PAYLOAD to a captured models.dev v2 document");
         return;
     };
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
-    let catalog = normalize_legacy_models_dev_for_tests(&bytes)
+    let catalog = normalize_models_dev(&bytes)
         .expect("live document normalizes")
         .catalog;
 
@@ -97,7 +97,7 @@ fn a_whole_document_seeds_once_and_is_then_stable() {
     );
 }
 
-/// A single rate change in a 3.6 MB document opens exactly one era.
+/// A single rate change in a whole document opens exactly one era.
 ///
 /// Runs the real diff over every row, so a rule that accidentally treats an
 /// untouched field as changed shows up as a count far above one rather than as
@@ -105,13 +105,16 @@ fn a_whole_document_seeds_once_and_is_then_stable() {
 #[test]
 fn one_changed_rate_in_a_whole_document_opens_one_era() {
     let Some(bytes) = payload() else {
-        eprintln!("skipped: set FUSIFORM_FULL_PAYLOAD to a captured models.dev document");
+        eprintln!("skipped: set FUSIFORM_FULL_PAYLOAD to a captured models.dev v2 document");
         return;
     };
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
 
-    let catalog = normalize_legacy_models_dev_for_tests(&bytes)
+    // Use the parsed tree on both sides so editing a price cannot also change
+    // which API is listed first and therefore supplies the connection facts.
+    let mut doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let catalog = normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
         .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
@@ -125,16 +128,17 @@ fn one_changed_rate_in_a_whole_document_opens_one_era() {
 
     // Move one rate on one model, through the parsed form so the mutation does
     // not depend on the document's whitespace.
-    let mut doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     let cost = doc
         .get_mut("anthropic")
         .and_then(|p| p.get_mut("models"))
         .and_then(|m| m.get_mut("claude-sonnet-4-5"))
         .and_then(|m| m.get_mut("cost"))
+        .and_then(|c| c.get_mut("text"))
+        .and_then(|t| t.get_mut("input"))
         .and_then(|c| c.as_object_mut())
         .expect("the fixture model must exist in the live document");
-    let before = cost.get("input").cloned().unwrap();
-    cost.insert("input".to_string(), serde_json::json!(99));
+    let before = cost.get("price").cloned().unwrap();
+    cost.insert("price".to_string(), serde_json::json!(99));
     assert_ne!(
         before,
         serde_json::json!(99),
@@ -142,9 +146,7 @@ fn one_changed_rate_in_a_whole_document_opens_one_era() {
     );
     let mutated = serde_json::to_vec(&doc).unwrap();
 
-    let changed = normalize_legacy_models_dev_for_tests(&mutated)
-        .unwrap()
-        .catalog;
+    let changed = normalize_models_dev(&mutated).unwrap().catalog;
     let plan = plan_ingest(
         &store,
         &changed,
@@ -173,33 +175,29 @@ fn one_changed_rate_in_a_whole_document_opens_one_era() {
 /// Serializing and reparsing a document is not a change.
 ///
 /// The reason the diff compares normalized values rather than bytes. A whole
-/// document round-tripped through a JSON library has different bytes, different
-/// key order and different number rendering, and none of that is a fact about
-/// any model.
+/// document can use different formatting and provider order without changing
+/// the facts. The order of API entries inside each model is meaningful.
 #[test]
 fn reserializing_a_document_is_not_a_change() {
     let Some(bytes) = payload() else {
-        eprintln!("skipped: set FUSIFORM_FULL_PAYLOAD to a captured models.dev document");
+        eprintln!("skipped: set FUSIFORM_FULL_PAYLOAD to a captured models.dev v2 document");
         return;
     };
     let dir = tempfile::tempdir().unwrap();
     let store = store(&dir);
 
-    let catalog = normalize_legacy_models_dev_for_tests(&bytes)
-        .unwrap()
-        .catalog;
+    let catalog = normalize_models_dev(&bytes).unwrap().catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     observe(&store, 2_000, ObservationOutcome::Unchanged);
 
-    // Round-trip through serde: same facts, different bytes.
-    let doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    let reserialized = serde_json::to_vec(&doc).unwrap();
+    // Reformat the outer map without sorting the order-sensitive API entries.
+    let doc: std::collections::BTreeMap<String, &serde_json::value::RawValue> =
+        serde_json::from_slice(&bytes).unwrap();
+    let reserialized = serde_json::to_vec_pretty(&doc).unwrap();
     assert_ne!(reserialized, bytes, "the round trip must change the bytes");
 
-    let same = normalize_legacy_models_dev_for_tests(&reserialized)
-        .unwrap()
-        .catalog;
+    let same = normalize_models_dev(&reserialized).unwrap().catalog;
     let plan = plan_ingest(
         &store,
         &same,

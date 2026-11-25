@@ -11,9 +11,9 @@ use std::collections::BTreeMap;
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::normalize::{
-    normalize_legacy_models_dev_for_tests, NormalizeOutcome, NormalizedModel,
+    normalize_models_dev, v2::FindingKey, NormalizeV2Outcome, NormalizedModel, RefusedFactScope,
 };
-use fusiform_core::{BoundaryKind, NormalizeError, ObservationOutcome, SourceId, Timestamp};
+use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_store::ingest::{catalog_digest, facts_with_values, plan_ingest};
 use fusiform_store::{CatalogStore, NewObservation};
 
@@ -21,7 +21,7 @@ use fusiform_store::{CatalogStore, NewObservation};
 /// plus the two broken shapes it does not (yet).
 ///
 /// - `with-base`: a base price card, a `fast` mode pricing input, output and a
-///   cache read of 0 (so a stated zero), and a `pro` mode with no cost. The
+///   cache read of 0 (so a stated zero), and a `flex` mode with no cost. The
 ///   base prices cache_write and `fast` does not.
 /// - `no-base`: modes and no base `cost`, as five live rows publish.
 /// - `refusals`: a mode whose name cannot form a fact key, a mode whose cost
@@ -33,54 +33,124 @@ const DOC: &str = r#"{
     "models": {
       "with-base": {
         "id": "with-base",
-        "cost": { "input": 2, "output": 8, "cache_read": 0.2, "cache_write": 2.5 },
+        "cost": {
+          "text": {
+            "input": {
+              "price": 2,
+              "cache": {
+                "read": 0.2,
+                "write": 2.5
+              }
+            },
+            "output": { "price": 8 }
+          }
+        },
         "experimental": {
           "modes": {
             "fast": {
-              "cost": { "input": 4, "output": 16, "cache_read": 0 },
-              "provider": { "body": { "service_tier": "priority" } }
+              "cost": {
+                "text": {
+                  "input": {
+                    "price": 4,
+                    "cache": {
+                      "read": 0
+                    }
+                  },
+                  "output": { "price": 16 }
+                }
+              },
+              "body": {
+                "service_tier": "priority"
+              }
             },
-            "pro": {
-              "provider": { "body": { "reasoning": { "mode": "pro" } } }
+            "flex": {
+              "body": {
+                "reasoning": {
+                  "mode": "pro"
+                }
+              }
             }
           }
-        }
+        },
+        "type": "chat",
+        "capabilities": {},
+        "api": {}
       },
       "no-base": {
         "id": "no-base",
         "experimental": {
           "modes": {
             "fast": {
-              "cost": { "input": 30, "output": 150 },
-              "provider": {
-                "body": { "speed": "fast" },
-                "headers": { "anthropic-beta": "fast-mode-2026-02-01" }
+              "cost": {
+                "text": {
+                  "input": { "price": 30 },
+                  "output": { "price": 150 }
+                }
+              },
+              "body": {
+                "speed": "fast"
+              },
+              "headers": {
+                "anthropic-beta": "fast-mode-2026-02-01"
               }
             }
           }
-        }
+        },
+        "type": "chat",
+        "capabilities": {},
+        "api": {}
       },
       "refusals": {
         "id": "refusals",
-        "cost": { "input": 1, "output": 2 },
+        "cost": {
+          "text": {
+            "input": { "price": 1 },
+            "output": { "price": 2 }
+          }
+        },
         "experimental": {
           "modes": {
-            "Fast Tier": { "cost": { "input": 5, "output": 10 } },
-            "broken": { "cost": { "input": "five", "output": 10 } },
-            "priority": { "cost": { "input": 3, "output": 6 } }
+            "Fast Tier": {
+              "cost": {
+                "text": {
+                  "input": { "price": 5 },
+                  "output": { "price": 10 }
+                }
+              }
+            },
+            "ultrafast": {
+              "cost": {
+                "text": {
+                  "input": {
+                    "price": "five"
+                  },
+                  "output": { "price": 10 }
+                }
+              }
+            },
+            "priority": {
+              "cost": {
+                "text": {
+                  "input": { "price": 3 },
+                  "output": { "price": 6 }
+                }
+              }
+            }
           }
-        }
+        },
+        "type": "chat",
+        "capabilities": {},
+        "api": {}
       }
     }
   }
 }"#;
 
-fn normalized() -> NormalizeOutcome {
-    normalize_legacy_models_dev_for_tests(DOC.as_bytes())
-        .expect("a document with refused modes still normalizes")
+fn normalized() -> NormalizeV2Outcome {
+    normalize_models_dev(DOC.as_bytes()).expect("a document with refused modes still normalizes")
 }
 
-fn model<'a>(outcome: &'a NormalizeOutcome, id: &str) -> &'a NormalizedModel {
+fn model<'a>(outcome: &'a NormalizeV2Outcome, id: &str) -> &'a NormalizedModel {
     outcome
         .catalog
         .models()
@@ -103,7 +173,7 @@ fn priced(units: u64) -> String {
 
 /// A model with a base card, a priced mode and an unpriced mode stores exactly
 /// the base rates plus the priced mode's dimensions, with the values it
-/// published. `pro`, which publishes no cost, stores nothing.
+/// published. `flex`, which publishes no cost, stores nothing.
 #[test]
 fn a_moded_model_stores_its_mode_rates_beside_its_base_rates() {
     let outcome = normalized();
@@ -129,7 +199,7 @@ fn a_moded_model_stores_its_mode_rates_beside_its_base_rates() {
 
     assert_eq!(got, expected);
     assert!(
-        !got.keys().any(|k| k.contains(".mode.pro")),
+        !got.keys().any(|k| k.contains(".mode.flex")),
         "a mode with no cost must produce no fact: {got:?}"
     );
 }
@@ -190,21 +260,26 @@ fn an_unreadable_mode_is_refused_and_reported() {
         "only the base card and the readable mode may be stored"
     );
 
-    let refused: Vec<(&str, &str)> = outcome
+    let refused: Vec<_> = outcome
         .findings
         .iter()
-        .filter_map(|f| match f {
-            NormalizeError::RefusedMode { model, mode, .. } => {
-                Some((model.as_str(), mode.as_str()))
-            }
-            _ => None,
-        })
+        .filter(|finding| matches!(finding.key, FindingKey::RefusedPrice { .. }))
         .collect();
     assert_eq!(
-        refused,
-        vec![("acme/refusals", "Fast Tier"), ("acme/refusals", "broken")],
-        "each refused mode must be reported exactly once, and a mode with no \
-         cost (`pro`) is not a refusal"
+        refused.len(),
+        2,
+        "the two refused modes report: {refused:?}"
+    );
+    assert!(refused
+        .iter()
+        .all(|finding| finding.occurrences == 1
+            && finding.first_model_id.as_deref() == Some("refusals")));
+    assert_eq!(
+        model(&outcome, "refusals").refused,
+        ["Fast Tier", "ultrafast"]
+            .map(|name| RefusedFactScope::ModeRates(Some(name.to_string())))
+            .into_iter()
+            .collect()
     );
 }
 
@@ -277,9 +352,7 @@ fn with_luna_fast(edit: impl FnOnce(&mut serde_json::Value)) -> String {
 #[test]
 fn ingest_opens_an_era_only_when_a_mode_price_moves() {
     let (store, _dir) = store();
-    let seed = normalize_legacy_models_dev_for_tests(EXCERPT.as_bytes())
-        .unwrap()
-        .catalog;
+    let seed = normalize_models_dev(EXCERPT.as_bytes()).unwrap().catalog;
     let plan = plan_ingest(&store, &seed, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     assert!(
         plan.eras
@@ -311,11 +384,9 @@ fn ingest_opens_an_era_only_when_a_mode_price_moves() {
     // Only the bytes that select the mode change. Not a price, so no era and
     // no digest movement.
     let bytes_only = with_luna_fast(|fast| {
-        fast["provider"]["body"]["service_tier"] = serde_json::json!("flex");
+        fast["body"]["service_tier"] = serde_json::json!("flex");
     });
-    let bytes_only = normalize_legacy_models_dev_for_tests(bytes_only.as_bytes())
-        .unwrap()
-        .catalog;
+    let bytes_only = normalize_models_dev(bytes_only.as_bytes()).unwrap().catalog;
     assert_eq!(
         catalog_digest(&bytes_only),
         catalog_digest(&seed),
@@ -333,11 +404,9 @@ fn ingest_opens_an_era_only_when_a_mode_price_moves() {
 
     // One mode price moves.
     let repriced = with_luna_fast(|fast| {
-        fast["cost"]["input"] = serde_json::json!(0.5);
+        fast["cost"]["text"]["input"]["price"] = serde_json::json!(0.5);
     });
-    let repriced = normalize_legacy_models_dev_for_tests(repriced.as_bytes())
-        .unwrap()
-        .catalog;
+    let repriced = normalize_models_dev(repriced.as_bytes()).unwrap().catalog;
     assert_ne!(
         catalog_digest(&repriced),
         catalog_digest(&seed),

@@ -6,9 +6,6 @@ publish = false
 description = "Pure domain for the ck-fusiform AI-model capability catalog: identity, observations, eras, and rates."
 license = "MIT"
 
-[features]
-legacy-test-parser = []
-
 [dependencies]
 fusiform-protocol = { path = "../fusiform-protocol" }
 serde = { workspace = true }
@@ -22,5 +19,4 @@ serde_json = { workspace = true, features = ["arbitrary_precision", "raw_value"]
 time = { version = "0.3", default-features = false }
 
 [dev-dependencies]
-fusiform-core = { path = ".", features = ["legacy-test-parser"] }
 fusiform-testkit = { workspace = true }

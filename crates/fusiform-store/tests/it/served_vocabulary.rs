@@ -12,9 +12,7 @@
 //! repriced 20-40% on 2026-08-11 with `last_updated` unchanged). Answering
 //! "no, and here is what stops it" required something that stops it.
 
-use fusiform_core::normalize::{
-    normalize_legacy_models_dev_for_tests, normalize_legacy_models_dev_for_tests_with,
-};
+use fusiform_core::normalize::{normalize_models_dev, normalize_models_dev_v2_with};
 use fusiform_core::ChargeUnitEvidence;
 use fusiform_store::ingest::fact_keys_of;
 use fusiform_store::FactKey;
@@ -99,16 +97,16 @@ fn the_served_fact_set_is_exactly_this() {
     // The store crate cannot read the module's table; the module-side
     // `wire_fact_table` test normalizes with the shipped table itself.
     let mut fixture: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
-    fixture["anthropic"]["models"]["claude-sonnet-4-5"]["provider"] =
-        serde_json::json!({"shape": "responses"});
+    fixture["anthropic"]["models"]["claude-sonnet-4-5"]["api"] =
+        serde_json::json!({"responses": {"sdk": {"aisdk": "@ai-sdk/anthropic"}}});
     fixture["anthropic"]["models"]["claude-sonnet-4-5"]["type"] =
         serde_json::json!("transcription");
-    let seed: serde_json::Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    fixture["google"]["models"]["gemini-3.1-flash-live-preview"] =
-        seed["google"]["models"]["gemini-3.1-flash-live-preview"].clone();
-    let outcome = normalize_legacy_models_dev_for_tests_with(
+    fixture["google"]["models"]["audio-witness"] = serde_json::json!({
+        "type": "realtime", "api": {}, "capabilities": {},
+        "cost": {"audio": {"input": {"price": 1, "unit": "token"},
+            "output": {"price": 2, "unit": "token"}}}
+    });
+    let outcome = normalize_models_dev_v2_with(
         &serde_json::to_vec(&fixture).unwrap(),
         &ChargeUnitEvidence::input_audio_per_token(["google"])
             .with_output_audio_per_token(["google"]),
@@ -221,7 +219,7 @@ fn the_served_fact_set_is_exactly_this() {
 /// different key would pass this and fail the set assertion above.
 #[test]
 fn unreliable_and_renderer_selecting_fields_are_not_facts() {
-    let outcome = normalize_legacy_models_dev_for_tests(FIXTURE).expect("fixture normalizes");
+    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
 
     for model in outcome.catalog.models() {
         for (key, value) in fusiform_store::ingest::facts_with_values(model) {
@@ -254,7 +252,7 @@ fn unreliable_and_renderer_selecting_fields_are_not_facts() {
 /// values, on every model that carries a mode.
 #[test]
 fn mode_request_bytes_never_reach_a_fact() {
-    let outcome = normalize_legacy_models_dev_for_tests(FIXTURE).expect("fixture normalizes");
+    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
 
     // Every byte-level value the fixture's modes carry: the body parameter
     // names, their values, the header name and the header value.
@@ -309,7 +307,7 @@ fn mode_request_bytes_never_reach_a_fact() {
 /// one the parser discarded. What must not happen is it reaching a consumer.
 #[test]
 fn last_updated_is_parsed_but_never_reaches_a_fact() {
-    let outcome = normalize_legacy_models_dev_for_tests(FIXTURE).expect("fixture normalizes");
+    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
 
     // It is genuinely parsed: this test would be vacuous if the field were
     // simply absent from the normalized model.
@@ -367,7 +365,7 @@ fn last_updated_is_parsed_but_never_reaches_a_fact() {
 /// built from the constants could.
 #[test]
 fn every_namespace_prefix_selects_real_facts() {
-    let outcome = normalize_legacy_models_dev_for_tests(FIXTURE).expect("fixture normalizes");
+    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
 
     let mut produced: Vec<String> = Vec::new();
     for model in outcome.catalog.models() {
@@ -439,8 +437,7 @@ fn an_unknown_modality_list_is_stored_as_null() {
         "the fixture must have had a block, or the mutation proves nothing"
     );
 
-    let outcome =
-        normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap()).unwrap();
+    let outcome = normalize_models_dev(&serde_json::to_vec(&doc).unwrap()).unwrap();
     let model = outcome
         .catalog
         .models()
@@ -509,13 +506,18 @@ fn a_tier_rate_without_a_base_rate_of_the_same_class_survives() {
           "m1": {
             "id": "m1",
             "name": "M1",
+            "type": "chat",
+            "api": {},
+            "capabilities": {},
             "cost": {
-              "input": 5,
-              "output": 30,
-              "tiers": [
-                { "input": 10, "output": 45, "cache_write": 2.5,
-                  "tier": { "type": "context", "size": 256000 } }
-              ]
+              "text": {
+                "input": { "price": 5, "overrides": [
+                  { "when": {"context": {"gt": 256000}}, "price": 10, "cache": {"write": 2.5} }
+                ] },
+                "output": { "price": 30, "overrides": [
+                  { "when": {"context": {"gt": 256000}}, "price": 45 }
+                ] }
+              }
             },
             "limit": { "context": 400000, "output": 128000 },
             "modalities": { "input": ["text"], "output": ["text"] }
@@ -524,7 +526,7 @@ fn a_tier_rate_without_a_base_rate_of_the_same_class_survives() {
       }
     }"#;
 
-    let outcome = normalize_legacy_models_dev_for_tests(payload.as_bytes())
+    let outcome = normalize_models_dev(payload.as_bytes())
         .expect("a tier rate without a base rate must normalize, not refuse");
     let model = outcome
         .catalog
@@ -589,7 +591,7 @@ fn a_stored_rate_carries_no_annotation_fusiform_invented() {
         },
     })
     .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE)
+    let catalog = normalize_models_dev(FIXTURE)
         .expect("fixture normalizes")
         .catalog;
     let plan = fusiform_store::ingest::plan_ingest(
@@ -658,7 +660,7 @@ fn a_stored_rate_carries_no_annotation_fusiform_invented() {
 /// the decision at the moment the field appears rather than at review time.
 #[test]
 fn every_capability_field_reaches_a_fact() {
-    let outcome = normalize_legacy_models_dev_for_tests(FIXTURE).expect("fixture normalizes");
+    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
     let model = outcome
         .catalog
         .models()
@@ -742,7 +744,7 @@ fn every_capability_field_reaches_a_fact() {
 /// appears rather than at review time.
 #[test]
 fn every_limit_field_reaches_a_fact() {
-    let outcome = normalize_legacy_models_dev_for_tests(FIXTURE).expect("fixture normalizes");
+    let outcome = normalize_models_dev(FIXTURE).expect("fixture normalizes");
     let model = outcome
         .catalog
         .models()
@@ -807,13 +809,14 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
     // Synthetic claims exercise optional fields that the older excerpt lacks.
     let mut fixture: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
     let row = &mut fixture["anthropic"]["models"]["claude-sonnet-4-5"];
-    row["canonical_model_id"] = serde_json::json!("anthropic/claude-sonnet-4-5");
+    row["canonical_id"] = serde_json::json!("anthropic/claude-sonnet-4-5");
     row["status"] = serde_json::json!("future-preview");
     row["type"] = serde_json::json!("transcription");
-    row["provider"] =
-        serde_json::json!({"npm": "@sdk/model", "api": "https://model/", "shape": "responses"});
-    let outcome = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&fixture).unwrap())
-        .expect("fixture normalizes");
+    row["api"] = serde_json::json!({
+        "responses": {"base_url": "https://model/", "sdk": {"aisdk": "@sdk/model"}}
+    });
+    let outcome =
+        normalize_models_dev(&serde_json::to_vec(&fixture).unwrap()).expect("fixture normalizes");
     let model = outcome
         .catalog
         .models()
@@ -905,10 +908,10 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
 #[test]
 fn canonical_identity_and_open_status_reach_stored_facts() {
     use fusiform_store::ingest::facts_with_values;
-    let outcome = normalize_legacy_models_dev_for_tests(
+    let outcome = normalize_models_dev(
         br#"{"p":{"models":{
-        "published":{"canonical_model_id":"lab/weights-1.0","status":"future-preview"},
-        "unpublished":{}
+        "published":{"type":"chat","api":{},"capabilities":{},"canonical_id":"lab/weights-1.0","status":"future-preview"},
+        "unpublished":{"type":"chat","api":{},"capabilities":{}}
     }}}"#,
     )
     .unwrap();
@@ -938,16 +941,23 @@ fn canonical_identity_and_open_status_reach_stored_facts() {
 #[test]
 fn normalized_model_type_is_verbatim_and_sparse() {
     use fusiform_store::ingest::facts_with_values;
-    let outcome = normalize_legacy_models_dev_for_tests(
+    let mut outcome = normalize_models_dev(
         br#"{"p":{"models":{
-        "transcription":{"type":"transcription"},
-        "future":{"type":"Future Kind \"v2\""},
-        "empty":{"type":""},
-        "unpublished":{},
-        "null":{"type":null}
+        "transcription":{"type":"transcription","api":{},"capabilities":{}},
+        "future":{"type":"Future Kind \"v2\"","api":{},"capabilities":{}},
+        "empty":{"type":"","api":{},"capabilities":{}},
+        "unpublished":{"type":"chat","api":{},"capabilities":{}},
+        "null":{"type":null,"api":{},"capabilities":{}}
     }}}"#,
     )
     .unwrap();
+    // Historical normalized rows could omit type, which the v2 document requires.
+    outcome.catalog.providers[0]
+        .models
+        .iter_mut()
+        .find(|model| model.key.model_id == "unpublished")
+        .unwrap()
+        .model_type = None;
     let mut checked = 0;
     for model in outcome.catalog.models() {
         let values: std::collections::BTreeMap<_, _> =
