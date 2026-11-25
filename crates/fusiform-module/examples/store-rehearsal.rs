@@ -1,6 +1,8 @@
 //! Compare a signed store bootstrap with the backup used to publish it.
 
-use std::{collections::BTreeSet, env, fs, path::Path, process::ExitCode, time::Instant};
+use std::{
+    collections::BTreeSet, env, fs, path::Path, process::ExitCode, sync::Arc, time::Instant,
+};
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_module::{route::serve_tool_call, settings, store_poll::StorePoller};
@@ -63,10 +65,10 @@ async fn main() -> Result<ExitCode> {
 
     println!("Store rehearsal: base={base}, pinned kid={kid}");
     let started = Instant::now();
-    let rebuilt = CatalogStore::open_for_store(&descriptor(
+    let rebuilt = Arc::new(CatalogStore::open_for_store(&descriptor(
         &run_dir.path().join("rebuilt.db"),
         format!("{run_name}-rebuilt"),
-    )?)?;
+    )?)?);
     let bootstrap = poller.poll(&rebuilt).await;
     let elapsed = started.elapsed();
     let peak = peak_rss_kib().map_or_else(|| "unavailable".into(), |n| format!("{n} KiB"));
