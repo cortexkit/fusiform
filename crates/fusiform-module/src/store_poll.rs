@@ -28,6 +28,21 @@ pub use current::VerifiedStoreHead;
 pub use fusiform_release::validate_judgments;
 use state::Verified;
 
+/// Run the same signature checks and state transitions as the daemon poller.
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub fn verify_chain_for_tests(
+    releases: &[Release],
+    keys: &ReleaseKeys,
+) -> Result<fusiform_release::State, String> {
+    let (first, rest) = releases.split_first().ok_or("release chain is empty")?;
+    let mut verified = Verified::first(first.clone(), keys)?;
+    for release in rest {
+        verified = Verified::advance(&verified, release, keys)?;
+    }
+    Ok(verified.state)
+}
+
 const HEAD_PATH: &str = "v1/head";
 const HISTORY_BASE_PATH: &str = "v1/history/base.json";
 pub(crate) const POLL_INTERVAL_MS: i64 = 60_000;

@@ -2,6 +2,9 @@ use super::*;
 use fusiform_release::{Snapshot, upstream_state_hash};
 use serde_json::Value;
 
+#[path = "../../fusiform-publish/tests/support/consumer.rs"]
+mod consumer;
+
 const SNAPSHOT: &[u8] =
     include_bytes!("../../fusiform-release/fixtures/release-format-v1/snapshot.json");
 const EVIDENCE: &[u8] = include_bytes!("../fixtures/evidence.json");
@@ -41,7 +44,10 @@ fn publish_index_and_replayed_index_agree_by_hash() {
     let (summary, next) = publish_step(MODELS, &prior, EVIDENCE).unwrap();
     let summary: Value = serde_json::from_slice(&summary).unwrap();
     assert_eq!(summary["model_count"], 2);
-    assert_eq!(summary["base_upstream_hash"], upstream_hash(&prior).unwrap());
+    assert_eq!(
+        summary["base_upstream_hash"],
+        upstream_hash(&prior).unwrap()
+    );
     assert!(summary.get("refusal").is_none());
     let next = next.unwrap();
     let change = canonical_json(&json!({"upstream": summary["ops"], "curation_set": null}));
@@ -68,7 +74,8 @@ fn release_builder_refuses_a_diff_from_a_stale_index() {
     };
     let envelope = |wire: &[u8]| {
         let unsigned: Value = serde_json::from_slice(wire).unwrap();
-        let envelope: ReleaseEnvelope = serde_json::from_value(unsigned["envelope"].clone()).unwrap();
+        let envelope: ReleaseEnvelope =
+            serde_json::from_value(unsigned["envelope"].clone()).unwrap();
         serde_json::to_vec(&envelope).unwrap()
     };
     let r1 = envelope(&release(&genesis, &[], 1, 1).unwrap());
@@ -93,23 +100,75 @@ fn release_builder_refuses_a_diff_from_a_stale_index() {
     );
     let (fresh, _) = publish_step(&catalog, &after2.unwrap(), EVIDENCE).unwrap();
     assert!(release(&fresh, &r2, 3, 3).is_ok());
-    assert_eq!(release(&stale, &[], 1, 3).unwrap_err().class, "invalid_summary");
+    assert_eq!(
+        release(&stale, &[], 1, 3).unwrap_err().class,
+        "invalid_summary"
+    );
 }
 
 #[test]
-fn replay_accepts_a_change_with_a_decision_grade() {
-    let mut snapshot: Snapshot = serde_json::from_slice(SNAPSHOT).unwrap();
-    let index = index_from_snapshot(SNAPSHOT).unwrap();
-    snapshot
-        .state
-        .curation_set
+fn release_with_decision_grade_replays_but_unknown_kind_is_refused() {
+    use fusiform_release::{Release, SigningKey, build_release, sign_envelope, state_hash};
+
+    let first: Release = decode_json(
+        include_bytes!("../../fusiform-release/fixtures/release-format-v1/chain/release-1.json"),
+        "fixture",
+    )
+    .unwrap();
+    let key = SigningKey::from_bytes(&[42; 32]);
+    let kid = "release-format-v1-test-key";
+    let keys = std::collections::BTreeMap::from([(kid.to_string(), key.verifying_key())]);
+    let mut index = FactIndex::from_snapshot_upstream(&Default::default()).unwrap();
+    index.apply_change(&first.change).unwrap();
+    let mut catalog: Value = serde_json::from_slice(MODELS).unwrap();
+    catalog["zeta"]["models"]["mini"]["name"] = json!("Mini 2");
+    let (summary, next) =
+        publish_step(&canonical_json(&catalog), &index.to_bytes(), EVIDENCE).unwrap();
+    let mut curation = first.change.curation_set.clone().unwrap();
+    curation.version += 1;
+    curation
         .kind_grades
-        .entry("fixture/decision".into())
-        .or_default()
-        .insert("decision".into(), 83.into());
-    let change =
-        canonical_json(&json!({"upstream": [], "curation_set": snapshot.state.curation_set}));
-    assert_eq!(index_apply_change(&index, &change).unwrap(), index);
+        .insert("zeta/mini".into(), [("decision".into(), 83.into())].into());
+    let time = first.envelope.published_at_ms + 1;
+    let unsigned = build_release(
+        &summary,
+        &serde_json::to_vec(&curation).unwrap(),
+        &serde_json::to_vec(&first.envelope).unwrap(),
+        2,
+        time,
+        time,
+    )
+    .unwrap();
+    let mut unsigned: Value = serde_json::from_slice(&unsigned).unwrap();
+    let envelope = serde_json::from_value(unsigned["envelope"].clone()).unwrap();
+    unsigned["signatures"] = json!(sign_envelope(&envelope, kid, &key).unwrap());
+    let second: Release = serde_json::from_value(unsigned).unwrap();
+    assert!(!second.change.upstream.is_empty());
+    assert_eq!(
+        consumer::check_chain(&[first.clone(), second.clone()], &keys)
+            .unwrap()
+            .to_bytes(),
+        next.unwrap()
+    );
+
+    // Re-sign the bad grade so replay has to inspect the kind itself, not just
+    // reject a mismatched signature or hash.
+    let mut invalid = second;
+    curation
+        .kind_grades
+        .insert("zeta/mini".into(), [("bogus".into(), 83.into())].into());
+    let envelope = &mut invalid.envelope;
+    envelope.curation_hash = curation.curation_hash();
+    envelope.state_hash = state_hash(envelope.curation_hash, envelope.upstream_hash);
+    invalid.change.curation_set = Some(curation);
+    envelope.change_hash = invalid.change.change_hash();
+    invalid.signatures = sign_envelope(envelope, kid, &key).unwrap();
+    let failure = consumer::check_chain(&[first, invalid], &keys)
+        .expect_err("publisher chain checker replayed a signed bogus task grade");
+    assert!(
+        failure.contains("invalid task grade for zeta/mini"),
+        "{failure}"
+    );
 }
 
 #[test]

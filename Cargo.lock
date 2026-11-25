@@ -644,6 +644,7 @@ version = "0.1.0"
 dependencies = [
  "fusiform-core",
  "fusiform-curate",
+ "fusiform-module",
  "fusiform-publish",
  "fusiform-release",
  "js-sys",

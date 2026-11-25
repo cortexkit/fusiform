@@ -6,6 +6,9 @@ publish = false
 description = "The ck-fusiform daemon: fetches upstream catalogs on a cadence and serves the history."
 license = "MIT"
 
+[features]
+test-support = []
+
 [[bin]]
 name = "ck-fusiform"
 path = "src/main.rs"

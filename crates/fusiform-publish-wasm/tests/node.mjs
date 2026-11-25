@@ -32,7 +32,8 @@ test('recover from the release snapshot, publish and replay the new change', () 
   assert.ok(wire instanceof Uint8Array);
   assert.ok(next instanceof Uint8Array);
   const summary = JSON.parse(Buffer.from(wire));
-  assert.deepEqual(Object.keys(summary), ['conflicts', 'model_count', 'ops', 'upstream_hash']);
+  assert.deepEqual(Object.keys(summary), ['base_upstream_hash', 'conflicts', 'model_count', 'ops', 'upstream_hash']);
+  assert.equal(summary.base_upstream_hash, envelope.upstream_hash);
   assert.deepEqual(wire, Uint8Array.from(bytes(summary)));
   assert.equal(summary.model_count, 2);
   assert.ok(summary.ops.some(({ op, fact }) => op === 'set' && fact === 'rate.input'));

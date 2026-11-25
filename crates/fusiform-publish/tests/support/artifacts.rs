@@ -216,6 +216,27 @@ fn history_base(import: &Release) -> Vec<u8> {
 }
 
 #[test]
+fn signed_chain_refuses_curation_rollback() {
+    let (r1, mut r2, _) = two_releases();
+    let mut curation = r1.change.curation_set.clone().unwrap();
+    curation.version -= 1;
+    r2.envelope.curation_version = curation.version;
+    r2.envelope.curation_hash = curation.curation_hash();
+    r2.envelope.state_hash =
+        fusiform_release::state_hash(r2.envelope.curation_hash, r2.envelope.upstream_hash);
+    r2.change.curation_set = Some(curation);
+    r2.envelope.change_hash = r2.change.change_hash();
+    r2.signatures = sign_envelope(&r2.envelope, KID, &key()).unwrap();
+    let keys = BTreeMap::from([(KID.to_string(), key().verifying_key())]);
+    let failure = consumer::check_chain(&[r1, r2], &keys)
+        .expect_err("publisher chain checker accepted a signed curation rollback");
+    assert!(
+        failure.contains("curation version does not advance"),
+        "{failure}"
+    );
+}
+
+#[test]
 fn signed_chain_replays_and_snapshot_reproduces_state() {
     let (r1, r2, index) = two_releases();
     let r3 = third_release(&r2, &index);
@@ -239,13 +260,13 @@ fn signed_chain_replays_and_snapshot_reproduces_state() {
         .elo = "1.0".parse().unwrap();
     assert_eq!(
         consumer::check_chain(&tampered, &keys).unwrap_err(),
-        "change hash mismatch"
+        "verify release 3: change_hash does not match the release's change"
     );
     tampered[2].envelope.change_hash = tampered[2].change.change_hash();
     tampered[2].signatures = sign_envelope(&tampered[2].envelope, KID, &key()).unwrap();
     assert_eq!(
         consumer::check_chain(&tampered, &keys).unwrap_err(),
-        "replayed state does not match the envelope"
+        "verify release 3: curation_hash does not match verified state"
     );
 
     let fixtures = fixtures();
@@ -383,7 +404,8 @@ fn snapshot_builder_refuses_signed_invalid_history_lists() {
 fn history_day_builder_keeps_unknown_fields_in_the_canonical_bytes() {
     let (_, release, _) = two_releases();
     let mut stored = serde_json::to_value(release).unwrap();
-    let extension: Value = serde_json::from_str(r#"{"z":[9007199254740993,1.00],"a":true}"#).unwrap();
+    let extension: Value =
+        serde_json::from_str(r#"{"z":[9007199254740993,1.00],"a":true}"#).unwrap();
     stored["extra"] = extension.clone();
     stored["envelope"]["extra"] = extension.clone();
     stored["change"]["extra"] = extension.clone();
