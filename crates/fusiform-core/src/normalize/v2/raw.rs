@@ -22,9 +22,6 @@ impl<'a> RawProvider<'a> {
 
 pub(super) struct RawModel<'a> {
     pub fields: Object<'a>,
-    pub model_type: String,
-    pub capabilities: Object<'a>,
-    pub api: Object<'a>,
 }
 
 impl<'a> RawModel<'a> {
@@ -32,15 +29,10 @@ impl<'a> RawModel<'a> {
         let fields = Object::parse(raw)?;
         // V1 can carry `type` but has neither of these v2 object members. Each
         // row must have the v2 shape, not just the first row in the document.
-        let model_type = serde_json::from_str(fields.required("type")?.get())?;
-        let capabilities = Object::parse(fields.required("capabilities")?)?;
-        let api = Object::parse(fields.required("api")?)?;
-        Ok(Self {
-            fields,
-            model_type,
-            capabilities,
-            api,
-        })
+        for member in ["type", "capabilities", "api"] {
+            fields.required(member)?;
+        }
+        Ok(Self { fields })
     }
 }
 

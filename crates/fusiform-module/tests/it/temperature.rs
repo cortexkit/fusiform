@@ -16,7 +16,8 @@ fn temperature_corrections_cover_exactly_the_seed_google_gemini_36_and_newer_row
         .collect();
     assert_eq!(rows.len(), 5);
     let seed: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     let ids = [
         "gemini-3.6-flash",
         "gemini-3.7-flash",

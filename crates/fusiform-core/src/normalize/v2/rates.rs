@@ -118,6 +118,21 @@ impl<'raw> Prices<'_, 'raw> {
         }
     }
 
+    fn price_object(
+        &mut self,
+        raw: Option<&'raw RawValue>,
+        owner: Option<&str>,
+        path: &str,
+    ) -> Option<Object<'raw>> {
+        match Object::parse(raw?) {
+            Ok(object) => Some(object),
+            Err(_) => {
+                self.refuse(scope(owner), path, "price member is not an object");
+                None
+            }
+        }
+    }
+
     fn read_modes(&mut self, modes: &Object<'raw>) {
         for (name, raw) in &modes.0 {
             let Ok(mode) = Object::parse(raw) else {
@@ -215,16 +230,19 @@ impl<'raw> Prices<'_, 'raw> {
             ("web_search", None, true),
         ] {
             let block = if let Some((modality, direction)) = role.split_once('.') {
-                cost.object(modality)
-                    .and_then(|entry| entry.object(direction))
+                self.price_object(cost.raw(modality), owner, modality)
+                    .and_then(|entry| self.price_object(entry.raw(direction), owner, role))
             } else {
-                cost.object(role)
+                self.price_object(cost.raw(role), owner, role)
             };
             let Some(block) = block else { continue };
             let unit = block.read::<String>("unit");
             let unit = match (unit.as_deref(), block.raw("unit")) {
                 (Some(unit), _) => unit,
-                (None, Some(raw)) => raw.get(),
+                (None, Some(_)) => {
+                    self.refuse(scope(owner), role, "price unit is not a string");
+                    continue;
+                }
                 (None, None) if role == "web_search" => "thousand_searches",
                 (None, None) => "token",
             };
@@ -346,7 +364,8 @@ impl<'raw> Prices<'_, 'raw> {
                 None,
             );
         }
-        if let Some(cache) = fields.object("cache") {
+        if let Some(cache) = self.price_object(fields.raw("cache"), owner, &format!("{role}.cache"))
+        {
             self.cache(schedule, condition, owner, &cache);
         }
     }
@@ -445,7 +464,11 @@ impl<'raw> Prices<'_, 'raw> {
         cache: &Object<'raw>,
     ) {
         let role = schedule.role;
-        let explicit = cache.object("explicit");
+        let explicit = self.price_object(
+            cache.raw("explicit"),
+            owner,
+            &format!("{role}.cache.explicit"),
+        );
         let (read, write, established) = match role {
             "text.input" => (
                 Some(ChargeBasis::PerMillionTokens {

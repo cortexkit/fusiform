@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 // Each unit-billed key must first be recognised by the consumer that prices
 // spend: an unknown rate key makes that consumer refuse a whole pricing day.
 // Grow this list one deliberate key at a time, never by a key pattern.
-const UNIT_BILLED_RATE_KEYS: &[&str] = &[
+pub const UNIT_BILLED_RATE_KEYS: &[&str] = &[
     "rate.input_audio.per_second",
     "rate.input.per_character",
     "rate.request.per_request",

@@ -20,7 +20,8 @@ const CONTROL: &str = "google/gemini-3.8-flash";
 /// control, with Argon's output limit set to `output`.
 fn upstream(output: Value) -> Vec<u8> {
     let seed: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     let mut google = seed["google"].clone();
     google["models"] = json!({});
     for id in ["gemini-4-argon", "gemini-3.8-flash"] {
@@ -696,7 +697,8 @@ fn anthropic_store_with_capability(
     planted: Option<Value>,
 ) -> (CatalogStore, tempfile::TempDir) {
     let seed: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     let mut upstream = json!({});
     for (provider, ids) in [
         (
@@ -1088,7 +1090,8 @@ const DAYBREAK_CONTROL: &str = "openai/gpt-5.6-sol";
 /// with one models.dev would have published.
 fn daybreak_store(planted: Option<Value>) -> (CatalogStore, tempfile::TempDir) {
     let seed: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     let mut upstream = json!({});
     upstream["openai"] = seed["openai"].clone();
     upstream["openai"]["models"] = json!({});
@@ -1226,7 +1229,8 @@ fn a_status_models_dev_publishes_wins_over_the_deprecation_row() {
 #[test]
 fn carbon_and_neon_antigravity_aliases_serve_target_output_limits() {
     let seed: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     let carbon = seed["google"]["models"]["gemini-4-carbon"].clone();
     assert_eq!(
         carbon["limit"]["output"],
@@ -1319,7 +1323,8 @@ fn carbon_and_neon_antigravity_aliases_serve_target_output_limits() {
 #[test]
 fn hydrogen_antigravity_alias_serves_the_targets_output_limit() {
     let seed: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     let hydrogen = seed["google"]["models"]["gemini-4-hydrogen"].clone();
     assert_eq!(hydrogen["limit"]["output"], json!(65_536));
     let mut google = seed["google"].clone();
@@ -1377,7 +1382,8 @@ const AZURE_GPT_55: &str = "azure/gpt-5.5";
 /// of Opus 5.5 (its google provider comes from Gemini 3.8 Flash).
 fn reasoning_default_store() -> (CatalogStore, tempfile::TempDir) {
     let seed: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     let mut upstream = json!({});
     for (provider, ids) in [
         ("openai", vec!["gpt-5.5", "gpt-6.2-sol"]),
@@ -1582,7 +1588,8 @@ const CYBER_ROUTE: &str = "route.refusal_fallback.cyber";
 /// copy of Haiku 5.5 and the Antigravity alias of Opus 5.5 as boundaries.
 fn refusal_fallback_store() -> (CatalogStore, tempfile::TempDir) {
     let seed: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     let mut upstream = json!({});
     for (provider, ids) in [
         (

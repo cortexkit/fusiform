@@ -150,7 +150,9 @@ const GOLDEN: &str = include_str!("../../fixtures/served-payloads.json");
 
 /// The embedded models.dev seed. The plane cases copy real xAI and DeepSeek rows
 /// out of it, because the fixture excerpt has neither provider.
-const SEED: &str = include_str!("../../data/models-dev-seed.json");
+fn legacy_seed() -> &'static str {
+    fusiform_core::normalize::legacy_models_dev_snapshot_for_tests()
+}
 
 /// The target of the shipped alias the fixture pins.
 ///
@@ -178,7 +180,7 @@ fn merged_upstream() -> String {
         }
     }
 
-    let seed: serde_json::Value = serde_json::from_str(SEED).expect("the seed parses");
+    let seed: serde_json::Value = serde_json::from_str(legacy_seed()).expect("the seed parses");
     for (provider, model) in [ALIAS_TARGET, ("google", "gemini-4-carbon")] {
         let target = seed[provider]["models"][model].clone();
         assert!(
@@ -203,7 +205,7 @@ fn merged_upstream() -> String {
 /// model changes the counts published by catalog.status.
 fn plane_store() -> (CatalogStore, tempfile::TempDir, Vec<(String, String)>) {
     let mut doc: serde_json::Value = serde_json::from_str(&merged_upstream()).unwrap();
-    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    let seed: serde_json::Value = serde_json::from_str(legacy_seed()).unwrap();
     let mut cuts = Vec::new();
     for (provider, id) in [
         ("xai", "grok-4.20-0309-non-reasoning"),
@@ -526,7 +528,7 @@ fn render_all() -> String {
         .unwrap()
         .extend(render_login_methods());
     ordinary.as_object_mut().unwrap().insert(
-        "catalog.get — curated GPT-Realtime-2.1".into(),
+        "catalog.get — GPT-Realtime-2.1 audio rates".into(),
         render_realtime_audio(),
     );
     ordinary.as_object_mut().unwrap().insert(
@@ -558,7 +560,7 @@ fn render_all() -> String {
 }
 
 pub(super) fn speed_twin_store() -> (CatalogStore, tempfile::TempDir) {
-    let mut seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    let mut seed: serde_json::Value = serde_json::from_str(legacy_seed()).unwrap();
     seed.as_object_mut().unwrap().retain(|provider, row| {
         let ids: &[&str] = match provider.as_str() {
             "kimi-code-plan-global" => &["k3.1-pro", "k3.1-pro-highspeed"],
@@ -627,7 +629,7 @@ pub(super) fn render_speed_twins() -> serde_json::Map<String, serde_json::Value>
 }
 
 fn render_hydrogen_alias() -> serde_json::Value {
-    let mut seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    let mut seed: serde_json::Value = serde_json::from_str(legacy_seed()).unwrap();
     seed.as_object_mut().unwrap().retain(|provider, row| {
         if provider != "google" {
             return false;
@@ -743,7 +745,8 @@ pub(super) fn render_attachment_limits() -> serde_json::Map<String, serde_json::
 
 pub(super) fn render_temperature() -> serde_json::Map<String, serde_json::Value> {
     let mut seed: serde_json::Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     seed.as_object_mut().unwrap().retain(|provider, row| {
         let models: &[&str] = match provider.as_str() {
             "openai" => &["gpt-4.1"],
@@ -805,7 +808,8 @@ pub(super) fn render_temperature() -> serde_json::Map<String, serde_json::Value>
 /// routes, with their permitted fallback lists, so readers pin both shapes.
 pub(super) fn render_refusal_fallbacks() -> serde_json::Map<String, serde_json::Value> {
     let mut seed: serde_json::Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     seed.as_object_mut().unwrap().retain(|provider, row| {
         if provider != "anthropic" {
             return false;
@@ -912,6 +916,16 @@ fn render_login_methods() -> serde_json::Map<String, serde_json::Value> {
 fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
     let mut cases = serde_json::Map::new();
     let (store, _dir) = super::curated_wire::store();
+    let media = [
+        ("openai", "gpt-image-2.6-flare"),
+        ("google", "gemini-omni-1.2-flash"),
+        ("google", "gemini-3.8-flash-tts"),
+        ("elevenlabs", "eleven_flash_v2_5"),
+        ("openai", "gpt-transcribe"),
+        ("openai", "gpt-live-transcribe"),
+        ("google", "gemini-3.5-transcribe-live"),
+    ];
+    let (v2, _v2_dir) = super::media_catalog::v2_seed_store(&media);
     for (label, arguments) in [
         (
             "catalog.get — GPT Image Flare",
@@ -942,7 +956,7 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
             serde_json::json!({"provider_id":"elevenlabs","model_id":"eleven_flash_v2_5"}),
         ),
         (
-            "catalog.get — curated unit-billed transcription rate",
+            "catalog.get — unit-billed transcription rate",
             serde_json::json!({"provider_id":"openai","model_id":"gpt-transcribe"}),
         ),
         (
@@ -1004,8 +1018,16 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
             serde_json::json!({"provider_id":"anthropic","model_id":"claude-opus-5-5","fact_prefixes":["capability."]}),
         ),
     ] {
+        let view = if media
+            .iter()
+            .any(|(p, m)| arguments["provider_id"] == *p && arguments["model_id"] == *m)
+        {
+            &v2
+        } else {
+            &store
+        };
         let request = serde_json::json!({"name":"catalog.get","arguments":arguments});
-        let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+        let response = serve_tool_call(view, &serde_json::to_vec(&request).unwrap()).unwrap();
         let mut response = serde_json::to_value(response).unwrap();
         response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
         cases.insert(
@@ -1038,8 +1060,8 @@ fn gemini_flash_image_retirement_golden_cases_pin_both_read_shapes() {
 
 /// A point-in-time read of a curated row, served from the history a boot
 /// records. Its own store, so the ordinary cases' counts do not move, and the
-/// shipped rows with nothing held, so the case does not depend on what the
-/// shipped file holds. Read at the row's first boundary, its curation date.
+/// historical curated rows without a withholding declaration. Read at the
+/// row's first boundary, its curation date.
 fn render_curated_history() -> serde_json::Value {
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
@@ -1055,9 +1077,11 @@ fn render_curated_history() -> serde_json::Value {
         },
     })
     .unwrap();
-    let (mut table, rejects) = fusiform_module::curated_models::load_table_reporting_rejects(
-        include_str!("../../data/curated-models.json"),
-    );
+    let mut historical: serde_json::Value =
+        serde_json::from_str(include_str!("../../fixtures/retired-curated-models.json")).unwrap();
+    historical["schema"] = serde_json::json!("curated-models/v1");
+    let (mut table, rejects) =
+        fusiform_module::curated_models::load_table_reporting_rejects(&historical.to_string());
     assert!(rejects.is_empty(), "{rejects:?}");
     table.held.clear();
     let at = table.models[&("typesafe".to_string(), "jev-1.13.0".to_string())].established_at_ms;
@@ -1130,7 +1154,7 @@ fn render_realtime_audio() -> serde_json::Value {
     let request = serde_json::json!({"name":"catalog.get", "arguments":{
         "provider_id":"openai", "model_id":"gpt-realtime-2.1"
     }});
-    let (store, _dir) = super::cache_lifetimes::store(None);
+    let (store, _dir) = super::media_catalog::v2_seed_store(&[("openai", "gpt-realtime-2.1")]);
     let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
     let mut response = serde_json::to_value(response).unwrap();
     response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
@@ -1140,7 +1164,7 @@ fn render_realtime_audio() -> serde_json::Value {
 /// Render the seed's `ollama-cloud/kimi-k2.6` row separately so this identity
 /// case does not change the model counts in the ordinary golden cases.
 fn render_canonical_link() -> serde_json::Value {
-    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    let seed: serde_json::Value = serde_json::from_str(legacy_seed()).unwrap();
     let row = seed["ollama-cloud"]["models"]["kimi-k2.6"].clone();
     assert!(row.is_object());
     assert_eq!(row["canonical_model_id"], "moonshotai/kimi-k2.6");
@@ -1674,6 +1698,10 @@ pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Valu
             "synthetic-multimodal":{"id":"synthetic-multimodal", "type":"chat", "modalities":{"input":["audio"],"output":["text","audio","image","video"]}}
         }
     }});
+    let mut doc = doc;
+    doc["cloudflare-workers-ai"]["models"]["@cf/cloudflare/clef-flash"] = serde_json::json!({
+        "type":"decision", "limit":{"output":24576}
+    });
     let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
         .catalog;
@@ -3022,28 +3050,26 @@ fn cases() -> Vec<(&'static str, String)> {
             r#"{"name":"catalog.history","arguments":{"provider_id":"meta","model_id":"muse-wonder-full-1.0","fact_key":"limit.context"}}"#.to_string(),
         ),
         (
-            // A typed decision model: it states `model.kind` and a stated-zero
-            // output rate beside a priced input. If the shipped file ever
-            // holds it, this case shows the id in `retired` instead.
-            "catalog.get — a curated decision model",
+            // Decision kind is derived from the published type, not stored.
+            "catalog.get — an upstream decision model",
             r#"{"name":"catalog.get","arguments":{"provider_id":"cloudflare-workers-ai","model_id":"@cf/cloudflare/clef"}}"#.to_string(),
         ),
         (
-            "catalog.get — a curated extraction model",
+            "catalog.get — an upstream extraction model",
             r#"{"name":"catalog.get","arguments":{"provider_id":"cloudflare-workers-ai","model_id":"@cf/cloudflare/clairic"}}"#.to_string(),
         ),
         (
             // models.dev does not list this provider at all, so every row a
             // provider read returns is curated.
             "catalog.get — a provider served only through curated rows",
-            r#"{"name":"catalog.get","arguments":{"provider_id":"typesafe"}}"#.to_string(),
+            r#"{"name":"catalog.get","arguments":{"provider_id":"exa"}}"#.to_string(),
         ),
         (
             // A retired-inclusive read of the same provider. While a curated
             // row is held this pins its absent identity; with none held it
             // pins that the served row is unchanged by include_retired.
             "catalog.get — a curated-only provider read including retired rows",
-            r#"{"name":"catalog.get","arguments":{"provider_id":"typesafe","include_retired":true}}"#.to_string(),
+            r#"{"name":"catalog.get","arguments":{"provider_id":"exa","include_retired":true}}"#.to_string(),
         ),
         (
             // A provider whose own pricing page bills audio input per token:
@@ -3092,9 +3118,18 @@ fn served_history_override_addition_tracks_dated_get() {
 
 fn render() -> String {
     let (store, _dir) = store();
+    let (system_one, _v2_dir) = super::media_catalog::v2_seed_store(&[
+        ("cloudflare-workers-ai", "@cf/cloudflare/clef"),
+        ("cloudflare-workers-ai", "@cf/cloudflare/clairic"),
+    ]);
     let mut doc = serde_json::Map::new();
     for (label, body) in cases() {
-        let response = serve_tool_call(&store, body.as_bytes())
+        let view = if body.contains("@cf/cloudflare/") {
+            &system_one
+        } else {
+            &store
+        };
+        let response = serve_tool_call(view, body.as_bytes())
             .unwrap_or_else(|e| panic!("{label} must serve: {e:?}"));
         let mut value = serde_json::to_value(&response).unwrap();
 
@@ -3653,7 +3688,7 @@ fn anthropic_gateway_store() -> (CatalogStore, tempfile::TempDir) {
     .unwrap();
     // Cover every upstream Anthropic row, not just the golden excerpt: gateway
     // billing must preserve each published card, including its tier variants.
-    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    let seed: serde_json::Value = serde_json::from_str(legacy_seed()).unwrap();
     let upstream = serde_json::json!({"anthropic": seed["anthropic"]});
     let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&upstream).unwrap())
         .unwrap()

@@ -251,8 +251,6 @@
       "atomic-chat/gemma-4-E4B-it-MLX-4bit": ["other", "gemini"],
       "azure/codestral-2501": ["other", "mistral"],
       "azure/ministral-3b": ["other", "mistral"],
-      "azure-cognitive-services/codestral-2501": ["other", "mistral"],
-      "azure-cognitive-services/ministral-3b": ["other", "mistral"],
       "baseten/moonshotai/Kimi-K3": ["other", "kimi"],
       "baseten/zai-org/GLM-5.2": ["other", "glm"],
       "baseten/zai-org/GLM-5.2-Fast": ["other", "glm"],
@@ -1635,7 +1633,69 @@
       "togetherai/Qwen/Qwen3.7-Plus": ["other", "qwen"],
       "togetherai/Qwen/Qwen3.8-Flash": ["other", "qwen"],
       "togetherai/Qwen/Qwen4-Max": ["other", "qwen"],
-      "togetherai/meta-models/Muse-Glimmer-30B": ["other", "llama"]
+      "togetherai/meta-models/Muse-Glimmer-30B": ["other", "llama"],
+      "alibaba/text-embedding-v4": ["other", "qwen"],
+      "alibaba/wan2.7-image": ["other", "qwen"],
+      "alibaba/wan2.7-image-pro": ["other", "qwen"],
+      "cloudflare-ai-gateway/google/nano-banana": ["other", "gemini"],
+      "cloudflare-ai-gateway/google/nano-banana-2": ["other", "gemini"],
+      "cloudflare-ai-gateway/google/nano-banana-2-lite": ["other", "gemini"],
+      "cloudflare-ai-gateway/google/nano-banana-2.1": ["other", "gemini"],
+      "cloudflare-ai-gateway/google/nano-banana-pro": ["other", "gemini"],
+      "cloudflare-ai-gateway/minimax/h3": ["other", "minimax"],
+      "cloudflare-ai-gateway/minimax/h3-highspeed": ["other", "minimax"],
+      "cloudflare-ai-gateway/minimax/h3-lite": ["other", "minimax"],
+      "cloudflare-ai-gateway/minimax/h3-max": ["other", "minimax"],
+      "cloudflare-ai-gateway/minimax/hailuo-2.3": ["other", "minimax"],
+      "cloudflare-ai-gateway/minimax/hailuo-2.3-fast": ["other", "minimax"],
+      "cloudflare-ai-gateway/minimax/speech-2.8-hd": ["other", "minimax"],
+      "cloudflare-ai-gateway/minimax/speech-2.8-turbo": ["other", "minimax"],
+      "cloudflare-ai-gateway/openai/tts-1": ["other", "gpt"],
+      "cloudflare-ai-gateway/openai/tts-1-hd": ["other", "gpt"],
+      "cloudflare-workers-ai/@cf/google/embeddinggemma-2": ["other", "gemini"],
+      "databricks/databricks-qwen3-embedding-0-6b": ["other", "qwen"],
+      "deepinfra/Qwen/Qwen3-Embedding-0.6B": ["other", "qwen"],
+      "deepinfra/Qwen/Qwen3-Embedding-4B": ["other", "qwen"],
+      "deepinfra/Qwen/Qwen3-Embedding-8B": ["other", "qwen"],
+      "deepinfra/google/embeddinggemma-2": ["other", "gemini"],
+      "deepinfra/google/embeddinggemma-300m": ["other", "gemini"],
+      "entrim/Qwen/Qwen3-Embedding-8B": ["other", "qwen"],
+      "gitlab/duo-chat-fable-5-2": ["other", "claude"],
+      "google-vertex/muse-ember-1.0": ["other", "llama"],
+      "google-vertex/muse-spark-1.3": ["other", "llama"],
+      "google-vertex/muse-wonder-1.0": ["other", "llama"],
+      "huggingface/Qwen/Qwen3-Embedding-0.6B": ["other", "qwen"],
+      "kenari/muse-image": ["other", "llama"],
+      "minimax-cn/MiniMax-H3": ["other", "minimax"],
+      "minimax-cn/MiniMax-H3-Highspeed": ["other", "minimax"],
+      "minimax-cn/MiniMax-H3-Image": ["other", "minimax"],
+      "minimax-cn/MiniMax-H3-Image-Highspeed": ["other", "minimax"],
+      "minimax-cn/MiniMax-H3-Lite": ["other", "minimax"],
+      "minimax-cn/MiniMax-H3-Max": ["other", "minimax"],
+      "minimax-cn/MiniMax-Hailuo-02": ["other", "minimax"],
+      "minimax-cn/MiniMax-Hailuo-2.3": ["other", "minimax"],
+      "minimax-cn/MiniMax-Hailuo-2.3-Fast": ["other", "minimax"],
+      "minimax-cn/image-01": ["other", "minimax"],
+      "minimax-cn/image-01-live": ["other", "minimax"],
+      "minimax-cn/speech-02-hd": ["other", "minimax"],
+      "minimax-cn/speech-02-turbo": ["other", "minimax"],
+      "minimax-cn/speech-2.6-hd": ["other", "minimax"],
+      "minimax-cn/speech-2.6-turbo": ["other", "minimax"],
+      "minimax-cn/speech-2.8-hd": ["other", "minimax"],
+      "minimax-cn/speech-2.8-turbo": ["other", "minimax"],
+      "opencode/codestral-embed": ["other", "mistral"],
+      "openrouter/meta/muse-image": ["other", "llama"],
+      "openrouter/mistralai/codestral-embed-2505": ["other", "mistral"],
+      "openrouter/mistralai/voxtral-mini-3b-2507": ["other", "mistral"],
+      "openrouter/mistralai/voxtral-mini-transcribe": ["other", "mistral"],
+      "openrouter/mistralai/voxtral-mini-transcribe-3-0": ["other", "mistral"],
+      "openrouter/mistralai/voxtral-mini-tts-2603": ["other", "mistral"],
+      "openrouter/mistralai/voxtral-mini-tts-3-0": ["other", "mistral"],
+      "openrouter/mistralai/voxtral-small-24b-2507-stt": ["other", "mistral"],
+      "openrouter/mistralai/voxtral-small-transcribe-3-0": ["other", "mistral"],
+      "stepping-stone/mistralai/Voxtral-Mini-3B-2507": ["other", "mistral"],
+      "zhipuai/embedding-2": ["other", "glm"],
+      "zhipuai/embedding-3": ["other", "glm"]
     }
   },
   {
@@ -1842,96 +1902,96 @@
     "rows": {
       "ovhcloud/qwen3-vl-30b-a3b": ["qwen", "other"]
     }
-  }
-    ,{
-      "reason": "The Alibaba provider glob called every row Qwen. These exact rows are reseller offerings of the DeepSeek and Moonshot families, which their upstream family and canonical identities distinguish.",
-      "rows": {
-        "alibaba-cn/deepseek-v4-pro-0813": ["qwen", "deepseek"],
-        "alibaba-cn/deepseek-v4.1-flash-1017": ["qwen", "deepseek"],
-        "alibaba-cn/kimi-k2.7-code": ["qwen", "kimi"]
-      }
-    },
-    {
-      "reason": "The Alibaba provider globs did not distinguish Qwen from the HappyHorse and Wan image/video families or GTE embeddings. Those family tokens establish no Qwen lineage.",
-      "rows": {
-        "alibaba-cn/happyhorse-1.0-i2v": ["qwen", "other"],
-        "alibaba-cn/happyhorse-1.0-r2v": ["qwen", "other"],
-        "alibaba-cn/happyhorse-1.0-t2v": ["qwen", "other"],
-        "alibaba-cn/happyhorse-1.0-video-edit": ["qwen", "other"],
-        "alibaba-cn/happyhorse-1.1-i2v": ["qwen", "other"],
-        "alibaba-cn/happyhorse-1.1-r2v": ["qwen", "other"],
-        "alibaba-cn/happyhorse-1.1-t2v": ["qwen", "other"],
-        "alibaba-cn/text-embedding-v3": ["qwen", "other"],
-        "alibaba-cn/wan2.6-i2v": ["qwen", "other"],
-        "alibaba-cn/wan2.6-i2v-flash": ["qwen", "other"],
-        "alibaba-cn/wan2.6-r2v": ["qwen", "other"],
-        "alibaba-cn/wan2.6-r2v-flash": ["qwen", "other"],
-        "alibaba-cn/wan2.6-t2v": ["qwen", "other"],
-        "alibaba-cn/wan2.7-i2v": ["qwen", "other"],
-        "alibaba-cn/wan2.7-image": ["qwen", "other"],
-        "alibaba-cn/wan2.7-image-pro": ["qwen", "other"],
-        "alibaba-cn/wan2.7-r2v": ["qwen", "other"],
-        "alibaba-cn/wan2.7-t2v": ["qwen", "other"],
-        "alibaba-cn/wan2.7-videoedit": ["qwen", "other"],
-        "alibaba-cn/wan3.0-video": ["qwen", "other"],
-        "alibaba-cn/wan3.0-video-prime": ["qwen", "other"],
-        "alibaba-token-plan/wan3.0-video": ["qwen", "other"],
-        "alibaba-token-plan-cn/wan3.0-video": ["qwen", "other"]
-      }
-    },
-    {
-      "reason": "Genie and Lyria are distinct world-generation and music families, not Gemini. The old glob matched their Google provider rather than a Gemini identity.",
-      "rows": {
-        "google/genie-4": ["gemini", "other"],
-        "google/lyria-3.5": ["gemini", "other"],
-        "google/lyria-realtime-exp": ["gemini", "other"]
-      }
-    },
-    {
-      "reason": "NVIDIA publishes the Nemotron Embed family, not a Llama family. A Llama substring in the reseller's embedding model ID is not enough to map that family.",
-      "rows": {
-        "deepinfra/nvidia/llama-nemotron-embed-vl-1b-v2": ["llama", "other"]
-      }
-    },
-    {
-      "reason": "Whisper transcription and Omni Moderation are separately named OpenAI families, not GPT. The OpenAI provider glob did not distinguish them.",
-      "rows": {
-        "openai/gpt-realtime-whisper": ["gpt", "other"],
-        "openai/omni-moderation-latest": ["gpt", "other"],
-        "openai/whisper-1": ["gpt", "other"]
-      }
-    },
-    {
-      "reason": "These reseller rows carry neither an upstream family nor a canonical model identity. A reseller's display ID alone does not establish lineage.",
-      "rows": {
-        "openrouter/qwen/qwen3-tts-1.7b": ["qwen", "other"],
-        "openrouter/x-ai/grok-stt-2.0": ["grok", "other"]
-      }
-    },
-    {
-      "reason": "CogVideoX and CogView are Zhipu's separate image and video families, not GLM. The Z.ai provider glob matched the lab rather than either family.",
-      "rows": {
-        "zai/cogvideox-3": ["glm", "other"],
-        "zai/cogview-4-250304": ["glm", "other"]
-      }
+  },
+  {
+    "reason": "The Alibaba provider glob called every row Qwen. These exact rows are reseller offerings of the DeepSeek and Moonshot families, which their upstream family and canonical identities distinguish.",
+    "rows": {
+      "alibaba-cn/deepseek-v4-pro-0813": ["qwen", "deepseek"],
+      "alibaba-cn/deepseek-v4.1-flash-1017": ["qwen", "deepseek"],
+      "alibaba-cn/kimi-k2.7-code": ["qwen", "kimi"]
     }
+  },
+  {
+    "reason": "The Alibaba provider globs did not distinguish Qwen from the HappyHorse and Wan image/video families or GTE embeddings. Those family tokens establish no Qwen lineage.",
+    "rows": {
+      "alibaba-cn/happyhorse-1.0-i2v": ["qwen", "other"],
+      "alibaba-cn/happyhorse-1.0-r2v": ["qwen", "other"],
+      "alibaba-cn/happyhorse-1.0-t2v": ["qwen", "other"],
+      "alibaba-cn/happyhorse-1.0-video-edit": ["qwen", "other"],
+      "alibaba-cn/happyhorse-1.1-i2v": ["qwen", "other"],
+      "alibaba-cn/happyhorse-1.1-r2v": ["qwen", "other"],
+      "alibaba-cn/happyhorse-1.1-t2v": ["qwen", "other"],
+      "alibaba-cn/text-embedding-v3": ["qwen", "other"],
+      "alibaba-cn/wan2.6-i2v": ["qwen", "other"],
+      "alibaba-cn/wan2.6-i2v-flash": ["qwen", "other"],
+      "alibaba-cn/wan2.6-r2v": ["qwen", "other"],
+      "alibaba-cn/wan2.6-r2v-flash": ["qwen", "other"],
+      "alibaba-cn/wan2.6-t2v": ["qwen", "other"],
+      "alibaba-cn/wan2.7-i2v": ["qwen", "other"],
+      "alibaba-cn/wan2.7-image": ["qwen", "other"],
+      "alibaba-cn/wan2.7-image-pro": ["qwen", "other"],
+      "alibaba-cn/wan2.7-r2v": ["qwen", "other"],
+      "alibaba-cn/wan2.7-t2v": ["qwen", "other"],
+      "alibaba-cn/wan2.7-videoedit": ["qwen", "other"],
+      "alibaba-cn/wan3.0-video": ["qwen", "other"],
+      "alibaba-cn/wan3.0-video-prime": ["qwen", "other"],
+      "alibaba-token-plan/wan3.0-video": ["qwen", "other"],
+      "alibaba-token-plan-cn/wan3.0-video": ["qwen", "other"]
+    }
+  },
+  {
+    "reason": "Genie and Lyria are distinct world-generation and music families, not Gemini. The old glob matched their Google provider rather than a Gemini identity.",
+    "rows": {
+      "google/genie-4": ["gemini", "other"],
+      "google/lyria-3.5": ["gemini", "other"],
+      "google/lyria-realtime-exp": ["gemini", "other"]
+    }
+  },
+  {
+    "reason": "NVIDIA publishes the Nemotron Embed family, not a Llama family. A Llama substring in the reseller's embedding model ID is not enough to map that family.",
+    "rows": {
+      "deepinfra/nvidia/llama-nemotron-embed-vl-1b-v2": ["llama", "other"]
+    }
+  },
+  {
+    "reason": "Whisper transcription and Omni Moderation are separately named OpenAI families, not GPT. The OpenAI provider glob did not distinguish them.",
+    "rows": {
+      "openai/gpt-realtime-whisper": ["gpt", "other"],
+      "openai/omni-moderation-latest": ["gpt", "other"],
+      "openai/whisper-1": ["gpt", "other"]
+    }
+  },
+  {
+    "reason": "These reseller rows carry neither an upstream family nor a canonical model identity. A reseller's display ID alone does not establish lineage.",
+    "rows": {
+      "openrouter/qwen/qwen3-tts-1.7b": ["qwen", "other"],
+      "openrouter/x-ai/grok-stt-2.0": ["grok", "other"]
+    }
+  },
+  {
+    "reason": "CogVideoX and CogView are Zhipu's separate image and video families, not GLM. The Z.ai provider glob matched the lab rather than either family.",
+    "rows": {
+      "zai/cogvideox-3": ["glm", "other"],
+      "zai/cogview-4-250304": ["glm", "other"]
+    }
+  }
   ],
   "counts": {
     "coverage": {
-      "claude": 1028,
-      "deepseek": 809,
-      "gemini": 893,
-      "glm": 879,
-      "gpt": 1801,
-      "grok": 289,
-      "kimi": 499,
-      "llama": 332,
-      "minimax": 307,
-      "mistral": 326,
-      "other": 1857,
-      "qwen": 1141
+      "claude": 996,
+      "deepseek": 810,
+      "gemini": 949,
+      "glm": 892,
+      "gpt": 1820,
+      "grok": 303,
+      "kimi": 498,
+      "llama": 335,
+      "minimax": 353,
+      "mistral": 343,
+      "other": 2414,
+      "qwen": 1200
     },
-    "newly_classified": 1636,
-    "disagreements": 167
+    "newly_classified": 1696,
+    "disagreements": 204
   }
 }

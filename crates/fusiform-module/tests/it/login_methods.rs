@@ -5,7 +5,8 @@ use serde_json::{json, Value};
 
 pub(crate) fn store() -> (CatalogStore, tempfile::TempDir) {
     let seed: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     let mut upstream = json!({"openai": seed["openai"].clone()});
     upstream["openai"]["models"] = json!({});
     for id in ["gpt-6.1-sol", "gpt-5.5", "gpt-4o"] {

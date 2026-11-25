@@ -54,6 +54,46 @@ fn assert_unaffected(facts: &BTreeMap<String, Value>) {
 }
 
 #[test]
+fn v2_unreadable_saved_fields_refuse_only_the_affected_fact() {
+    let saved = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/data/models-dev-v2/api-v2-20261125.json.gz");
+    let result = std::process::Command::new("gzip")
+        .arg("-dc")
+        .arg(saved)
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let snapshot: Value = serde_json::from_slice(&result.stdout).unwrap();
+    let row = &snapshot["google"]["models"]["gemini-3.8-flash-tts"];
+    let base = json!({"google":{"name":"Google","models":{"gemini-3.8-flash-tts":row}}});
+    let baseline = facts(&normalize(&base));
+    for (object, key, fact) in [
+        ("limit", "context", "limit.context"),
+        ("limit", "output", "limit.output"),
+        ("capabilities", "temperature", "capability.temperature"),
+    ] {
+        assert!(baseline.contains_key(fact));
+        let mut bad = base.clone();
+        bad["google"]["models"]["gemini-3.8-flash-tts"][object][key] = json!("not readable");
+        let outcome = normalize(&bad);
+        let model = outcome.catalog.models().next().unwrap();
+        assert!(
+            model
+                .refused
+                .contains(&RefusedFactScope::Fact(FactKey::from_stored(fact.into()))),
+            "{fact} must not look withdrawn"
+        );
+        let mut expected = baseline.clone();
+        expected.remove(fact);
+        assert_eq!(facts(&outcome), expected, "readable siblings of {fact}");
+        assert!(outcome
+            .findings
+            .iter()
+            .any(|f| format!("{:?}", f.key).contains(&format!("{object}.{key}"))));
+    }
+}
+
+#[test]
 fn v2_unknown_key_is_ignored_and_counted_per_path() {
     // The first model in source order is not first in the sorted catalog.
     let mut first = document()["provider"]["models"]["model"].clone();
@@ -478,11 +518,38 @@ refused_condition!(v2_unknown_key_is_named_in_the_refusal, "future_key", {"futur
 refused_condition!(v2_region_is_refused, "region", {"region": {"equals": "us"}});
 refused_condition!(v2_utc_hours_is_refused, "utc_hours", {"utc_hours": {"gt": "02:00"}});
 refused_condition!(v2_utc_days_is_refused, "utc_days", {"utc_days": {"in": ["sun"]}});
-refused_condition!(v2_date_is_refused, "date", {"date": {"gte": "2027-01-01"}});
+refused_condition!(v2_date_lt_is_refused, "date", {"date": {"lt": "2027-01-01"}});
+refused_condition!(v2_invalid_calendar_date_is_refused, "invalid date", {"date": {"gte": "2027-02-29"}});
 refused_condition!(v2_holiday_is_refused, "holiday", {"holiday": {"equals": "US"}});
 refused_condition!(v2_resolution_is_refused, "resolution", {"resolution": {"equals": "720p"}});
 refused_condition!(v2_quality_is_refused, "quality", {"quality": {"equals": "high"}});
 refused_condition!(v2_duration_is_refused, "duration", {"duration": {"gt": 32}});
+
+#[test]
+fn v2_gt_and_gte_date_prices_use_the_observation_millisecond() {
+    use fusiform_core::{normalize_models_dev_with, Timestamp};
+
+    let mut body = document();
+    body["provider"]["models"]["model"]["cost"]["text"] = json!({
+        "input": {"price":1, "overrides":[{"when":{"date":{"gte":"2027-01-01"}}, "price":2}]},
+        "output": {"price":3, "overrides":[{"when":{"date":{"gt":"2027-01-01"}}, "price":4}]}
+    });
+    let bytes = serde_json::to_vec(&body).unwrap();
+    let midnight = 1_798_761_600_000;
+    for (at, expected, next) in [
+        (midnight - 1, [1, 3], Some(midnight)),
+        (midnight, [2, 3], Some(midnight + 1)),
+        (midnight + 1, [2, 4], None),
+    ] {
+        let outcome =
+            normalize_models_dev_with(&bytes, &ChargeUnitEvidence::none(), Timestamp(at)).unwrap();
+        assert_eq!(outcome.next_date_boundary_ms, next);
+        assert!(outcome.catalog.models().next().unwrap().refused.is_empty());
+        let row = facts(&outcome);
+        assert_eq!(row["rate.input"]["units"], expected[0] * 1_000_000_000_i64);
+        assert_eq!(row["rate.output"]["units"], expected[1] * 1_000_000_000_i64);
+    }
+}
 
 #[test]
 fn v2_malformed_non_object_and_v1_documents_return_no_catalog() {

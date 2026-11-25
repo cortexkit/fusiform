@@ -29,7 +29,7 @@ mod tests {
         assert!(rejects.is_empty(), "{rejects:?}");
         assert_eq!(
             rows.keys().map(String::as_str).collect::<Vec<_>>(),
-            ["google"]
+            ["google", "openai"]
         );
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -45,13 +45,16 @@ mod tests {
                 "output tokenization is model-specific, not a provider-wide input conversion"
             );
             let models = seed[&row.provider_id]["models"].as_object().unwrap();
-            assert!(models
-                .values()
-                .any(|model| model["cost"].get("output_audio").is_some()));
+            let publishes_audio =
+                |model: &serde_json::Value| model.pointer("/cost/audio/output/price").is_some();
+            assert!(models.values().any(publishes_audio));
+            if let Some(included) = &row.included_models {
+                for model in included {
+                    assert!(publishes_audio(&models[model]));
+                }
+            }
             for excluded in &row.excluded_models {
-                assert!(models[&excluded.model_id]["cost"]
-                    .get("output_audio")
-                    .is_some());
+                assert!(publishes_audio(&models[&excluded.model_id]));
             }
         }
     }

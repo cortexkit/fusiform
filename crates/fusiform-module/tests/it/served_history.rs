@@ -313,7 +313,8 @@ fn oscillating_store() -> (CatalogStore, tempfile::TempDir) {
     })
     .unwrap();
     let mut document: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     for index in 0..229 {
         for (model, count) in [
             ("deepseek/deepseek-v4.1-flash", 229),

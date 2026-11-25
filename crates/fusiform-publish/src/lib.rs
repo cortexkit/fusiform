@@ -9,7 +9,7 @@ mod snapshot_reader;
 
 use std::fmt;
 
-use fusiform_core::normalize::NormalizedModel;
+use fusiform_core::normalize::{NormalizedModel, v2::Finding};
 use fusiform_core::shrink_guard::implausible_shrink;
 use fusiform_core::upstream_facts::{Existence, FactConflict, FactKey, ModelFacts, facts_of};
 use fusiform_core::{ChargeUnitEvidence, NormalizeV2Outcome, Timestamp, normalize_models_dev_with};
@@ -28,6 +28,9 @@ pub struct PublishStep {
     pub upstream_hash: Hash,
     pub model_count: usize,
     pub next_date_boundary_ms: Option<i64>,
+    pub findings: Vec<Finding>,
+    /// Existing fact hashes retained because the current claim was refused.
+    pub held_fact_count: usize,
     /// Conflicting upstream prices that were omitted rather than guessed.
     pub conflicts: Vec<FactConflict>,
 }
@@ -70,7 +73,7 @@ pub fn publish_step(
     let NormalizeV2Outcome {
         catalog,
         next_date_boundary_ms,
-        ..
+        findings,
     } = parse_catalog(models_dev, evidence, upstream_observed_at_ms)?;
     let model_count = catalog.model_count();
     if let Some(reason) = implausible_shrink(previous.model_count(), model_count) {
@@ -81,6 +84,7 @@ pub fn publish_step(
     let mut ops = Vec::new();
     let mut index = IndexBuilder::default();
     let mut conflicts = Vec::new();
+    let mut held_fact_count = 0;
 
     // The normalizer emits providers and models in key order. Visit one model's
     // facts at a time and merge against the old hashes to find ordered removals.
@@ -89,16 +93,16 @@ pub fn publish_step(
         for model in provider.models {
             let projected = project_model(&model);
             conflicts.extend(projected.conflicts);
-            let model_id = model.key.model_id;
+            let model_id = &model.key.model_id;
             for (fact, json) in projected.values {
                 let key = (provider_id.as_str(), Some(model_id.as_str()), fact.as_str());
                 let value = serde_json::from_str(&json).expect("upstream storage facts are JSON");
                 let hash = fact_hash(&value);
-                index.add_sorted(key, hash);
-
-                while let Some((old, _)) = previous_facts.next_if(|(old, _)| *old < key) {
-                    ops.push(remove(old));
+                while let Some((old, held)) = previous_facts.next_if(|(old, _)| *old < key) {
+                    held_fact_count +=
+                        usize::from(hold_or_remove(&mut index, &mut ops, old, held, &model));
                 }
+                index.add_sorted(key, hash);
                 if !previous_facts
                     .next_if(|(old, _)| *old == key)
                     .is_some_and(|(_, held)| held == hash)
@@ -110,6 +114,13 @@ pub fn publish_step(
                         value,
                     });
                 }
+            }
+            // A refused field can sort after the last fact this model projects.
+            while let Some((old, held)) =
+                previous_facts.next_if(|(old, _)| old.0 == provider_id && old.1 == Some(model_id))
+            {
+                held_fact_count +=
+                    usize::from(hold_or_remove(&mut index, &mut ops, old, held, &model));
             }
         }
     }
@@ -124,8 +135,31 @@ pub fn publish_step(
         upstream_hash,
         model_count,
         next_date_boundary_ms,
+        findings,
+        held_fact_count,
         conflicts,
     })
+}
+
+fn hold_or_remove(
+    index: &mut IndexBuilder,
+    ops: &mut Vec<ChangeOp>,
+    old: FactKeyRef<'_>,
+    hash: Hash,
+    model: &NormalizedModel,
+) -> bool {
+    if !model.refused.is_empty()
+        && old.0 == model.key.provider_id
+        && old.1 == Some(&model.key.model_id)
+    {
+        let key = FactKey::from_stored(old.2.to_owned());
+        if model.refused.iter().any(|scope| scope.covers(&key)) {
+            index.add_sorted(old, hash);
+            return true;
+        }
+    }
+    ops.push(remove(old));
+    false
 }
 
 fn parse_catalog(

@@ -539,6 +539,27 @@ pub fn normalize_legacy_models_dev_for_tests(
     normalize_legacy_models_dev_for_tests_with(bytes, &ChargeUnitEvidence::none())
 }
 
+/// Read the frozen v1 catalog for tests that still exercise legacy behavior.
+#[cfg(any(test, feature = "legacy-test-parser"))]
+pub fn legacy_models_dev_snapshot_for_tests() -> &'static str {
+    static SNAPSHOT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SNAPSHOT.get_or_init(|| {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/models-dev-v2/api-v1-20261125.json.gz"
+        );
+        let output = std::process::Command::new("gzip")
+            .args(["-dc", path])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "could not decompress the legacy models.dev test snapshot"
+        );
+        String::from_utf8(output.stdout).unwrap()
+    })
+}
+
 /// Normalize a models.dev document, using `evidence` to attribute eligible
 /// input/output audio values as per-token rates. Excluded models, and cost blocks
 /// that also price audio in a context tier or the legacy `context_over_200k`
@@ -1212,6 +1233,7 @@ fn normalize_mode_rates(
 
 /// The models.dev cost key for audio input, whose unit only a provider's own
 /// documentation can establish (see [`ChargeUnitEvidence`]).
+#[cfg(any(test, feature = "legacy-test-parser"))]
 const INPUT_AUDIO_COST_KEY: &str = "input_audio";
 
 /// The cost keys whose charge unit is established: per million tokens.

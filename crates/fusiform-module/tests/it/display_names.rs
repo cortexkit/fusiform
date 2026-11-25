@@ -188,7 +188,7 @@ fn aliases_use_the_route_label_and_the_alias_provider_not_the_target() {
 
 #[test]
 fn embedded_seed_upgrade_records_exactly_the_published_names_as_first_values() {
-    let seed = include_bytes!("../../data/models-dev-seed.json");
+    let seed = fusiform_core::normalize::legacy_models_dev_snapshot_for_tests().as_bytes();
     let raw: Value = serde_json::from_slice(seed).unwrap();
     let mut expected = 0;
     let mut model_count = 0;

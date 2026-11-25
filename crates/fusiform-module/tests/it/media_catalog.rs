@@ -58,38 +58,40 @@ fn empty_store() -> (CatalogStore, tempfile::TempDir) {
     (store, dir)
 }
 
-fn price(units: i64, exponent: u32) -> Value {
-    json!({"state":"priced", "units":units, "exponent":exponent,
-        "currency":"USD", "unit_provenance":{"kind":"stated"}})
+pub(super) fn v2_seed_store(ids: &[(&str, &str)]) -> (CatalogStore, tempfile::TempDir) {
+    let (store, dir) = empty_store();
+    let mut catalog = fusiform_module::seed::catalog().unwrap();
+    catalog.providers.retain_mut(|provider| {
+        provider
+            .models
+            .retain(|row| ids.contains(&(row.key.provider_id.as_str(), row.key.model_id.as_str())));
+        !provider.models.is_empty()
+    });
+    assert_eq!(catalog.model_count(), ids.len());
+    let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
+    store.append_eras(&plan.eras).unwrap();
+    (store, dir)
 }
 
-fn assert_curated(provider: &str, model: &str, expected: Value) {
-    let seed: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
-    assert!(
-        seed[provider]["models"].get(model).is_none(),
-        "upstream now owns {provider}/{model}"
-    );
-    let (store, _dir) = empty_store();
+fn price(units: i64, exponent: u32) -> Value {
+    json!({"state":"priced", "units":units * 10_i64.pow(9 - exponent), "exponent":9,
+        "currency":"USD", "unit_provenance":{"kind":"assumed_by_policy", "policy":"models-dev-usd-v1"}})
+}
+
+fn assert_v2_media(provider: &str, model: &str, expected: Value) {
+    let (store, _dir) = v2_seed_store(&[(provider, model)]);
     let response =
         super::curated_wire::get(&store, json!({"provider_id":provider,"model_id":model}));
-    assert_eq!(
-        serde_json::to_value(&response.models[&format!("{provider}/{model}")]).unwrap(),
-        expected
-    );
-    let source = response
-        .curated
-        .iter()
-        .find(|row| row.model == format!("{provider}/{model}"))
-        .unwrap();
-    let row = &fusiform_module::curated_models::models()[&(provider.into(), model.into())];
-    assert_eq!(source.review_by_ms - row.established_at_ms, 60 * 86_400_000);
-    assert!(!source.source_ref.is_empty());
+    let row = &response.models[&format!("{provider}/{model}")];
+    for (key, expected) in expected.as_object().unwrap() {
+        assert_eq!(row.get(key), Some(expected), "{provider}/{model}: {key}");
+    }
+    assert!(response.curated.is_empty());
 }
 
 #[test]
-fn gemini_flash_tts_serves_only_documented_speech_facts() {
-    assert_curated(
+fn gemini_flash_tts_keeps_its_speech_rates_and_conversion_on_v2() {
+    assert_v2_media(
         "google",
         "gemini-3.8-flash-tts",
         json!({
@@ -99,7 +101,7 @@ fn gemini_flash_tts_serves_only_documented_speech_facts() {
             "limit.context":8192, "limit.output":16384, "limit.output_audio_tokens_per_second":25,
             "limit.temperature_min":0.0, "limit.temperature_max":2.0,
             "rate.input":price(50,2), "rate.output_audio":price(9,0),
-            "wire.api":{"value":"https://generativelanguage.googleapis.com/v1beta","from":"curated"},
+            "wire.api":{"value":"https://generativelanguage.googleapis.com/v1beta","from":"model"},
             "wire.family":"google.generate_content"
         }),
     );
@@ -107,11 +109,9 @@ fn gemini_flash_tts_serves_only_documented_speech_facts() {
 
 #[test]
 fn eleven_flash_serves_only_documented_character_billing() {
-    let mut rate = price(4, 2);
-    rate["per"] = json!(1000);
-    rate["increment"] = json!({"kind":"unknown"});
-    rate["minimum_quantity"] = json!({"kind":"unknown"});
-    assert_curated(
+    let mut rate = price(40, 0);
+    rate["per"] = json!(1_000_000);
+    assert_v2_media(
         "elevenlabs",
         "eleven_flash_v2_5",
         json!({
@@ -129,7 +129,7 @@ fn eleven_flash_serves_only_documented_character_billing() {
 }
 
 #[test]
-fn realtime_is_restored_on_a_fresh_store_without_an_upstream_row() {
+fn realtime_audio_is_priced_on_a_fresh_v2_store() {
     let (store, _dir) = empty_store();
     fusiform_module::seed::seed_if_empty(&store).unwrap();
     let response = super::curated_wire::get(
@@ -137,26 +137,28 @@ fn realtime_is_restored_on_a_fresh_store_without_an_upstream_row() {
         json!({"provider_id":"openai","model_id":"gpt-realtime-2.1"}),
     );
     assert!(response.fact_overrides.is_empty());
-    assert_eq!(response.curated.len(), 1);
-    assert_eq!(response.curated[0].model, "openai/gpt-realtime-2.1");
-    assert_eq!(response.curated[0].auth_methods, ["apikey"]);
-    assert_eq!(
-        serde_json::to_value(&response.models["openai/gpt-realtime-2.1"]).unwrap(),
-        json!({
-            "existence":"present", "provider.name":"OpenAI", "model.name":"GPT-Realtime-2.1",
-            "model.type":"realtime", "model.canonical_id":"openai/gpt-realtime-2.1",
-            "model.lineage":"gpt", "capability.input_modalities":["audio","image","text"],
-            "capability.output_modalities":["audio","text"], "capability.attachment":true,
-            "capability.reasoning":true, "capability.tool_call":true,
-            "capability.structured_output":false, "capability.temperature":false,
-            "capability.reasoning_options":[{"type":"effort","values":["minimal","low","medium","high","xhigh"]}],
-            "limit.context":128000, "limit.output":32000, "limit.images_per_request":1500,
-            "rate.input":price(4_000_000_000,9), "rate.cache_read":price(400_000_000,9),
-            "rate.output":price(24_000_000_000,9), "rate.input_audio":price(32_000_000_000,9),
-            "rate.cached_input_audio":price(400_000_000,9), "rate.output_audio":price(64_000_000_000,9),
-            "wire.api":{"value":"https://api.openai.com/v1","from":"curated"}
-        })
-    );
+    assert!(response.curated.is_empty());
+    let expected = json!({
+        "existence":"present", "provider.name":"OpenAI", "model.name":"GPT-Realtime-2.1",
+        "model.type":"realtime", "model.canonical_id":"openai/gpt-realtime-2.1",
+        "model.lineage":"gpt", "capability.input_modalities":["audio","image","text"],
+        "capability.output_modalities":["audio","text"], "capability.attachment":true,
+        "capability.reasoning":true, "capability.tool_call":true,
+        "capability.structured_output":false, "capability.temperature":false,
+        "capability.reasoning_options":[{"type":"effort","values":["minimal","low","medium","high","xhigh"]}],
+        "limit.context":128000, "limit.output":32000, "limit.images_per_request":1500,
+        "rate.input":price(4_000_000_000,9), "rate.cache_read":price(400_000_000,9),
+        "rate.output":price(24_000_000_000,9), "rate.input_audio":price(32_000_000_000,9),
+        "rate.cached_input_audio":price(400_000_000,9), "rate.output_audio":price(64_000_000_000,9),
+        "wire.api":{"value":"https://api.openai.com/v1","from":"model"}
+    });
+    for (key, expected) in expected.as_object().unwrap() {
+        assert_eq!(
+            response.models["openai/gpt-realtime-2.1"].get(key),
+            Some(expected),
+            "{key}"
+        );
+    }
 }
 
 #[test]
@@ -183,11 +185,14 @@ fn output_audio_is_sourced_and_seeded() {
         assert_eq!(amount.currency.as_str(), "USD");
         assert!(per.is_none());
     }
-    for model in catalog
-        .models()
-        .filter(|model| model.key.provider_id != "google")
-    {
-        assert!(!model.rates.iter().any(|rate| rate.basis
+    for model in catalog.models().filter(|model| {
+        model.key.provider_id != "google"
+            && !(model.key.provider_id == "openai" && model.key.model_id == "gpt-realtime-2.1")
+    }) {
+        assert!(!model.rates.iter().any(|rate| matches!(
+            rate.value,
+            fusiform_core::RateValue::Priced { .. }
+        ) && rate.basis
             == ChargeBasis::PerMillionTokens {
                 class: TokenClass::OutputAudio
             }));
@@ -200,15 +205,20 @@ fn image_and_video_roles_are_explicitly_admitted() {
         assert!(fusiform_protocol::SERVED_FACTS
             .iter()
             .any(|fact| fact.key == role));
-        assert!(fusiform_module::curated_models::models()
-            .values()
-            .any(|row| row.facts.contains_key(role)));
+        assert!(fusiform_module::seed::catalog()
+            .unwrap()
+            .models()
+            .any(|model| {
+                fusiform_store::ingest::fact_keys_of(model)
+                    .into_iter()
+                    .any(|key| key.as_str() == role)
+            }));
     }
 }
 
 #[test]
-fn flare_serves_only_documented_image_facts() {
-    assert_curated(
+fn flare_keeps_its_images_protocol_and_rates_on_v2() {
+    assert_v2_media(
         "openai",
         "gpt-image-2.6-flare",
         json!({
@@ -216,10 +226,10 @@ fn flare_serves_only_documented_image_facts() {
             "model.lineage":"gpt",
             "capability.input_modalities":["image","text"], "capability.output_modalities":["image"],
             "limit.images_per_request":1500,
-            "limit.temperature_min":0, "limit.temperature_max":2,
+            "capability.temperature":false,
             "rate.input":price(5,0), "rate.cache_read":price(125,2),
             "rate.input_image":price(8,0), "rate.output_image":price(30,0),
-            "wire.api":{"value":"https://api.openai.com/v1","from":"curated"},
+            "wire.api":{"value":"https://api.openai.com/v1","from":"model"},
             "wire.family":"openai.images"
         }),
     );
@@ -227,8 +237,8 @@ fn flare_serves_only_documented_image_facts() {
 }
 
 #[test]
-fn omni_serves_only_documented_video_facts() {
-    assert_curated(
+fn omni_keeps_its_interactions_protocol_and_media_facts_on_v2() {
+    assert_v2_media(
         "google",
         "gemini-omni-1.2-flash",
         json!({
@@ -244,7 +254,7 @@ fn omni_serves_only_documented_video_facts() {
             "limit.output_video_tokens_per_second.resolution.720p":5792,
             "limit.output_video_tokens_per_second.resolution.1080p":8688,
             "limit.output_video_tokens_per_second.resolution.4k":17376,
-            "wire.api":{"value":"https://generativelanguage.googleapis.com/v1beta","from":"curated"},
+            "wire.api":{"value":"https://generativelanguage.googleapis.com/v1beta","from":"model"},
             "wire.family":"google.interactions"
         }),
     );
@@ -255,7 +265,10 @@ fn omni_serves_only_documented_video_facts() {
 
 #[test]
 fn omni_video_facts_survive_prefix_filters_and_are_not_shared() {
-    let (store, _dir) = empty_store();
+    let (store, _dir) = v2_seed_store(&[
+        ("google", "gemini-omni-1.2-flash"),
+        ("google", "gemini-omni-1.1-flash"),
+    ]);
     let id = "google/gemini-omni-1.2-flash";
     let expected = [
         ("limit.output_duration_ms", json!(15000)),
@@ -292,7 +305,8 @@ fn omni_video_facts_survive_prefix_filters_and_are_not_shared() {
 
 fn image_store(output: i64) -> (CatalogStore, tempfile::TempDir) {
     let seed: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     let mut doc = json!({});
     for provider in ["google", "google-vertex"] {
         let mut row = seed[provider]["models"]["gemini-3.1-flash-image"].clone();

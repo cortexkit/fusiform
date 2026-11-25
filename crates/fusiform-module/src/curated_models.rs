@@ -132,11 +132,11 @@ pub(crate) fn document_releasing(ids: &[(&str, &str)]) -> String {
     serde_json::to_string(&doc).unwrap()
 }
 
-/// The shipped document with nothing held: every row is served as curated
+/// The historical test document with nothing held: every row is served as curated
 /// wherever upstream does not currently publish it.
 #[cfg(test)]
 pub(crate) fn document_without_held() -> String {
-    let mut doc: serde_json::Value = serde_json::from_str(DOCUMENT).unwrap();
+    let mut doc = document_with_retired_test_models();
     doc.as_object_mut().unwrap().remove("held");
     serde_json::to_string(&doc).unwrap()
 }

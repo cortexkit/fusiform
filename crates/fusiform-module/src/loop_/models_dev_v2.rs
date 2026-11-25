@@ -7,7 +7,7 @@ use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::normalize::v2::NormalizeV2Outcome;
 use fusiform_core::normalize::NormalizedModel;
 use fusiform_core::upstream_facts::{facts_of, Existence, FactKey};
-use fusiform_core::{normalize_models_dev_v2_with, BoundaryKind};
+use fusiform_core::BoundaryKind;
 use fusiform_protocol::{served_fact_key_matches, SERVED_FACTS};
 use fusiform_store::serve::CatalogQuery;
 use fusiform_store::NewEra;
@@ -19,7 +19,7 @@ use crate::route::{serve_tool_call, ToolResponse};
 
 const SOURCE: SourceId = SourceId::ModelsDev;
 const SEED_AT: Timestamp = Timestamp(1_000);
-const SWITCH_AT: Timestamp = Timestamp(2_000);
+const SWITCH_AT: Timestamp = Timestamp(1_795_629_037_000);
 type Facts = BTreeMap<String, String>;
 type Identity = (String, String);
 type RecordedModels = BTreeMap<Identity, Facts>;
@@ -156,7 +156,7 @@ fn explained() -> Explained {
 }
 
 fn parse_v2(bytes: &[u8]) -> NormalizeV2Outcome {
-    normalize_models_dev_v2_with(bytes, &crate::input_audio::evidence()).unwrap()
+    normalize_models_dev_with(bytes, &crate::input_audio::evidence(), SWITCH_AT).unwrap()
 }
 
 fn empty_store() -> (CatalogStore, tempfile::TempDir) {
@@ -948,7 +948,7 @@ fn models_dev_v2_guarded_switch_keeps_history_and_served_wire_continuity() {
             facts_changed: changes.len(),
         }
     );
-    assert_eq!(tick.eras_written, 48_130);
+    assert_eq!(tick.eras_written, 48_403);
     let after = served(&store, &prefixes);
     verify_wire(
         &before,
@@ -966,6 +966,26 @@ fn models_dev_v2_guarded_switch_keeps_history_and_served_wire_continuity() {
             witness.served,
             "{id}"
         );
+    }
+    let kinds = served(&store, &["model.kind"]);
+    let expected_kinds: BTreeMap<_, _> = v2
+        .catalog
+        .models()
+        .filter(|row| arrivals.contains(&(row.key.provider_id.clone(), row.key.model_id.clone())))
+        .filter_map(|row| {
+            let kind = row
+                .model_type
+                .as_deref()
+                .filter(|kind| matches!(*kind, "decision" | "extraction"))?;
+            Some((
+                format!("{}/{}", row.key.provider_id, row.key.model_id),
+                json!(kind),
+            ))
+        })
+        .collect();
+    assert_eq!(expected_kinds.len(), 133);
+    for (id, kind) in expected_kinds {
+        assert_eq!(kinds[&id]["model.kind"], kind, "{id}");
     }
 
     let current = recorded(&store, &CatalogQuery::current(SOURCE));
@@ -1036,7 +1056,7 @@ fn models_dev_v2_guarded_switch_keeps_history_and_served_wire_continuity() {
     }
 
     let era_count = store.era_count(SOURCE).unwrap();
-    let repeat = apply_v2(&store, &signals, bytes, Timestamp(3_000));
+    let repeat = apply_v2(&store, &signals, bytes, Timestamp(SWITCH_AT.0 + 1));
     assert_eq!(repeat.outcome, TickOutcome::Unchanged);
     assert_eq!(repeat.eras_written, 0);
     assert_eq!(store.era_count(SOURCE).unwrap(), era_count);

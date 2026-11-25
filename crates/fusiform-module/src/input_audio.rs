@@ -79,10 +79,9 @@ mod tests {
         let (rows, rejects) = load(row);
         assert!(rejects.is_empty());
         let unused = unused_rows(&rows, &seed());
-        assert_eq!(unused.len(), 2, "{unused:?}");
+        assert_eq!(unused.len(), 1, "{unused:?}");
         assert!(unused[0].starts_with("openai/not-in-the-embedded-seed:"));
         assert!(unused[0].contains("correct or remove the inclusion"));
-        assert!(unused[1].starts_with("openai: no row"));
     }
 
     #[test]
@@ -92,7 +91,8 @@ mod tests {
         assert!(!rows.is_empty());
         assert!(rows.contains_key("google"));
         assert!(evidence().bills_input_audio_per_token("google", "gemini-3.8-flash"));
-        assert!(!evidence().bills_input_audio_per_token("openai", "gpt-realtime-2.1"));
+        assert!(evidence().bills_input_audio_per_token("openai", "gpt-realtime-2.1"));
+        assert!(!evidence().bills_input_audio_per_token("openai", "gpt-realtime-2.1-mini"));
         assert!(!evidence().bills_input_audio_per_token("google-vertex", "gemini-3.8-flash"));
         assert_eq!(
             rows["google"]
@@ -226,10 +226,10 @@ mod tests {
         let (rows, rejects) = load_reporting_rejects(&doc.to_string());
         assert!(rejects.is_empty(), "{rejects:?}");
         assert!(unused_rows(&rows, &seed).is_empty());
-        seed["google"]["models"][excluded]["cost"]
+        seed["google"]["models"][excluded]["cost"]["audio"]
             .as_object_mut()
             .unwrap()
-            .remove("input_audio");
+            .remove("input");
         let unused = unused_rows(&rows, &seed);
         assert_eq!(unused.len(), 1, "{unused:?}");
         assert!(unused[0].starts_with(&format!("google/{excluded}:")));
@@ -309,8 +309,8 @@ mod tests {
             .unwrap()
             .values_mut()
         {
-            if let Some(cost) = model["cost"].as_object_mut() {
-                cost.remove("input_audio");
+            if let Some(cost) = model["cost"]["audio"].as_object_mut() {
+                cost.remove("input");
             }
         }
         let unused = unused_rows(sources(), &seed);

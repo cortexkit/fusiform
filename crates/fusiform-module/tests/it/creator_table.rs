@@ -92,9 +92,8 @@ fn priced_rows_per_curated_family(
                         .values()
                         .filter(|m| {
                             m.get("family").and_then(|f| f.as_str()) == Some(row.family.as_str())
-                                && m.get("cost")
-                                    .and_then(|c| c.get("input"))
-                                    .is_some_and(|v| !v.is_null())
+                                && m.pointer("/cost/text/input/price")
+                                    .is_some_and(serde_json::Value::is_number)
                         })
                         .count()
                 })

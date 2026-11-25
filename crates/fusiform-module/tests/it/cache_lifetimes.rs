@@ -8,10 +8,12 @@ use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, NewObservation};
 use serde_json::{json, Value};
 
-const SEED: &str = include_str!("../../data/models-dev-seed.json");
+fn legacy_seed() -> &'static str {
+    fusiform_core::normalize::legacy_models_dev_snapshot_for_tests()
+}
 
 pub(super) fn store(mismatch: Option<(&str, &str)>) -> (CatalogStore, tempfile::TempDir) {
-    let mut doc: Value = serde_json::from_str(SEED).unwrap();
+    let mut doc: Value = serde_json::from_str(legacy_seed()).unwrap();
     doc.as_object_mut()
         .unwrap()
         .retain(|provider, _| provider == "openai" || provider == "anthropic");
@@ -253,7 +255,7 @@ fn dated_cache_lifetime_prices_start_at_first_serving() {
 #[test]
 fn dated_cache_lifetimes_use_the_upstream_prices_at_the_requested_instant() {
     let (store, _dir) = store(None);
-    let mut doc: Value = serde_json::from_str(SEED).unwrap();
+    let mut doc: Value = serde_json::from_str(legacy_seed()).unwrap();
     doc.as_object_mut()
         .unwrap()
         .retain(|provider, _| provider == "openai" || provider == "anthropic");

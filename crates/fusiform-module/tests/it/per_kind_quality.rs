@@ -597,7 +597,7 @@ fn decision_kind_rejects_chat_and_search_and_supports_local_keys() {
 fn every_curated_task_row_passes_guard_over_the_embedded_catalog() {
     let (store, _dir) = fixture();
     let catalog = fusiform_core::normalize_legacy_models_dev_for_tests_with(
-        include_bytes!("../../data/models-dev-seed.json"),
+        fusiform_core::normalize::legacy_models_dev_snapshot_for_tests().as_bytes(),
         &fusiform_module::input_audio::evidence(),
     )
     .unwrap()

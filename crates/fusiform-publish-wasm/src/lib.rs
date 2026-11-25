@@ -83,6 +83,10 @@ fn publish_step(
     write_json(&mut summary, base_upstream_hash);
     summary.extend_from_slice(br#","conflicts":"#);
     write_json(&mut summary, conflicts);
+    summary.extend_from_slice(b",\"findings\":");
+    write_json(&mut summary, step.findings);
+    summary.extend_from_slice(b",\"held_fact_count\":");
+    write_json(&mut summary, step.held_fact_count);
     summary.extend_from_slice(b",\"model_count\":");
     write_json(&mut summary, step.model_count);
     summary.extend_from_slice(b",\"next_date_boundary_ms\":");
@@ -203,5 +207,7 @@ fn decode_json<'a, T: Deserialize<'a>>(bytes: &'a [u8], class: &'static str) -> 
     serde_json::from_slice(bytes).map_err(|err| Failure::new(class, err))
 }
 
+#[cfg(test)]
+mod refusal_tests;
 #[cfg(test)]
 mod tests;

@@ -7,7 +7,7 @@ mod raw;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use serde::de::{self, MapAccess, Visitor};
+use serde::de::{self, DeserializeOwned, MapAccess, Visitor};
 use serde::Deserializer;
 use serde_json::{json, value::RawValue, Value};
 
@@ -21,7 +21,8 @@ use crate::{Modality, ModelKey, SourceId, Timestamp};
 use inventory::Kind;
 use raw::{Object, RawModel, RawProvider};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FindingKey {
     UnknownKey { object_kind: String, path: String },
     UnknownModelType { value: String },
@@ -30,6 +31,7 @@ pub enum FindingKey {
     UnservedCost { role: String, unit: String },
     UnattributableChargeUnit { role: String },
     RefusedPrice { role: String, detail: String },
+    RefusedModelMember { path: String },
 }
 
 impl FindingKey {
@@ -42,6 +44,7 @@ impl FindingKey {
             Self::UnservedCost { .. } => "unserved_cost",
             Self::UnattributableChargeUnit { .. } => "unattributable_charge_unit",
             Self::RefusedPrice { .. } => "refused_price",
+            Self::RefusedModelMember { .. } => "refused_model_member",
         }
     }
 
@@ -53,7 +56,7 @@ impl FindingKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Finding {
     pub key: FindingKey,
     pub occurrences: usize,
@@ -224,10 +227,9 @@ fn normalize_provider(
     provider: RawProvider<'_>,
     ctx: &mut Context<'_>,
 ) -> Result<NormalizedProvider, String> {
-    let name = provider
-        .fields
-        .read::<String>("name")
-        .filter(|name| !name.is_empty());
+    let name = provider.fields.raw("name").map_or(Ok(None), |raw| {
+        serde_json::from_str::<String>(raw.get()).map(Some)
+    });
     Kind::Provider.inventory(
         "provider",
         &provider.fields,
@@ -238,7 +240,10 @@ fn normalize_provider(
     for (model_id, raw) in provider.models {
         let raw =
             RawModel::parse(raw).map_err(|error| format!("model {id}/{model_id}: {error}"))?;
-        let model = normalize_model(id, &model_id, name.as_deref(), raw, ctx);
+        let name = name
+            .as_ref()
+            .map(|name| name.as_deref().filter(|name| !name.is_empty()));
+        let model = normalize_model(id, &model_id, name.map_err(|_| ()), raw, ctx);
         if models.insert(model_id, model).is_some() {
             return Err(format!("duplicate model id in provider {id:?}"));
         }
@@ -252,111 +257,264 @@ fn normalize_provider(
     })
 }
 
+struct ModelFactRead<'a> {
+    model: &'a str,
+    findings: &'a mut Findings,
+    refused: BTreeSet<RefusedFactScope>,
+}
+
+impl ModelFactRead<'_> {
+    fn refused(&mut self, path: &str, facts: &[&str]) {
+        self.findings.add(
+            FindingKey::RefusedModelMember {
+                path: path.to_owned(),
+            },
+            Some(self.model),
+        );
+        self.refused.extend(
+            facts
+                .iter()
+                .map(|key| RefusedFactScope::Fact(FactKey::from_stored((*key).to_owned()))),
+        );
+    }
+
+    fn decode<T, E>(&mut self, result: Result<T, E>, path: &str, facts: &[&str]) -> Option<T> {
+        match result {
+            Ok(value) => Some(value),
+            Err(_) => {
+                self.refused(path, facts);
+                None
+            }
+        }
+    }
+
+    fn value<T: DeserializeOwned>(
+        &mut self,
+        raw: Option<&RawValue>,
+        path: &str,
+        facts: &[&str],
+    ) -> Option<T> {
+        self.decode(serde_json::from_str::<T>(raw?.get()), path, facts)
+    }
+
+    fn object<'raw>(
+        &mut self,
+        raw: Option<&'raw RawValue>,
+        path: &str,
+        facts: &[&str],
+    ) -> Option<Object<'raw>> {
+        self.decode(Object::parse(raw?), path, facts)
+    }
+}
+
+const WIRE_FACTS: &[&str] = &["wire.api", "wire.npm", "wire.shape"];
+const MODALITY_FACTS: &[&str] = &[
+    "capability.input_modalities",
+    "capability.output_modalities",
+    "capability.attachment",
+];
+const CAPABILITY_FACTS: &[&str] = &[
+    "capability.reasoning",
+    "capability.reasoning_options",
+    "capability.tool_call",
+    "capability.structured_output",
+    "capability.temperature",
+];
+
+fn raw_field<'raw>(object: Option<&Object<'raw>>, key: &str) -> Option<&'raw RawValue> {
+    object?.raw(key)
+}
+
 fn normalize_model(
     provider: &str,
     model: &str,
-    provider_name: Option<&str>,
+    provider_name: Result<Option<&str>, ()>,
     raw: RawModel<'_>,
     ctx: &mut Context<'_>,
 ) -> NormalizedModel {
-    let findings = &mut ctx.findings;
-    let RawModel {
-        fields,
-        model_type,
-        capabilities,
-        api,
-    } = raw;
-    Kind::Model.inventory("model", &fields, Some(model), findings);
-    if !matches!(
-        model_type.as_str(),
-        "chat"
-            | "image"
-            | "video"
-            | "embedding"
-            | "reranking"
-            | "decision"
-            | "transcription"
-            | "speech"
-            | "realtime"
-            | "extraction"
-            | "audio"
-    ) {
-        findings.add(
+    let RawModel { fields } = raw;
+    Kind::Model.inventory("model", &fields, Some(model), &mut ctx.findings);
+    let mut read = ModelFactRead {
+        model,
+        findings: &mut ctx.findings,
+        refused: BTreeSet::new(),
+    };
+    let model_type = read.decode(
+        serde_json::from_str::<String>(fields.raw("type").expect("required v2 member").get()),
+        "type",
+        &["model.type"],
+    );
+    if let Some(value) = model_type.as_ref().filter(|value| {
+        !matches!(
+            value.as_str(),
+            "chat"
+                | "image"
+                | "video"
+                | "embedding"
+                | "reranking"
+                | "decision"
+                | "transcription"
+                | "speech"
+                | "realtime"
+                | "extraction"
+                | "audio"
+        )
+    }) {
+        read.findings.add(
             FindingKey::UnknownModelType {
-                value: model_type.clone(),
+                value: value.clone(),
             },
             Some(model),
         );
     }
-    let mut refused = BTreeSet::new();
-    let modes = fields
-        .object("experimental")
-        .and_then(|experimental| experimental.object("modes"));
-    let modalities = fields.object("modalities");
-    let input_modalities = read_modalities(modalities.as_ref(), "input");
-    let attachment = input_modalities
-        .as_ref()
-        .map(|items| items.iter().any(|value| *value != Modality::Text));
-    let reasoning = capabilities.object("reasoning");
-    let limit = fields.object("limit");
-    let key = ModelKey {
-        source: SourceId::ModelsDev,
-        provider_id: provider.to_owned(),
-        model_id: model.to_owned(),
-    };
-    let rates = rates::normalize_rates(&key, fields.raw("cost"), modes.as_ref(), ctx, &mut refused);
-    NormalizedModel {
-        key,
-        provider_name: provider_name.map(str::to_owned),
-        display_name: fields
-            .read::<String>("name")
+    let capabilities = normalize_capabilities(&fields, &mut read);
+    let limit = read.object(
+        fields.raw("limit"),
+        "limit",
+        &["limit.context", "limit.output"],
+    );
+    let api = read.object(fields.raw("api"), "api", WIRE_FACTS);
+    let experimental_raw = fields.raw("experimental");
+    let experimental = read.object(experimental_raw, "experimental", &[]);
+    let modes_raw = raw_field(experimental.as_ref(), "modes");
+    let modes = read.object(modes_raw, "experimental.modes", &[]);
+    let unreadable_modes = (experimental_raw.is_some() && experimental.is_none())
+        || (modes_raw.is_some() && modes.is_none());
+    let mut row = NormalizedModel {
+        key: ModelKey {
+            source: SourceId::ModelsDev,
+            provider_id: provider.to_owned(),
+            model_id: model.to_owned(),
+        },
+        provider_name: read
+            .decode(provider_name, "provider.name", &["provider.name"])
+            .flatten()
+            .map(str::to_owned),
+        display_name: read
+            .value::<String>(fields.raw("name"), "name", &["model.name"])
             .filter(|name| !name.is_empty()),
-        family: fields.read("family"),
-        canonical_id: fields.read("canonical_id"),
-        status: fields.read("status"),
-        model_type: Some(model_type),
+        family: read.value(fields.raw("family"), "family", &["model.family"]),
+        canonical_id: read.value(
+            fields.raw("canonical_id"),
+            "canonical_id",
+            &["model.canonical_id"],
+        ),
+        status: read.value(fields.raw("status"), "status", &["model.status"]),
+        model_type,
         release_date: fields.read("release_date"),
         last_updated: fields.read("last_updated"),
         knowledge_cutoff: fields.read("knowledge"),
-        open_weights: fields.read("open_weights"),
-        capabilities: Capabilities {
-            input_modalities,
-            output_modalities: read_modalities(modalities.as_ref(), "output"),
-            attachment,
-            reasoning: reasoning
-                .as_ref()
-                .and_then(|reasoning| reasoning.read("supported")),
-            reasoning_options: reasoning.as_ref().and_then(reasoning_options),
-            tool_call: capabilities
-                .object("tools")
-                .and_then(|tools| tools.read("supported")),
-            structured_output: capabilities.read("structured_output"),
-            temperature: capabilities.read("temperature"),
-        },
+        open_weights: read.value(
+            fields.raw("open_weights"),
+            "open_weights",
+            &["model.open_weights"],
+        ),
+        capabilities,
         limits: Limits {
-            context_tokens: absent_if_zero(limit.as_ref().and_then(|limit| limit.read("context"))),
-            output_tokens: absent_if_zero(limit.as_ref().and_then(|limit| limit.read("output"))),
+            context_tokens: absent_if_zero(read.value(
+                raw_field(limit.as_ref(), "context"),
+                "limit.context",
+                &["limit.context"],
+            )),
+            output_tokens: absent_if_zero(read.value(
+                raw_field(limit.as_ref(), "output"),
+                "limit.output",
+                &["limit.output"],
+            )),
         },
-        wire: normalize_api(model, &api, &mut ctx.findings, &mut refused),
-        rates,
-        refused,
+        wire: api
+            .as_ref()
+            .map(|api| normalize_api(api, &mut read))
+            .unwrap_or_default(),
+        rates: Vec::new(),
+        refused: read.refused,
         quarantined: Quarantine {
             provider_override: false,
             experimental_modes: modes
-                .into_iter()
-                .flat_map(|mode| mode.0)
-                .map(|(name, _)| name)
+                .iter()
+                .flat_map(|mode| &mode.0)
+                .map(|(name, _)| name.clone())
                 .collect(),
         },
+    };
+    if unreadable_modes {
+        row.refused.insert(RefusedFactScope::ModeRates(None));
+    }
+    row.rates = rates::normalize_rates(
+        &row.key,
+        fields.raw("cost"),
+        modes.as_ref(),
+        ctx,
+        &mut row.refused,
+    );
+    row
+}
+
+fn normalize_capabilities(fields: &Object<'_>, read: &mut ModelFactRead<'_>) -> Capabilities {
+    let modalities = read.object(fields.raw("modalities"), "modalities", MODALITY_FACTS);
+    let input_modalities = read_modalities(read.value(
+        raw_field(modalities.as_ref(), "input"),
+        "modalities.input",
+        &["capability.input_modalities", "capability.attachment"],
+    ));
+    let output_modalities = read_modalities(read.value(
+        raw_field(modalities.as_ref(), "output"),
+        "modalities.output",
+        &["capability.output_modalities"],
+    ));
+    let attachment = input_modalities
+        .as_ref()
+        .map(|items| items.iter().any(|value| *value != Modality::Text));
+    let capabilities = read.object(fields.raw("capabilities"), "capabilities", CAPABILITY_FACTS);
+    let capabilities = capabilities.as_ref();
+    let reasoning_facts = &["capability.reasoning", "capability.reasoning_options"];
+    let reasoning = read.object(
+        raw_field(capabilities, "reasoning"),
+        "capabilities.reasoning",
+        reasoning_facts,
+    );
+    let supported = read.value(
+        raw_field(reasoning.as_ref(), "supported"),
+        "capabilities.reasoning.supported",
+        reasoning_facts,
+    );
+    let tools = read.object(
+        raw_field(capabilities, "tools"),
+        "capabilities.tools",
+        &["capability.tool_call"],
+    );
+    Capabilities {
+        input_modalities,
+        output_modalities,
+        attachment,
+        reasoning: supported,
+        reasoning_options: reasoning
+            .as_ref()
+            .filter(|_| supported == Some(true))
+            .map(|options| reasoning_options(options, read)),
+        tool_call: read.value(
+            raw_field(tools.as_ref(), "supported"),
+            "capabilities.tools.supported",
+            &["capability.tool_call"],
+        ),
+        structured_output: read.value(
+            raw_field(capabilities, "structured_output"),
+            "capabilities.structured_output",
+            &["capability.structured_output"],
+        ),
+        temperature: read.value(
+            raw_field(capabilities, "temperature"),
+            "capabilities.temperature",
+            &["capability.temperature"],
+        ),
     }
 }
 
-fn read_modalities(modalities: Option<&Object<'_>>, direction: &str) -> Option<Vec<Modality>> {
-    let published: Vec<String> = modalities?.read(direction)?;
+fn read_modalities(published: Option<Vec<String>>) -> Option<Vec<Modality>> {
     // MIME subtypes describe the same catalog modality. Output classes that
     // v1 grouped with text are still distinguished by the model's v2 type.
     let mut base = Vec::new();
-    for value in published {
+    for value in published? {
         let name = match value.as_str() {
             "embedding" | "decision" | "reranking" => "text",
             "application/pdf" => "pdf",
@@ -380,60 +538,91 @@ fn read_modalities(modalities: Option<&Object<'_>>, direction: &str) -> Option<V
     Some(base)
 }
 
-fn reasoning_options(reasoning: &Object<'_>) -> Option<Value> {
-    if reasoning.read("supported") != Some(true) {
-        return None;
-    }
+fn reasoning_options(reasoning: &Object<'_>, read: &mut ModelFactRead<'_>) -> Value {
+    let facts = &["capability.reasoning_options"];
     let mut options = Vec::new();
-    if reasoning.read("toggle") == Some(true) {
+    if read.value(
+        reasoning.raw("toggle"),
+        "capabilities.reasoning.toggle",
+        facts,
+    ) == Some(true)
+    {
         options.push(json!({"type": "toggle"}));
     }
-    if let Some(effort) = reasoning.read::<Vec<Value>>("effort") {
+    if let Some(effort) = read.value::<Vec<String>>(
+        reasoning.raw("effort"),
+        "capabilities.reasoning.effort",
+        facts,
+    ) {
         options.push(json!({"type": "effort", "values": effort}));
     }
-    if let Some(budget) = reasoning.object("budget") {
+    if let Some(budget) = read.object(
+        reasoning.raw("budget"),
+        "capabilities.reasoning.budget",
+        facts,
+    ) {
         let mut option = json!({"type": "budget_tokens"});
-        for field in ["min", "max"] {
-            if let Some(tokens) = budget.read::<u64>(field) {
-                option[field] = json!(tokens);
-            } else if field == "min" && budget.read::<i64>(field) == Some(-1) {
-                // Some providers publish -1 as a reasoning-budget sentinel.
-                option[field] = json!(-1);
+        for (key, path) in [
+            ("min", "capabilities.reasoning.budget.min"),
+            ("max", "capabilities.reasoning.budget.max"),
+        ] {
+            if let Some(value) = read.value::<Value>(budget.raw(key), path, facts) {
+                if value.is_u64() || (key == "min" && value.as_i64() == Some(-1)) {
+                    // Some providers publish -1 as a reasoning-budget sentinel.
+                    option[key] = value;
+                } else {
+                    read.refused(path, facts);
+                }
             }
         }
         options.push(option);
     }
-    Some(Value::Array(options))
+    Value::Array(options)
 }
 
-fn normalize_api(
-    model: &str,
-    api: &Object<'_>,
-    findings: &mut Findings,
-    refused: &mut BTreeSet<RefusedFactScope>,
-) -> WireFacts {
+fn normalize_api(api: &Object<'_>, read: &mut ModelFactRead<'_>) -> WireFacts {
     let mut wire = WireFacts::default();
     for (index, (protocol, raw)) in api.0.iter().enumerate() {
         if !known_api_protocol(protocol) {
-            findings.add(
+            read.findings.add(
                 FindingKey::UnknownApiProtocol {
                     value: protocol.clone(),
                 },
-                Some(model),
+                Some(read.model),
             );
             if index == 0 {
                 // Do not fall back to the second API: it need not accept the
                 // same requests or represent the endpoint previously served.
-                refused.extend(
+                read.refused.extend(
                     ["api", "npm", "shape"].map(|name| RefusedFactScope::Fact(FactKey::wire(name))),
                 );
             }
         } else if index == 0 {
-            if let Ok(entry) = Object::parse(raw) {
-                let npm = entry
-                    .object("sdk")
-                    .and_then(|sdk| sdk.read::<String>("aisdk"));
-                let base_url = entry.read::<String>("base_url");
+            if let Some(entry) = read.object(Some(raw), &format!("api.{protocol}"), WIRE_FACTS) {
+                let sdk_facts: &[&str] = if matches!(
+                    protocol.as_str(),
+                    "chat-completions" | "responses" | "speech" | "videos"
+                ) {
+                    &["wire.npm", "wire.shape"]
+                } else {
+                    &["wire.npm"]
+                };
+                let sdk = read.object(entry.raw("sdk"), &format!("api.{protocol}.sdk"), sdk_facts);
+                let npm: Option<String> = read.value(
+                    raw_field(sdk.as_ref(), "aisdk"),
+                    &format!("api.{protocol}.sdk.aisdk"),
+                    sdk_facts,
+                );
+                let base_facts: &[&str] = if protocol == "videos" {
+                    &["wire.api", "wire.shape"]
+                } else {
+                    &["wire.api"]
+                };
+                let base_url: Option<String> = read.value(
+                    entry.raw("base_url"),
+                    &format!("api.{protocol}.base_url"),
+                    base_facts,
+                );
                 let defaults_to_responses = matches!(
                     npm.as_deref(),
                     Some("@ai-sdk/openai" | "@ai-sdk/azure" | "@ai-sdk/xai")
@@ -442,7 +631,14 @@ fn normalize_api(
                     ("images", _) => Some("images"),
                     ("interactions", _) => Some("interactions"),
                     ("speech", _) if npm.as_deref() == Some("@ai-sdk/elevenlabs") => Some("speech"),
-                    ("videos", _) if api_has_matching_interactions(&entry, &api.0) => {
+                    ("videos", _)
+                        if api_has_matching_interactions(
+                            base_url.as_deref(),
+                            npm.as_deref(),
+                            api,
+                            read,
+                        ) =>
+                    {
                         Some("interactions")
                     }
                     ("chat-completions", true) => Some("completions"),
@@ -460,27 +656,28 @@ fn normalize_api(
     wire
 }
 
-fn api_has_matching_interactions(primary: &Object<'_>, apis: &[(String, &RawValue)]) -> bool {
-    let Some(url) = primary.read::<String>("base_url") else {
+fn api_has_matching_interactions(
+    url: Option<&str>,
+    sdk: Option<&str>,
+    apis: &Object<'_>,
+    read: &mut ModelFactRead<'_>,
+) -> bool {
+    let (Some(url), Some(sdk)) = (url, sdk) else {
         return false;
     };
-    let Some(sdk) = primary
-        .object("sdk")
-        .and_then(|sdk| sdk.read::<String>("aisdk"))
-    else {
+    let facts = &["wire.shape"];
+    let Some(entry) = read.object(apis.raw("interactions"), "api.interactions", facts) else {
         return false;
     };
-    apis.iter().skip(1).any(|(name, raw)| {
-        name == "interactions"
-            && Object::parse(raw).is_ok_and(|entry| {
-                entry.read::<String>("base_url").as_deref() == Some(&url)
-                    && entry
-                        .object("sdk")
-                        .and_then(|sdk| sdk.read::<String>("aisdk"))
-                        .as_deref()
-                        == Some(&sdk)
-            })
-    })
+    let endpoint: Option<String> =
+        read.value(entry.raw("base_url"), "api.interactions.base_url", facts);
+    let clients = read.object(entry.raw("sdk"), "api.interactions.sdk", facts);
+    let aisdk: Option<String> = read.value(
+        raw_field(clients.as_ref(), "aisdk"),
+        "api.interactions.sdk.aisdk",
+        facts,
+    );
+    endpoint.as_deref() == Some(url) && aisdk.as_deref() == Some(sdk)
 }
 
 fn known_api_protocol(value: &str) -> bool {

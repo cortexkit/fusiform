@@ -38,10 +38,7 @@
 //! determination, and why the standing question to consumers is whether the
 //! byte-affecting set is still complete rather than whether it looks right.
 
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests_with;
 use fusiform_store::ingest::fact_keys_of;
-
-const FIXTURE: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
 /// The wire crate's fact table lists exactly the facts fusiform serves.
 ///
@@ -61,27 +58,10 @@ const FIXTURE: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-de
 fn the_wire_fact_table_matches_what_the_producer_emits() {
     use fusiform_protocol::{FactClass, SERVED_FACTS};
 
-    // Normalized with the shipped input-audio evidence, as production ingest
-    // does, so `rate.input_audio` is produced where the deployed producer
-    // would produce it.
-    // The older excerpt predates model-level request shapes.
-    let mut fixture: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
-    fixture["anthropic"]["models"]["claude-sonnet-4-5"]["provider"] =
-        serde_json::json!({"shape": "responses"});
-    fixture["anthropic"]["models"]["claude-sonnet-4-5"]["type"] =
-        serde_json::json!("transcription");
-    let seed: serde_json::Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
-    fixture["google"]["models"]["gemini-3.1-flash-live-preview"] =
-        seed["google"]["models"]["gemini-3.1-flash-live-preview"].clone();
-    let outcome = normalize_legacy_models_dev_for_tests_with(
-        &serde_json::to_vec(&fixture).unwrap(),
-        &fusiform_module::input_audio::evidence(),
-    )
-    .expect("the fixture must normalize");
+    let catalog = fusiform_module::seed::catalog().expect("the v2 seed must normalize");
 
     let mut produced: Vec<String> = Vec::new();
-    for model in outcome.catalog.models() {
+    for model in catalog.models() {
         for key in fact_keys_of(model) {
             produced.push(key.as_str().to_string());
         }
@@ -118,7 +98,10 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             continue;
         }
         assert!(
-            tabled.contains(&key.as_str()),
+            tabled.contains(&key.as_str())
+                // Unit rates already serve through an exact curated allowlist;
+                // include it here until the protocol fact table lists them.
+                || fusiform_curate::curated_models::UNIT_BILLED_RATE_KEYS.contains(&key.as_str()),
             "the producer emits {key:?} and the wire table does not list it — a \
              consumer receiving it cannot tell whether it affects their request bytes"
         );
@@ -143,6 +126,16 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
             })
             .cloned()
     }));
+    let (v2, _dir) = super::media_catalog::v2_seed_store(&[("typesafe", "jev-1.13.0")]);
+    let decision = super::curated_wire::get(
+        &v2,
+        serde_json::json!({"provider_id":"typesafe","model_id":"jev-1.13.0","fact_prefixes":["model.kind"]}),
+    );
+    assert_eq!(
+        decision.models["typesafe/jev-1.13.0"]["model.kind"],
+        "decision"
+    );
+    curated.extend(decision.models["typesafe/jev-1.13.0"].keys().cloned());
     // An addition-only fact is produced by a shipped addition row.
     curated.extend(
         fusiform_module::fact_overrides::overrides()

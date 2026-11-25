@@ -27,7 +27,8 @@ const CASES: &[(&str, &str, &str)] = &[
 
 fn store() -> (CatalogStore, tempfile::TempDir) {
     let seed: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     let mut upstream = json!({});
     let extras = [
         ("perplexity", "sonar", ""),
