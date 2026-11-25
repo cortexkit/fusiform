@@ -1,11 +1,11 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::{
-    Change, ChangeOp, CurationSet, Hash, ReleaseEnvelope, ReleaseFormat, canonical_json, fact_hash,
-    state_hash, validate_upstream_key,
+    Change, ChangeOp, CurationSet, Hash, ReleaseEnvelope, ReleaseFormat, fact_hash, state_hash,
+    validate_upstream_key, write_canonical_json,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -147,7 +147,16 @@ pub fn build_release(
         curation_set: unchanged.is_none().then_some(curation),
     };
     envelope.change_hash = change.change_hash();
-    Ok(canonical_json(
-        &json!({"envelope": envelope, "change": change}),
-    ))
+    let mut out = br#"{"change":"#.to_vec();
+    change
+        .write_canonical(&mut out)
+        .expect("writing to a Vec cannot fail");
+    out.extend_from_slice(br#","envelope":"#);
+    write_canonical_json(
+        &mut out,
+        &serde_json::to_value(envelope).expect("an envelope is JSON"),
+    )
+    .expect("writing to a Vec cannot fail");
+    out.push(b'}');
+    Ok(out)
 }

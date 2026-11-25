@@ -11,5 +11,5 @@ time = { version = "0.3", default-features = false }
 base64 = "0.22"
 ed25519-dalek = { version = "2.2", default-features = false, features = ["zeroize"] }
 serde.workspace = true
-serde_json = { workspace = true, features = ["arbitrary_precision"] }
+serde_json = { workspace = true, features = ["arbitrary_precision", "raw_value"] }
 sha2 = "0.10"

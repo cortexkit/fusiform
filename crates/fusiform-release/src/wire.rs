@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt, io::Write as _, num::NonZeroU64};
+use std::{collections::BTreeMap, fmt, io::Write, num::NonZeroU64};
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Number, Value};
@@ -104,31 +104,33 @@ pub struct Change {
 
 impl Change {
     pub fn change_hash(&self) -> Hash {
-        use crate::{hash::DigestWriter, write_canonical_json};
+        let mut digest = crate::hash::DigestWriter::default();
+        self.write_canonical(&mut digest)
+            .expect("digest writes cannot fail");
+        digest.finish()
+    }
 
-        // The two v1 fields have a fixed canonical order. Encode one operation
-        // at a time so hashing does not make a second tree of a whole release.
-        let mut out = DigestWriter::default();
-        let encode = |out: &mut DigestWriter, value| {
-            write_canonical_json(out, &value).expect("digest writes cannot fail");
-        };
-        out.write_all(br#"{"curation_set":"#).unwrap();
-        encode(
+    pub(crate) fn write_canonical(&self, mut out: impl Write) -> std::io::Result<()> {
+        use crate::write_canonical_json;
+
+        // Hashing and release encoding use the same field order and encode one
+        // operation at a time instead of building a second tree of the change.
+        out.write_all(br#"{"curation_set":"#)?;
+        write_canonical_json(
             &mut out,
-            serde_json::to_value(&self.curation_set).expect("curation is JSON"),
-        );
-        out.write_all(br#","upstream":["#).unwrap();
+            &serde_json::to_value(&self.curation_set).expect("curation is JSON"),
+        )?;
+        out.write_all(br#","upstream":["#)?;
         for (index, operation) in self.upstream.iter().enumerate() {
             if index != 0 {
-                out.write_all(b",").unwrap();
+                out.write_all(b",")?;
             }
-            encode(
+            write_canonical_json(
                 &mut out,
-                serde_json::to_value(operation).expect("an operation is JSON"),
-            );
+                &serde_json::to_value(operation).expect("an operation is JSON"),
+            )?;
         }
-        out.write_all(b"]}").unwrap();
-        out.finish()
+        out.write_all(b"]}")
     }
 }
 

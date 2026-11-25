@@ -376,6 +376,19 @@ fn snapshot_builder_refuses_signed_invalid_history_lists() {
 }
 
 #[test]
+fn history_day_builder_keeps_unknown_fields_in_the_canonical_bytes() {
+    let (_, release, _) = two_releases();
+    let mut stored = serde_json::to_value(release).unwrap();
+    let extension: Value = serde_json::from_str(r#"{"z":[9007199254740993,1.00],"a":true}"#).unwrap();
+    stored["extra"] = extension.clone();
+    stored["envelope"]["extra"] = extension.clone();
+    stored["change"]["extra"] = extension.clone();
+    stored["change"]["upstream"][0]["extra"] = extension;
+    let actual = history_day_bytes(DAY, &serde_json::to_vec(&stored).unwrap()).unwrap();
+    assert_eq!(actual, wire(json!({"day": DAY, "releases": [stored]})));
+}
+
+#[test]
 fn history_day_builder_refuses_a_change_that_does_not_match_its_envelope() {
     let (_, mut release, _) = two_releases();
     let fusiform_release::ChangeOp::Set { value, .. } = &mut release.change.upstream[0] else {
