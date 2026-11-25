@@ -379,7 +379,7 @@ pub(crate) fn document_rows(
             continue;
         }
         if name == "plan-prices" {
-            plan_price_changes(out, previous, next, at)?;
+            plan_price_changes(out, previous, next, at, old.is_some())?;
             continue;
         }
         if let Some(table) = dedicated_table(document_kind(name)?) {
@@ -482,6 +482,7 @@ fn plan_price_changes(
     previous: Option<&Value>,
     next: Option<&Value>,
     at: i64,
+    has_previous_release: bool,
 ) -> Result<(), String> {
     let old = plan_price_claims(previous)?;
     let new = plan_price_claims(next)?;
@@ -496,6 +497,7 @@ fn plan_price_changes(
         let (&latest, latest_row) = next
             .last_key_value()
             .expect("plan has at least one boundary");
+        let mut reassert_latest = old_latest.is_some_and(|(&old_at, _)| old_at > latest);
         for (&boundary, row) in next {
             if previous.and_then(|p| p.get(&boundary)) == Some(row) {
                 continue;
@@ -518,12 +520,18 @@ fn plan_price_changes(
                 })
             {
                 row["boundary_at_ms"] = json!(at);
+                reassert_latest = false;
+            } else if has_previous_release && boundary == latest && boundary < at {
+                // The first release reconciles its vendor boundaries with the
+                // imported base. Only later releases can restore a claim that
+                // a prior signed release withdrew or replaced at publication.
+                reassert_latest = true;
             }
             emit(row);
         }
-        if old_latest.is_some_and(|(&old_at, _)| old_at > latest) {
-            // Dropping the latest claim makes the remaining price current at
-            // publication, not retroactively at its original boundary.
+        if reassert_latest {
+            // Reassert the current claim at publication so it wins going
+            // forward without erasing the intervening history.
             let mut replacement = latest_row.clone();
             replacement["boundary_at_ms"] = json!(at);
             emit(replacement);
@@ -1079,6 +1087,86 @@ mod tests {
         assert_eq!(
             read(3006)[0].refusal_reason.as_deref(),
             Some(fusiform_store::UNCURATED)
+        );
+    }
+
+    fn prices_after_plan_reinstatement(
+        original: &Documents,
+        interim: &Documents,
+    ) -> Vec<Option<i64>> {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open_for_store(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().into_owned(),
+            },
+        })
+        .unwrap();
+        let base = ImportedTables::new();
+        for (release, old, docs, at) in [
+            (1, None, original, 3001),
+            (2, Some(original), interim, 3002),
+            (3, Some(interim), original, 3003),
+        ] {
+            let mut rows = ImportedTables::new();
+            validate_published(docs, &Upstream::default()).unwrap();
+            validate_received(docs, &Upstream::default()).unwrap();
+            document_rows(&mut rows, old, docs, at).unwrap();
+            store
+                .apply_store_releases(
+                    (release == 1).then_some(&base),
+                    &[ReleaseArrival {
+                        published_at_ms: at,
+                        release: StoreRelease {
+                            release,
+                            state_hash: "a".repeat(64),
+                            curation_hash: "b".repeat(64),
+                            applied_at_ms: at,
+                        },
+                        rows,
+                        upstream: None,
+                    }],
+                )
+                .unwrap();
+        }
+        (3001..=3003)
+            .map(|at| store.plan_prices_at(at, Some("provider")).unwrap()[0].minor_units)
+            .collect()
+    }
+
+    fn reinstatement_document(prices: &[(i64, i64)]) -> Documents {
+        let cells: Vec<_> = prices
+            .iter()
+            .map(|(boundary, amount)| {
+                json!({"provider_id":"provider","tier":"pro", "boundary_at_ms":boundary,
+                "established_by":"operator", "source_ref":"https://example.test/prices",
+                "established_at_ms":3000, "review_by_ms":6000,
+                "price":{"currency":"USD","exponent":2,"period":"month","minor_units":amount}})
+            })
+            .collect();
+        BTreeMap::from([("plan-prices".to_string(), json!({ "cells": cells }))])
+    }
+
+    #[test]
+    fn a_republished_plan_tier_is_served_again() {
+        let listed = reinstatement_document(&[(2000, 200)]);
+        assert_eq!(
+            prices_after_plan_reinstatement(&listed, &Documents::new()),
+            [Some(200), None, Some(200)],
+            "the republished tier must win over the tombstone without hiding the withdrawal"
+        );
+    }
+
+    #[test]
+    fn a_reinstated_later_plan_claim_is_served() {
+        let both = reinstatement_document(&[(2000, 200), (1000, 100)]);
+        let earlier_only = reinstatement_document(&[(1000, 100)]);
+        assert_eq!(
+            prices_after_plan_reinstatement(&both, &earlier_only),
+            [Some(200), Some(100), Some(200)],
+            "the reinstated price must win over the temporary replacement"
         );
     }
 
