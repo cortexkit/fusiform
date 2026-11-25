@@ -4,38 +4,78 @@
 //! place of models.dev's 32,768. These tests drive the real serve path over a
 //! store seeded from the embedded models.dev copy, which publishes 32,768.
 
+use std::collections::BTreeMap;
+
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
+use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::{serve_catalog_get, serve_history, CatalogGetResponse};
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, NewObservation};
-use serde_json::{json, Value};
+use serde_json::{
+    json,
+    value::{to_raw_value, RawValue},
+    Value,
+};
 
 const TARGET: &str = "google/gemini-4-argon";
 const ALIAS: &str = "google/antigravity-gemini-4-argon";
 const CONTROL: &str = "google/gemini-3.8-flash";
 
+type RawObject = BTreeMap<String, Box<RawValue>>;
+
+fn seed_subset(selection: &[(&str, &[&str])]) -> RawObject {
+    let seed: RawObject =
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
+    selection
+        .iter()
+        .map(|&(provider_id, ids)| {
+            let mut provider: RawObject = serde_json::from_str(seed[provider_id].get()).unwrap();
+            let mut models: RawObject = serde_json::from_str(provider["models"].get()).unwrap();
+            for &id in ids {
+                assert!(
+                    models.contains_key(id),
+                    "the seed must carry {provider_id}/{id}"
+                );
+            }
+            // Keep each model's API and cache TTL keys in document order.
+            models.retain(|id, _| ids.contains(&id.as_str()));
+            provider.insert("models".into(), to_raw_value(&models).unwrap());
+            (provider_id.into(), to_raw_value(&provider).unwrap())
+        })
+        .collect()
+}
+
+fn edit_seed_model(
+    document: &mut RawObject,
+    provider_id: &str,
+    model_id: &str,
+    edit: impl FnOnce(&mut RawObject),
+) {
+    let mut provider: RawObject = serde_json::from_str(document[provider_id].get()).unwrap();
+    let mut models: RawObject = serde_json::from_str(provider["models"].get()).unwrap();
+    let mut model: RawObject = serde_json::from_str(models[model_id].get()).unwrap();
+    edit(&mut model);
+    models.insert(model_id.into(), to_raw_value(&model).unwrap());
+    provider.insert("models".into(), to_raw_value(&models).unwrap());
+    document.insert(provider_id.into(), to_raw_value(&provider).unwrap());
+}
+
 /// The embedded seed's google entry cut to the overridden model and one
 /// control, with Argon's output limit set to `output`.
 fn upstream(output: Value) -> Vec<u8> {
-    let seed: Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    let mut google = seed["google"].clone();
-    google["models"] = json!({});
-    for id in ["gemini-4-argon", "gemini-3.8-flash"] {
-        let row = seed["google"]["models"][id].clone();
-        assert!(row.is_object(), "the seed must carry google/{id}");
-        google["models"][id] = row;
-    }
-    assert_eq!(
-        google["models"]["gemini-4-argon"]["limit"]["output"],
-        json!(32_768),
-        "the embedded seed must publish the value the override replaces"
-    );
-    google["models"]["gemini-4-argon"]["limit"]["output"] = output;
-    serde_json::to_vec(&json!({ "google": google })).unwrap()
+    let mut document = seed_subset(&[("google", &["gemini-4-argon", "gemini-3.8-flash"])]);
+    edit_seed_model(&mut document, "google", "gemini-4-argon", |model| {
+        let mut limit: Value = serde_json::from_str(model["limit"].get()).unwrap();
+        assert_eq!(
+            limit["output"],
+            json!(32_768),
+            "the embedded seed must publish the value the override replaces"
+        );
+        limit["output"] = output;
+        model.insert("limit".into(), to_raw_value(&limit).unwrap());
+    });
+    serde_json::to_vec(&document).unwrap()
 }
 
 fn ingest(store: &CatalogStore, bytes: &[u8], at: i64) {
@@ -51,9 +91,7 @@ fn ingest(store: &CatalogStore, bytes: &[u8], at: i64) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(bytes)
-        .unwrap()
-        .catalog;
+    let catalog = normalize_models_dev(bytes).unwrap().catalog;
     let (kind, observation) = if at == 1_000 {
         (BoundaryKind::Seed, None)
     } else {
@@ -87,9 +125,10 @@ fn get(store: &CatalogStore, args: Value) -> CatalogGetResponse {
 }
 
 fn assert_no_added_reasoning_rate(reasoning: Option<bool>) {
-    let mut row = json!({"id":"speech", "name":"Speech", "cost":{"output":10}});
+    let mut row = json!({"id":"speech", "type":"chat", "name":"Speech", "capabilities":{}, "api":{},
+        "cost":{"text":{"output":{"price":10}}}});
     if let Some(reasoning) = reasoning {
-        row["reasoning"] = json!(reasoning);
+        row["capabilities"] = json!({"reasoning":{"supported":reasoning}});
     }
     let document = json!({"openai":{"id":"openai", "name":"OpenAI", "models":{"speech":row}}});
     let (store, _dir) = store_document(&serde_json::to_vec(&document).unwrap());
@@ -130,12 +169,17 @@ fn reasoning_rate_is_not_added_when_capability_is_unknown() {
 #[test]
 fn reasoning_billed_as_output_on_current_and_dated_reads() {
     let upstream = json!({"openai":{"id":"openai", "name":"OpenAI", "models":{
-        "output-only":{"id":"output-only", "name":"Output only", "reasoning":true, "cost":{"output":10}},
-        "priced":{"id":"priced", "name":"Priced", "reasoning":true, "cost":{"output":10, "reasoning":1}},
-        "zero":{"id":"zero", "name":"Zero", "reasoning":true, "cost":{"output":10, "reasoning":0}},
-        "unpriced":{"id":"unpriced", "name":"Unpriced", "reasoning":true, "cost":{"output":10}}
+        "output-only":{"id":"output-only", "type":"chat", "name":"Output only", "api":{},
+            "capabilities":{"reasoning":{"supported":true}}, "cost":{"text":{"output":{"price":10}}}},
+        "priced":{"id":"priced", "type":"chat", "name":"Priced", "api":{},
+            "capabilities":{"reasoning":{"supported":true}}, "cost":{"text":{"output":{"price":10, "reasoning":1}}}},
+        "zero":{"id":"zero", "type":"chat", "name":"Zero", "api":{},
+            "capabilities":{"reasoning":{"supported":true}}, "cost":{"text":{"output":{"price":10, "reasoning":0}}}},
+        "unpriced":{"id":"unpriced", "type":"chat", "name":"Unpriced", "api":{},
+            "capabilities":{"reasoning":{"supported":true}}, "cost":{"text":{"output":{"price":10}}}}
     }}});
     let (store, _dir) = store_document(&serde_json::to_vec(&upstream).unwrap());
+    // The models.dev v2 parser cannot emit the historical missing-rate marker for reasoning.
     let unpriced = json!({"state":"unpriced", "reason":"missing_rate"});
     store
         .append_eras(&[fusiform_store::NewEra {
@@ -222,8 +266,9 @@ const FLASH: &str = "google/gemini-3.1-flash-image";
 const FLASH_MODEL: &str = "gemini-3.1-flash-image";
 
 fn flash_document(output: i64) -> Vec<u8> {
-    let model = json!({"id":FLASH_MODEL, "name":"Flash Image",
-        "cost":{"input":2, "output":output}, "limit":{"context":1000, "output":500}});
+    let model = json!({"id":FLASH_MODEL, "type":"chat", "name":"Flash Image", "capabilities":{}, "api":{},
+        "cost":{"text":{"input":{"price":2}, "output":{"price":output}}},
+        "limit":{"context":1000, "output":500}});
     serde_json::to_vec(&json!({"google":{"id":"google", "name":"Google",
         "models":{FLASH_MODEL:model}}}))
     .unwrap()
@@ -875,14 +920,10 @@ fn anthropic_store_with_capability(
     capability: &str,
     planted: Option<Value>,
 ) -> (CatalogStore, tempfile::TempDir) {
-    let seed: Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    let mut upstream = json!({});
-    for (provider, ids) in [
+    let mut upstream = seed_subset(&[
         (
             "anthropic",
-            vec![
+            &[
                 "claude-opus-5-5",
                 "claude-haiku-5-5",
                 "claude-sonnet-5-5",
@@ -892,19 +933,21 @@ fn anthropic_store_with_capability(
             ],
         ),
         // Only so the Antigravity alias of Opus 5.5 has its provider.
-        ("google", vec!["gemini-3.8-flash"]),
-        ("opencode-go", vec!["claude-haiku-5-5"]),
-        ("amazon-bedrock", vec!["anthropic.claude-fable-5"]),
-        ("google-vertex-anthropic", vec!["claude-sonnet-5@default"]),
-    ] {
-        upstream[provider] = seed[provider].clone();
-        upstream[provider]["models"] = json!({});
-        for id in ids {
-            let row = seed[provider]["models"][id].clone();
-            assert!(row.is_object(), "the seed must carry {provider}/{id}");
-            upstream[provider]["models"][id] = row;
-        }
-    }
+        ("google", &["gemini-3.8-flash"]),
+        ("opencode-go", &["claude-haiku-5-5"]),
+        ("amazon-bedrock", &["anthropic.claude-fable-5"]),
+    ]);
+    // The seed no longer lists this Vertex route; keep it as a negative control.
+    upstream.insert(
+        "google-vertex-anthropic".into(),
+        to_raw_value(
+            &json!({"id":"google-vertex-anthropic", "name":"Vertex AI (Anthropic)",
+            "models":{"claude-sonnet-5@default":{"id":"claude-sonnet-5@default", "type":"chat",
+                "name":"Claude Sonnet 5", "canonical_id":"anthropic/claude-sonnet-5",
+                "limit":{"context":1000000}, "capabilities":{}, "api":{"messages":{}}}}}),
+        )
+        .unwrap(),
+    );
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -929,7 +972,7 @@ fn anthropic_store_with_capability(
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&upstream).unwrap())
+    let catalog = normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
         .unwrap()
         .catalog;
     let mut plan =
@@ -1271,64 +1314,21 @@ const DAYBREAK_CONTROL: &str = "openai/gpt-5.6-sol";
 /// models.dev publishes none. `planted` replaces Daybreak Blue's stored status
 /// with one models.dev would have published.
 fn daybreak_store(planted: Option<Value>) -> (CatalogStore, tempfile::TempDir) {
-    let seed: Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    let mut upstream = json!({});
-    upstream["openai"] = seed["openai"].clone();
-    upstream["openai"]["models"] = json!({});
-    for id in [
-        "gpt-daybreak-blue-latest",
-        "gpt-daybreak-red-latest",
-        "gpt-5.6-sol",
-    ] {
-        let row = seed["openai"]["models"][id].clone();
-        assert!(row.is_object(), "the seed must carry openai/{id}");
-        upstream["openai"]["models"][id] = row;
-    }
-    let dir = tempfile::tempdir().unwrap();
-    let store = CatalogStore::open(&StorageDescriptor {
-        module_id: "fusiform".into(),
-        storage_namespace: "default".into(),
-        isolation: Isolation::Module,
-        backend: StorageBackend::Sqlite {
-            path: dir.path().join("store.db").to_string_lossy().into(),
-        },
-    })
-    .unwrap();
-    store
-        .record_observation(&NewObservation {
-            source: SourceId::ModelsDev,
-            observed_at: Timestamp(1_000),
-            outcome: ObservationOutcome::Changed {
-                snapshot_seq: 1_000,
-            },
-            normalized_hash: None,
-            raw_hash: None,
-            etag: None,
-            duration_ms: None,
-            detail: None,
-        })
-        .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&upstream).unwrap())
-        .unwrap()
-        .catalog;
-    let mut plan =
-        plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
-    for era in &mut plan.eras {
-        if era.fact_key.as_str() == STATUS && era.model_id.starts_with("gpt-daybreak-") {
+    let aliases = ["gpt-daybreak-blue-latest", "gpt-daybreak-red-latest"];
+    let mut upstream = seed_subset(&[("openai", &[aliases[0], aliases[1], "gpt-5.6-sol"])]);
+    for id in aliases {
+        edit_seed_model(&mut upstream, "openai", id, |model| {
             assert_eq!(
-                era.value_json, "null",
-                "models.dev now publishes a status for {}; review the deprecation rows",
-                era.model_id
+                model.get("status").map_or("null", |value| value.get()),
+                "null",
+                "models.dev now publishes a status for {id}; review the deprecation rows"
             );
-            if let (Some(value), "gpt-daybreak-blue-latest") = (&planted, era.model_id.as_str()) {
-                era.value_json = value.to_string();
+            if let (Some(value), "gpt-daybreak-blue-latest") = (&planted, id) {
+                model.insert("status".into(), to_raw_value(value).unwrap());
             }
-        }
+        });
     }
-    store.append_eras(&plan.eras).unwrap();
-    (store, dir)
+    store_document(&serde_json::to_vec(&upstream).unwrap())
 }
 
 #[test]
@@ -1410,36 +1410,17 @@ fn a_status_models_dev_publishes_wins_over_the_deprecation_row() {
 
 #[test]
 fn carbon_and_neon_antigravity_aliases_serve_target_output_limits() {
-    let seed: Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    let carbon = seed["google"]["models"]["gemini-4-carbon"].clone();
+    let upstream = seed_subset(&[(
+        "google",
+        &["gemini-4-carbon", "gemini-4-argon", "gemini-4-neon"],
+    )]);
+    let google: Value = serde_json::from_str(upstream["google"].get()).unwrap();
     assert_eq!(
-        carbon["limit"]["output"],
+        google["models"]["gemini-4-carbon"]["limit"]["output"],
         json!(32_768),
         "the embedded seed must publish the value the override replaces"
     );
-    let mut google = seed["google"].clone();
-    google["models"] = json!({
-        "gemini-4-carbon": carbon,
-        "gemini-4-argon": seed["google"]["models"]["gemini-4-argon"],
-        "gemini-4-neon": seed["google"]["models"]["gemini-4-neon"]
-    });
-    let dir = tempfile::tempdir().unwrap();
-    let store = CatalogStore::open(&StorageDescriptor {
-        module_id: "fusiform".into(),
-        storage_namespace: "default".into(),
-        isolation: Isolation::Module,
-        backend: StorageBackend::Sqlite {
-            path: dir.path().join("store.db").to_string_lossy().into(),
-        },
-    })
-    .unwrap();
-    ingest(
-        &store,
-        &serde_json::to_vec(&json!({ "google": google })).unwrap(),
-        1_000,
-    );
+    let (store, _dir) = store_document(&serde_json::to_vec(&upstream).unwrap());
 
     let get_named = |model| get(&store, json!({"provider_id":"google","model_id":model}));
     let outputs = ["antigravity-gemini-4-carbon", "antigravity-gemini-4-neon"]
@@ -1504,28 +1485,13 @@ fn carbon_and_neon_antigravity_aliases_serve_target_output_limits() {
 
 #[test]
 fn hydrogen_antigravity_alias_serves_the_targets_output_limit() {
-    let seed: Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    let hydrogen = seed["google"]["models"]["gemini-4-hydrogen"].clone();
-    assert_eq!(hydrogen["limit"]["output"], json!(65_536));
-    let mut google = seed["google"].clone();
-    google["models"] = json!({"gemini-4-hydrogen": hydrogen});
-    let dir = tempfile::tempdir().unwrap();
-    let store = CatalogStore::open(&StorageDescriptor {
-        module_id: "fusiform".into(),
-        storage_namespace: "default".into(),
-        isolation: Isolation::Module,
-        backend: StorageBackend::Sqlite {
-            path: dir.path().join("store.db").to_string_lossy().into(),
-        },
-    })
-    .unwrap();
-    ingest(
-        &store,
-        &serde_json::to_vec(&json!({"google": google})).unwrap(),
-        1_000,
+    let upstream = seed_subset(&[("google", &["gemini-4-hydrogen"])]);
+    let google: Value = serde_json::from_str(upstream["google"].get()).unwrap();
+    assert_eq!(
+        google["models"]["gemini-4-hydrogen"]["limit"]["output"],
+        json!(65_536)
     );
+    let (store, _dir) = store_document(&serde_json::to_vec(&upstream).unwrap());
     for response in [
         get(
             &store,
@@ -1563,24 +1529,12 @@ const AZURE_GPT_55: &str = "azure/gpt-5.5";
 /// gpt-5.5's canonical id under the same model id, and the Antigravity alias
 /// of Opus 5.5 (its google provider comes from Gemini 3.8 Flash).
 fn reasoning_default_store() -> (CatalogStore, tempfile::TempDir) {
-    let seed: Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    let mut upstream = json!({});
-    for (provider, ids) in [
-        ("openai", vec!["gpt-5.5", "gpt-6.2-sol"]),
-        ("azure", vec!["gpt-5.5"]),
-        ("anthropic", vec!["claude-opus-5-5"]),
-        ("google", vec!["gemini-3.8-flash"]),
-    ] {
-        upstream[provider] = seed[provider].clone();
-        upstream[provider]["models"] = json!({});
-        for id in ids {
-            let row = seed[provider]["models"][id].clone();
-            assert!(row.is_object(), "the seed must carry {provider}/{id}");
-            upstream[provider]["models"][id] = row;
-        }
-    }
+    let upstream = seed_subset(&[
+        ("openai", &["gpt-5.5", "gpt-6.2-sol"]),
+        ("azure", &["gpt-5.5"]),
+        ("anthropic", &["claude-opus-5-5"]),
+        ("google", &["gemini-3.8-flash"]),
+    ]);
     store_document(&serde_json::to_vec(&upstream).unwrap())
 }
 
@@ -1769,14 +1723,10 @@ const CYBER_ROUTE: &str = "route.refusal_fallback.cyber";
 /// Seeded Claude rows for the refusal-fallback additions, with one reseller
 /// copy of Haiku 5.5 and the Antigravity alias of Opus 5.5 as boundaries.
 fn refusal_fallback_store() -> (CatalogStore, tempfile::TempDir) {
-    let seed: Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    let mut upstream = json!({});
-    for (provider, ids) in [
+    let upstream = seed_subset(&[
         (
             "anthropic",
-            vec![
+            &[
                 "claude-fable-5",
                 "claude-fable-5-1",
                 "claude-opus-5",
@@ -1786,47 +1736,10 @@ fn refusal_fallback_store() -> (CatalogStore, tempfile::TempDir) {
                 "claude-opus-4-5",
             ],
         ),
-        ("google", vec!["gemini-3.8-flash"]),
-        ("opencode-go", vec!["claude-haiku-5-5"]),
-    ] {
-        upstream[provider] = seed[provider].clone();
-        upstream[provider]["models"] = json!({});
-        for id in ids {
-            let row = seed[provider]["models"][id].clone();
-            assert!(row.is_object(), "the seed must carry {provider}/{id}");
-            upstream[provider]["models"][id] = row;
-        }
-    }
-    let dir = tempfile::tempdir().unwrap();
-    let store = CatalogStore::open(&StorageDescriptor {
-        module_id: "fusiform".into(),
-        storage_namespace: "default".into(),
-        isolation: Isolation::Module,
-        backend: StorageBackend::Sqlite {
-            path: dir.path().join("store.db").to_string_lossy().into(),
-        },
-    })
-    .unwrap();
-    store
-        .record_observation(&NewObservation {
-            source: SourceId::ModelsDev,
-            observed_at: Timestamp(1_000),
-            outcome: ObservationOutcome::Changed {
-                snapshot_seq: 1_000,
-            },
-            normalized_hash: None,
-            raw_hash: None,
-            etag: None,
-            duration_ms: None,
-            detail: None,
-        })
-        .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&upstream).unwrap())
-        .unwrap()
-        .catalog;
-    let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
-    store.append_eras(&plan.eras).unwrap();
-    (store, dir)
+        ("google", &["gemini-3.8-flash"]),
+        ("opencode-go", &["claude-haiku-5-5"]),
+    ]);
+    store_document(&serde_json::to_vec(&upstream).unwrap())
 }
 
 #[test]

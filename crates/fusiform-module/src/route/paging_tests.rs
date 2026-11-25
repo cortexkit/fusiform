@@ -55,8 +55,9 @@ pub(super) fn fixture_in_mode(store_mode: bool) -> (CatalogStore, tempfile::Temp
             provider.clone(),
             json!({
                 "id": provider, "name": provider,
-                "models": {"m": {"id":"m", "name":"Synthetic model", "family":"x".repeat(400),
-                    "limit":{"context":1000}, "cost":{"input":1,"output":2}}}
+                "models": {"m": {"id":"m", "type":"chat", "name":"Synthetic model", "family":"x".repeat(400),
+                    "capabilities":{}, "api":{},
+                    "limit":{"context":1000}, "cost":{"text":{"input":{"price":1},"output":{"price":2}}}}}
             }),
         );
     }
@@ -64,15 +65,16 @@ pub(super) fn fixture_in_mode(store_mode: bool) -> (CatalogStore, tempfile::Temp
         "google".into(),
         json!({
             "id":"google", "name":"Synthetic alias target", "models":{
-                "gemini-3.8-flash":{"id":"gemini-3.8-flash","name":"Synthetic model",
-                    "family":"gemini","limit":{"context":1000},"cost":{"input":1,"output":2}}}
+                "gemini-3.8-flash":{"id":"gemini-3.8-flash","type":"chat","name":"Synthetic model",
+                    "capabilities":{}, "api":{},
+                    "family":"gemini","limit":{"context":1000},
+                    "cost":{"text":{"input":{"price":1},"output":{"price":2}}}}}
         }),
     );
-    let catalog = fusiform_core::normalize::normalize_legacy_models_dev_for_tests(
-        &serde_json::to_vec(&upstream).unwrap(),
-    )
-    .unwrap()
-    .catalog;
+    let catalog =
+        fusiform_core::normalize::normalize_models_dev(&serde_json::to_vec(&upstream).unwrap())
+            .unwrap()
+            .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     let obs = observation(&store, 1000);
@@ -463,8 +465,8 @@ fn continuation_after_era_write_is_refused() {
     let (store, _dir) = fixture();
     let first = get(&store, json!({"paged":true}), 2600);
     let token = first.next_page_token.unwrap();
-    let catalog = fusiform_core::normalize::normalize_legacy_models_dev_for_tests(
-        br#"{"new":{"id":"new","name":"new","models":{"m":{"id":"m","name":"new"}}}}"#,
+    let catalog = fusiform_core::normalize::normalize_models_dev(
+        br#"{"new":{"id":"new","name":"new","models":{"m":{"id":"m","type":"chat","name":"new","capabilities":{},"api":{}}}}}"#,
     )
     .unwrap()
     .catalog;
