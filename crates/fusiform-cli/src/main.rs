@@ -40,13 +40,14 @@
 //! ```
 
 use std::{
-    collections::BTreeMap,
     env,
     ffi::OsString,
     path::{Path, PathBuf},
     process,
     time::Duration,
 };
+
+mod catalog_render;
 
 use fusiform_store::prefix;
 use std::fmt::Write as _;
@@ -640,7 +641,7 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
 
     match args.command.as_str() {
         "status" => print_status(&response),
-        "get" => print_catalog(&response),
+        "get" => catalog_render::print_catalog(&response),
         "history" => print!("{}", render_history(&response)),
         "correct" => print_correction(&response),
         "plan-prices" => print!("{}", render_plan_prices(&response)),
@@ -972,282 +973,6 @@ fn print_status(response: &serde_json::Value) {
     }
 }
 
-fn print_catalog(response: &serde_json::Value) {
-    let resolved = response
-        .get("resolved_at_ms")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
-    let empty = serde_json::Map::new();
-    let models = response
-        .get("models")
-        .and_then(|v| v.as_object())
-        .unwrap_or(&empty);
-
-    println!(
-        "{} at {}  (catalog version {})",
-        count(models.len(), "model"),
-        format_instant(resolved),
-        response
-            .get("catalog_version")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(-1)
-    );
-
-    print!("{}", render_catalog_models(response, models));
-}
-
-fn render_catalog_models(
-    response: &serde_json::Value,
-    models: &serde_json::Map<String, serde_json::Value>,
-) -> String {
-    // A single model prints its facts; a whole catalog prints one line each,
-    // because 6,253 models times eleven facts is not something to read.
-    //
-    // BOTH SHAPES BUILD A STRING AND PRINT ONCE. They used to differ — the
-    // single-model path returned text while this one printed directly — and
-    // that asymmetry is what let `render_single_model` both print and return
-    // without looking wrong, which rendered every single-model read twice.
-    //
-    // The mixed form cannot be written now: nothing below prints, so a block
-    // added to one path and not the other is missing rather than doubled, and
-    // missing is the failure that shows up the first time someone looks.
-    if models.len() == 1 {
-        return render_single_model(response, models);
-    }
-
-    let mut out = render_billing_plane(response);
-    out.push('\n');
-    for (identity, facts) in models {
-        let _ = write!(out, "  {identity}");
-        for key in ["quality.elo", "quality.eq"] {
-            if let Some(value) = facts.get(key) {
-                let _ = write!(out, "  {key}={}", render_fact_value(value));
-            }
-        }
-        out.push('\n');
-    }
-    out.push_str(&render_curated(response));
-    out.push_str(&render_quality_scores(response));
-    out.push_str(&render_aliased(response));
-    out.push_str(&render_fact_overrides(response));
-    out.push_str(&render_withheld(response));
-    out.push_str(&render_uncertain(response));
-    out
-}
-
-fn render_quality_scores(response: &serde_json::Value) -> String {
-    let Some(grades) = response
-        .get("quality_scores")
-        .filter(|value| value.is_object())
-    else {
-        return String::new();
-    };
-    format!(
-        "\nquality scores: graded by {} at {} (routing judgments, not upstream facts)\n",
-        grades["graded_by"].as_str().unwrap_or("?"),
-        format_instant(grades["graded_at_ms"].as_i64().unwrap_or(0))
-    )
-}
-
-/// An alias serves another model's facts under its own id, and its prices are
-/// borrowed. Without this line an operator sees ordinary-looking facts and no
-/// sign of which model they really describe or what established that.
-fn render_aliased(response: &serde_json::Value) -> String {
-    let mut out = String::new();
-    if let Some(rows) = response.get("aliased").and_then(|v| v.as_array()) {
-        for row in rows {
-            let _ = writeln!(
-                out,
-                "\naliased: {} serves {}/{} (prices borrowed)",
-                row["model"].as_str().unwrap_or("?"),
-                row["target_provider_id"].as_str().unwrap_or("?"),
-                row["target_model_id"].as_str().unwrap_or("?")
-            );
-            let _ = writeln!(
-                out,
-                "  source: {}",
-                row["source_ref"].as_str().unwrap_or("?")
-            );
-        }
-    }
-    out
-}
-
-/// Login restrictions must be visible even on a plain read: the provider id
-/// alone does not establish that an API-key credential can call this model.
-fn render_curated(response: &serde_json::Value) -> String {
-    let mut out = String::new();
-    if let Some(rows) = response.get("curated").and_then(|v| v.as_array()) {
-        for row in rows {
-            let methods = row["auth_methods"]
-                .as_array()
-                .map(|methods| {
-                    methods
-                        .iter()
-                        .filter_map(|method| method.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                })
-                .unwrap_or_default();
-            let _ = writeln!(
-                out,
-                "\ncurated: {} (not stored upstream)",
-                row["model"].as_str().unwrap_or("?")
-            );
-            let _ = writeln!(
-                out,
-                "  allowed login methods: {methods} (all others refused)"
-            );
-            let _ = writeln!(
-                out,
-                "  source: {}",
-                row["source_ref"].as_str().unwrap_or("?")
-            );
-            let _ = writeln!(out, "  review by: {}", row["review_by_ms"]);
-        }
-    }
-    out
-}
-
-/// Disclose the billing claims beside the catalog they qualify, even when a
-/// bulk read only lists model identities. A quota proxy is not a billed price,
-/// and a rule's source is what lets an operator inspect that distinction.
-fn render_billing_plane(response: &serde_json::Value) -> String {
-    let mut out = String::new();
-    if let Some(plane) = response.get("plane").and_then(|v| v.as_object()) {
-        let _ = writeln!(
-            out,
-            "\nbilling plane: {}/{} ({})",
-            plane
-                .get("provider_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?"),
-            plane
-                .get("auth_method")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?"),
-            plane.get("kind").and_then(|v| v.as_str()).unwrap_or("?"),
-        );
-        if plane.get("kind").and_then(|v| v.as_str()) == Some("quota_proxy") {
-            out.push_str("  API rates are quota proxies, not amounts billed.\n");
-        }
-        // An undeclared API-key plane is the upstream itself and has no
-        // curated provenance. Do not invent a source or a review date for it.
-        if let Some(source) = plane.get("source_ref").and_then(|v| v.as_str()) {
-            let _ = writeln!(out, "  source {source}");
-        }
-        if let Some(review) = plane.get("review_by_ms").and_then(|v| v.as_i64()) {
-            let _ = writeln!(out, "  review by {}", format_instant(review));
-        }
-    }
-
-    if let Some(rules) = response.get("billing_rules").and_then(|v| v.as_array()) {
-        if !rules.is_empty() {
-            out.push_str("\nbilling rules:\n");
-        }
-        for rule in rules {
-            let fact = rule["fact_key"].as_str().unwrap_or("?");
-            let suffix = fact
-                .strip_prefix("rate.")
-                .and_then(|key| key.split_once('.'))
-                .map(|(_, suffix)| format!(".{suffix}"))
-                .unwrap_or_default();
-            let target = rule["as_class"]
-                .as_str()
-                .map(|class| format!("{class}{suffix}"));
-            let state = match rule["state"].as_str().unwrap_or("?") {
-                "billed_as" => format!("billed as {}", target.as_deref().unwrap_or("?")),
-                "stated_zero" => "stated zero".to_string(),
-                "not_established" => match target {
-                    Some(target) => format!("not established (would be billed as {target})"),
-                    None => "not established".to_string(),
-                },
-                other => other.to_string(),
-            };
-            let _ = writeln!(
-                out,
-                "  {}  {fact}  {state}\n      established by {} on {}, review by {}\n      source {}",
-                rule["model"].as_str().unwrap_or("?"),
-                rule["established_by"].as_str().unwrap_or("?"),
-                format_instant(rule["established_at_ms"].as_i64().unwrap_or(0)),
-                format_instant(rule["review_by_ms"].as_i64().unwrap_or(0)),
-                rule["source_ref"].as_str().unwrap_or("?"),
-            );
-        }
-    }
-    out
-}
-
-fn render_fact_value(value: &serde_json::Value) -> String {
-    if value.get("state").and_then(|v| v.as_str()) == Some("billed_as") {
-        if let Some(key) = value.get("key").and_then(|v| v.as_str()) {
-            // Keep any `.above_context.<size>` suffix: a tiered rule bills at
-            // the target's price for the same context size, and dropping the
-            // suffix would point at the target's cheaper base rate instead.
-            return format!("billed as {}", key.strip_prefix("rate.").unwrap_or(key));
-        }
-    }
-    value.to_string()
-}
-
-/// Report facts whose served value is a sourced override, not the upstream's.
-///
-/// # Why a silent override is the failure this exists to prevent
-///
-/// The value IS in the model list above, and it is the intended one — which is
-/// exactly the problem. An operator reading `limit.output  65536` has no way to
-/// know models.dev publishes a different number there and fusiform replaced
-/// it. If the override is ever wrong, the error is silent: nothing fails and
-/// nobody looks. So each override names the value it replaces and its source,
-/// on every read that served one, single-model and bulk alike.
-///
-/// Returned rather than printed so the composed text an operator reads can be
-/// asserted, and the caller prints the assembled report once.
-fn render_fact_overrides(response: &serde_json::Value) -> String {
-    let mut out = String::new();
-    if let Some(rows) = response.get("fact_overrides").and_then(|v| v.as_array()) {
-        for row in rows {
-            let model = row["model"].as_str().unwrap_or("?");
-            let declared = format!(
-                "{}/{}",
-                row["provider_id"].as_str().unwrap_or("?"),
-                row["model_id"].as_str().unwrap_or("?")
-            );
-            // A null `replaces` marks an addition: upstream publishes nothing for
-            // this key, which "publishes null" would misstate.
-            let upstream = if row["replaces"].is_null() {
-                "upstream publishes no value".to_owned()
-            } else {
-                format!("upstream publishes {}", row["replaces"])
-            };
-            let _ = writeln!(
-                out,
-                "\noverridden: {model} {} = {} ({upstream}; not stored upstream)",
-                row["fact_key"].as_str().unwrap_or("?"),
-                row["value"],
-            );
-            // On an alias entry the override is declared for the target row.
-            if declared != model {
-                let _ = writeln!(out, "  declared for: {declared}");
-            }
-            let _ = writeln!(out, "  reason: {}", row["reason"].as_str().unwrap_or("?"));
-            let _ = writeln!(
-                out,
-                "  source: {}",
-                row["source_ref"].as_str().unwrap_or("?")
-            );
-            let _ = writeln!(
-                out,
-                "  established by {} on {}, review by {}",
-                row["established_by"].as_str().unwrap_or("?"),
-                format_instant(row["established_at_ms"].as_i64().unwrap_or(0)),
-                format_instant(row["review_by_ms"].as_i64().unwrap_or(0)),
-            );
-        }
-    }
-    out
-}
-
 /// The failed-poll history line, or nothing when no poll has ever failed.
 ///
 /// Returned rather than printed so the COMPOSED SENTENCE is what gets tested.
@@ -1362,136 +1087,6 @@ fn render_failures(response: &serde_json::Value) -> String {
         "failed polls     {ever} ever, last {}{class}{hint}\n",
         format_instant(at)
     )
-}
-
-/// One model's facts, followed by curation, withholding and uncertainty notices.
-fn render_single_model(
-    response: &serde_json::Value,
-    models: &serde_json::Map<String, serde_json::Value>,
-) -> String {
-    let mut out = render_billing_plane(response);
-    for (identity, facts) in models {
-        out.push_str(&format!("\n{identity}\n"));
-        let facts: BTreeMap<_, _> = facts
-            .as_object()
-            .map(|o| o.iter().collect())
-            .unwrap_or_default();
-        for (key, value) in facts {
-            let value = render_fact_value(value);
-            out.push_str(&format!("  {key:<34}  {value}\n"));
-        }
-    }
-    out.push_str(&render_curated(response));
-    out.push_str(&render_aliased(response));
-    out.push_str(&render_fact_overrides(response));
-    out.push_str(&render_withheld(response));
-    out.push_str(&render_uncertain(response));
-    out.push_str(&render_quality_scores(response));
-    // Return the assembled text so the caller can print it once.
-    out
-}
-
-/// Report facts the read refused to answer.
-///
-/// Printed after the models rather than folded into them, because a withheld
-/// fact is absent from that list. Without this an operator sees a model with no
-/// input rate and concludes the upstream publishes none.
-fn render_withheld(response: &serde_json::Value) -> String {
-    let mut out = String::new();
-    let Some(withheld) = response.get("withheld").and_then(|v| v.as_array()) else {
-        return String::new();
-    };
-    if withheld.is_empty() {
-        return String::new();
-    }
-
-    let _ = writeln!(
-        out,
-        "\n{} withheld — the record fusiform holds for these is known bad:",
-        count(withheld.len(), "fact")
-    );
-    for item in withheld {
-        let model = item.get("model").and_then(|v| v.as_str()).unwrap_or("?");
-        let fact = item.get("fact_key").and_then(|v| v.as_str()).unwrap_or("?");
-        let _ = writeln!(out, "  {model}  {fact}");
-        if let Some(corrections) = item.get("corrections").and_then(|v| v.as_array()) {
-            for c in corrections {
-                let from = c
-                    .get("affected_from_ms")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0);
-                let until = c
-                    .get("affected_until_ms")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0);
-                let reason = c.get("reason").and_then(|v| v.as_str()).unwrap_or("");
-                let _ = writeln!(
-                    out,
-                    "      {} to {}: {reason}",
-                    format_instant(from),
-                    format_instant(until)
-                );
-            }
-        }
-    }
-    out
-}
-
-/// Facts whose value at the read instant may already have been superseded.
-///
-/// Printed after the models rather than folded into them, because unlike a
-/// withheld fact the value IS returned — this qualifies an answer rather than
-/// replacing one. An operator who sees the value alone reads it as what was in
-/// force; what fusiform actually knows is that it was in force at the start of
-/// an interval containing the read instant, and it did not look again until the
-/// end.
-///
-/// Empty for a read of the current catalog, always: an era covering now has no
-/// successor. So this only appears on a historical read, which is the question
-/// a wrong answer costs money on.
-///
-/// Written after the wire field had been live for three commits with nothing
-/// rendering it — the bracket reached the payload and stopped one layer short
-/// of the only surface an operator uses.
-fn render_uncertain(response: &serde_json::Value) -> String {
-    let mut out = String::new();
-    let Some(uncertain) = response.get("uncertain").and_then(|v| v.as_array()) else {
-        return String::new();
-    };
-    if uncertain.is_empty() {
-        return String::new();
-    }
-
-    let _ = writeln!(
-        out,
-        "\n{} uncertain at this instant — the value is real, and \
-         fusiform did not look during the window it may have changed in:",
-        count(uncertain.len(), "fact")
-    );
-    for item in uncertain {
-        let provider = item
-            .get("provider_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
-        let model = item.get("model_id").and_then(|v| v.as_str()).unwrap_or("?");
-        let fact = item.get("fact_key").and_then(|v| v.as_str()).unwrap_or("?");
-        let after = item
-            .get("superseded_after_ms")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        let by = item
-            .get("superseded_by_ms")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        let _ = writeln!(out, "  {provider}/{model}  {fact}");
-        let _ = writeln!(
-            out,
-            "      last confirmed {}, changed by {}",
-            format_instant(after),
-            format_instant(by)
-        );
-    }
-    out
 }
 
 /// The whole history block as a string, printed once by the caller.
@@ -2565,6 +2160,8 @@ fn render_grades(response: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::catalog_render::{render_billing_plane, render_catalog_models};
+
     #[test]
     fn a_write_reason_does_not_consume_a_switch() {
         let request = |args: &[&str]| {
@@ -3425,7 +3022,9 @@ mod tests {
              of the file"
         );
 
-        let violations = plural_caller_violations(production);
+        let catalog = include_str!("catalog_render.rs");
+        let catalog_production = catalog.split("#[cfg(test)]").next().unwrap();
+        let violations = plural_caller_violations(&format!("{production}\n{catalog_production}"));
         assert!(
             violations.is_empty(),
             "plural must have exactly one production caller (count): {violations:?}. Use count(n, noun)."
@@ -4060,7 +3659,7 @@ mod connection_discovery_tests {
 
 #[cfg(test)]
 mod render_once_tests {
-    use super::*;
+    use super::catalog_render::render_catalog_models;
 
     /// A single-model read renders its facts exactly once.
     ///
@@ -4091,7 +3690,7 @@ mod render_once_tests {
             }
         });
         let models = response["models"].as_object().unwrap();
-        let out = render_single_model(&response, models);
+        let out = render_catalog_models(&response, models);
 
         assert_eq!(
             out.matches("crossmodel/deepseek/deepseek-v4-flash").count(),
@@ -4425,6 +4024,7 @@ mod render_history_tests {
 
 #[cfg(test)]
 mod curated_render_tests {
+    use super::catalog_render::{render_catalog_models, render_quality_scores};
     #[test]
     fn quality_scores_render_exact_decimals_and_disclosure_once() {
         let response: serde_json::Value = serde_json::from_str(
@@ -4439,8 +4039,7 @@ mod curated_render_tests {
             if bulk {
                 response["models"]["reseller/n"] = serde_json::json!({"quality.elo":1000});
             }
-            let text =
-                super::render_catalog_models(&response, response["models"].as_object().unwrap());
+            let text = render_catalog_models(&response, response["models"].as_object().unwrap());
             assert!(text.contains("quality.elo"));
             assert!(text.contains("1284"));
             assert!(text.contains("quality.eq"));
@@ -4452,7 +4051,7 @@ mod curated_render_tests {
         }
         let mut empty = response;
         empty.as_object_mut().unwrap().remove("quality_scores");
-        assert!(super::render_quality_scores(&empty).is_empty());
+        assert!(render_quality_scores(&empty).is_empty());
     }
 
     use super::*;
