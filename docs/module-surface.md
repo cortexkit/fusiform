@@ -211,11 +211,13 @@ The health report is computed from in-memory signals only: no lock, no disk.
 | Status | When |
 | --- | --- |
 | `failing` | no store is open, so no read can be answered (`health.rs`: `no_store_is_failing_regardless_of_everything_else`) |
-| `degraded` | two or more consecutive completed polls left no observation in the store (`restart_health::ticks_that_reach_no_verdict_are_reported_as_a_write_problem`) |
-| `degraded` | the loop has not attempted a fetch in 70 minutes: it is not running (`restart_health::a_stopped_loop_is_named_rather_than_reported_as_staleness`) |
-| `degraded` | the startup read of the store failed, so the catalog's age is unknown (`health.rs`: `a_failed_startup_read_is_not_a_fresh_install`) |
-| `degraded` | the last successful observation is more than 2 hours old; the detail names the failure class if polls are failing (`health_detail::a_stale_catalog_names_its_cause`) |
-| `degraded` | 4 or more consecutive fetch failures (`health.rs`: `a_failure_streak_is_degraded_before_the_staleness_clock_fires`) |
+| `degraded` | direct mode: two or more consecutive completed polls left no observation in the store (`restart_health::ticks_that_reach_no_verdict_are_reported_as_a_write_problem`) |
+| `degraded` | direct mode: the loop has not attempted a fetch in 70 minutes: it is not running (`restart_health::a_stopped_loop_is_named_rather_than_reported_as_staleness`) |
+| `degraded` | direct mode: the startup read of the store failed, so the catalog's age is unknown (`health.rs`: `a_failed_startup_read_is_not_a_fresh_install`) |
+| `degraded` | direct mode: the last successful observation is more than 2 hours old; the detail names the failure class if polls are failing (`health_detail::a_stale_catalog_names_its_cause`) |
+| `degraded` | direct mode: 4 or more consecutive fetch failures (`health.rs`: `a_failure_streak_is_degraded_before_the_staleness_clock_fires`) |
+| `degraded` | store mode: no head has been verified yet, the last verified head is more than 4 minutes old, or 4 or more consecutive polls failed (`health.rs`: `store_health_degrades_for_bootstrap_staleness_and_failure_streaks`) |
+| `degraded` | store mode: more than 12 minutes since the last attempt, verified release during replay, or verified head, whichever was most recent (`health.rs`: `a_store_catchup_verifying_releases_is_not_a_silent_loop`) |
 | `degraded` | the startup page check returned anything other than `ok`, including an error running the check (`health.rs`: `store_quick_check_failure_is_degraded_with_the_sqlite_result`) |
 | `ok` | otherwise, including a fresh install with no observation yet (`health.rs`: `a_fresh_install_with_no_observation_yet_is_ok`) |
 
@@ -242,6 +244,7 @@ started; catalog-history metrics survive a restart, while `store_open` and
 | --- | --- |
 | `process_poll_attempts`, `process_polls_recorded`, `process_polls_unrecorded` | process |
 | `process_consecutive_failures` | process |
+| `process_store_poll_failures`, `process_store_poll_error` | store mode only: current consecutive failure count and most recent error text; a successful poll resets both |
 | `process_consecutive_unpersisted_polls` | process; reset when an observation is persisted, even for a failed fetch |
 | `process_attempt_age_ms` | process |
 | `failures_ever`, `last_failure_age_ms`, `last_failure_class` | catalog |
@@ -257,6 +260,8 @@ An age that has never been set is `null`, not zero.
 In store mode, health checks that the poll loop is active and the published
 head was verified. A check that finds the same head counts as an attempt but
 does not record a poll in SQLite or refresh the catalog's observation age.
+A single failed poll does not change a healthy status; the error remains in
+the detail and metrics.
 
 `store_quick_check.result` is `ok` or the first row returned by SQLite; if the
 check itself errors, it holds the error text instead. `checked_at_ms` is the

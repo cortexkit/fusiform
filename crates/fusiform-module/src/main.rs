@@ -192,7 +192,7 @@ impl ModuleHandler for Fusiform {
             Err(e) => {
                 eprintln!("fusiform: store did not open: {e}");
                 self.signals
-                    .store_poll_result(Some(format!("store did not open: {e}")));
+                    .store_startup_status(format!("store did not open: {e}"));
                 return;
             }
         };
@@ -234,7 +234,7 @@ impl ModuleHandler for Fusiform {
                 }
                 Ok(None) => true,
                 Err(error) => {
-                    self.signals.store_poll_result(Some(error.to_string()));
+                    self.signals.store_startup_status(error.to_string());
                     return;
                 }
             };
@@ -270,14 +270,14 @@ impl ModuleHandler for Fusiform {
                     let publisher =
                         bootstrap.then(|| (Arc::clone(&store), Arc::clone(&self.signals)));
                     let uses_seed = fallback.lock().unwrap_or_else(|p| p.into_inner()).is_some();
-                    self.signals.store_poll_result(Some(
+                    self.signals.store_startup_status(
                         if uses_seed {
                             seed_fallback::OFFLINE_REASON
                         } else {
                             "waiting for verified store head"
                         }
                         .into(),
-                    ));
+                    );
                     tokio::spawn(poller.run(
                         store,
                         Arc::clone(&self.signals),
@@ -294,11 +294,11 @@ impl ModuleHandler for Fusiform {
                         uses_seed,
                     ));
                 }
-                Err(error) => self.signals.store_poll_result(Some(if bootstrap {
+                Err(error) => self.signals.store_startup_status(if bootstrap {
                     format!("{}: {error}", seed_fallback::OFFLINE_REASON)
                 } else {
                     error
-                })),
+                }),
             }
             return;
         }

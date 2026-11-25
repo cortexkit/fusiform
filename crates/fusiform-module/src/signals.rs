@@ -73,7 +73,7 @@ const fn decode_class(value: u64) -> Option<FailureClass> {
 #[derive(Debug)]
 pub struct Signals {
     store_url: Option<String>,
-    store_poll_error: arc_swap::ArcSwapOption<String>,
+    store_poll_failure: arc_swap::ArcSwapOption<StorePollFailure>,
     /// When the poller last verified the published head, even if it wrote nothing.
     last_store_head_check_ms: AtomicI64,
     last_store_replay_progress_ms: AtomicI64,
@@ -194,11 +194,17 @@ impl Default for Signals {
     }
 }
 
+#[derive(Debug)]
+struct StorePollFailure {
+    error: std::sync::Arc<String>,
+    streak: u64,
+}
+
 impl Signals {
     pub fn new() -> Self {
         Self {
             store_url: None,
-            store_poll_error: arc_swap::ArcSwapOption::empty(),
+            store_poll_failure: arc_swap::ArcSwapOption::empty(),
             last_store_head_check_ms: AtomicI64::new(NEVER),
             last_store_replay_progress_ms: AtomicI64::new(NEVER),
             store_applied_release: AtomicU64::new(0),
@@ -237,11 +243,35 @@ impl Signals {
     }
 
     pub fn store_poll_result(&self, error: Option<String>) {
-        self.store_poll_error.store(error.map(std::sync::Arc::new));
+        let streak = self.store_poll_failures().saturating_add(1);
+        self.set_store_poll_failure(error, streak);
+    }
+
+    pub fn store_startup_status(&self, detail: String) {
+        self.set_store_poll_failure(Some(detail), 0);
+    }
+
+    fn set_store_poll_failure(&self, error: Option<String>, streak: u64) {
+        self.store_poll_failure.store(error.map(|error| {
+            std::sync::Arc::new(StorePollFailure {
+                error: std::sync::Arc::new(error),
+                streak,
+            })
+        }));
     }
 
     pub fn store_poll_error(&self) -> Option<std::sync::Arc<String>> {
-        self.store_poll_error.load_full()
+        self.store_poll_failure
+            .load()
+            .as_ref()
+            .map(|f| f.error.clone())
+    }
+
+    pub(crate) fn store_poll_failures(&self) -> u64 {
+        self.store_poll_failure
+            .load()
+            .as_ref()
+            .map_or(0, |f| f.streak)
     }
 
     pub(crate) fn store_head_checked(&self, at_ms: i64) {
