@@ -10,19 +10,25 @@ type Documents = BTreeMap<String, Value>;
 /// Check vendor documents before an operator writes a draft. A login allowlist
 /// must name a model upstream publishes now, so the writer cannot publish a typo.
 pub fn validate_published(documents: &Documents, upstream: &Upstream) -> Result<(), String> {
-    validate_vendor_documents(documents, Some(upstream))
+    validate_vendor_documents(documents, Some(upstream), false)
 }
 
-/// Check vendor documents when building or receiving a release. Do not refuse
-/// a release just because upstream withdrew a model named by a login allowlist:
-/// the allowlist only restricts a model while it is served.
+/// Check vendor documents from a stored release without enforcing newer
+/// authoring rules for retired fields or requiring current upstream models.
 pub fn validate_received(documents: &Documents) -> Result<(), String> {
-    validate_vendor_documents(documents, None)
+    validate_vendor_documents(documents, None, true)
+}
+
+pub(crate) fn validate_new_release_documents(documents: &Documents) -> Result<(), String> {
+    // A login allowlist only restricts a model while it is served. An upstream
+    // withdrawal after approval must not prevent a release from being built.
+    validate_vendor_documents(documents, None, false)
 }
 
 fn validate_vendor_documents(
     documents: &Documents,
     upstream: Option<&Upstream>,
+    stored: bool,
 ) -> Result<(), String> {
     use VendorDocument::*;
 
@@ -34,6 +40,7 @@ fn validate_vendor_documents(
     for (name, raw) in documents {
         let doc = raw.to_string();
         let rejects = match document_kind(name)? {
+            ModelAliases if stored => curate::aliases::load_stored_reporting_rejects(&doc).1,
             ModelAliases => curate::aliases::load_reporting_rejects(&doc).1,
             AttachmentLimits => curate::attachment_limits::load(&doc).1,
             BillingPlanes => curate::billing_planes::load_reporting_rejects(&doc).1,
