@@ -14,7 +14,46 @@
 
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
+
+/// An unreadable member carries a default only so its readable siblings can
+/// still be decoded. The normalizer must not serve that default as a claim.
+#[derive(Debug, Clone)]
+pub struct RawMember<T, const OBJECT: bool = false> {
+    pub value: T,
+    pub unreadable: bool,
+}
+
+impl<T: Default, const OBJECT: bool> Default for RawMember<T, OBJECT> {
+    fn default() -> Self {
+        Self {
+            value: T::default(),
+            unreadable: false,
+        }
+    }
+}
+
+impl<'de, T: Default + DeserializeOwned, const OBJECT: bool> Deserialize<'de>
+    for RawMember<T, OBJECT>
+{
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = serde_json::Value::deserialize(deserializer)?;
+        // Serde structs can also read tuple-shaped arrays. Upstream model
+        // blocks have named members, so such arrays cannot be observations.
+        if !OBJECT || raw.is_object() || raw.is_null() {
+            if let Ok(value) = serde_json::from_value(raw) {
+                return Ok(Self {
+                    value,
+                    unreadable: false,
+                });
+            }
+        }
+        Ok(Self {
+            value: T::default(),
+            unreadable: true,
+        })
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RawProvider {
@@ -33,56 +72,59 @@ pub struct RawProvider {
     /// The provider's published client package, preserved verbatim.
     pub npm: Option<String>,
     #[serde(default)]
-    pub models: BTreeMap<String, RawModel>,
+    pub models: BTreeMap<String, RawMember<RawModel, true>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
 pub struct RawModel {
-    pub id: Option<String>,
-    pub name: Option<String>,
-    pub family: Option<String>,
-    pub canonical_model_id: Option<String>,
-    pub status: Option<String>,
+    pub id: RawMember<Option<String>>,
+    pub name: RawMember<Option<String>>,
+    pub family: RawMember<Option<String>>,
+    pub canonical_model_id: RawMember<Option<String>>,
+    pub status: RawMember<Option<String>>,
     #[serde(rename = "type")]
-    pub model_type: Option<String>,
-    pub release_date: Option<String>,
-    pub last_updated: Option<String>,
-    pub knowledge: Option<String>,
-    pub open_weights: Option<bool>,
-    pub reasoning: Option<bool>,
+    pub model_type: RawMember<Option<String>>,
+    pub release_date: RawMember<Option<String>>,
+    pub last_updated: RawMember<Option<String>>,
+    pub knowledge: RawMember<Option<String>>,
+    pub open_weights: RawMember<Option<bool>>,
+    pub reasoning: RawMember<Option<bool>>,
     /// Whether models.dev claims the model supports structured output. `None`
     /// means the upstream did not state a value; it is never defaulted to false.
-    pub structured_output: Option<bool>,
+    pub structured_output: RawMember<Option<bool>>,
     /// Whether the serving API accepts temperature; absence remains unknown.
-    pub temperature: Option<bool>,
+    pub temperature: RawMember<Option<bool>>,
     /// The reasoning settings the model accepts, held as the upstream's JSON
     /// untouched. A pass-through on purpose: entry types fusiform has not seen
     /// and `null` elements inside `values` are real upstream data, and a typed
     /// struct would drop or reject them. `None` when the key is absent, which is
     /// a different claim from a published `[]`.
     pub reasoning_options: Option<serde_json::Value>,
-    pub tool_call: Option<bool>,
-    pub attachment: Option<bool>,
-    pub limit: Option<RawLimit>,
-    pub modalities: Option<RawModalities>,
-    pub cost: Option<RawCost>,
+    pub tool_call: RawMember<Option<bool>>,
+    pub attachment: RawMember<Option<bool>>,
+    pub limit: RawMember<Option<RawLimit>, true>,
+    pub modalities: RawMember<Option<RawModalities>, true>,
+    pub cost: RawMember<Option<RawCost>, true>,
     /// Per-model connection claims; other request overrides remain unread.
-    pub provider: Option<RawModelProvider>,
+    pub provider: RawMember<Option<RawModelProvider>, true>,
     /// Named modes with their own rates and their own wire shaping.
-    pub experimental: Option<RawExperimental>,
+    pub experimental: RawMember<Option<RawExperimental>, true>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
 pub struct RawModelProvider {
-    pub npm: Option<String>,
-    pub api: Option<String>,
-    pub shape: Option<String>,
+    pub npm: RawMember<Option<String>>,
+    pub api: RawMember<Option<String>>,
+    pub shape: RawMember<Option<String>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
 pub struct RawLimit {
-    pub context: Option<u64>,
-    pub output: Option<u64>,
+    pub context: RawMember<Option<u64>>,
+    pub output: RawMember<Option<u64>>,
     /// The maximum input the model accepts, when the upstream states it
     /// separately from the total.
     ///
@@ -104,21 +146,21 @@ pub struct RawLimit {
     /// Serving this needs a source for what the field MEANS, and whether the
     /// 470 sums are observed or computed by the upstream from the other two —
     /// which decides whether it is evidence or restatement.
-    pub input: Option<u64>,
+    pub input: RawMember<Option<u64>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct RawModalities {
     #[serde(default)]
-    pub input: Vec<String>,
+    pub input: RawMember<Vec<String>>,
     #[serde(default)]
-    pub output: Vec<String>,
+    pub output: RawMember<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct RawExperimental {
     #[serde(default)]
-    pub modes: BTreeMap<String, RawMode>,
+    pub modes: RawMember<BTreeMap<String, RawMode>, true>,
 }
 
 /// One named mode under `experimental.modes`, reduced to its rate schedule.
@@ -214,6 +256,9 @@ impl From<BTreeMap<String, serde_json::Value>> for RawCost {
                             spec.tier_type.as_deref() == Some("context") && spec.size.is_none()
                         }) {
                             unreadable_members.push(format!("cost.tiers[{index}].tier.size"));
+                        }
+                        if tier.tier_unreadable {
+                            unreadable_members.push(format!("cost.tiers[{index}].tier"));
                         }
                         tiers.push(tier);
                     }
@@ -311,6 +356,7 @@ pub struct RawTier {
     pub scalars: BTreeMap<String, String>,
     pub tier: Option<RawTierSpec>,
     unreadable_rates: Vec<String>,
+    tier_unreadable: bool,
 }
 
 impl From<BTreeMap<String, serde_json::Value>> for RawTier {
@@ -318,10 +364,14 @@ impl From<BTreeMap<String, serde_json::Value>> for RawTier {
         let mut scalars = BTreeMap::new();
         let mut tier = None;
         let mut unreadable_rates = Vec::new();
+        let mut tier_unreadable = false;
 
         for (key, value) in map {
             if key == "tier" {
-                tier = serde_json::from_value::<RawTierSpec>(value).ok();
+                if value.is_object() {
+                    tier = serde_json::from_value::<RawTierSpec>(value).ok();
+                }
+                tier_unreadable = tier.is_none();
             } else if let Some(number) = value.as_number() {
                 scalars.insert(key, number.to_string());
             } else if is_known_rate(&key) {
@@ -333,6 +383,7 @@ impl From<BTreeMap<String, serde_json::Value>> for RawTier {
             scalars,
             tier,
             unreadable_rates,
+            tier_unreadable,
         }
     }
 }

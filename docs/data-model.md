@@ -80,7 +80,7 @@ One `observation` row is written per poll, whatever happened. Columns:
 | `outcome` | `changed`, `unchanged`, `not_modified`, `failed` or `seeded` |
 | `failure_class` | set only for `failed`: `network`, `http_status`, `parse` or `implausible` |
 | `detail` | producer detail for diagnostics; consumers do not branch on it |
-| `normalized_hash` | hash of the normalized catalog; moves only when a served fact moves |
+| `normalized_hash` | hash of normalized upstream claims and the scopes the parser had to refuse |
 | `raw_hash` | hash of the fetched bytes; moves when the upstream reformats |
 | `etag` | the upstream's validator, sent as `If-None-Match` on the next poll |
 | `duration_ms` | how long the fetch took |
@@ -171,6 +171,15 @@ fusiform attaches to a stored value, rather than one the upstream published,
 must be listed there or it will open eras and move the digest
 (`ingest::a_producer_annotation_moves_neither_the_digest_nor_the_diff`,
 `ingest::the_digest_moves_exactly_when_the_diff_does`).
+
+An unreadable model member is not evidence that the upstream withdrew it.
+Ingest writes no era for an affected fact or an unreadable price schedule; held
+values keep their original boundaries while readable siblings still land. A new
+model has no previous value to keep. If a later poll actually omits the claim,
+the usual withdrawal rules apply. When it becomes readable again, ingest writes
+an era only if the claim differs from the one in force. Refused scopes are part
+of the poll digest so a genuine omission cannot compare equal to an unreadable
+claim. The poll logs the refusal and exposes counts in `catalog.status`.
 
 Store mode, where fusiform reads signed releases from the curated store instead
 of polling models.dev, decides eras with the same planner a poll uses (it

@@ -377,6 +377,9 @@ pub fn facts_of(model: &NormalizedModel) -> ModelFacts {
         }
     }
 
+    if !model.refused.is_empty() {
+        facts.retain(|(key, _)| !model.refused.iter().any(|scope| scope.covers(key)));
+    }
     facts.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
     if !facts.windows(2).any(|pair| pair[0].0 == pair[1].0) {
         return ModelFacts {

@@ -206,10 +206,21 @@ fn vector(
         .map(|(id, raw)| {
             let mut outputs = BTreeSet::new();
             for model in raw.models.values() {
-                if let Some(modalities) = &model.modalities {
-                    outputs.extend(modalities.output.iter().cloned());
+                let provider_model = &model.value;
+                assert!(
+                    !model.unreadable
+                        && !provider_model.modalities.unreadable
+                        && !provider_model.model_type.unreadable,
+                    "{id}: seed model shape is needed to derive provider output types"
+                );
+                if let Some(modalities) = &provider_model.modalities.value {
+                    assert!(
+                        !modalities.output.unreadable,
+                        "{id}: seed output modalities must be readable"
+                    );
+                    outputs.extend(modalities.output.value.iter().cloned());
                 }
-                if model.model_type.as_deref() == Some("embedding") {
+                if provider_model.model_type.value.as_deref() == Some("embedding") {
                     outputs.insert("embedding".into());
                 }
             }

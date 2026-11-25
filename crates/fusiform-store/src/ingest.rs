@@ -32,7 +32,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fusiform_core::normalize::{NormalizedCatalog, NormalizedModel};
+use fusiform_core::normalize::{NormalizedCatalog, NormalizedModel, RefusedFactScope};
 use fusiform_core::{BoundaryKind, RateValue, SourceId, Timestamp};
 
 use crate::{CatalogError, CatalogStore, FactKey, NewEra};
@@ -89,7 +89,7 @@ pub(crate) fn plan_ingest_in(
     let current = current_values_in(conn, catalog.source)?;
     let models = catalog.models().map(|model| {
         let identity = (model.key.provider_id.clone(), model.key.model_id.clone());
-        (identity, facts_of(model).values)
+        (identity, facts_of(model).values, Some(&model.refused))
     });
     Ok(plan_model_eras(
         catalog.source,
@@ -103,6 +103,11 @@ pub(crate) fn plan_ingest_in(
 
 type ModelIdentity = (String, String);
 type ProjectedFacts = Vec<(FactKey, String)>;
+type ProjectedModel<'a> = (
+    ModelIdentity,
+    ProjectedFacts,
+    Option<&'a BTreeSet<RefusedFactScope>>,
+);
 
 /// Complete facts for models touched by a release. `None` means the model is
 /// absent; models outside the map were not observed to change in this release.
@@ -130,7 +135,7 @@ pub(crate) fn plan_release_ingest(
     let present = models.iter().filter_map(|(identity, facts)| {
         facts
             .as_ref()
-            .map(|facts| (identity.clone(), facts.clone()))
+            .map(|facts| (identity.clone(), facts.clone(), None))
     });
     Ok(plan_model_eras(
         source,
@@ -142,10 +147,10 @@ pub(crate) fn plan_release_ingest(
     ))
 }
 
-fn plan_model_eras(
+fn plan_model_eras<'a>(
     source: SourceId,
     current: &CurrentValues,
-    models: impl IntoIterator<Item = (ModelIdentity, ProjectedFacts)>,
+    models: impl IntoIterator<Item = ProjectedModel<'a>>,
     at: Timestamp,
     boundary_kind: BoundaryKind,
     observation_id: Option<i64>,
@@ -155,7 +160,7 @@ fn plan_model_eras(
     let mut changed_facts = 0usize;
     let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
 
-    for (identity, facts) in models {
+    for (identity, facts, refused) in models {
         seen.insert(identity.clone());
 
         let published: BTreeSet<FactKey> = facts.iter().map(|(k, _)| k.clone()).collect();
@@ -226,6 +231,11 @@ fn plan_model_eras(
         if let Some(held) = known {
             for (fact_key, current_value) in held {
                 if published.contains(fact_key) || fact_key == &FactKey::existence() {
+                    continue;
+                }
+                // No claim was read for these keys, so keep the held value
+                // and its original boundary rather than writing a tombstone.
+                if refused.is_some_and(|scopes| scopes.iter().any(|scope| scope.covers(fact_key))) {
                     continue;
                 }
                 let tombstone = withdrawal_value(fact_key);
@@ -328,21 +338,39 @@ pub fn catalog_digest_with_conflicts(catalog: &NormalizedCatalog) -> (String, Ve
             .collect();
         facts.sort();
         for (key, value) in facts {
-            // Length-prefixed rather than delimiter-separated: a provider id
-            // containing the delimiter would otherwise let two different fact sets
-            // hash identically, and provider ids are upstream-controlled strings.
-            for field in [
-                model.key.provider_id.as_str(),
-                model.key.model_id.as_str(),
-                key.as_str(),
-                &value,
-            ] {
-                hasher.update(&(field.len() as u64).to_le_bytes());
-                hasher.update(field.as_bytes());
-            }
+            hash_projection(&mut hasher, model, key.as_str(), &value);
+        }
+        // Otherwise an unreadable rate and a later absent cost block could
+        // compare equal, hiding a real withdrawal on the digest fast path.
+        for scope in group
+            .iter()
+            .flat_map(|model| &model.refused)
+            .collect::<BTreeSet<_>>()
+        {
+            let (tag, value) = match scope {
+                RefusedFactScope::Model => ("!refused-model", ""),
+                RefusedFactScope::Fact(key) => ("!refused-fact", key.as_str()),
+                RefusedFactScope::BaseAndTierRates => ("!refused-base-and-tier", ""),
+                RefusedFactScope::ModeRates(None) => ("!refused-all-modes", ""),
+                RefusedFactScope::ModeRates(Some(mode)) => ("!refused-mode", mode.as_str()),
+            };
+            hash_projection(&mut hasher, model, tag, value);
         }
     }
     (hasher.finalize().to_hex().to_string(), conflicts)
+}
+
+fn hash_projection(hasher: &mut blake3::Hasher, model: &NormalizedModel, key: &str, value: &str) {
+    // Length-prefix upstream IDs too, since any separator can occur in them.
+    for field in [
+        model.key.provider_id.as_str(),
+        model.key.model_id.as_str(),
+        key,
+        value,
+    ] {
+        hasher.update(&(field.len() as u64).to_le_bytes());
+        hasher.update(field.as_bytes());
+    }
 }
 
 /// Every fact a model publishes, as `(key, value)` pairs.

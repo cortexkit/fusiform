@@ -28,6 +28,7 @@ fn count_findings(
             NormalizeError::OrphanedLegacyTier { .. } => "orphaned_legacy_tier",
             NormalizeError::UnattributableChargeUnit { .. } => "unattributable_charge_unit",
             NormalizeError::RefusedBaseSchedule { .. } => "refused_base_schedule",
+            NormalizeError::RefusedModelMember { .. } => "refused_model_member",
             NormalizeError::RefusedMode { .. } => "refused_mode",
         };
         let message = finding.to_string();

@@ -834,6 +834,8 @@ fn every_domain_field_reaches_a_fact_or_is_declared_unread() {
         limits: _,
         rates: _,
         wire,
+        // Ingest-only metadata: a refusal prevents a fact from being written.
+        refused: _,
 
         // Declared unread, with the reason each is not served.
         //

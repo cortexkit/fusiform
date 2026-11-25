@@ -17,18 +17,19 @@
 //!   mode prices are served separately from the bytes that select the mode.
 //! - **Infer a semantic from a field's name.** `tier.size` is read as a
 //!   threshold only where `tier.type` says `context`; anywhere else it is a
-//!   parse error rather than a guess.
+//!   refused schedule rather than a guess.
 //! - **Turn a missing value into a real one.** A zero limit is absence, a
 //!   missing rate is `Unpriced`, and an unattributable charge unit is
 //!   `UnknownChargeBasis` — never a number a consumer would spend against.
 
 mod raw;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::money::{
     decimal_str_to_minor_units, Amount, CurrencyCode, PolicyId, UnitProvenance, NANO_EXPONENT,
 };
+use crate::upstream_facts::{prefix, rate_key, FactKey};
 use crate::{
     ChargeBasis, Modality, ModelKey, RateCondition, RateValue, SourceId, TokenClass, UnpricedReason,
 };
@@ -142,8 +143,35 @@ pub struct NormalizedModel {
     pub limits: Limits,
     pub wire: WireFacts,
     pub rates: Vec<NormalizedRate>,
+    /// Refused upstream claims are not withdrawals, even when no value was
+    /// decoded for their keys.
+    pub refused: BTreeSet<RefusedFactScope>,
     /// Presence of request overrides, distinct from the served connection claims.
     pub quarantined: Quarantine,
+}
+
+/// The facts a poll could not read for this model.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RefusedFactScope {
+    Model,
+    Fact(FactKey),
+    BaseAndTierRates,
+    ModeRates(Option<String>),
+}
+
+impl RefusedFactScope {
+    pub fn covers(&self, fact: &FactKey) -> bool {
+        let key = fact.as_str();
+        match self {
+            Self::Model => key != "existence" && !key.starts_with(prefix::PROVIDER),
+            Self::Fact(refused) => refused == fact,
+            Self::BaseAndTierRates => key.starts_with(prefix::RATE) && !rate_key::is_mode_rate(key),
+            Self::ModeRates(mode) => key
+                .strip_prefix(prefix::RATE)
+                .and_then(|rate| rate.split_once(rate_key::MODE))
+                .is_some_and(|(_, name)| mode.as_deref().is_none_or(|refused| name == refused)),
+        }
+    }
 }
 
 /// Upstream fields that decide how a request is spoken rather than what a model
@@ -221,7 +249,7 @@ impl NormalizedCatalog {
 pub enum NormalizeError {
     /// The document's top level was not an object of providers.
     NotAProviderMap,
-    /// The parser rejected the document's JSON or a nested value.
+    /// The parser rejected the document's JSON or provider structure.
     DocumentParse { diagnostic: String },
     /// A rate literal could not be scaled to minor units.
     BadRate {
@@ -244,7 +272,7 @@ pub enum NormalizeError {
     ///
     /// The two encodings coexist on 288 models and their RATES agreed on every
     /// one measured. If they ever disagree, one of them is wrong and fusiform
-    /// cannot tell which — so it stops rather than picking.
+    /// cannot tell which, so it refuses the schedule rather than picking.
     ///
     /// Note what is compared: the rates, never the threshold. The key's name is
     /// not its threshold — measured, the tier size is 200,000 on only 126 of
@@ -271,12 +299,12 @@ pub enum NormalizeError {
     UnattributableChargeUnit { model: String, key: String },
     /// An unreadable cost member made the model's base and tier rates unsafe to serve.
     RefusedBaseSchedule { model: String, member: String },
+    /// A present model field had no readable claim.
+    RefusedModelMember { model: String, member: &'static str },
     /// A named mode under `experimental.modes` whose price could not be served.
     ///
-    /// Not fatal, and never a fallback: the mode produces no rate at all, the
-    /// model's base rates are unaffected, and a consumer asking for the mode's
-    /// price finds it absent (unpriced) rather than receiving the base rate or
-    /// a guess. Reported so the refusal is counted rather than silent.
+    /// The mode produces no new rate, and the model's base rates are unaffected.
+    /// Ingest keeps a previously held mode price; no base rate is substituted.
     ///
     /// Two causes. The NAME falls outside `[a-z0-9_-]+`, and serving it would
     /// mint a fact key from arbitrary upstream text. Or the COST is not the
@@ -309,22 +337,6 @@ impl std::fmt::Display for NormalizeError {
                 "{model}: pricing tier declares type {tier_type:?}, and only \"context\" has a known meaning"
             ),
             NormalizeError::TierMissingType { model } => {
-                // Says what is known, and no more.
-                //
-                // This fires from `tier.tier == None`, which has TWO causes that
-                // are indistinguishable here: the `tier` key was absent, or it
-                // was present and did not parse — `RawTier`'s conversion drops
-                // the parse error, and both fields of `RawTierSpec` are
-                // optional, so a failure means the value was not an object or a
-                // key had the wrong type (`"size": "200000"` as a string is the
-                // ordinary way an upstream drifts).
-                //
-                // The old wording — "carries a size with no type" — asserted
-                // both halves. On the malformed case neither is known, and an
-                // operator greps the payload for a tier with a size and no type,
-                // finds one with both, and hunts a phantom. A message that
-                // travels to a reader and names a specific cause it cannot
-                // support is the sentinel problem in prose.
                 write!(f, "{model}: pricing tier has no readable type")
             }
             NormalizeError::OrphanedLegacyTier {
@@ -339,6 +351,9 @@ impl std::fmt::Display for NormalizeError {
             }
             NormalizeError::RefusedBaseSchedule { model, member } => {
                 write!(f, "{model}: cannot read {member}; base and tier rates refused")
+            }
+            NormalizeError::RefusedModelMember { model, member } => {
+                write!(f, "{model}: cannot read {member}; affected model facts refused")
             }
             NormalizeError::RefusedMode {
                 model,
@@ -531,7 +546,7 @@ pub fn normalize_models_dev_with(
                 api.as_deref(),
                 evidence,
                 &mut findings,
-            )?;
+            );
             model.provider_name = name.clone().filter(|name| !name.is_empty());
             models.push(model);
         }
@@ -552,22 +567,65 @@ pub fn normalize_models_dev_with(
     })
 }
 
+struct ModelRead<'a> {
+    label: &'a str,
+    findings: &'a mut Vec<NormalizeError>,
+    refused: BTreeSet<RefusedFactScope>,
+}
+
+impl ModelRead<'_> {
+    fn read<'raw, T, const OBJECT: bool, const N: usize>(
+        &mut self,
+        raw: &'raw raw::RawMember<T, OBJECT>,
+        member: &'static str,
+        scopes: impl FnOnce() -> [RefusedFactScope; N],
+    ) -> Option<&'raw T> {
+        if raw.unreadable {
+            self.refused.extend(scopes());
+            self.findings.push(NormalizeError::RefusedModelMember {
+                model: self.label.to_owned(),
+                member,
+            });
+            None
+        } else {
+            Some(&raw.value)
+        }
+    }
+
+    fn fact<'raw, T>(
+        &mut self,
+        raw: &'raw raw::RawMember<Option<T>>,
+        member: &'static str,
+        fact: impl FnOnce() -> FactKey,
+    ) -> Option<&'raw T> {
+        self.read(raw, member, || [RefusedFactScope::Fact(fact())])
+            .and_then(Option::as_ref)
+    }
+}
+
 fn normalize_model(
     provider_id: &str,
     model_id: &str,
-    raw: &RawModel,
+    raw: &raw::RawMember<RawModel, true>,
     provider_npm: Option<&str>,
     provider_api: Option<&str>,
     evidence: &ChargeUnitEvidence,
     findings: &mut Vec<NormalizeError>,
-) -> Result<NormalizedModel, NormalizeError> {
+) -> NormalizedModel {
     let label = format!("{provider_id}/{model_id}");
     let key = ModelKey::new(SourceId::ModelsDev, provider_id, model_id);
+    let mut read = ModelRead {
+        label: &label,
+        findings,
+        refused: BTreeSet::new(),
+    };
+    let _ = read.read(raw, "model", || [RefusedFactScope::Model]);
+    let raw = &raw.value;
 
     // Name every parsed model field at this boundary. A new raw field must be
     // carried, ignored, or quarantined deliberately rather than silently lost.
     let raw::RawModel {
-        id: _,
+        id,
         name,
         family,
         canonical_model_id,
@@ -589,17 +647,45 @@ fn normalize_model(
         provider,
         experimental,
     } = raw;
+    read.read(id, "id", || []);
 
-    let (npm, api, shape) = match provider {
-        Some(raw::RawModelProvider { npm, api, shape }) => {
-            (npm.as_deref(), api.as_deref(), shape.as_deref())
+    let mut wire = WireFacts::default();
+    if let Some(provider) = read.read(provider, "provider", || {
+        ["npm", "api", "shape"].map(|key| RefusedFactScope::Fact(FactKey::wire(key)))
+    }) {
+        let claim = |read: &mut ModelRead<'_>,
+                     raw: &raw::RawMember<Option<String>>,
+                     path,
+                     key,
+                     inherited| {
+            let value = read.fact(raw, path, || FactKey::wire(key));
+            if raw.unreadable {
+                None
+            } else {
+                wire_claim(value.map(String::as_str), inherited)
+            }
+        };
+        if let Some(raw::RawModelProvider { npm, api, shape }) = provider {
+            wire.npm = claim(&mut read, npm, "provider.npm", "npm", provider_npm);
+            wire.api = claim(&mut read, api, "provider.api", "api", provider_api);
+            wire.shape = claim(&mut read, shape, "provider.shape", "shape", None);
+        } else if !read.refused.contains(&RefusedFactScope::Model) {
+            wire.npm = wire_claim(None, provider_npm);
+            wire.api = wire_claim(None, provider_api);
         }
-        None => (None, None, None),
-    };
-    let wire = WireFacts {
-        npm: wire_claim(npm, provider_npm),
-        api: wire_claim(api, provider_api),
-        shape: wire_claim(shape, None),
+    }
+
+    let modalities = read
+        .read(modalities, "modalities", || {
+            ["input_modalities", "output_modalities"]
+                .map(|key| RefusedFactScope::Fact(FactKey::capability(key)))
+        })
+        .and_then(Option::as_ref);
+    let modality = |read: &mut ModelRead<'_>, raw: &raw::RawMember<Vec<String>>, member, key| {
+        read.read(raw, member, || {
+            [RefusedFactScope::Fact(FactKey::capability(key))]
+        })
+        .map(|list| list.iter().map(|s| Modality::parse(s)).collect())
     };
 
     // Modalities are `None` when the upstream publishes no block, and an empty
@@ -619,17 +705,37 @@ fn normalize_model(
     // out every affected model with nothing looking wrong.
     let capabilities = Capabilities {
         input_modalities: modalities
-            .as_ref()
-            .map(|m| m.input.iter().map(|s| Modality::parse(s)).collect()),
-        output_modalities: modalities
-            .as_ref()
-            .map(|m| m.output.iter().map(|s| Modality::parse(s)).collect()),
-        reasoning: *reasoning,
-        reasoning_options: (*reasoning_options).clone(),
-        structured_output: *structured_output,
-        temperature: *temperature,
-        tool_call: *tool_call,
-        attachment: *attachment,
+            .and_then(|m| modality(&mut read, &m.input, "modalities.input", "input_modalities")),
+        output_modalities: modalities.and_then(|m| {
+            modality(
+                &mut read,
+                &m.output,
+                "modalities.output",
+                "output_modalities",
+            )
+        }),
+        reasoning: read
+            .fact(reasoning, "reasoning", || FactKey::capability("reasoning"))
+            .copied(),
+        reasoning_options: reasoning_options.clone(),
+        structured_output: read
+            .fact(structured_output, "structured_output", || {
+                FactKey::capability("structured_output")
+            })
+            .copied(),
+        temperature: read
+            .fact(temperature, "temperature", || {
+                FactKey::capability("temperature")
+            })
+            .copied(),
+        tool_call: read
+            .fact(tool_call, "tool_call", || FactKey::capability("tool_call"))
+            .copied(),
+        attachment: read
+            .fact(attachment, "attachment", || {
+                FactKey::capability("attachment")
+            })
+            .copied(),
     };
 
     // TOTAL DESTRUCTURING, so a field added to `RawLimit` cannot be parsed and
@@ -641,7 +747,12 @@ fn normalize_model(
     // wire. Between them sits raw -> domain, and `limit.input` lived there
     // unnoticed: parsed into `RawLimit`, never carried into `Limits`, never
     // served, while the payload-side fence reported it as read.
-    let limits = match limit.as_ref() {
+    let limits = match read
+        .read(limit, "limit", || {
+            ["context", "output"].map(|key| RefusedFactScope::Fact(FactKey::limit(key)))
+        })
+        .and_then(Option::as_ref)
+    {
         None => Limits::default(),
         Some(crate::normalize::raw::RawLimit {
             context,
@@ -666,64 +777,124 @@ fn normalize_model(
             // Carry sourced fields, but not a claim the source does not make.
             // A per-path ceiling requires a documented measurement naming the
             // access path it constrains.
-            input: _,
-        }) => Limits {
-            context_tokens: absent_if_zero(*context),
-            output_tokens: absent_if_zero(*output),
-        },
+            input,
+        }) => {
+            read.read(input, "limit.input", || []);
+            Limits {
+                context_tokens: absent_if_zero(
+                    read.fact(context, "limit.context", || FactKey::limit("context"))
+                        .copied(),
+                ),
+                output_tokens: absent_if_zero(
+                    read.fact(output, "limit.output", || FactKey::limit("output"))
+                        .copied(),
+                ),
+            }
+        }
     };
 
-    let mut rates = match cost.as_ref() {
-        Some(cost) => normalize_rates(
+    let mut rates = Vec::new();
+    if cost.unreadable {
+        read.refused.insert(RefusedFactScope::BaseAndTierRates);
+        read.findings.push(NormalizeError::RefusedBaseSchedule {
+            model: label.clone(),
+            member: "cost".into(),
+        });
+    } else if let Some(cost) = &cost.value {
+        if !cost.unreadable_members.is_empty() {
+            read.refused.insert(RefusedFactScope::BaseAndTierRates);
+        }
+        match normalize_rates(
             &label,
             cost,
             evidence.bills_input_audio_per_token(provider_id, model_id),
             evidence.bills_output_audio_per_token(provider_id, model_id),
-            findings,
-        )?,
-        // No cost object at all. Measured on 420 models. Recording nothing here
-        // is correct: the absence is expressed by there being no rate rows, and
-        // a consumer asking for a rate gets `NoCatalogCoverage` from the store
-        // rather than a fabricated `MissingRate` row for every basis fusiform
-        // can imagine.
-        None => Vec::new(),
-    };
+            read.findings,
+        ) {
+            Ok(base) => rates = base,
+            Err(finding) => {
+                read.refused.insert(RefusedFactScope::BaseAndTierRates);
+                read.findings.push(finding);
+            }
+        }
+    }
 
     // Mode rates are read whether or not the model has a base cost: five live
     // models (anyapi and snowflake-cortex rows) price a mode and publish no
     // base rate, and that is served as published rather than dropped.
-    if let Some(experimental) = experimental.as_ref() {
-        for (name, mode) in &experimental.modes {
-            rates.extend(normalize_mode_rates(&label, name, mode, findings));
+    let mut experimental_modes = Vec::new();
+    if let Some(experimental) = read
+        .read(experimental, "experimental", || {
+            [RefusedFactScope::ModeRates(None)]
+        })
+        .and_then(Option::as_ref)
+    {
+        if let Some(modes) = read.read(&experimental.modes, "experimental.modes", || {
+            [RefusedFactScope::ModeRates(None)]
+        }) {
+            for (name, mode) in modes {
+                experimental_modes.push(name.clone());
+                match normalize_mode_rates(&label, name, mode) {
+                    Ok(mode_rates) => rates.extend(mode_rates),
+                    Err(finding) => {
+                        if is_servable_mode_name(name) {
+                            read.refused
+                                .insert(RefusedFactScope::ModeRates(Some(name.clone())));
+                        }
+                        read.findings.push(finding);
+                    }
+                }
+            }
         }
     }
 
     let quarantined = Quarantine {
-        provider_override: provider.is_some(),
-        experimental_modes: experimental
-            .as_ref()
-            .map(|e| e.modes.keys().cloned().collect())
-            .unwrap_or_default(),
+        provider_override: provider.unreadable || provider.value.is_some(),
+        experimental_modes,
     };
 
-    Ok(NormalizedModel {
+    NormalizedModel {
         key,
-        display_name: (*name).clone().filter(|name| !name.is_empty()),
+        display_name: read
+            .fact(name, "name", || FactKey::model("name"))
+            .filter(|name| !name.is_empty())
+            .cloned(),
         provider_name: None,
-        family: (*family).clone(),
-        canonical_id: (*canonical_model_id).clone(),
-        status: (*status).clone(),
-        model_type: (*model_type).clone(),
-        release_date: (*release_date).clone(),
-        last_updated: (*last_updated).clone(),
-        knowledge_cutoff: (*knowledge).clone(),
-        open_weights: *open_weights,
+        family: read
+            .fact(family, "family", || FactKey::model("family"))
+            .cloned(),
+        canonical_id: read
+            .fact(canonical_model_id, "canonical_model_id", || {
+                FactKey::model("canonical_id")
+            })
+            .cloned(),
+        status: read
+            .fact(status, "status", || FactKey::model("status"))
+            .cloned(),
+        model_type: read
+            .fact(model_type, "type", || FactKey::model("type"))
+            .cloned(),
+        release_date: read
+            .read(release_date, "release_date", || [])
+            .cloned()
+            .flatten(),
+        last_updated: read
+            .read(last_updated, "last_updated", || [])
+            .cloned()
+            .flatten(),
+        knowledge_cutoff: read.read(knowledge, "knowledge", || []).cloned().flatten(),
+        open_weights: read
+            .fact(open_weights, "open_weights", || {
+                FactKey::model("open_weights")
+            })
+            .copied(),
         capabilities,
         limits,
         wire,
         rates,
+        refused: read.refused,
         quarantined,
-    })
+    }
 }
 
 fn wire_claim(model: Option<&str>, provider: Option<&str>) -> Option<WireClaim> {
@@ -933,12 +1104,10 @@ pub fn is_servable_mode_name(name: &str) -> bool {
 
 /// The rates one named mode publishes, or none.
 ///
-/// A mode with no `cost` (OpenAI's `pro` today) is a mode without a published
-/// price and yields nothing, silently: nothing was refused. Every other way a
-/// mode can fail yields nothing AND a [`NormalizeError::RefusedMode`] finding,
-/// so the refusal is counted. No path here reads or falls back to the base
-/// rate; a dimension the mode does not price stays absent, which a consumer
-/// reads as unpriced for that mode.
+/// A mode with no `cost` is a mode without a published price, not a refusal.
+/// A refusal is reported separately so ingest keeps the held mode price rather
+/// than mistaking an unreadable member for a withdrawal. Neither path falls
+/// back to the base rate.
 ///
 /// All or nothing per mode: if any key in the cost block is unusable the whole
 /// mode is refused, because serving the dimensions that happened to parse would
@@ -947,31 +1116,26 @@ fn normalize_mode_rates(
     label: &str,
     name: &str,
     mode: &raw::RawMode,
-    findings: &mut Vec<NormalizeError>,
-) -> Vec<NormalizedRate> {
-    let refuse = |findings: &mut Vec<NormalizeError>, reason: String| {
-        findings.push(NormalizeError::RefusedMode {
+) -> Result<Vec<NormalizedRate>, NormalizeError> {
+    let refuse = |reason: String| {
+        Err(NormalizeError::RefusedMode {
             model: label.to_string(),
             mode: name.to_string(),
             reason,
-        });
-        Vec::new()
+        })
     };
 
     if mode.malformed {
-        return refuse(findings, "the mode is not an object".to_string());
+        return refuse("the mode is not an object".to_string());
     }
     let Some(cost) = &mode.cost else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     if !is_servable_mode_name(name) {
-        return refuse(
-            findings,
-            "the name is outside [a-z0-9_-]+ and cannot form a fact key".to_string(),
-        );
+        return refuse("the name is outside [a-z0-9_-]+ and cannot form a fact key".to_string());
     }
     let Some(cost) = cost.as_object() else {
-        return refuse(findings, format!("cost is not an object: {cost}"));
+        return refuse(format!("cost is not an object: {cost}"));
     };
 
     let mut rates = Vec::new();
@@ -979,17 +1143,16 @@ fn normalize_mode_rates(
         let Some((_, class)) = TOKEN_COST_KEYS.iter().find(|(k, _)| k == key) else {
             // Tiers, legacy tier blocks and audio keys have never been measured
             // inside a mode, so their meaning there is unestablished.
-            return refuse(
-                findings,
-                format!("cost key {key:?} has no known charge unit inside a mode"),
-            );
+            return refuse(format!(
+                "cost key {key:?} has no known charge unit inside a mode"
+            ));
         };
         let Some(number) = value.as_number() else {
-            return refuse(findings, format!("cost.{key} is not a number: {value}"));
+            return refuse(format!("cost.{key} is not a number: {value}"));
         };
         let value = match rate_value(label, key, &number.to_string()) {
             Ok(v) => v,
-            Err(e) => return refuse(findings, e.to_string()),
+            Err(e) => return refuse(e.to_string()),
         };
         rates.push(NormalizedRate {
             basis: ChargeBasis::PerMillionTokens { class: *class },
@@ -999,7 +1162,7 @@ fn normalize_mode_rates(
             value,
         });
     }
-    rates
+    Ok(rates)
 }
 
 /// The models.dev cost key for audio input, whose unit only a provider's own
