@@ -174,6 +174,63 @@ fn refusals(f: &Fixture, fields: &[FieldId], from: i64, until: i64) -> Vec<Corre
 }
 
 #[test]
+fn an_earlier_correction_does_not_hide_a_defect_still_in_force() {
+    let f = fixture();
+    let source = SourceId::ModelsDev;
+    let fields = [FieldId::Rate {
+        class: TokenClass::Input,
+    }];
+    let defect_at = NOW - 1_000;
+    f.store
+        .append_eras(&[NewEra {
+            source,
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: FactKey::rate(TokenClass::Input),
+            value_json: r#"{"units":777000000000}"#.into(),
+            boundary_at: Timestamp(defect_at),
+            boundary_kind: BoundaryKind::Observed,
+            observation_id: None,
+        }])
+        .unwrap();
+
+    let first = plan(&f, &fields, BAD_FROM, FIXED_AT - 1);
+    apply_correction(&f.store, source, &first, Timestamp(NOW)).unwrap();
+    let next = |until| {
+        plan_correction(
+            &f.store,
+            source,
+            "anthropic",
+            "claude-sonnet-4-5",
+            &fields,
+            Timestamp(FIXED_AT),
+            Timestamp(until),
+            "A separate defect",
+            Timestamp(NOW + 2_000),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        next(NOW).expect_err("a correction cannot hide a defect still in force"),
+        vec![CorrectionRefusal::PresentStillAffected {
+            fact_key: FactKey::rate(TokenClass::Input),
+            current_since: Timestamp(defect_at),
+        }]
+    );
+
+    // A valid later plan still shows the real start and applies even though
+    // the newest boundary is the first correction, not that start.
+    let plan = next(NOW - 2_000).unwrap();
+    assert_eq!(plan.rows[0].current_since, Timestamp(defect_at));
+    assert_eq!(
+        apply_correction(&f.store, source, &plan, Timestamp(NOW + 2_000)).unwrap(),
+        1
+    );
+    let error = apply_correction(&f.store, source, &plan, Timestamp(NOW + 3_000)).unwrap_err();
+    assert!(error.to_string().contains("the catalog changed"), "{error}");
+}
+
+#[test]
 fn transient_bad_value_can_be_marked_from_a_conservative_lower_bound() {
     let f = fixture();
     let correction = plan(&f, &rates(), BAD_FROM - 1, FIXED_AT - 1);

@@ -36,6 +36,7 @@
 use std::collections::BTreeMap;
 
 use fusiform_core::{BoundaryKind, Correction, FieldId, SourceId, Timestamp};
+use rusqlite::{params, OptionalExtension};
 
 use crate::{CatalogError, CatalogStore, FactKey, NewEra};
 
@@ -65,6 +66,9 @@ pub struct PlannedCorrection {
     /// Shown so an operator can see the fix landed before they commit: a
     /// boundary inside the corrected window is the refused case below.
     pub current_since: Timestamp,
+    // The writer compares this boundary including corrections, because another
+    // correction can change the history without changing the value in force.
+    expected_boundary: Timestamp,
 }
 
 /// Why a correction cannot be written.
@@ -230,7 +234,7 @@ pub fn plan_correction(
 
     for fact_key in keys.keys() {
         // The value in force now, read rather than supplied.
-        let current = store.recorded_value_at(source, provider_id, model_id, fact_key, now)?;
+        let current = claim_at(store, source, provider_id, model_id, fact_key, now)?;
         let Some(current) = current else {
             refusals.push(CorrectionRefusal::NoSuchFact {
                 provider_id: provider_id.to_string(),
@@ -286,15 +290,27 @@ pub fn plan_correction(
         //
         // The case is real: the 17,455 eras of 2026-08-16 all carry identical
         // values on both sides. See `ValueUnchangedAcrossWindow`.
-        let entering =
-            store.recorded_value_at(source, provider_id, model_id, fact_key, affected_from)?;
+        let entering = claim_at(
+            store,
+            source,
+            provider_id,
+            model_id,
+            fact_key,
+            affected_from,
+        )?;
         // The window may start before the first record of the fact, but it
         // must reach an instant at which the fact was recorded; otherwise
         // there is nothing to correct.
         if entering.is_none()
-            && store
-                .recorded_value_at(source, provider_id, model_id, fact_key, affected_until)?
-                .is_none()
+            && claim_at(
+                store,
+                source,
+                provider_id,
+                model_id,
+                fact_key,
+                affected_until,
+            )?
+            .is_none()
         {
             refusals.push(CorrectionRefusal::NoValueByWindowEnd {
                 fact_key: fact_key.clone(),
@@ -350,6 +366,7 @@ pub fn plan_correction(
             fact_key: fact_key.clone(),
             value_json: current.value_json,
             current_since: current.boundary_at,
+            expected_boundary: current.latest_boundary,
         });
     }
 
@@ -366,6 +383,44 @@ pub fn plan_correction(
     }))
 }
 
+struct ClaimAt {
+    value_json: String,
+    boundary_at: Timestamp,
+    latest_boundary: Timestamp,
+}
+
+fn claim_at(
+    store: &CatalogStore,
+    source: SourceId,
+    provider: &str,
+    model: &str,
+    fact: &FactKey,
+    at: Timestamp,
+) -> Result<Option<ClaimAt>, CatalogError> {
+    // A correction restates a value, so only a non-correction era establishes
+    // when the claim took effect. Read the newest boundary in the same SQL
+    // snapshot so the writer's check cannot pair a stale value with a newer era.
+    store.raw_conn(|conn| {
+        conn.query_row(
+            "SELECT value_json, boundary_at_ms, (\
+                 SELECT MAX(boundary_at_ms) FROM era WHERE source = ?1 AND provider_id = ?2 \
+                   AND model_id = ?3 AND fact_key = ?4 AND boundary_at_ms <= ?5\
+             ) FROM era WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3 \
+               AND fact_key = ?4 AND boundary_at_ms <= ?5 AND boundary_kind <> 'corrected' \
+             ORDER BY boundary_at_ms DESC LIMIT 1",
+            params![source.as_str(), provider, model, fact.as_str(), at.0],
+            |row| {
+                Ok(ClaimAt {
+                    value_json: row.get(0)?,
+                    boundary_at: Timestamp(row.get(1)?),
+                    latest_boundary: Timestamp(row.get(2)?),
+                })
+            },
+        )
+        .optional()
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn window_contains_different_claim(
     store: &CatalogStore,
@@ -380,7 +435,8 @@ fn window_contains_different_claim(
     store.raw_conn(|conn| {
         let mut stmt = conn.prepare_cached(
             "SELECT value_json FROM era WHERE source = ?1 AND provider_id = ?2 AND model_id = ?3 \
-             AND fact_key = ?4 AND boundary_at_ms > ?5 AND boundary_at_ms <= ?6",
+             AND fact_key = ?4 AND boundary_at_ms > ?5 AND boundary_at_ms <= ?6 \
+             AND boundary_kind <> 'corrected'",
         )?;
         let mut rows = stmt.query(rusqlite::params![
             source.as_str(),
@@ -416,8 +472,8 @@ fn window_contains_different_claim(
 /// repair. The one thing this module exists not to do, reached through the
 /// mechanism chosen to prevent it.
 ///
-/// So the plan is a compare-and-swap: every row records which era was in force
-/// when it was planned, and this refuses unless that is still true. Refusing is
+/// So the plan is a compare-and-swap: every row remembers the newest boundary
+/// when it was planned, and this refuses if that boundary changed. Refusing is
 /// correct rather than conservative — the operator's diagnosis was made against
 /// a catalog state that no longer exists, and re-planning shows them what
 /// actually changed.
@@ -483,22 +539,20 @@ pub(crate) fn check_expected_eras_in(
         )?;
         // Compare era identity, not the value: another correction may have
         // opened a new era holding the same value.
-        if boundary == Some(row.current_since.0) {
+        if boundary == Some(row.expected_boundary.0) {
             continue;
         }
-        let current = boundary.map_or_else(
-            || "no longer recorded".into(),
-            |at| format!("now recorded at {at}"),
-        );
+        let current =
+            boundary.map_or_else(|| "no longer recorded".into(), |at| format!("now at {at}"));
         return Ok(Err(CatalogError::Invariant(format!(
             "{}/{} {}: the catalog changed after this correction was planned \
-             — the value in force was recorded at {} and is {}. Applying the plan \
+             — the newest boundary was at {} and is {}. Applying the plan \
              would write the old value back and revert that change. Re-run without \
              --commit to see the current state.",
             row.provider_id,
             row.model_id,
             row.fact_key.as_str(),
-            row.current_since.0,
+            row.expected_boundary.0,
             current
         ))));
     }
