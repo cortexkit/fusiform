@@ -56,8 +56,7 @@ impl PagePlan {
             .collect();
         let mut estimate = PageEstimate {
             bytes: self.envelope_bytes,
-            present: [false; 12],
-            quality: None,
+            ..Default::default()
         };
         let mut through = None;
         for (index, (provider, contribution)) in remaining.iter().enumerate() {
@@ -298,11 +297,9 @@ fn build_plan(
         let quality = QualityContribution::measure(response.quality_scores.as_ref())?;
         for (provider, rows) in partition_providers(&mut response) {
             let mut contribution = rows.contribution(quality)?;
-            if !response.overrides.is_empty() {
-                // Each priced range here is one provider. Charge for its local
-                // disclosures; a multi-provider reply may coalesce duplicates.
-                contribution.bytes +=
-                    compact_size(&response.overrides)? + r#",\"overrides\":"#.len();
+            for row in std::mem::take(&mut response.overrides) {
+                let bytes = compact_size(&row)?;
+                contribution.overrides.push((row.key, row.fact, bytes));
             }
             providers.push((provider, contribution));
         }
@@ -466,6 +463,87 @@ mod tests {
             serve_catalog_get_request(&store, request, budget, usize::MAX, &cache, None).unwrap();
         assert_eq!(second.models.keys().collect::<Vec<_>>(), ["p01/m"]);
         assert_eq!(second.quality_scores.unwrap().graded_at_ms, 9999);
+    }
+
+    #[test]
+    fn planned_store_pages_match_serialized_pages_with_local_overrides() {
+        let (store, _dir) = super::super::paging_tests::fixture_in_mode(true);
+        for (provider, key) in [
+            ("p00", "lab/shared"),
+            ("p01", "lab/shared"),
+            ("p02", "lab/other"),
+        ] {
+            store
+                .append_eras(&[fusiform_store::NewEra {
+                    source: SourceId::ModelsDev,
+                    provider_id: provider.into(),
+                    model_id: "m".into(),
+                    fact_key: FactKey::from_stored("model.canonical_id".into()),
+                    value_json: serde_json::to_string(key).unwrap(),
+                    boundary_at: Timestamp(2000),
+                    boundary_kind: fusiform_core::BoundaryKind::Asserted,
+                    observation_id: None,
+                }])
+                .unwrap();
+        }
+        store
+            .append_model_mark(
+                "lab/shared",
+                true,
+                "user",
+                "reviewed \"matching\" offers",
+                9000,
+            )
+            .unwrap();
+        store
+            .append_model_mark("lab/other", true, "user", "second judgment", 9000)
+            .unwrap();
+        let cache = Mutex::new(None);
+        let read = |request, budget| {
+            serve_catalog_get_request(&store, request, budget, usize::MAX, &cache, None).unwrap()
+        };
+        let request = CatalogGetRequest::default();
+        let whole = read(request.clone(), usize::MAX);
+        assert_eq!(whole.overrides.len(), 2);
+        let mut providers = BTreeSet::from(["google".into()]);
+        for last in ["p00", "p01", "p02"] {
+            providers.insert(last.into());
+            let mut expected = whole.clone();
+            scope_page(&mut expected, &providers);
+            if last != "p02" {
+                expected.overrides.retain(|row| row.key == "lab/shared");
+            }
+            expected.next_page_token = Some(page_token(
+                false,
+                expected.catalog_version,
+                expected.resolved_at_ms,
+                last,
+            ));
+            let budget = compact_size(&expected).unwrap();
+            let actual = read(
+                CatalogGetRequest {
+                    paged: true,
+                    ..request.clone()
+                },
+                budget,
+            );
+            assert_eq!(
+                actual.models.keys().collect::<Vec<_>>(),
+                expected.models.keys().collect::<Vec<_>>(),
+                "the serialized page fits through {last} in {budget} bytes"
+            );
+            expected.resolved_at_ms = actual.resolved_at_ms;
+            expected.next_page_token = Some(page_token(
+                false,
+                expected.catalog_version,
+                expected.resolved_at_ms,
+                last,
+            ));
+            assert_eq!(
+                serde_json::to_value(actual).unwrap(),
+                serde_json::to_value(expected).unwrap()
+            );
+        }
     }
 
     #[test]

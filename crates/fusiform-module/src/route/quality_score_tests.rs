@@ -1426,20 +1426,18 @@ fn quality_scores_page_estimate_charges_each_task_disclosure_once() {
             bytes: 73,
         };
         let contribution = rows.contribution(Some(disclosure)).unwrap();
-        let estimate = PageEstimate {
-            bytes: 0,
-            present: [false; 12],
-            quality: None,
-        }
-        .with_provider(&contribution)
-        .unwrap();
+        let estimate = || {
+            PageEstimate::default()
+                .with_provider(&contribution)
+                .unwrap()
+        };
         assert_eq!(
-            estimate.quality.unwrap().graded_at_ms,
+            estimate().quality.unwrap().graded_at_ms,
             disclosure.graded_at_ms,
             "{kind} must charge attribution"
         );
-        assert_eq!(estimate.bytes, contribution.bytes + 73);
-        let twice = estimate.with_provider(&contribution).unwrap();
+        assert_eq!(estimate().bytes, contribution.bytes + 73);
+        let twice = estimate().with_provider(&contribution).unwrap();
         assert_eq!(
             twice.bytes,
             contribution.bytes * 2 + 74,
@@ -1452,7 +1450,7 @@ fn quality_scores_page_estimate_charges_each_task_disclosure_once() {
                 bytes: 70,
             }))
             .unwrap();
-        let twice_with_newer = estimate.with_provider(&newer).unwrap();
+        let twice_with_newer = estimate().with_provider(&newer).unwrap();
         assert_eq!(twice_with_newer.quality.unwrap().graded_at_ms, 1);
         assert_eq!(
             twice_with_newer.bytes,

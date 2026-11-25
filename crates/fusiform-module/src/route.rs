@@ -1665,8 +1665,7 @@ fn page_catalog(
     // including the final page, which needs no token at all.
     let mut estimate = PageEstimate {
         bytes: compact_size(&response)? - quality.map_or(0, |q| q.bytes) + token_reserve,
-        present: [false; 12],
-        quality: None,
+        ..Default::default()
     };
     let mut count = 0;
     for (index, (_, _, contribution, _, token_bytes)) in sized.iter().enumerate() {
@@ -1756,7 +1755,7 @@ struct ProviderRows {
 
 // The empty models object is already in the envelope. Optional array headers
 // appear only once per page; provider payloads supply their interior JSON bytes.
-const DISCLOSURE_HEADERS: [&str; 11] = [
+const DISCLOSURE_HEADERS: [&str; 12] = [
     r#","curated":[]"#,
     r#","withheld":[]"#,
     r#","retired":[]"#,
@@ -1768,13 +1767,16 @@ const DISCLOSURE_HEADERS: [&str; 11] = [
     r#","wire_corrections":[]"#,
     r#","fact_overrides":[]"#,
     r#","login_methods":[]"#,
+    r#","overrides":[]"#,
 ];
+const PAGE_COLLECTIONS: usize = DISCLOSURE_HEADERS.len() + 1;
+const OVERRIDES_INDEX: usize = PAGE_COLLECTIONS - 1;
 
-#[derive(Clone, Copy)]
 struct ProviderContribution {
     bytes: usize,
-    present: [bool; 12],
+    present: [bool; PAGE_COLLECTIONS],
     quality: Option<QualityContribution>,
+    overrides: Vec<(String, String, usize)>,
 }
 
 #[derive(Clone, Copy)]
@@ -1798,15 +1800,16 @@ impl QualityContribution {
     }
 }
 
-#[derive(Clone, Copy)]
-struct PageEstimate {
+#[derive(Default)]
+struct PageEstimate<'a> {
     bytes: usize,
-    present: [bool; 12],
+    present: [bool; PAGE_COLLECTIONS],
     quality: Option<QualityContribution>,
+    overrides: BTreeMap<(&'a str, &'a str), usize>,
 }
 
-impl PageEstimate {
-    fn with_provider(mut self, provider: &ProviderContribution) -> Result<Self, RouteError> {
+impl<'a> PageEstimate<'a> {
+    fn with_provider(mut self, provider: &'a ProviderContribution) -> Result<Self, RouteError> {
         let mut added = provider.bytes;
         // The page has one disclosure, from the newest judgment it serves.
         if let Some(quality) = provider.quality {
@@ -1830,6 +1833,19 @@ impl PageEstimate {
                 };
                 self.present[index] = true;
             }
+        }
+        for (key, fact, bytes) in &provider.overrides {
+            // Providers can share a canonical key. If both disclose the same
+            // (key, fact), the later provider supplies the page's value.
+            if let Some(previous) = self.overrides.insert((key, fact), *bytes) {
+                self.bytes -= previous;
+            } else if self.present[OVERRIDES_INDEX] {
+                added += 1;
+            } else {
+                added += DISCLOSURE_HEADERS[OVERRIDES_INDEX - 1].len();
+                self.present[OVERRIDES_INDEX] = true;
+            }
+            added += bytes;
         }
         self.bytes = self
             .bytes
@@ -1857,6 +1873,7 @@ impl ProviderRows {
             !self.wire_corrections.is_empty(),
             !self.fact_overrides.is_empty(),
             !self.login_methods.is_empty(),
+            false, // Overrides are accounted for by distinct key and fact.
         ];
         let headers = DISCLOSURE_HEADERS
             .iter()
@@ -1869,6 +1886,7 @@ impl ProviderRows {
         Ok(ProviderContribution {
             bytes,
             present,
+            overrides: Vec::new(),
             quality: quality.filter(|_| {
                 self.models
                     .values()
