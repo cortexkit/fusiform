@@ -148,6 +148,33 @@ fn release_builder_refuses_empty_op_keys() {
 }
 
 #[test]
+fn release_builder_refuses_provider_level_sets() {
+    let first: Release = serde_json::from_slice(include_bytes!(
+        "../fixtures/release-format-v1/chain/release-1.json"
+    ))
+    .unwrap();
+    let parent = &first.envelope;
+    let summary = canonical_json(&json!({
+        "base_upstream_hash": parent.upstream_hash,
+        "upstream_hash": parent.upstream_hash,
+        "ops": [{"op": "set_provider", "provider": "q", "fact": "provider.name", "value": "Q"}],
+    }));
+    let result = fusiform_release::build_release(
+        &summary,
+        &serde_json::to_vec(&first.change.curation_set.unwrap()).unwrap(),
+        &serde_json::to_vec(parent).unwrap(),
+        2,
+        parent.published_at_ms + 1,
+        parent.upstream_observed_at_ms + 1,
+    );
+    assert_eq!(
+        result.err().map(|err| err.class),
+        Some("invalid_summary"),
+        "builder accepted an unsupported set_provider operation"
+    );
+}
+
+#[test]
 fn canonical_json_orders_and_escapes_at_every_depth() {
     let input = br#" {"z":{"z":[],"a":{}},"\u00e9":"\u96ea\/","a":[{"x":1,"b":"\u0001\u0000\u000b\u0008\u000c\u000a\u000d\u0009\u0022\u005c"},null,true]} "#;
     assert_eq!(

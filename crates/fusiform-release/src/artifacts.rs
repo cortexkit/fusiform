@@ -72,6 +72,12 @@ pub fn build_release(
     let summary: Summary = serde_json::from_slice(summary)
         .map_err(|err| ArtifactRefusal::new("invalid_summary", err))?;
     for op in &summary.ops {
+        if matches!(op, ChangeOp::SetProvider { .. }) {
+            return Err(ArtifactRefusal::new(
+                "invalid_summary",
+                "set_provider is unsupported until the publisher produces provider facts",
+            ));
+        }
         validate_upstream_key(op.key())
             .map_err(|err| ArtifactRefusal::new("invalid_summary", err))?;
     }

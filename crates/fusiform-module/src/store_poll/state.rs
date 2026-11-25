@@ -34,7 +34,7 @@ impl Verified {
             (|| {
                 verify_change(None, &release, keys)?;
                 let mut upstream = Upstream::new();
-                apply_ops(&mut upstream, release.change.upstream)?;
+                apply_ops(&mut upstream, &release.change.upstream)?;
                 let curation_set = release
                     .change
                     .curation_set
@@ -66,7 +66,7 @@ impl Verified {
                 None => previous.state.curation_set.clone(),
             };
             let mut upstream = previous.state.upstream.clone();
-            apply_ops(&mut upstream, release.change.upstream.iter().cloned())?;
+            apply_ops(&mut upstream, &release.change.upstream)?;
             Self::build(
                 release.envelope.clone(),
                 State {
@@ -156,50 +156,136 @@ fn empty_provider() -> ProviderFacts {
     }
 }
 
-fn apply_ops(
-    upstream: &mut Upstream,
-    ops: impl IntoIterator<Item = ChangeOp>,
-) -> Result<(), String> {
-    for op in ops {
-        let key = op.key();
-        validate_upstream_key(key)?;
-        let (provider, model, key) = key;
-        match op {
-            ChangeOp::Set {
-                provider,
-                model,
-                fact,
-                value,
-            } => {
-                let row = upstream.entry(provider).or_insert_with(empty_provider);
-                row.models.entry(model).or_default().insert(fact, value);
-            }
-            ChangeOp::SetProvider {
-                provider,
-                fact,
-                value,
-            } => {
-                let row = upstream.entry(provider).or_insert_with(empty_provider);
-                row.provider.insert(fact, value);
-            }
-            ChangeOp::Remove { .. } | ChangeOp::RemoveProvider { .. } => {
-                let missing = || format!("cannot remove missing upstream key {:?}", op.key());
-                let row = upstream.get_mut(provider).ok_or_else(missing)?;
-                let facts = match model {
-                    Some(model) => row.models.get_mut(model).ok_or_else(missing)?,
-                    None => &mut row.provider,
-                };
-                facts.remove(key).ok_or_else(missing)?;
-                if facts.is_empty() {
-                    if let Some(model) = model {
-                        row.models.remove(model);
-                    }
+fn apply_ops(upstream: &mut Upstream, ops: &[ChangeOp]) -> Result<(), String> {
+    for group in ops.chunk_by(|left, right| left.key().0 == right.key().0) {
+        let provider = group[0].key().0;
+        let had_models = upstream
+            .get(provider)
+            .is_some_and(|row| !row.models.is_empty());
+        let adds_model = group.iter().any(|op| matches!(op, ChangeOp::Set { .. }));
+        for op in group {
+            let key = op.key();
+            validate_upstream_key(key)?;
+            let (_, model, key) = key;
+            match op {
+                ChangeOp::Set {
+                    model, fact, value, ..
+                } => {
+                    let row = upstream
+                        .entry(provider.to_owned())
+                        .or_insert_with(empty_provider);
+                    row.models
+                        .entry(model.clone())
+                        .or_default()
+                        .insert(fact.clone(), value.clone());
                 }
-                if row.provider.is_empty() && row.models.is_empty() {
-                    upstream.remove(provider);
+                ChangeOp::SetProvider { fact, value, .. } => {
+                    if !had_models && !adds_model {
+                        return Err(format!("set_provider names provider {provider:?} with no existing or incoming models"));
+                    }
+                    let row = upstream
+                        .entry(provider.to_owned())
+                        .or_insert_with(empty_provider);
+                    row.provider.insert(fact.clone(), value.clone());
+                }
+                ChangeOp::Remove { .. } | ChangeOp::RemoveProvider { .. } => {
+                    let missing = || format!("cannot remove missing upstream key {:?}", op.key());
+                    let row = upstream.get_mut(provider).ok_or_else(missing)?;
+                    let facts = match model {
+                        Some(model) => row.models.get_mut(model).ok_or_else(missing)?,
+                        None => &mut row.provider,
+                    };
+                    facts.remove(key).ok_or_else(missing)?;
+                    if facts.is_empty() {
+                        if let Some(model) = model {
+                            row.models.remove(model);
+                        }
+                    }
                 }
             }
         }
+        // A batch can remove one model and add another for the same provider.
+        // Only reject an orphan if the provider still has no models afterward.
+        if let Some(row) = upstream.get(provider).filter(|row| row.models.is_empty()) {
+            if !row.provider.is_empty() {
+                return Err(format!(
+                    "change leaves provider facts without models for {provider:?}"
+                ));
+            }
+            upstream.remove(provider);
+        }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn apply(upstream: &mut Upstream, json: &str) -> Result<(), String> {
+        apply_ops(
+            upstream,
+            &serde_json::from_str::<Vec<ChangeOp>>(json).unwrap(),
+        )
+    }
+
+    #[test]
+    fn provider_level_replay_refuses_a_set_without_models() {
+        let mut upstream = Upstream::new();
+        let failure = apply(
+            &mut upstream,
+            r#"[{"op":"set_provider","provider":"p","fact":"name","value":"P"}]"#,
+        )
+        .expect_err("consumer accepted a provider set without existing or incoming models");
+        assert!(
+            failure.contains("no existing or incoming models"),
+            "{failure}"
+        );
+    }
+
+    #[test]
+    fn provider_level_replay_refuses_facts_orphaned_by_last_model_removal() {
+        let mut upstream = Upstream::new();
+        apply(
+            &mut upstream,
+            r#"[{"op":"set_provider","provider":"p","fact":"name","value":"P"},
+                {"op":"set","provider":"p","model":"m","fact":"name","value":"M"}]"#,
+        )
+        .unwrap();
+        let failure = apply(
+            &mut upstream,
+            r#"[{"op":"remove","provider":"p","model":"m","fact":"name"}]"#,
+        )
+        .expect_err("consumer retained the provider's facts after removing its last model");
+        assert!(
+            failure.contains("leaves provider facts without models"),
+            "{failure}"
+        );
+    }
+
+    #[test]
+    fn provider_level_replay_allows_replacing_models_and_removing_the_provider() {
+        let mut upstream = Upstream::new();
+        apply(
+            &mut upstream,
+            r#"[{"op":"set_provider","provider":"p","fact":"name","value":"P"},
+                {"op":"set","provider":"p","model":"m","fact":"name","value":"M"}]"#,
+        )
+        .unwrap();
+        apply(
+            &mut upstream,
+            r#"[{"op":"remove","provider":"p","model":"m","fact":"name"},
+                {"op":"set","provider":"p","model":"n","fact":"name","value":"N"}]"#,
+        )
+        .unwrap();
+        assert!(!upstream["p"].provider.is_empty());
+        assert_eq!(upstream["p"].models.keys().collect::<Vec<_>>(), ["n"]);
+        apply(
+            &mut upstream,
+            r#"[{"op":"remove_provider","provider":"p","fact":"name"},
+                {"op":"remove","provider":"p","model":"n","fact":"name"}]"#,
+        )
+        .unwrap();
+        assert!(upstream.is_empty());
+    }
 }
