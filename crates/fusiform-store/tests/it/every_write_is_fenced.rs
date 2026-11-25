@@ -29,24 +29,49 @@
 //! ASTRO actually hit, which is a write that never reaches it.
 
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 /// Statements that modify the database, as they appear in SQL.
 const WRITE_KEYWORDS: [&str; 3] = ["INSERT INTO", "UPDATE ", "DELETE FROM"];
-const STORE_SOURCES: &[&str] = &[
-    "lib.rs",
-    "ingest.rs",
-    "serve.rs",
-    "correct.rs",
-    "readers.rs",
-    "curated.rs",
-    "fact_overrides.rs",
-    "cache_lifetimes.rs",
-    "quality.rs",
-    "quality_efforts.rs",
-    "store_consumer.rs",
-    "local_overrides.rs",
+const EXEMPT_STORE_SOURCES: &[&str] = &[
+    // The migration check below verifies that imports run through the same
+    // lease-holding database handle the store opened.
+    "schema.rs",
+    // Deliberately sends a write to a read-only connection to prove SQLite refuses it.
+    "tests/read_connections.rs",
 ];
 const VERSION_HELPER: &str = "advance_catalog_version_in";
+
+fn store_source_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+}
+
+fn store_sources(root: &Path) -> BTreeSet<PathBuf> {
+    fn collect(root: &Path, dir: &Path, files: &mut BTreeSet<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
+            let entry = entry.unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
+            let path = entry.path();
+            let kind = entry
+                .file_type()
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            if kind.is_dir() {
+                collect(root, &path, files);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let relative = path.strip_prefix(root).unwrap();
+                if !EXEMPT_STORE_SOURCES
+                    .iter()
+                    .any(|name| relative == Path::new(name))
+                {
+                    files.insert(relative.to_path_buf());
+                }
+            }
+        }
+    }
+
+    let mut files = BTreeSet::new();
+    collect(root, root, &mut files);
+    files
+}
 
 /// Read a store source file, with SQL string continuations joined.
 ///
@@ -72,10 +97,8 @@ const VERSION_HELPER: &str = "advance_catalog_version_in";
 /// write scan and the fenced-range scan run over this same joined text. They
 /// are consistent with each other, which is the only property the comparison
 /// needs.
-fn source(name: &str) -> String {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src")
-        .join(name);
+fn source(name: impl AsRef<Path>) -> String {
+    let path = store_source_root().join(name);
     let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     join_continuations(&raw)
 }
@@ -209,10 +232,11 @@ fn version_helper_callers_are_all_named_and_fenced() {
     let mut callers = BTreeSet::new();
     let mut era_append_callers = BTreeSet::new();
     let mut definitions = Vec::new();
-    for file in STORE_SOURCES {
-        let text = source(file);
+    for file in store_sources(&store_source_root()) {
+        let text = source(&file);
+        let file = file.display();
         if version_helper_range(&text).is_some() {
-            definitions.push(*file);
+            definitions.push(file.to_string());
         }
         let ranges = fenced_ranges(&text);
         let mut function = "<module>";
@@ -312,6 +336,32 @@ fn migration_handle_violations(text: &str) -> Vec<&str> {
 }
 
 #[test]
+fn store_source_scan_includes_modules_without_writes_today() {
+    let root = store_source_root();
+    let sources = store_sources(&root);
+    for file in ["history.rs", "history_base.rs"] {
+        assert!(
+            sources.contains(Path::new(file)),
+            "{file} must be scanned even when it does not write yet"
+        );
+    }
+    for file in EXEMPT_STORE_SOURCES {
+        assert!(
+            root.join(file).is_file(),
+            "stale write-fence exemption: {file}"
+        );
+        assert!(!sources.contains(Path::new(file)));
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("new_module")).unwrap();
+    let nested = Path::new("new_module").join("schema.rs");
+    std::fs::write(temp.path().join(&nested), "").unwrap();
+    std::fs::write(temp.path().join("schema.rs"), "").unwrap();
+    assert_eq!(store_sources(temp.path()), BTreeSet::from([nested]));
+}
+
+#[test]
 fn planted_unfenced_write_is_reported() {
     assert_eq!(
         unfenced_writes("conn.execute(\"INSERT \\\n INTO observation\");"),
@@ -345,14 +395,11 @@ fn planted_reopened_migration_handle_is_reported() {
 /// during a refactor and nothing objected.
 #[test]
 fn no_write_escapes_the_fence() {
-    // Every file that can issue SQL against the store. `schema.rs` is excluded
-    // deliberately and checked separately below.
-    // Its grade and mark import INSERTs run through the retained migration
-    // handle, not a live write API; the migration-handle control covers it.
     let mut writes_seen = 0usize;
 
-    for file in STORE_SOURCES {
-        let text = source(file);
+    for file in store_sources(&store_source_root()) {
+        let text = source(&file);
+        let file = file.display();
         let unfenced = unfenced_writes(&text);
 
         for line in write_lines(&text) {
