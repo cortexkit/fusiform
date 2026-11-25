@@ -4,17 +4,62 @@ use fusiform_core::BoundaryKind;
 use fusiform_store::NewEra;
 
 fn store() -> (CatalogStore, tempfile::TempDir) {
+    store_in_mode(false)
+}
+
+fn store_in_mode(store_mode: bool) -> (CatalogStore, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let store = CatalogStore::open(&StorageDescriptor {
+    let descriptor = StorageDescriptor {
         module_id: "fusiform".to_string(),
         storage_namespace: "default".to_string(),
         isolation: Isolation::Module,
         backend: StorageBackend::Sqlite {
             path: dir.path().join("store.db").to_string_lossy().to_string(),
         },
-    })
+    };
+    let store = if store_mode {
+        CatalogStore::open_for_store(&descriptor)
+    } else {
+        CatalogStore::open(&descriptor)
+    }
     .unwrap();
     (store, dir)
+}
+
+#[test]
+fn store_mode_history_inheritance_origin_agrees_with_catalog_get() {
+    for store_mode in [false, true] {
+        let (store, dir) = store_in_mode(store_mode);
+        seed(&store, "zai", "glm-x", Some(75_000_000), true);
+        seed(&store, "reseller", "glm-x", None, true);
+        if store_mode {
+            let db = rusqlite::Connection::open(dir.path().join("store.db")).unwrap();
+            db.execute(
+                "INSERT INTO store_document_era(document,document_json,recorded_at_ms)
+                 VALUES ('model-creators',?1,1000)",
+                [r#"{"creators":[]}"#],
+            )
+            .unwrap();
+        }
+        let current =
+            serve_catalog_get(&store, br#"{"provider_id":"reseller","model_id":"glm-x"}"#).unwrap();
+        let rate = current.models["reseller/glm-x"].get("rate.input");
+        assert_eq!(rate.is_some(), !store_mode);
+        let history = serve_history(
+            &store,
+            br#"{"provider_id":"reseller","model_id":"glm-x","fact_key":"rate.input"}"#,
+        )
+        .unwrap();
+        assert!(history.eras.is_empty());
+        assert_eq!(
+            history
+                .inherited_from
+                .as_ref()
+                .map(|origin| origin.provider_id.as_str()),
+            rate.and_then(|rate| rate["inherited_from"]["provider_id"].as_str()),
+            "history named a rate origin that catalog.get does not serve (store_mode={store_mode})"
+        );
+    }
 }
 
 fn era(provider: &str, model: &str, key: &str, value: &str) -> NewEra {
@@ -444,6 +489,7 @@ fn history_names_where_an_inherited_rate_comes_from() {
     let origin = inheritance_origin(
         &store,
         SourceId::ModelsDev,
+        &creators(),
         "ollama-cloud",
         "glm-x",
         &FactKey::from_stored("rate.input".to_string()),
@@ -457,6 +503,7 @@ fn history_names_where_an_inherited_rate_comes_from() {
         inheritance_origin(
             &store,
             SourceId::ModelsDev,
+            &creators(),
             "zai",
             "glm-x",
             &FactKey::from_stored("rate.input".to_string()),
@@ -472,6 +519,7 @@ fn history_names_where_an_inherited_rate_comes_from() {
         inheritance_origin(
             &store,
             SourceId::ModelsDev,
+            &creators(),
             "ollama-cloud",
             "glm-x",
             &FactKey::from_stored("limit.context".to_string()),

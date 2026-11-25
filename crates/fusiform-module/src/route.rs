@@ -289,7 +289,7 @@ fn upstream_history(
     //
     // Reached only when the read found nothing, so the ordinary path pays no
     // extra query.
-    if rows.is_empty() {
+    let inherited_from = if rows.is_empty() {
         let published = crate::curation::PublishedCuration::load(store, None)
             .map_err(RouteError::unavailable)?;
         let tables = published
@@ -361,8 +361,20 @@ fn upstream_history(
         }
         // Known model, nothing recorded for this fact: a real answer, and now
         // the only remaining cause is the fact key. The empty response says
-        // which of the three it is by elimination.
-    }
+        // which of the three it is by elimination. Inherited rates have no
+        // era on this provider, so use the same creator table as catalog.get
+        // to explain that case.
+        inheritance_origin(
+            store,
+            source,
+            tables.creators,
+            &request.provider_id,
+            &request.model_id,
+            &fact,
+        )
+    } else {
+        None
+    };
 
     // Annotated exactly as the catalog path annotates, because the reason for
     // the annotation does not weaken with age.
@@ -407,33 +419,6 @@ fn upstream_history(
         .last_changed_at(source, &request.provider_id, &request.model_id, &fact)
         .map_err(|e| store_error(&e))?
         .map(|t| t.0);
-
-    // Why an empty history can be the RIGHT answer for a fact that is served.
-    //
-    // A rate inherited from the creator has no eras on this row -- the value is
-    // derived at serve time -- so `catalog.get` serves a price and
-    // `catalog.history` finds nothing. Two surfaces disagreeing about whether a
-    // fact exists, both correct, which reads as one of them being broken.
-    //
-    // Answered by running THE SAME derivation `catalog.get` runs, rather than
-    // by re-deriving the eligibility rule here. A second copy of that rule
-    // would be free to drift from the one that decides what is actually
-    // served, and then this surface would explain an absence that is not the
-    // one the consumer met.
-    //
-    // Only consulted when the history is empty: a fact with eras of its own is
-    // this provider's, and inheritance never overwrites a published rate.
-    let inherited_from = if eras.is_empty() {
-        inheritance_origin(
-            store,
-            source,
-            &request.provider_id,
-            &request.model_id,
-            &fact,
-        )
-    } else {
-        None
-    };
 
     Ok(HistoryResponse {
         source: source.as_str().to_string(),
@@ -3290,6 +3275,7 @@ fn widened_for_inheritance(prefixes: &[String]) -> Vec<String> {
 fn inheritance_origin(
     store: &CatalogStore,
     source: SourceId,
+    creators: &crate::creators::Creators,
     provider_id: &str,
     model_id: &str,
     fact: &FactKey,
@@ -3309,13 +3295,7 @@ fn inheritance_origin(
         })
         .collect();
 
-    inherit_rate_for(
-        store,
-        source,
-        crate::creators::creators(),
-        &mut facts,
-        model_id,
-    );
+    inherit_rate_for(store, source, creators, &mut facts, model_id);
 
     serde_json::from_value(facts.get(fact.as_str())?.get("inherited_from")?.clone()).ok()
 }
