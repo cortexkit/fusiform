@@ -1678,26 +1678,10 @@
         }
       ],
       "catalog_version": 0,
-      "fact_overrides": [
-        {
-          "established_at_ms": 1794528000000,
-          "established_by": "fusiform",
-          "fact_key": "limit.output",
-          "model": "google/antigravity-gemini-4-hydrogen",
-          "model_id": "antigravity-gemini-4-hydrogen",
-          "provider_id": "google",
-          "quote": "The captured agy 1.5.5 Low and XHigh requests send \"maxOutputTokens\": 262144; the registry declares limit: { context: 1048576, output: 262144 }. Both requests returned HTTP 429, so server acceptance was not observed.",
-          "reason": "The alias route has its own sourced output limit, independent of the target's API limit.",
-          "replaces": 65536,
-          "review_by_ms": 1799712000000,
-          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/test-fixtures/agy-cli-1.5.5/hydrogen-evidence.json#L31-L36; https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/packages/core/src/model-registry.ts#L323-L337",
-          "value": 262144
-        }
-      ],
       "models": {
         "google/antigravity-gemini-4-hydrogen": {
           "limit.context": 1048576,
-          "limit.output": 262144
+          "limit.output": 65536
         }
       },
       "resolved_at_ms": -1,

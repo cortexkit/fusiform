@@ -1486,8 +1486,11 @@ fn carbon_and_its_antigravity_alias_serve_the_sourced_output_limit() {
     assert!(historical.fact_overrides.is_empty());
 }
 
+/// A live Code Assist request for this route asking for 200,000 output tokens
+/// stopped at exactly 65,536, so the route serves its target's limit rather
+/// than the 262,144 the native client puts in its requests.
 #[test]
-fn hydrogen_antigravity_alias_serves_the_sourced_output_limit() {
+fn hydrogen_antigravity_alias_serves_the_targets_output_limit() {
     let seed: Value =
         serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
     let hydrogen = seed["google"]["models"]["gemini-4-hydrogen"].clone();
@@ -1509,8 +1512,6 @@ fn hydrogen_antigravity_alias_serves_the_sourced_output_limit() {
         &serde_json::to_vec(&json!({"google": google})).unwrap(),
         1_000,
     );
-    let alias = &fusiform_module::aliases::aliases()
-        [&("google".into(), "antigravity-gemini-4-hydrogen".into())];
     for response in [
         get(
             &store,
@@ -1524,17 +1525,8 @@ fn hydrogen_antigravity_alias_serves_the_sourced_output_limit() {
         ),
     ] {
         let identity = "google/antigravity-gemini-4-hydrogen";
-        assert_eq!(response.models[identity]["limit.output"], json!(262_144));
-        let rows = disclosed_fact(&response, identity, "limit.output");
-        assert_eq!(rows.len(), 1);
-        let row = rows[0];
-        let limit = alias.limit_output.as_ref().unwrap();
-        assert_eq!(row.model_id, "antigravity-gemini-4-hydrogen");
-        assert_eq!(row.replaces, json!(65_536));
-        assert_eq!(row.source_ref, limit.source_ref);
-        assert_eq!(row.quote, limit.quote);
-        assert_eq!(row.established_at_ms, alias.established_at_ms);
-        assert_eq!(row.review_by_ms, alias.review_by_ms);
+        assert_eq!(response.models[identity]["limit.output"], json!(65_536));
+        assert!(disclosed_fact(&response, identity, "limit.output").is_empty());
     }
     let target = get(
         &store,

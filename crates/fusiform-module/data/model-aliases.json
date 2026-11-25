@@ -103,11 +103,6 @@
       "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/packages/core/src/model-registry.ts#L107-L135 (native routes), #L323-L337 (public model), #L635-L648 (tier mapping); https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/test-fixtures/agy-cli-1.5.5/hydrogen-evidence.json (native xhigh request); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope",
       "established_at_ms": 1794528000000,
       "review_by_ms": 1799712000000,
-      "limit_output": {
-        "value": 262144,
-        "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/test-fixtures/agy-cli-1.5.5/hydrogen-evidence.json#L31-L36; https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/packages/core/src/model-registry.ts#L323-L337",
-        "quote": "The captured agy 1.5.5 Low and XHigh requests send \"maxOutputTokens\": 262144; the registry declares limit: { context: 1048576, output: 262144 }. Both requests returned HTTP 429, so server acceptance was not observed."
-      },
       "reasoning_wire_ids": {
         "low": "gemini-4-hydrogen-low",
         "medium": "gemini-4-hydrogen-medium",
