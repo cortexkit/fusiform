@@ -1,5 +1,7 @@
+use std::collections::BTreeMap;
+
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::SourceId;
+use fusiform_core::{normalize_models_dev_with, SourceId, Timestamp};
 use fusiform_module::fetch::FetchOutcome;
 use fusiform_module::loop_::{apply, TickOutcome};
 use fusiform_module::signals::Signals;
@@ -7,7 +9,11 @@ use fusiform_module::{input_audio, seed};
 use fusiform_publish::{publish_step, FactIndex};
 use fusiform_release::{fact_hash, upstream_hash_sorted, ChangeOp, ProviderFacts, Upstream};
 use fusiform_store::CatalogStore;
-use serde_json::{json, Value};
+use serde_json::{
+    json,
+    value::{to_raw_value, RawValue},
+    Value,
+};
 
 const SEED: &[u8] = include_bytes!("../../data/models-dev-seed.json");
 const PROVIDER: &str = "openai";
@@ -25,7 +31,13 @@ fn the_publisher_hashes_exactly_what_a_seeded_store_holds() {
     let upstream = held_as_upstream(held);
     let previous = FactIndex::from_snapshot_upstream(&upstream).unwrap();
     assert_eq!(previous.upstream_hash(), held_hash);
-    let published = publish_step(SEED, &previous, &input_audio::evidence(), 0).unwrap();
+    let published = publish_step(
+        SEED,
+        &previous,
+        &input_audio::evidence(),
+        seed::meta().unwrap().fetched_at_ms,
+    )
+    .unwrap();
     assert_eq!(published.upstream_hash, held_hash);
     assert_eq!(published.model_count, model_count);
     assert_eq!(published.index.model_count(), model_count);
@@ -83,6 +95,7 @@ fn held_as_upstream(held: fusiform_store::ingest::CurrentValues) -> Upstream {
 #[test]
 fn one_seed_edit_sets_one_fact_and_a_removed_model_loses_all_its_facts() {
     let evidence = input_audio::evidence();
+    let observed_at = seed::meta().unwrap().fetched_at_ms;
     let upstream: Upstream = seed::upstream_state()
         .unwrap()
         .models
@@ -112,16 +125,30 @@ fn one_seed_edit_sets_one_fact_and_a_removed_model_loses_all_its_facts() {
     let prior = FactIndex::from_snapshot_upstream(&upstream).unwrap();
     let previous = FactIndex::from_bytes(&prior.to_bytes()).unwrap();
 
-    let mut changed: Value = serde_json::from_slice(SEED).unwrap();
-    let models = changed[PROVIDER]["models"].as_object_mut().unwrap();
+    // V2 uses the first API and first cache-write TTL as defaults, so decoding
+    // the whole catalog into Value could change facts unrelated to the edit.
+    type RawObject = BTreeMap<String, Box<RawValue>>;
+    let mut changed: RawObject = serde_json::from_slice(SEED).unwrap();
+    let mut provider: RawObject = serde_json::from_str(changed[PROVIDER].get()).unwrap();
+    let mut models: RawObject = serde_json::from_str(provider["models"].get()).unwrap();
+    let mut model: RawObject = serde_json::from_str(models[MODEL].get()).unwrap();
     let edited = json!("A changed display name");
-    assert_ne!(models[MODEL]["name"], edited);
-    models.get_mut(MODEL).unwrap()["name"] = edited.clone();
+    assert_ne!(
+        serde_json::from_str::<Value>(model["name"].get()).unwrap(),
+        edited
+    );
+    model.insert("name".into(), to_raw_value(&edited).unwrap());
+    models.insert(MODEL.into(), to_raw_value(&model).unwrap());
+    let mut changed_document = |models: &RawObject| {
+        provider.insert("models".into(), to_raw_value(models).unwrap());
+        changed.insert(PROVIDER.into(), to_raw_value(&provider).unwrap());
+        serde_json::to_vec(&changed).unwrap()
+    };
     let next = publish_step(
-        &serde_json::to_vec(&changed).unwrap(),
+        &changed_document(&models),
         &previous,
         &evidence,
-        0,
+        observed_at,
     )
     .unwrap();
     assert_eq!(next.model_count, previous.model_count());
@@ -136,13 +163,12 @@ fn one_seed_edit_sets_one_fact_and_a_removed_model_loses_all_its_facts() {
         }]
     );
 
-    let models = changed[PROVIDER]["models"].as_object_mut().unwrap();
     assert!(models.remove(MODEL).is_some());
     let removed = publish_step(
-        &serde_json::to_vec(&changed).unwrap(),
+        &changed_document(&models),
         &previous,
         &evidence,
-        0,
+        observed_at,
     )
     .unwrap();
     let expected: Vec<_> = upstream[PROVIDER].models[MODEL]
@@ -159,18 +185,21 @@ fn one_seed_edit_sets_one_fact_and_a_removed_model_loses_all_its_facts() {
     assert_eq!(removed.model_count, previous.model_count() - 1);
 }
 
-const REPEATED_TIERS: &[u8] = br#"{
+const CONFLICTING_MODE: &[u8] = br#"{
   "p": {"name":"Provider", "models": {
-    "m": {"name":"Tiered model", "cost":{"tiers":[
-      {"tier":{"type":"context","size":200000},"input":1,"output":3},
-      {"tier":{"type":"context","size":200000},"input":2,"output":3}
-    ]}},
-    "n": {"name":"Other model"}
+    "m": {"name":"Tiered model", "type":"chat", "capabilities":{}, "api":{},
+      "experimental":{"modes":{"fast":{"service_tier":"priority",
+        "cost":{"text":{"input":{"price":1}}}}}},
+      "cost":{"text":{
+        "input":{"overrides":[{"when":{"service_tier":{"equals":"priority"}},"price":2}]},
+        "output":{"overrides":[{"when":{"context":{"gt":200000}},"price":3}]}
+      }}},
+    "n": {"name":"Other model", "type":"chat", "capabilities":{}, "api":{}}
   }}
 }"#;
 
 #[test]
-fn conflicting_repeated_tier_prices_are_omitted_by_both_paths() {
+fn conflicting_named_mode_and_service_tier_prices_are_omitted_by_both_paths() {
     let (_dir, store) = blank_store();
     let signals = Signals::new();
     let poll = |at| {
@@ -179,7 +208,7 @@ fn conflicting_repeated_tier_prices_are_omitted_by_both_paths() {
             &signals,
             SourceId::ModelsDev,
             FetchOutcome::Body {
-                bytes: REPEATED_TIERS.to_vec(),
+                bytes: CONFLICTING_MODE.to_vec(),
                 etag: None,
                 duration: std::time::Duration::ZERO,
             },
@@ -191,32 +220,57 @@ fn conflicting_repeated_tier_prices_are_omitted_by_both_paths() {
 
     let held = store.current_values(SourceId::ModelsDev).unwrap();
     let facts = &held[&("p".into(), "m".into())];
-    let input = "rate.input.above_context.200000";
+    let input = "rate.input.mode.fast";
     let output = "rate.output.above_context.200000";
     assert!(!facts.keys().any(|key| key.as_str() == input));
-    assert!(facts.keys().any(|key| key.as_str() == output));
+    let (_, raw) = facts
+        .iter()
+        .find(|(key, _)| key.as_str() == output)
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(raw).unwrap()["units"],
+        3_000_000_000u64
+    );
     assert_eq!(held.len(), 2);
     let store_hash = hash_held(&held);
 
     let blank = FactIndex::from_snapshot_upstream(&Upstream::new()).unwrap();
-    let published = publish_step(REPEATED_TIERS, &blank, &input_audio::evidence(), 0).unwrap();
-    let [conflict] = published.conflicts.as_slice() else {
-        panic!("expected only the input conflict")
+    let evidence = input_audio::evidence();
+    let normalized = normalize_models_dev_with(CONFLICTING_MODE, &evidence, Timestamp(1)).unwrap();
+    let [finding] = normalized.findings.as_slice() else {
+        panic!("expected only the mode conflict: {:?}", normalized.findings)
     };
-    assert_eq!(
-        (
-            conflict.provider.as_str(),
-            conflict.model.as_str(),
-            conflict.fact.as_str()
-        ),
-        ("p", "m", input)
-    );
-    let amounts: Vec<_> = conflict
-        .values
-        .iter()
-        .map(|raw| serde_json::from_str::<Value>(raw).unwrap()["units"].clone())
-        .collect();
-    assert_eq!(amounts, [json!(1_000_000_000), json!(2_000_000_000)]);
+    assert_eq!(finding.first_model_id.as_deref(), Some("m"));
+    assert!(matches!(&finding.key,
+        fusiform_core::normalize::v2::FindingKey::RefusedPrice { role, detail }
+        if role == "text.input.price" && detail == "conflicting prices for mode fast"));
+
+    let source: Value = serde_json::from_slice(CONFLICTING_MODE).unwrap();
+    for (remove_tier, expected) in [(true, 1_000_000_000), (false, 2_000_000_000)] {
+        let mut candidate = source.clone();
+        let row = &mut candidate["p"]["models"]["m"];
+        if remove_tier {
+            row["cost"]["text"].as_object_mut().unwrap().remove("input");
+        } else {
+            row["experimental"]["modes"]["fast"]
+                .as_object_mut()
+                .unwrap()
+                .remove("cost");
+        }
+        let only = publish_step(
+            &serde_json::to_vec(&candidate).unwrap(),
+            &blank,
+            &evidence,
+            1,
+        )
+        .unwrap();
+        assert!(
+            only.ops.iter().any(|op| matches!(op,
+            ChangeOp::Set { provider, model, fact, value }
+                if provider == "p" && model == "m" && fact == input && value["units"] == expected))
+        );
+    }
+    let published = publish_step(CONFLICTING_MODE, &blank, &evidence, 1).unwrap();
     assert_eq!(published.upstream_hash, store_hash);
     assert!(published.ops.iter().all(|op| op.key().2 != input));
     assert_eq!(
@@ -227,17 +281,38 @@ fn conflicting_repeated_tier_prices_are_omitted_by_both_paths() {
             .count(),
         1
     );
-    let repeated = publish_step(
-        REPEATED_TIERS,
-        &published.index,
-        &input_audio::evidence(),
-        0,
-    )
-    .unwrap();
+    let repeated = publish_step(CONFLICTING_MODE, &published.index, &evidence, 2).unwrap();
     assert!(repeated.ops.is_empty());
     assert_eq!(repeated.conflicts, published.conflicts);
 
     let repeated_poll = poll(2);
     assert!(matches!(repeated_poll.outcome, TickOutcome::Unchanged));
     assert_eq!(repeated_poll.eras_written, 0);
+}
+
+#[test]
+fn matching_context_overrides_merge_in_order() {
+    // The models.dev v2 schema says, “Matching overrides merge field by field
+    // (nested objects included) in order”. The later price wins without
+    // clearing the earlier cache read price.
+    let body = br#"{"p":{"models":{"m":{"type":"chat","api":{},"capabilities":{},
+      "cost":{"text":{"input":{"overrides":[
+        {"when":{"context":{"gt":200000}},"price":1,"cache":{"read":0.5}},
+        {"when":{"context":{"gt":200000}},"price":2}
+      ]}}}}}}}"#;
+    let blank = FactIndex::from_snapshot_upstream(&Upstream::new()).unwrap();
+    let published = publish_step(body, &blank, &input_audio::evidence(), 1).unwrap();
+    assert!(published.conflicts.is_empty());
+    for (fact, units) in [
+        ("rate.input.above_context.200000", 2_000_000_000),
+        ("rate.cache_read.above_context.200000", 500_000_000),
+    ] {
+        let matching: Vec<_> = published
+            .ops
+            .iter()
+            .filter(|op| op.key().2 == fact)
+            .collect();
+        assert_eq!(matching.len(), 1, "{fact}");
+        assert!(matches!(matching[0], ChangeOp::Set { value, .. } if value["units"] == units));
+    }
 }

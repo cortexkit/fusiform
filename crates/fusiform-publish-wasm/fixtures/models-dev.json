@@ -1,1 +1,1 @@
-{"alpha":{"name":"Fixture Labs","models":{"-":{"cost":{"input":0.31}}}},"zeta":{"models":{"mini":{"limit":{"context":8192}}}}}
+{"alpha":{"name":"Fixture Labs","models":{"-":{"api":{},"capabilities":{},"cost":{"text":{"input":{"price":0.31}}},"type":"chat"}}},"zeta":{"models":{"mini":{"api":{},"capabilities":{},"limit":{"context":8192},"type":"chat"}}}}

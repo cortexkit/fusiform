@@ -4,10 +4,12 @@ mod consumer;
 use std::collections::BTreeMap;
 
 use fusiform_core::ChargeUnitEvidence;
-use fusiform_publish::{FactIndex, SnapshotInputs, publish_step, snapshot_bytes};
+use fusiform_publish::{
+    FactIndex, SnapshotInputs, publish_step, snapshot_bytes, snapshot_bytes_from_state,
+};
 use fusiform_release::{
-    HistoryAttestationBody, HistoryFile, Release, SignatureError, SigningKey, Snapshot,
-    build_release, canonical_json, history_day_bytes, sha256, sign_envelope,
+    ChangeOp, HistoryAttestationBody, HistoryFile, Release, SignatureError, SigningKey, Snapshot,
+    State, Upstream, build_release, canonical_json, history_day_bytes, sha256, sign_envelope,
     sign_history_attestation, verify_envelope, verify_history_attestation,
 };
 use serde_json::{Value, json};
@@ -44,21 +46,40 @@ fn models_with_rename() -> Vec<u8> {
     wire(models)
 }
 
-fn summary(models: &[u8], previous: &FactIndex) -> (Vec<u8>, FactIndex) {
-    let step = publish_step(models, previous, &ChargeUnitEvidence::default(), 0).unwrap();
+fn summary(models: &[u8], previous: &FactIndex, observed_at: i64) -> (Vec<u8>, FactIndex) {
+    let step = publish_step(
+        models,
+        previous,
+        &ChargeUnitEvidence::default(),
+        observed_at,
+    )
+    .unwrap();
+    assert!(step.conflicts.is_empty());
     (
-        wire(json!({
-            "base_upstream_hash": previous.upstream_hash(),
-            "ops": step.ops,
-            "upstream_hash": step.upstream_hash,
-        })),
+        summary_bytes(previous, &step.index, &step.ops, step.next_date_boundary_ms),
         step.index,
     )
 }
 
+fn summary_bytes(
+    previous: &FactIndex,
+    index: &FactIndex,
+    ops: &[ChangeOp],
+    next_date_boundary_ms: Option<i64>,
+) -> Vec<u8> {
+    wire(json!({
+        "base_upstream_hash": previous.upstream_hash(),
+        "conflicts": [],
+        "model_count": index.model_count(),
+        "next_date_boundary_ms": next_date_boundary_ms,
+        "ops": ops,
+        "upstream_hash": index.upstream_hash(),
+    }))
+}
+
 fn two_releases() -> (Release, Release, FactIndex) {
     let index = FactIndex::from_snapshot_upstream(&BTreeMap::new()).unwrap();
-    let (genesis, index) = summary(MODELS, &index);
+    let (genesis, index) = summary(MODELS, &index, START_MS - 2);
     let r1 = build_release(
         &genesis,
         CURATION.as_bytes(),
@@ -69,7 +90,7 @@ fn two_releases() -> (Release, Release, FactIndex) {
     )
     .unwrap();
     let r1 = signed(&r1, &key());
-    let (changed, index) = summary(&models_with_rename(), &index);
+    let (changed, index) = summary(&models_with_rename(), &index, START_MS - 1);
     let r2 = build_release(
         &changed,
         CURATION.as_bytes(),
@@ -83,7 +104,7 @@ fn two_releases() -> (Release, Release, FactIndex) {
 }
 
 fn third_release(r2: &Release, index: &FactIndex) -> Release {
-    let (unchanged, _) = summary(&models_with_rename(), index);
+    let (unchanged, _) = summary(&models_with_rename(), index, START_MS + 86_399_998);
     let curation = CURATION.replace("\"version\":1", "\"version\":2");
     let r3 = build_release(
         &unchanged,
@@ -147,11 +168,117 @@ impl SnapshotDocs {
 }
 
 pub fn fixtures() -> BTreeMap<&'static str, Vec<u8>> {
-    let (r1, r2, _) = two_releases();
-    let base = history_base(&r1);
-    let day = history_day_bytes(DAY, &jsonl(&[&r2])).unwrap();
+    // The release-format vectors describe a historical catalog that predates
+    // the mandatory v2 model type. Start from those facts so a parser change
+    // cannot rewrite the release format's compatibility record.
+    let empty = FactIndex::from_snapshot_upstream(&Upstream::new()).unwrap();
+    let sparse = |context: Value| -> fusiform_release::Facts {
+        wire_facts(json!({
+            "capability.attachment": null, "capability.input_modalities": null,
+            "capability.output_modalities": null, "capability.reasoning": null,
+            "capability.reasoning_options": null, "capability.tool_call": null,
+            "existence": "present", "limit.context": context, "limit.output": null,
+            "model.canonical_id": null, "model.family": null, "model.open_weights": null,
+            "model.status": null,
+        }))
+    };
+    let mut alpha = sparse(Value::Null);
+    alpha.extend(wire_facts(json!({
+        "provider.name": "Fixture Labs",
+        "rate.input": {"currency":"USD", "exponent":9, "state":"priced", "units":310000000},
+    })));
+    let mut upstream: Upstream = serde_json::from_value(json!({
+        "alpha": {"models": {"-": alpha}, "provider": {}},
+        "zeta": {"models": {"mini": sparse(json!(8192))}, "provider": {}},
+    }))
+    .unwrap();
+    let genesis_ops: Vec<_> = upstream
+        .iter()
+        .flat_map(|(provider, facts)| {
+            facts.models.iter().flat_map(move |(model, facts)| {
+                facts.iter().map(move |(fact, value)| ChangeOp::Set {
+                    provider: provider.clone(),
+                    model: model.clone(),
+                    fact: fact.clone(),
+                    value: value.clone(),
+                })
+            })
+        })
+        .collect();
+    let first = FactIndex::from_snapshot_upstream(&upstream).unwrap();
+    let genesis = summary_bytes(&empty, &first, &genesis_ops, None);
+    let r1 = signed(
+        &build_release(
+            &genesis,
+            CURATION.as_bytes(),
+            b"",
+            1,
+            START_MS - 1,
+            START_MS - 2,
+        )
+        .unwrap(),
+        &key(),
+    );
+    upstream
+        .get_mut("zeta")
+        .unwrap()
+        .models
+        .get_mut("mini")
+        .unwrap()
+        .insert("model.name".into(), json!("Mini 2"));
+    let second = FactIndex::from_snapshot_upstream(&upstream).unwrap();
+    let renamed = summary_bytes(&first, &second, &[rename_op()], None);
+    let r2 = signed(
+        &build_release(
+            &renamed,
+            CURATION.as_bytes(),
+            &wire(&r1.envelope),
+            2,
+            START_MS,
+            START_MS - 1,
+        )
+        .unwrap(),
+        &key(),
+    );
+    let state = State {
+        upstream,
+        curation_set: r1.change.curation_set.clone().unwrap(),
+    };
+    chain_artifacts(&r1, &r2, |docs| {
+        snapshot_bytes_from_state(
+            &wire(state),
+            &docs.envelope,
+            &docs.signatures,
+            &docs.history,
+            &docs.history_signatures,
+            PUBLIC_KEY,
+        )
+        .unwrap()
+    })
+}
+
+fn wire_facts(value: Value) -> fusiform_release::Facts {
+    serde_json::from_value(value).unwrap()
+}
+
+fn rename_op() -> ChangeOp {
+    ChangeOp::Set {
+        provider: "zeta".into(),
+        model: "mini".into(),
+        fact: "model.name".into(),
+        value: json!("Mini 2"),
+    }
+}
+
+fn chain_artifacts(
+    r1: &Release,
+    r2: &Release,
+    snapshot: impl FnOnce(SnapshotDocs) -> Vec<u8>,
+) -> BTreeMap<&'static str, Vec<u8>> {
+    let base = history_base(r1);
+    let day = history_day_bytes(DAY, &jsonl(&[r2])).unwrap();
     let docs = SnapshotDocs::new(
-        &r2,
+        r2,
         vec![
             HistoryFile {
                 file: "base.json".into(),
@@ -163,20 +290,22 @@ pub fn fixtures() -> BTreeMap<&'static str, Vec<u8>> {
             },
         ],
     );
-    let snapshot =
-        snapshot_bytes(docs.inputs(&models_with_rename(), &ChargeUnitEvidence::default())).unwrap();
     BTreeMap::from([
         ("chain/base.json", base),
-        ("chain/release-1.json", wire(&r1)),
-        ("chain/release-2.json", wire(&r2)),
-        ("chain/snapshot.json", snapshot),
+        ("chain/release-1.json", wire(r1)),
+        ("chain/release-2.json", wire(r2)),
+        ("chain/snapshot.json", snapshot(docs)),
         ("chain/days/2026-11-19.json", day),
     ])
 }
 
-fn history_base(import: &Release) -> Vec<u8> {
-    use fusiform_release::ChangeOp;
+fn live_fixtures(r1: &Release, r2: &Release) -> BTreeMap<&'static str, Vec<u8>> {
+    chain_artifacts(r1, r2, |docs| {
+        snapshot_bytes(docs.inputs(&models_with_rename(), &ChargeUnitEvidence::default())).unwrap()
+    })
+}
 
+fn history_base(import: &Release) -> Vec<u8> {
     let at = import.envelope.upstream_observed_at_ms;
     let era: Vec<_> = import
         .change
@@ -242,7 +371,7 @@ fn signed_chain_replays_and_snapshot_reproduces_state() {
     let r3 = third_release(&r2, &index);
     assert!(r1.change.curation_set.is_some());
     assert!(r2.change.curation_set.is_none());
-    assert!(!r2.change.upstream.is_empty());
+    assert_eq!(r2.change.upstream, [rename_op()]);
     assert!(r3.change.curation_set.is_some());
     assert!(r3.change.upstream.is_empty());
     let keys = BTreeMap::from([(KID.to_string(), key().verifying_key())]);
@@ -269,7 +398,7 @@ fn signed_chain_replays_and_snapshot_reproduces_state() {
         "verify release 3: curation_hash does not match verified state"
     );
 
-    let fixtures = fixtures();
+    let fixtures = live_fixtures(&chain[0], &chain[1]);
     let bytes = &fixtures["chain/snapshot.json"];
     let snapshot: Snapshot = serde_json::from_slice(bytes).unwrap();
     assert_eq!(*bytes, wire(&snapshot));
@@ -291,9 +420,109 @@ fn signed_chain_replays_and_snapshot_reproduces_state() {
 }
 
 #[test]
+fn signed_release_replay_uses_the_envelope_time_on_both_sides_of_a_price_boundary() {
+    let mut models = parse(MODELS);
+    models["alpha"]["models"]["-"]["cost"]["multipliers"] = json!([
+        {"when": {"date": {"gte": DAY}}, "factor": {"text": {"input": {"price": 2}}}}
+    ]);
+    let models = wire(models);
+    let mut previous = FactIndex::from_snapshot_upstream(&Upstream::new()).unwrap();
+    let mut parent = Vec::new();
+    let mut releases = Vec::new();
+    let mut history = Vec::new();
+    for (number, observed_at, units, next_boundary) in [
+        (1, START_MS - 1, 310_000_000, Some(START_MS)),
+        (2, START_MS, 620_000_000, None),
+    ] {
+        let published_at = observed_at + 1;
+        let (first_summary, next) = summary(&models, &previous, observed_at);
+        let release = signed(
+            &build_release(
+                &first_summary,
+                CURATION.as_bytes(),
+                &parent,
+                number,
+                published_at,
+                observed_at,
+            )
+            .unwrap(),
+            &key(),
+        );
+        assert_eq!(release.envelope.upstream_observed_at_ms, observed_at);
+        assert_eq!(
+            parse(&first_summary)["next_date_boundary_ms"],
+            json!(next_boundary)
+        );
+        let price = json!({"currency":"USD", "exponent":9, "state":"priced", "units":units});
+        let price_op = ChangeOp::Set {
+            provider: "alpha".into(),
+            model: "-".into(),
+            fact: "rate.input".into(),
+            value: price,
+        };
+        assert!(release.change.upstream.contains(&price_op));
+        if number == 2 {
+            assert_eq!(release.change.upstream, [price_op]);
+        }
+
+        let original = wire(&release);
+        let decoded: Release = serde_json::from_slice(&original).unwrap();
+        let envelope = decoded.envelope;
+        let (replay_summary, replay_index) =
+            summary(&models, &previous, envelope.upstream_observed_at_ms);
+        let replayed = signed(
+            &build_release(
+                &replay_summary,
+                CURATION.as_bytes(),
+                &parent,
+                envelope.release,
+                envelope.published_at_ms,
+                envelope.upstream_observed_at_ms,
+            )
+            .unwrap(),
+            &key(),
+        );
+        assert_eq!(replay_summary, first_summary);
+        assert_eq!(replay_index.to_bytes(), next.to_bytes());
+        assert_eq!(wire(&replayed), original);
+
+        let (file, bytes) = if number == 1 {
+            ("base.json".to_owned(), history_base(&release))
+        } else {
+            (
+                format!("days/{DAY}.json"),
+                history_day_bytes(DAY, &jsonl(&[&release])).unwrap(),
+            )
+        };
+        history.push(HistoryFile {
+            file,
+            sha256: sha256(&bytes),
+        });
+        let docs = SnapshotDocs::new(&release, history.clone());
+        let evidence = ChargeUnitEvidence::default();
+        let snapshot: Snapshot =
+            serde_json::from_slice(&snapshot_bytes(docs.inputs(&models, &evidence)).unwrap())
+                .unwrap();
+        assert_eq!(
+            snapshot.state.upstream["alpha"].models["-"]["rate.input"]["units"],
+            units
+        );
+        assert_eq!(
+            FactIndex::from_snapshot_upstream(&snapshot.state.upstream).unwrap(),
+            next
+        );
+        parent = wire(&release.envelope);
+        previous = next;
+        releases.push(release);
+    }
+    let keys = BTreeMap::from([(KID.to_owned(), key().verifying_key())]);
+    assert_eq!(consumer::check_chain(&releases, &keys).unwrap(), previous);
+}
+
+#[test]
 fn release_builder_refuses_invalid_parent_and_noop() {
     let (r1, r2, index) = two_releases();
-    let (summary, _) = summary(&models_with_rename(), &index);
+    let (summary, _) = summary(&models_with_rename(), &index, START_MS);
     let build = |summary: &[u8], curation: &[u8], parent: &[u8], number| {
         build_release(summary, curation, parent, number, START_MS, START_MS)
             .unwrap_err()
@@ -330,8 +559,8 @@ fn release_builder_refuses_invalid_parent_and_noop() {
 fn curation_number_spelling_is_hashed_and_version_must_change() {
     let (r1, _, _) = two_releases();
     let prior = FactIndex::from_snapshot_upstream(&BTreeMap::new()).unwrap();
-    let (genesis, index) = summary(MODELS, &prior);
-    let (changed, _) = summary(&models_with_rename(), &index);
+    let (genesis, index) = summary(MODELS, &prior, START_MS);
+    let (changed, _) = summary(&models_with_rename(), &index, START_MS);
     let tampered = CURATION.replace("1.00", "1.0");
     let build = |raw: &str| {
         parse(&build_release(&genesis, raw.as_bytes(), b"", 1, START_MS, START_MS).unwrap())
@@ -431,7 +660,8 @@ fn history_day_builder_refuses_a_change_that_does_not_match_its_envelope() {
 
 #[test]
 fn snapshot_builders_refuse_semantically_invalid_curation() {
-    let fixtures = fixtures();
+    let (r1, r2, _) = two_releases();
+    let fixtures = live_fixtures(&r1, &r2);
     let mut snapshot: Snapshot = serde_json::from_slice(&fixtures["chain/snapshot.json"]).unwrap();
     snapshot
         .state
@@ -594,7 +824,7 @@ fn snapshot_builder_refuses_mismatching_inputs() {
 #[test]
 fn history_attestation_refuses_tampering_and_cross_release_reuse() {
     let (r1, r2, _) = two_releases();
-    let fixtures = fixtures();
+    let fixtures = live_fixtures(&r1, &r2);
     let snapshot: Snapshot = serde_json::from_slice(&fixtures["chain/snapshot.json"]).unwrap();
     let attestation = snapshot.history_attestation.unwrap();
     let keys = BTreeMap::from([(KID.to_string(), key().verifying_key())]);

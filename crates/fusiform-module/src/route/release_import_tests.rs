@@ -8,7 +8,7 @@ use std::{
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::{
-    normalize_legacy_models_dev_for_tests, BoundaryKind, ChargeUnitEvidence, ObservationOutcome,
+    normalize_models_dev_with, BoundaryKind, ChargeUnitEvidence, ObservationOutcome,
 };
 use fusiform_publish::{publish_step, snapshot_bytes_from_state, FactIndex};
 use fusiform_release::{
@@ -82,7 +82,9 @@ fn observe(store: &CatalogStore, body: &[u8], at: i64, seeded: bool) -> i64 {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(body).unwrap().catalog;
+    let catalog = normalize_models_dev_with(body, &ChargeUnitEvidence::default(), Timestamp(at))
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         store,
         &catalog,
@@ -241,13 +243,19 @@ fn dated_store_release_keeps_era_facts_but_not_current_layers() {
     observe(
         &source,
         &wire(json!({
-            "google": {"name": "Google", "npm": "@ai-sdk/google", "models": {
+            "google": {"name": "Google", "models": {
                 "gemini-4-carbon": {"name": "Gemini 4 Carbon", "family": "gemini",
-                    "limit": {"output": 32768}, "cost": {"input": 2, "output": 8}}
+                    "type": "chat", "capabilities": {},
+                    "api": {"generate-content": {"sdk": {"aisdk": "@ai-sdk/google"}}},
+                    "limit": {"output": 32768},
+                    "cost": {"text": {"input": {"price": 2}, "output": {"price": 8}}}}
             }},
-            "anthropic": {"name": "Anthropic", "npm": "@ai-sdk/anthropic", "models": {
+            "anthropic": {"name": "Anthropic", "models": {
                 "claude-sonnet-5-5": {"name": "Claude Sonnet 5.5", "family": "claude-sonnet",
-                    "cost": {"input": 3, "output": 15, "cache_write": 3.75}}
+                    "type": "chat", "capabilities": {},
+                    "api": {"messages": {"sdk": {"aisdk": "@ai-sdk/anthropic"}}},
+                    "cost": {"text": {"input": {"price": 3, "cache": {"write": 3.75}},
+                                     "output": {"price": 15}}}}
             }}
         })),
         published_at - 10,
@@ -382,15 +390,19 @@ fn release_import_preserves_catalog_get_bytes() {
     let path = dir.path().join("source.db");
     let store = open(&path);
     let models = |price| {
-        let mut first = if price == 2 {
-            json!({"name":"First", "structured_output":true, "cost":{"input":price,"output":4}})
-        } else {
-            json!({"name":"First", "cost":{"input":price}})
-        };
-        first["reasoning_options"] = json!([{"type":"effort", "values":["low", "high"]}]);
-        wire(json!({"fixture": {"name":"Fixture Labs", "models": {
-            "first":first,
-            "steady":{"name":"Steady", "cost":{"input":5,"output":6}}
+        let mut first = json!({
+            "name": "First", "type": "chat", "api": {},
+            "capabilities": {"reasoning": {"supported": true, "effort": ["low", "high"]}},
+            "cost": {"text": {"input": {"price": price}}}
+        });
+        if price == 2 {
+            first["capabilities"]["structured_output"] = json!(true);
+            first["cost"]["text"]["output"] = json!({"price": 4});
+        }
+        wire(json!({"fixture": {"name": "Fixture Labs", "models": {
+            "first": first,
+            "steady": {"name": "Steady", "type": "chat", "api": {}, "capabilities": {},
+                "cost": {"text": {"input": {"price": 5}, "output": {"price": 6}}}}
         }}}))
     };
     let first = models(2);
@@ -612,7 +624,12 @@ fn release_import_classifies_every_store_table() {
     let path = dir.path().join("source.db");
     let store = open(&path);
     let at = 1_800_000_000_000;
-    observe(&store, br#"{"fixture":{"models":{"test":{}}}}"#, at, true);
+    observe(
+        &store,
+        br#"{"fixture":{"models":{"test":{"type":"chat","api":{},"capabilities":{}}}}}"#,
+        at,
+        true,
+    );
     let copy = dir.path().join("backup.db");
     backup(&path, &copy);
     let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
@@ -665,7 +682,12 @@ fn release_import_refuses_home_paths_in_buried_history_values() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("source.db");
         let store = open(&path);
-        observe(&store, br#"{"fixture":{"models":{"test":{}}}}"#, at, true);
+        observe(
+            &store,
+            br#"{"fixture":{"models":{"test":{"type":"chat","api":{},"capabilities":{}}}}}"#,
+            at,
+            true,
+        );
         store
             .record_observation(&NewObservation {
                 source: SourceId::ModelsDev,

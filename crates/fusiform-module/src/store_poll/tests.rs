@@ -533,8 +533,8 @@ async fn store_poll_warm_catch_up_reads_only_the_missing_suffix() {
 #[test]
 fn store_poll_writes_the_same_model_eras_as_direct_ingest() {
     use fusiform_core::{
-        normalize_legacy_models_dev_for_tests, BoundaryKind, ChargeUnitEvidence,
-        ObservationOutcome, SourceId, Timestamp,
+        normalize_models_dev_with, BoundaryKind, ChargeUnitEvidence, ObservationOutcome, SourceId,
+        Timestamp,
     };
     use fusiform_publish::{publish_step, FactIndex};
     use fusiform_release::{state_hash, Change};
@@ -567,10 +567,14 @@ fn store_poll_writes_the_same_model_eras_as_direct_ingest() {
 
     let mut document = json!({
         "p": {"name": "P", "models": {
-            "m": {"name": "Model", "cost": {"input": 1, "output": 2}, "limit": {"context": 100}},
-            "other": {"name": "Other"},
+            "m": {"name": "Model", "type": "chat", "api": {}, "capabilities": {},
+                "cost": {"text": {"input": {"price": 1}, "output": {"price": 2}}},
+                "limit": {"context": 100}},
+            "other": {"name": "Other", "type": "chat", "api": {}, "capabilities": {}},
         }},
-        "q": {"name": "Q", "models": {"untouched": {"name": "Untouched"}}},
+        "q": {"name": "Q", "models": {
+            "untouched": {"name": "Untouched", "type": "chat", "api": {}, "capabilities": {}}
+        }},
     });
     let rows_at = |path: &std::path::Path, at| {
         let conn =
@@ -624,7 +628,7 @@ fn store_poll_writes_the_same_model_eras_as_direct_ingest() {
     {
         match i {
             0 => {}
-            1 => document["p"]["models"]["m"]["cost"]["input"] = json!(3),
+            1 => document["p"]["models"]["m"]["cost"]["text"]["input"]["price"] = json!(3),
             2 => {
                 document["p"]["models"]["m"]
                     .as_object_mut()
@@ -641,7 +645,7 @@ fn store_poll_writes_the_same_model_eras_as_direct_ingest() {
             4 => document["p"]["models"]["m"] = held.clone(),
             6 => {
                 document["p"]["models"]["m"] = held.clone();
-                document["p"]["models"]["m"]["cost"] = json!({"input": 4});
+                document["p"]["models"]["m"]["cost"] = json!({"text": {"input": {"price": 4}}});
             }
             7 => {
                 document.as_object_mut().unwrap().remove("p");
@@ -710,9 +714,10 @@ fn store_poll_writes_the_same_model_eras_as_direct_ingest() {
                 detail: None,
             })
             .unwrap();
-        let catalog = normalize_legacy_models_dev_for_tests(&body)
-            .unwrap()
-            .catalog;
+        let catalog =
+            normalize_models_dev_with(&body, &ChargeUnitEvidence::default(), Timestamp(at))
+                .unwrap()
+                .catalog;
         let plan = plan_ingest(
             &direct,
             &catalog,
