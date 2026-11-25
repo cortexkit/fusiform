@@ -4,7 +4,10 @@ use std::{collections::BTreeMap, fmt::Write as _};
 
 use super::{count, format_instant};
 
-pub(super) fn print_catalog(response: &serde_json::Value) {
+pub(super) fn print_catalog(
+    out: &mut impl std::io::Write,
+    response: &serde_json::Value,
+) -> std::io::Result<()> {
     let resolved = response
         .get("resolved_at_ms")
         .and_then(|v| v.as_i64())
@@ -15,7 +18,8 @@ pub(super) fn print_catalog(response: &serde_json::Value) {
         .and_then(|v| v.as_object())
         .unwrap_or(&empty);
 
-    println!(
+    writeln!(
+        out,
         "{} at {}  (catalog version {})",
         count(models.len(), "model"),
         format_instant(resolved),
@@ -23,9 +27,9 @@ pub(super) fn print_catalog(response: &serde_json::Value) {
             .get("catalog_version")
             .and_then(|v| v.as_i64())
             .unwrap_or(-1)
-    );
+    )?;
 
-    print!("{}", render_catalog_models(response, models));
+    write!(out, "{}", render_catalog_models(response, models))
 }
 
 pub(super) fn render_catalog_models(

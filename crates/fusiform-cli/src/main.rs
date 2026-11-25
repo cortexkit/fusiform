@@ -40,8 +40,10 @@
 //! ```
 
 use std::{
+    collections::BTreeSet,
     env,
     ffi::{OsStr, OsString},
+    io::{self, Write as _},
     path::{Path, PathBuf},
     process,
     time::Duration,
@@ -97,14 +99,15 @@ options:
   --model <id>              narrow to one model (get/history require --provider)
   --auth-method <method>    select a billing plane (get only; requires --provider)
                             apikey, chatgpt, oauth, antigravity, gateway
-  --fact <key>              which fact, for history
+  --fact <key>              one fact for history; a repeatable selector for get
                             (rate.input, limit.context, existence, ...)
-  --fact-prefix <prefix>    list historical keys instead of selecting one fact
+  --fact-prefix <prefix>    list historical keys, or select a prefix for get
   --served                 show the dated-read timeline (history only)
   --at <epoch-ms>           resolve the catalog at a past instant (get only:
                             history returns the whole timeline)
   --rates                   only pricing facts
   --capabilities            only capability and limit facts
+                            get selectors combine into one list
   --include-retired         include models the upstream stopped publishing
   --polls <n>               how many recent polls status should show
 
@@ -164,10 +167,13 @@ async fn main() {
         _ => None,
     };
     if probe == Some(OsStr::new("--version")) || probe == Some(OsStr::new("-V")) {
-        println!(
-            "{}",
-            fusiform_protocol::version_line("ck-models", env!("CARGO_PKG_VERSION"))
-        );
+        finish(stdout(|out| {
+            writeln!(
+                out,
+                "{}",
+                fusiform_protocol::version_line("ck-models", env!("CARGO_PKG_VERSION"))
+            )
+        }));
         return;
     }
 
@@ -180,15 +186,37 @@ async fn main() {
     //
     // Exactly one non-empty line, well inside the 2 s budget.
     if probe == Some(OsStr::new("--ck-domain")) {
-        println!("{CK_DOMAIN_HEADLINE}");
+        finish(stdout(|out| writeln!(out, "{CK_DOMAIN_HEADLINE}")));
+        return;
+    }
+
+    if argv
+        .get(1)
+        .and_then(|arg| arg.to_str())
+        .is_some_and(|arg| matches!(arg, "--help" | "-h" | "help"))
+    {
+        finish(stdout(|out| writeln!(out, "{USAGE}")));
         return;
     }
 
     disown_inherited_module_identity();
 
-    if let Err(e) = run(argv).await {
+    finish(run(argv).await);
+}
+
+fn finish(result: Result<(), String>) {
+    if let Err(e) = result {
         eprintln!("ck models: {e}");
         process::exit(1);
+    }
+}
+
+fn stdout(write: impl FnOnce(&mut io::StdoutLock<'_>) -> io::Result<()>) -> Result<(), String> {
+    let mut out = io::stdout().lock();
+    match write(&mut out).and_then(|()| out.flush()) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        Err(error) => Err(format!("could not write stdout: {error}")),
     }
 }
 
@@ -251,7 +279,7 @@ struct Args {
     fact_prefix: Option<String>,
     served: bool,
     at_ms: Option<i64>,
-    prefixes: Option<Vec<String>>,
+    prefixes: Vec<String>,
     include_retired: bool,
     polls: Option<u32>,
     fields: Vec<String>,
@@ -435,8 +463,8 @@ fn request_for(args: &Args) -> Result<(&'static str, serde_json::Value), String>
             if let Some(at) = args.at_ms {
                 a.insert("at_ms".into(), serde_json::json!(at));
             }
-            if let Some(p) = &args.prefixes {
-                a.insert("fact_prefixes".into(), serde_json::json!(p));
+            if !args.prefixes.is_empty() {
+                a.insert("fact_prefixes".into(), serde_json::json!(args.prefixes));
             }
             if args.include_retired {
                 a.insert("include_retired".into(), serde_json::json!(true));
@@ -584,7 +612,7 @@ fn validate_verb_options(args: &Args) -> Result<(), String> {
         ("--at", args.at_ms.is_some(), &["get"]),
         (
             "--rates and --capabilities",
-            args.prefixes.is_some(),
+            !args.prefixes.is_empty(),
             &["get"],
         ),
         ("--include-retired", args.include_retired, &["get"]),
@@ -638,6 +666,9 @@ fn validate_verb_options(args: &Args) -> Result<(), String> {
     if args.auth_method.is_some() && args.provider.is_none() {
         return Err("--auth-method requires --provider".into());
     }
+    if args.command == "get" && args.model.is_some() && args.provider.is_none() {
+        return Err("--model requires --provider for get".into());
+    }
     Ok(())
 }
 
@@ -658,28 +689,24 @@ async fn run(argv: impl IntoIterator<Item = OsString>) -> Result<(), String> {
     };
 
     if args.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&response).map_err(|e| e.to_string())?
-        );
-        return Ok(());
+        let json = serde_json::to_string_pretty(&response).map_err(|e| e.to_string())?;
+        return stdout(|out| writeln!(out, "{json}"));
     }
 
-    match args.command.as_str() {
-        "status" => print_status(&response),
-        "get" => catalog_render::print_catalog(&response),
-        "history" => print!("{}", render_history(&response)),
-        "correct" => print_correction(&response),
-        "plan-prices" => print!("{}", render_plan_prices(&response)),
-        "mark-artifact" => print_mark(&response),
-        "retract-artifact" => print_retraction(&response),
+    stdout(|out| match args.command.as_str() {
+        "status" => print_status(out, &response),
+        "get" => catalog_render::print_catalog(out, &response),
+        "history" => write!(out, "{}", render_history(&response)),
+        "correct" => print_correction(out, &response),
+        "plan-prices" => write!(out, "{}", render_plan_prices(&response)),
+        "mark-artifact" => writeln!(out, "{}", render_mark(&response)),
+        "retract-artifact" => writeln!(out, "{}", render_retraction(&response)),
         "grade" | "withdraw-grade" | "grades" | "decommission" | "restore" | "marks"
         | "workload" => {
-            print!("{}", render_grades(&response))
+            write!(out, "{}", render_grades(&response))
         }
         _ => unreachable!("the command was validated above"),
-    }
-    Ok(())
+    })
 }
 
 #[derive(Debug)]
@@ -938,17 +965,18 @@ async fn call(
         .map_err(|e| CallFailure::Other(format!("{tool} returned a body that did not parse: {e}")))
 }
 
-fn print_status(response: &serde_json::Value) {
+fn print_status(out: &mut impl io::Write, response: &serde_json::Value) -> io::Result<()> {
     let get = |k: &str| response.get(k);
-    print!("{}", render_status_source(response));
-    println!(
+    write!(out, "{}", render_status_source(response))?;
+    writeln!(
+        out,
         "catalog version  {}",
         get("catalog_version")
             .and_then(|v| v.as_i64())
             .unwrap_or(-1)
-    );
+    )?;
     if let Some(rates_version) = get("rates_version").and_then(|v| v.as_u64()) {
-        println!("rates version    {rates_version}");
+        writeln!(out, "rates version    {rates_version}")?;
     }
     let models = get("model_count").and_then(|v| v.as_i64()).unwrap_or(-1);
     // Pricing coverage beside the model total, because the total cannot express
@@ -960,18 +988,19 @@ fn print_status(response: &serde_json::Value) {
         .filter(|priced| *priced < models)
         .map(|priced| format!("  ({} with no rate)", models - priced))
         .unwrap_or_default();
-    println!("models           {models}{unpriced}");
-    println!(
+    writeln!(out, "models           {models}{unpriced}")?;
+    writeln!(
+        out,
         "eras             {}",
         get("era_count").and_then(|v| v.as_i64()).unwrap_or(-1)
-    );
+    )?;
     // Where the record starts, so an operator knows how far back `get --at`
     // can reach before it is refused. Omitted by a module too old to report
     // it, and on an empty store, rather than printed as a guess.
     if let Some(begins) = get("history_begins_at_ms").and_then(|v| v.as_i64()) {
-        println!("history from     {}", format_instant(begins));
+        writeln!(out, "history from     {}", format_instant(begins))?;
     }
-    print!("{}", render_bus(response));
+    write!(out, "{}", render_bus(response))?;
     // Failed polls across the WHOLE history, printed before the poll window
     // rather than inside it.
     //
@@ -980,22 +1009,22 @@ fn print_status(response: &serde_json::Value) {
     // them to look further. This line is what tells them, and it names the flag
     // that would show it — a count with no way to reach the detail is a
     // diagnostic an operator has to guess at.
-    print!("{}", render_failures(response));
+    write!(out, "{}", render_failures(response))?;
 
     let Some(polls) = get("recent_polls").and_then(|v| v.as_array()) else {
-        return;
+        return Ok(());
     };
     if polls.is_empty() {
         // Distinct from "no changes": a store with no observations at all has
         // never polled, which is a different situation from polling quietly.
-        println!("\nno polls recorded yet");
-        return;
+        return writeln!(out, "\nno polls recorded yet");
     }
 
-    println!("\nrecent polls (newest first)");
+    writeln!(out, "\nrecent polls (newest first)")?;
     for poll in polls {
-        println!("{}", render_status_poll(poll));
+        writeln!(out, "{}", render_status_poll(poll))?;
     }
+    Ok(())
 }
 
 fn render_status_poll(poll: &serde_json::Value) -> String {
@@ -1574,11 +1603,6 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         .into_string()
         .map_err(|command| format!("command {command:?} must be valid UTF-8"))?;
 
-    if command == "--help" || command == "-h" || command == "help" {
-        println!("{USAGE}");
-        process::exit(0);
-    }
-
     let mut args = Args {
         command,
         provider: None,
@@ -1600,7 +1624,7 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         fact_prefix: None,
         served: false,
         at_ms: None,
-        prefixes: None,
+        prefixes: Vec::new(),
         include_retired: false,
         polls: None,
         fields: Vec::new(),
@@ -1613,15 +1637,24 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
         json: false,
     };
 
+    let mut seen_values = BTreeSet::new();
     while let Some(flag) = it.next() {
         let flag = flag
             .into_string()
             .map_err(|argument| format!("argument {argument:?} must be valid UTF-8"))?;
         if let Some(reason) = flag.strip_prefix("--reason=") {
+            if !seen_values.insert("--reason".to_owned()) {
+                return Err("--reason may be supplied only once".into());
+            }
             args.reason = Some(reason.into());
             continue;
         }
+        let repeatable = flag == "--field"
+            || (args.command == "get" && matches!(flag.as_str(), "--fact" | "--fact-prefix"));
         let mut os_value = || {
+            if !repeatable && !seen_values.insert(flag.clone()) {
+                return Err(format!("{flag} may be supplied only once"));
+            }
             let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
             if value.to_str().is_some_and(is_known_switch) {
                 return Err(format!("{flag} needs a value before {value:?}"));
@@ -1659,6 +1692,9 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
                 } else {
                     args.grade = Some(number);
                 }
+            }
+            "--fact" | "--fact-prefix" if args.command == "get" => {
+                add_fact_prefixes(&mut args.prefixes, [value()?]);
             }
             "--fact" => args.fact = Some(value()?),
             "--fact-prefix" => args.fact_prefix = Some(value()?),
@@ -1707,12 +1743,9 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
             // literals here. A prefix that matches nothing returns an empty
             // catalog rather than an error, so a drifted literal would make
             // `--rates` quietly print nothing at all.
-            "--rates" => args.prefixes = Some(vec![prefix::RATE.to_string()]),
+            "--rates" => add_fact_prefixes(&mut args.prefixes, [prefix::RATE]),
             "--capabilities" => {
-                args.prefixes = Some(vec![
-                    prefix::CAPABILITY.to_string(),
-                    prefix::LIMIT.to_string(),
-                ])
+                add_fact_prefixes(&mut args.prefixes, [prefix::CAPABILITY, prefix::LIMIT]);
             }
             "--include-retired" => args.include_retired = true,
             "--json" => args.json = true,
@@ -1724,6 +1757,7 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
                     )
                     && args.model.is_none() =>
             {
+                seen_values.insert("--model".to_owned());
                 args.model = Some(model.to_string())
             }
             workload
@@ -1738,6 +1772,18 @@ fn parse_args(argv: impl IntoIterator<Item = OsString>) -> Result<Args, String> 
     }
 
     Ok(args)
+}
+
+fn add_fact_prefixes(
+    prefixes: &mut Vec<String>,
+    inputs: impl IntoIterator<Item = impl Into<String>>,
+) {
+    for prefix in inputs {
+        let prefix = prefix.into();
+        if !prefixes.contains(&prefix) {
+            prefixes.push(prefix);
+        }
+    }
 }
 
 /// Translate a served fact key into the wire form of its typed correction field.
@@ -2066,10 +2112,6 @@ fn render_quota_decimal(value: &fusiform_protocol::QuotaDecimal) -> String {
     }
 }
 
-fn print_mark(response: &serde_json::Value) {
-    println!("{}", render_mark(response));
-}
-
 fn render_mark(response: &serde_json::Value) -> String {
     let n = |k: &str| response.get(k).and_then(|v| v.as_i64());
     let committed = response
@@ -2119,10 +2161,6 @@ fn render_mark(response: &serde_json::Value) -> String {
 }
 
 /// What withdrawing a mark would do, or did.
-fn print_retraction(response: &serde_json::Value) {
-    println!("{}", render_retraction(response));
-}
-
 fn render_retraction(response: &serde_json::Value) -> String {
     let flag = |k: &str| response.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
     let id = response
@@ -2151,7 +2189,7 @@ fn render_retraction(response: &serde_json::Value) -> String {
     }
 }
 
-fn print_correction(response: &serde_json::Value) {
+fn print_correction(out: &mut impl io::Write, response: &serde_json::Value) -> io::Result<()> {
     let written = response
         .get("written")
         .and_then(|v| v.as_bool())
@@ -2163,15 +2201,21 @@ fn print_correction(response: &serde_json::Value) {
         .unwrap_or_default();
 
     if written {
-        println!("recorded a correction over {}", count(facts.len(), "fact"));
+        writeln!(
+            out,
+            "recorded a correction over {}",
+            count(facts.len(), "fact")
+        )?;
     } else {
-        println!(
+        writeln!(
+            out,
             "PREVIEW — nothing written. {} would be corrected.",
             count(facts.len(), "fact")
-        );
+        )?;
     }
-    println!();
-    println!(
+    writeln!(out)?;
+    writeln!(
+        out,
         "  window   {} to {}",
         format_instant(
             response
@@ -2185,14 +2229,17 @@ fn print_correction(response: &serde_json::Value) {
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0)
         ),
-    );
+    )?;
     if let Some(reason) = response.get("reason").and_then(|v| v.as_str()) {
-        println!("  reason   {reason}");
+        writeln!(out, "  reason   {reason}")?;
     }
-    println!();
-    println!("  reads inside that window will refuse and name this correction.");
-    println!("  the value below stays in force and is NOT changed:");
-    println!();
+    writeln!(out)?;
+    writeln!(
+        out,
+        "  reads inside that window will refuse and name this correction."
+    )?;
+    writeln!(out, "  the value below stays in force and is NOT changed:")?;
+    writeln!(out)?;
 
     for fact in &facts {
         let key = fact.get("fact_key").and_then(|v| v.as_str()).unwrap_or("?");
@@ -2204,14 +2251,20 @@ fn print_correction(response: &serde_json::Value) {
             .get("current_since_ms")
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
-        println!("    {key:<32}  {value}");
-        println!("    {:<32}  in force since {}", "", format_instant(since));
+        writeln!(out, "    {key:<32}  {value}")?;
+        writeln!(
+            out,
+            "    {:<32}  in force since {}",
+            "",
+            format_instant(since)
+        )?;
     }
 
     if !written {
-        println!();
-        println!("  add --commit to record it.");
+        writeln!(out)?;
+        writeln!(out, "  add --commit to record it.")?;
     }
+    Ok(())
 }
 
 fn render_grades(response: &serde_json::Value) -> String {
@@ -2288,7 +2341,7 @@ mod tests {
         for (argv, flag) in [
             (
                 &[
-                    "get",
+                    "correct",
                     "--provider",
                     "p",
                     "--model",
@@ -3064,6 +3117,82 @@ mod tests {
             !out.contains("service tiers: "),
             "absence must not imply no tiers: {out}"
         );
+    }
+
+    #[test]
+    fn get_rejects_model_only_instead_of_sending_an_invalid_page_request() {
+        let args = parse_args(["ck-models", "get", "--model", "m"].map(OsString::from)).unwrap();
+        assert_eq!(
+            request_for(&args).unwrap_err(),
+            "--model requires --provider for get"
+        );
+    }
+
+    #[test]
+    fn get_combines_rate_and_capability_fact_selectors() {
+        let args =
+            parse_args(["ck-models", "get", "--rates", "--capabilities"].map(OsString::from))
+                .unwrap();
+        let (_, payload) = request_for(&args).unwrap();
+        assert_eq!(
+            payload["fact_prefixes"],
+            serde_json::json!(["rate.", "capability.", "limit."])
+        );
+    }
+
+    #[test]
+    fn get_combines_and_deduplicates_explicit_fact_selectors() {
+        let args = parse_args(
+            [
+                "ck-models",
+                "get",
+                "--fact",
+                "rate.input",
+                "--rates",
+                "--fact",
+                "limit.output",
+                "--fact-prefix",
+                "rate.",
+                "--fact",
+                "rate.input",
+            ]
+            .map(OsString::from),
+        )
+        .unwrap();
+        let (_, payload) = request_for(&args).unwrap();
+        assert_eq!(
+            payload["fact_prefixes"],
+            serde_json::json!(["rate.input", "rate.", "limit.output"])
+        );
+    }
+
+    #[test]
+    fn repeated_single_value_options_are_named_and_refused() {
+        for (argv, option) in [
+            (
+                &["ck-models", "get", "--provider", "a", "--provider", "b"][..],
+                "--provider",
+            ),
+            (
+                &["ck-models", "grade", "p/m", "--reason=a", "--reason", "b"][..],
+                "--reason",
+            ),
+            (
+                &["ck-models", "grade", "p/m", "--model", "p/other"][..],
+                "--model",
+            ),
+            (
+                &["ck-models", "history", "--fact", "x", "--fact", "y"][..],
+                "--fact",
+            ),
+        ] {
+            let result = parse_args(argv.iter().copied().map(OsString::from));
+            assert_eq!(
+                result.err().as_deref(),
+                Some(format!("{option} may be supplied only once").as_str()),
+                "{argv:?}"
+            );
+        }
     }
 
     #[test]

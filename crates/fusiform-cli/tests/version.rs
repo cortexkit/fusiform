@@ -231,3 +231,24 @@ fn non_utf8_paths_reach_connection_handling_and_text_values_are_rejected() {
         "{diagnostic}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn closed_stdout_is_a_clean_exit() {
+    for flag in ["--version", "--ck-domain", "--help"] {
+        let (read_end, write_end) = std::io::pipe().unwrap();
+        drop(read_end);
+        let output = Command::new(env!("CARGO_BIN_EXE_ck-models"))
+            .arg(flag)
+            .stdout(write_end)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{flag}: exit {:?}; {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty(), "{flag}: {output:?}");
+    }
+}
