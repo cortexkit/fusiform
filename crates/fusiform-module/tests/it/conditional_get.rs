@@ -44,6 +44,8 @@ enum Answer {
     /// 200 with a body and an ETag.
     Body,
     BodyWithModel,
+    ConditionalBodyWithModel,
+    UntaggedChangedModel,
     /// 304 with an ETag and no body, as models.dev really answers.
     NotModified,
     /// 304 with NO ETag header, which a proxy may produce.
@@ -121,21 +123,33 @@ fn serve_one(mut stream: TcpStream, answer: Answer, heads: &Arc<Mutex<Vec<String
         .read(&mut buf)
         .expect("stub request read before its deadline");
     assert!(n > 0, "stub client closed without a request");
+    let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+    let answer = if answer == Answer::ConditionalBodyWithModel {
+        if header_line(&request, "if-none-match:")
+            .is_some_and(|line| line.split_once(':').unwrap().1.trim() == "\"v1\"")
+        {
+            Answer::NotModified
+        } else {
+            Answer::BodyWithModel
+        }
+    } else {
+        answer
+    };
     heads
         .lock()
         .unwrap_or_else(|p| p.into_inner())
-        .push(String::from_utf8_lossy(&buf[..n]).to_string());
+        .push(request);
 
     match answer {
-        Answer::Body | Answer::BodyWithModel => {
-            let body: &[u8] = if answer == Answer::Body {
-                br#"{"anthropic":{"id":"anthropic","name":"A","models":{}}}"#
-            } else {
-                br#"{"anthropic":{"id":"anthropic","name":"A","models":{"m":{"id":"m","name":"M"}}}}"#
+        Answer::Body | Answer::BodyWithModel | Answer::UntaggedChangedModel => {
+            let (body, validator): (&[u8], &str) = match answer {
+                Answer::Body => (br#"{"anthropic":{"id":"anthropic","name":"A","models":{}}}"#, "ETag: \"v1\"\r\n"),
+                Answer::BodyWithModel => (br#"{"anthropic":{"id":"anthropic","name":"A","models":{"m":{"id":"m","name":"M"}}}}"#, "ETag: \"v1\"\r\n"),
+                _ => (br#"{"anthropic":{"id":"anthropic","name":"A","models":{"m":{"id":"m","name":"B"}}}}"#, ""),
             };
             let head = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
-                 ETag: \"v1\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                 {validator}Content-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
             );
             let _ = stream.write_all(head.as_bytes());
@@ -150,6 +164,7 @@ fn serve_one(mut stream: TcpStream, answer: Answer, heads: &Arc<Mutex<Vec<String
         Answer::NotModifiedBare => {
             let _ = stream.write_all(b"HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n");
         }
+        Answer::ConditionalBodyWithModel => unreachable!("conditional answer resolved above"),
     }
 }
 
@@ -239,9 +254,8 @@ async fn a_304_carries_the_validator_forward() {
 async fn a_304_without_an_etag_header_does_not_lose_the_validator() {
     // RFC 9110 says a 304 SHOULD carry the validator, which means a proxy or a
     // CDN edge may omit it. Fusiform reads the header off the response, so a
-    // bare 304 yields None — and the store's `last_etag` selects the most recent
-    // observation whose etag IS NOT NULL, so the validator survives in history
-    // even when one response omits it.
+    // bare 304 yields None. The poller uses the ETag from the last committed
+    // body, so the validator survives when a response without a body omits it.
     //
     // This test pins the fetch-layer half: a bare 304 is still NotModified
     // rather than an error, and it reports the absence honestly rather than
@@ -437,6 +451,63 @@ async fn a_new_process_reads_the_document_before_trusting_a_stored_validator() {
         header_line(third, "if-none-match").is_some_and(|v| v.contains("\"v1\"")),
         "after reading a body the process must poll conditionally again. Head \
          was:\n{third}"
+    );
+}
+
+#[tokio::test]
+async fn an_untagged_body_clears_the_previous_validator_but_a_bare_304_does_not() {
+    use fusiform_module::{
+        loop_::{PollContext, TickOutcome},
+        signals::Signals,
+    };
+    use fusiform_store::CatalogStore;
+
+    let upstream = Upstream::start(Answer::ConditionalBodyWithModel);
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&cortexkit_store_types::StorageDescriptor {
+        module_id: "fusiform".to_string(),
+        storage_namespace: "default".to_string(),
+        isolation: cortexkit_store_types::Isolation::Module,
+        backend: cortexkit_store_types::StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().to_string(),
+        },
+    })
+    .unwrap();
+    let ctx = PollContext::new(
+        Arc::new(store),
+        Fetcher::new().unwrap(),
+        upstream.endpoint(),
+        Arc::new(Signals::new()),
+    );
+
+    assert!(matches!(
+        tick(&ctx, 1000).await.unwrap().outcome,
+        TickOutcome::Changed { .. }
+    ));
+    upstream.set(Answer::NotModifiedBare);
+    assert_eq!(
+        tick(&ctx, 2000).await.unwrap().outcome,
+        TickOutcome::NotModified
+    );
+    upstream.set(Answer::UntaggedChangedModel);
+    assert!(matches!(
+        tick(&ctx, 3000).await.unwrap().outcome,
+        TickOutcome::Changed { .. }
+    ));
+    assert!(header_line(&upstream.heads()[2], "if-none-match:")
+        .is_some_and(|line| line.ends_with("\"v1\"")));
+
+    upstream.set(Answer::ConditionalBodyWithModel);
+    let reverted = tick(&ctx, 4000).await.unwrap();
+    assert!(
+        matches!(reverted.outcome, TickOutcome::Changed { .. }),
+        "reverted body was not applied: {:?}",
+        reverted.outcome
+    );
+    assert!(header_line(&upstream.heads()[3], "if-none-match").is_none());
+    assert_eq!(
+        tick(&ctx, 5000).await.unwrap().outcome,
+        TickOutcome::NotModified
     );
 }
 

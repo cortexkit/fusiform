@@ -1018,24 +1018,26 @@ impl CatalogStore {
         Ok(self.readers.with_snapshot(read)?)
     }
 
-    /// The ETag from the most recent observation that received one.
+    /// The validator from the last committed full body, if it had one.
     ///
     /// Read from the store rather than held in memory, so it survives a
     /// restart. The poll loop still sends no validator on a process's first
     /// poll, until that process has read a full document, because a 304 means
     /// the bytes are unchanged, not that the running binary has read them.
+    /// A 304 has no body to replace the validator; a newly committed body
+    /// without a validator clears it. Order by commit, not by the poll clock.
     pub fn last_etag(&self, source: SourceId) -> Result<Option<String>, CatalogError> {
         let etag = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT etag FROM observation \
-                 WHERE source = ?1 AND etag IS NOT NULL \
-                 ORDER BY observed_at_ms DESC LIMIT 1",
+                 WHERE source = ?1 AND outcome IN ('changed', 'unchanged') \
+                 ORDER BY id DESC LIMIT 1",
                 params![source.as_str()],
-                |r| r.get::<_, String>(0),
+                |r| r.get::<_, Option<String>>(0),
             )
             .optional()
         })?;
-        Ok(etag)
+        Ok(etag.flatten())
     }
 
     /// The normalized digest from the most recent observation that computed one.
