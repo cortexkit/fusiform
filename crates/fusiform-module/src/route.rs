@@ -2153,16 +2153,10 @@ fn finish_plane_view(
     };
     let published_quality = &judgments.published;
     let (quality, metadata) = local_overrides::overlay(published_quality, &judgments.local);
-    if metadata.is_empty() {
-        curate::derive_row_facts(
-            &mut response,
-            current,
-            lifetimes,
-            published_quality,
-            requested_prefixes,
-        );
-    } else {
-        let mut published = response.clone();
+    let mut published = local_overrides::comparison_rows(source, &response, &metadata);
+    #[cfg(test)]
+    quality_score_tests::PUBLISHED_OVERRIDE_ROWS.with(|count| count.set(published.models.len()));
+    if !published.models.is_empty() {
         curate::derive_row_facts(
             &mut published,
             current,
@@ -2170,13 +2164,15 @@ fn finish_plane_view(
             published_quality,
             requested_prefixes,
         );
-        curate::derive_row_facts(
-            &mut response,
-            current,
-            lifetimes,
-            &quality,
-            requested_prefixes,
-        );
+    }
+    curate::derive_row_facts(
+        &mut response,
+        current,
+        lifetimes,
+        &quality,
+        requested_prefixes,
+    );
+    if !published.models.is_empty() {
         local_overrides::disclose(&published, &mut response, &metadata);
     }
     if let Some(plane) = plane {

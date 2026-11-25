@@ -2,16 +2,28 @@ use super::*;
 use fusiform_protocol::LocalOverrideWire;
 use fusiform_store::LocalOverrides;
 
-type Metadata<'a> = BTreeMap<(String, String), (i64, &'a str)>;
+type Metadata<'a> = BTreeMap<String, BTreeMap<String, (i64, &'a str)>>;
+
+fn model_key<'a>(id: &'a str, facts: &'a curate::Facts) -> &'a str {
+    facts
+        .get("model.canonical_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(id)
+}
 
 pub(super) fn overlay<'a>(
     published: &curate::Quality,
     local: &'a LocalOverrides,
 ) -> (curate::Quality, Metadata<'a>) {
     let mut quality = published.clone();
-    let mut metadata = BTreeMap::new();
+    let mut metadata = Metadata::new();
     let mut record = |model: &str, fact: String, at: i64, reason: &'a str| {
-        metadata.insert((model.to_string(), fact), (at, reason));
+        if !model.starts_with("local:") {
+            metadata
+                .entry(model.to_string())
+                .or_default()
+                .insert(fact, (at, reason));
+        }
     };
     for row in &local.grades {
         let Some(grade) = row.grade.clone() else {
@@ -117,28 +129,61 @@ pub(super) fn overlay<'a>(
     (quality, metadata)
 }
 
+pub(super) fn comparison_rows(
+    source: SourceId,
+    local: &CatalogGetResponse,
+    metadata: &Metadata<'_>,
+) -> CatalogGetResponse {
+    let mut published = curate::response_envelope(
+        source,
+        local.resolved_at_ms,
+        local.catalog_version,
+        Vec::new(),
+        Vec::new(),
+    );
+    if !metadata.is_empty() {
+        published.models = local
+            .models
+            .iter()
+            .filter(|(id, facts)| metadata.contains_key(model_key(id, facts)))
+            .map(|(id, facts)| (id.clone(), facts.clone()))
+            .collect();
+        // A judgment can join an alias by its canonical key, but not by its alias ID.
+        published.aliased.extend(
+            local
+                .aliased
+                .iter()
+                .filter(|row| published.models.contains_key(&row.model))
+                .cloned(),
+        );
+    }
+    published
+}
+
 pub(super) fn disclose(
     published: &CatalogGetResponse,
     local: &mut CatalogGetResponse,
     metadata: &Metadata<'_>,
 ) {
     let mut disclosures = BTreeMap::new();
-    for (id, facts) in &local.models {
-        let model = facts
-            .get("model.canonical_id")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(id);
-        let previous = published.models.get(id);
-        for ((key, fact), (at, reason)) in metadata.iter().filter(|((key, _), _)| key == model) {
-            let published = previous.and_then(|facts| facts.get(fact));
+    for (id, previous) in &published.models {
+        let Some(facts) = local.models.get(id) else {
+            continue;
+        };
+        let key = model_key(id, facts);
+        let Some(entries) = metadata.get(key) else {
+            continue;
+        };
+        for (fact, (at, reason)) in entries {
+            let published = previous.get(fact);
             let local = facts.get(fact);
             if published.is_none() && local.is_none() {
                 continue;
             }
             disclosures.insert(
-                (key.clone(), fact.clone()),
+                (key, fact),
                 LocalOverrideWire {
-                    key: key.clone(),
+                    key: key.to_owned(),
                     fact: fact.clone(),
                     published: published.cloned(),
                     local: local.cloned(),

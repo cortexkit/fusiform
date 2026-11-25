@@ -4,6 +4,56 @@ use fusiform_core::BoundaryKind;
 use fusiform_store::NewEra;
 use serde_json::{json, Value};
 
+thread_local! {
+    pub(super) static PUBLISHED_OVERRIDE_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[test]
+fn local_override_comparison_only_derives_matching_catalog_rows() {
+    let (store, _dir) = fixture_in_mode(true, true);
+    store
+        .append_quality_grade(
+            "local:fixture/stt",
+            Some("transcription"),
+            Some(&fusiform_store::QualityGrade::NonChat { grade: 11.into() }),
+            "user",
+            "local engine",
+            2000,
+        )
+        .unwrap();
+    let count = || PUBLISHED_OVERRIDE_ROWS.with(std::cell::Cell::get);
+    let unrelated = get(&store, json!({}));
+    assert!(unrelated.models.len() >= 3);
+    assert!(unrelated.overrides.is_empty());
+    assert_eq!(
+        count(),
+        0,
+        "unrelated local engine grade caused a second catalog derivation"
+    );
+
+    store
+        .append_quality_grade(
+            "lab/shared",
+            None,
+            Some(&fusiform_store::QualityGrade::Chat {
+                elo: 123.into(),
+                eq: 456.into(),
+            }),
+            "user",
+            "catalog grade",
+            2001,
+        )
+        .unwrap();
+    let matched = get(&store, json!({}));
+    assert_eq!(
+        count(),
+        2,
+        "published comparison should only derive the two matching rows"
+    );
+    assert_eq!(matched.overrides.len(), 2);
+    assert!(matched.overrides.iter().all(|row| row.key == "lab/shared"));
+}
+
 #[test]
 fn store_mode_effort_write_reports_the_recorded_grader() {
     let (store, dir) = fixture_in_mode(false, true);
