@@ -81,9 +81,8 @@ pub enum CatalogError {
     /// Distinct from a generic backend error because it has a specific correct
     /// response: this process is superseded and must stop writing, not retry.
     Fenced,
-    /// The poll has fact changes, but its timestamp is not after the newest
-    /// fact boundary (the time a recorded value took effect) already written
-    /// for that source, as happens when the clock moves backwards.
+    /// The poll has fact changes, but its timestamp is not after an observation
+    /// or fact boundary already written for that source.
     PollBoundaryNotIncreasing {
         observed_at: Timestamp,
         latest: Timestamp,
@@ -112,7 +111,7 @@ impl std::fmt::Display for CatalogError {
                 latest,
             } => write!(
                 f,
-                "poll clock is at {} ms, not after the newest written boundary at {} ms",
+                "poll clock is at {} ms, not after the newest written boundary or observation at {} ms",
                 observed_at.0, latest.0
             ),
             CatalogError::Invariant(msg) => write!(f, "invariant violated: {msg}"),
@@ -708,12 +707,24 @@ impl CatalogStore {
                     let mut plan = ingest::plan_ingest_in(tx, catalog, at, boundary, None)?;
                     let changed = !plan.is_empty();
                     if changed {
-                        let latest: Option<i64> = tx.query_row(
+                        let source = [observation.source.as_str()];
+                        let latest_boundary: Option<i64> = tx.query_row(
                             "SELECT MAX(boundary_at_ms) FROM era WHERE source = ?1",
-                            [observation.source.as_str()],
+                            source,
                             |r| r.get(0),
                         )?;
-                        if let Some(latest) = latest.filter(|&latest| latest >= at.0) {
+                        // An unchanged poll or 304 can confirm the old value
+                        // without opening a new era. Do not write a change
+                        // before that observation.
+                        let latest_observation: Option<i64> = tx.query_row(
+                            "SELECT MAX(observed_at_ms) FROM observation WHERE source = ?1",
+                            source,
+                            |r| r.get(0),
+                        )?;
+                        if let Some(latest) = latest_boundary
+                            .max(latest_observation)
+                            .filter(|&latest| latest >= at.0)
+                        {
                             return Ok(Err(CatalogError::PollBoundaryNotIncreasing {
                                 observed_at: at,
                                 latest: Timestamp(latest),
@@ -1087,12 +1098,13 @@ impl CatalogStore {
     ///
     /// Only observations that parsed a body carry a digest, so a 304 or a
     /// failure between two full fetches does not erase the comparison basis.
+    /// Order by commit, not by the poll clock, which can move backwards.
     pub fn last_normalized_hash(&self, source: SourceId) -> Result<Option<String>, CatalogError> {
         let hash = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT normalized_hash FROM observation \
                  WHERE source = ?1 AND normalized_hash IS NOT NULL \
-                 ORDER BY observed_at_ms DESC LIMIT 1",
+                 ORDER BY id DESC LIMIT 1",
                 params![source.as_str()],
                 |r| r.get::<_, String>(0),
             )

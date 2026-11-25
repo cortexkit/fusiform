@@ -183,6 +183,77 @@ fn a_clock_rewind_must_not_acknowledge_an_unapplied_document() {
 }
 
 #[test]
+fn a_rewound_clock_does_not_hide_the_last_committed_digest() {
+    use fusiform_core::ObservationOutcome;
+    use fusiform_store::NewObservation;
+
+    let f = fixture();
+    let source = SourceId::ModelsDev;
+    for (at, digest) in [(5_000, "before-rewind"), (3_000, "after-rewind")] {
+        f.store
+            .record_observation(&NewObservation {
+                source,
+                observed_at: Timestamp(at),
+                outcome: ObservationOutcome::Unchanged,
+                normalized_hash: Some(digest.into()),
+                raw_hash: None,
+                etag: None,
+                duration_ms: None,
+                detail: None,
+            })
+            .unwrap();
+    }
+    assert_eq!(
+        f.store.last_normalized_hash(source).unwrap().as_deref(),
+        Some("after-rewind"),
+        "the last committed body, not the latest clock reading, supplies the digest"
+    );
+}
+
+#[test]
+fn a_changed_poll_cannot_write_behind_a_later_observation() {
+    let f = fixture();
+    let source = SourceId::ModelsDev;
+    run(&f, body(FIXTURE, Some("seed")), 1_000);
+    let version = f.store.catalog_version().unwrap();
+    let second = body_with_extra_model(true);
+    for (outcome, at) in [
+        (body(FIXTURE, Some("unchanged")), 5_000),
+        (
+            FetchOutcome::NotModified {
+                etag: Some("not-modified".into()),
+                duration: Duration::from_millis(10),
+            },
+            6_000,
+        ),
+    ] {
+        let confirmed = run(&f, outcome, at);
+        assert!(matches!(
+            confirmed.outcome,
+            TickOutcome::Unchanged | TickOutcome::NotModified
+        ));
+        let etag = f.store.last_etag(source).unwrap();
+        for rewound in [at - 500, at] {
+            let refused = run(&f, body(&second, Some("refused")), rewound);
+            assert_eq!(
+                refused.outcome,
+                TickOutcome::Failed {
+                    class: FailureClass::Implausible
+                },
+                "the changing poll at {rewound} must not write behind the observation at {at}"
+            );
+            assert_eq!(refused.eras_written, 0);
+            assert_eq!(f.store.catalog_version().unwrap(), version);
+            assert_eq!(f.store.last_etag(source).unwrap(), etag);
+        }
+    }
+    assert!(matches!(
+        run(&f, body(&second, Some("retry")), 6_001).outcome,
+        TickOutcome::Changed { .. }
+    ));
+}
+
+#[test]
 fn a_different_saved_digest_with_no_era_changes_does_not_advance_version() {
     use fusiform_core::ObservationOutcome;
     use fusiform_store::NewObservation;
