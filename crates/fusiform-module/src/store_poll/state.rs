@@ -1,6 +1,6 @@
 use fusiform_release::{
-    state_hash, upstream_state_hash, validate_upstream_key, verify_envelope, ChangeOp, CurationSet,
-    ProviderFacts, Release, ReleaseEnvelope, Snapshot, State, Upstream,
+    state_hash, upstream_state_hash, validate_judgments, validate_received, validate_upstream_key,
+    verify_envelope, ChangeOp, ProviderFacts, Release, ReleaseEnvelope, Snapshot, State, Upstream,
 };
 
 use super::{step, ReleaseKeys};
@@ -34,7 +34,7 @@ impl Verified {
             (|| {
                 verify_change(None, &release, keys)?;
                 let mut upstream = Upstream::new();
-                apply_ops(&mut upstream, release.change.upstream)?;
+                apply_ops(&mut upstream, &release.change.upstream)?;
                 let curation_set = release
                     .change
                     .curation_set
@@ -55,7 +55,7 @@ impl Verified {
         &mut self,
         release: &Release,
         keys: &ReleaseKeys,
-    ) -> Result<Option<CurationSet>, String> {
+    ) -> Result<Option<fusiform_release::CurationSet>, String> {
         // The caller discards the replay on error, so there is no need to
         // clone the complete upstream just to verify the next state.
         let mut verify = || -> Result<_, String> {
@@ -67,10 +67,7 @@ impl Verified {
                 Some(set) => Some(std::mem::replace(&mut self.state.curation_set, set.clone())),
                 None => None,
             };
-            apply_ops(
-                &mut self.state.upstream,
-                release.change.upstream.iter().cloned(),
-            )?;
+            apply_ops(&mut self.state.upstream, &release.change.upstream)?;
             check_state(&release.envelope, &self.state)?;
             if previous_curation.is_some() {
                 validate_curation(&self.state)?;
@@ -99,7 +96,7 @@ impl Verified {
 
 fn validate_curation(state: &State) -> Result<(), String> {
     validate_judgments(&state.curation_set)?;
-    crate::curation::validate_received(&state.curation_set.vendor_facts, &state.upstream)
+    validate_received(&state.curation_set.vendor_facts)
 }
 
 fn verify_change(
@@ -162,116 +159,136 @@ fn empty_provider() -> ProviderFacts {
     }
 }
 
-fn apply_ops(
-    upstream: &mut Upstream,
-    ops: impl IntoIterator<Item = ChangeOp>,
-) -> Result<(), String> {
-    for op in ops {
-        let key = op.key();
-        validate_upstream_key(key)?;
-        let (provider, model, key) = key;
-        match op {
-            ChangeOp::Set {
-                provider,
-                model,
-                fact,
-                value,
-            } => {
-                let row = upstream.entry(provider).or_insert_with(empty_provider);
-                row.models.entry(model).or_default().insert(fact, value);
-            }
-            ChangeOp::SetProvider {
-                provider,
-                fact,
-                value,
-            } => {
-                let row = upstream.entry(provider).or_insert_with(empty_provider);
-                row.provider.insert(fact, value);
-            }
-            ChangeOp::Remove { .. } | ChangeOp::RemoveProvider { .. } => {
-                let missing = || format!("cannot remove missing upstream key {:?}", op.key());
-                let row = upstream.get_mut(provider).ok_or_else(missing)?;
-                let facts = match model {
-                    Some(model) => row.models.get_mut(model).ok_or_else(missing)?,
-                    None => &mut row.provider,
-                };
-                facts.remove(key).ok_or_else(missing)?;
-                if facts.is_empty() {
-                    if let Some(model) = model {
-                        row.models.remove(model);
+fn apply_ops(upstream: &mut Upstream, ops: &[ChangeOp]) -> Result<(), String> {
+    for group in ops.chunk_by(|left, right| left.key().0 == right.key().0) {
+        let provider = group[0].key().0;
+        let had_models = upstream
+            .get(provider)
+            .is_some_and(|row| !row.models.is_empty());
+        let adds_model = group.iter().any(|op| matches!(op, ChangeOp::Set { .. }));
+        for op in group {
+            let key = op.key();
+            validate_upstream_key(key)?;
+            let (_, model, key) = key;
+            match op {
+                ChangeOp::Set {
+                    model, fact, value, ..
+                } => {
+                    let row = upstream
+                        .entry(provider.to_owned())
+                        .or_insert_with(empty_provider);
+                    row.models
+                        .entry(model.clone())
+                        .or_default()
+                        .insert(fact.clone(), value.clone());
+                }
+                ChangeOp::SetProvider { fact, value, .. } => {
+                    if !had_models && !adds_model {
+                        return Err(format!("set_provider names provider {provider:?} with no existing or incoming models"));
+                    }
+                    let row = upstream
+                        .entry(provider.to_owned())
+                        .or_insert_with(empty_provider);
+                    row.provider.insert(fact.clone(), value.clone());
+                }
+                ChangeOp::Remove { .. } | ChangeOp::RemoveProvider { .. } => {
+                    let missing = || format!("cannot remove missing upstream key {:?}", op.key());
+                    let row = upstream.get_mut(provider).ok_or_else(missing)?;
+                    let facts = match model {
+                        Some(model) => row.models.get_mut(model).ok_or_else(missing)?,
+                        None => &mut row.provider,
+                    };
+                    facts.remove(key).ok_or_else(missing)?;
+                    if facts.is_empty() {
+                        if let Some(model) = model {
+                            row.models.remove(model);
+                        }
                     }
                 }
-                if row.provider.is_empty() && row.models.is_empty() {
-                    upstream.remove(provider);
-                }
             }
+        }
+        // A batch can remove one model and add another for the same provider.
+        // Only reject an orphan if the provider still has no models afterward.
+        if let Some(row) = upstream.get(provider).filter(|row| row.models.is_empty()) {
+            if !row.provider.is_empty() {
+                return Err(format!(
+                    "change leaves provider facts without models for {provider:?}"
+                ));
+            }
+            upstream.remove(provider);
         }
     }
     Ok(())
 }
 
-/// Check the keys, grade values and workload names in a curation set.
-pub fn validate_judgments(set: &CurationSet) -> Result<(), String> {
-    let model_keys = set
-        .grades
-        .keys()
-        .chain(set.effort_grades.keys())
-        .chain(set.workload_efforts.keys())
-        .chain(set.decommissioned.keys())
-        .map(|model| (model, false))
-        .chain(set.kind_grades.keys().map(|model| (model, true)));
-    for (model, task) in model_keys {
-        if model.is_empty()
-            || !task && model.starts_with("local:")
-            || model.chars().any(|c| c.is_control() || c.is_whitespace())
-        {
-            return Err(format!("invalid published model key {model:?}"));
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn apply(upstream: &mut Upstream, json: &str) -> Result<(), String> {
+        apply_ops(
+            upstream,
+            &serde_json::from_str::<Vec<ChangeOp>>(json).unwrap(),
+        )
     }
-    let valid_number =
-        |number: &serde_json::Number| number.as_f64().is_some_and(|n| n > 0.0 && n.is_finite());
-    for (model, grade) in &set.grades {
-        if grade
-            .graded_effort
-            .as_deref()
-            .is_some_and(|effort| effort.trim().is_empty())
-            || !valid_number(&grade.elo)
-            || !valid_number(&grade.eq)
-        {
-            return Err(format!("invalid chat grade for {model}"));
-        }
+
+    #[test]
+    fn provider_level_replay_refuses_a_set_without_models() {
+        let mut upstream = Upstream::new();
+        let failure = apply(
+            &mut upstream,
+            r#"[{"op":"set_provider","provider":"p","fact":"name","value":"P"}]"#,
+        )
+        .expect_err("consumer accepted a provider set without existing or incoming models");
+        assert!(
+            failure.contains("no existing or incoming models"),
+            "{failure}"
+        );
     }
-    for (model, efforts) in &set.effort_grades {
-        if efforts.iter().any(|(effort, grade)| {
-            effort.trim().is_empty() || !valid_number(&grade.elo) || !valid_number(&grade.eq)
-        }) {
-            return Err(format!("invalid effort grade for {model}"));
-        }
+
+    #[test]
+    fn provider_level_replay_refuses_facts_orphaned_by_last_model_removal() {
+        let mut upstream = Upstream::new();
+        apply(
+            &mut upstream,
+            r#"[{"op":"set_provider","provider":"p","fact":"name","value":"P"},
+                {"op":"set","provider":"p","model":"m","fact":"name","value":"M"}]"#,
+        )
+        .unwrap();
+        let failure = apply(
+            &mut upstream,
+            r#"[{"op":"remove","provider":"p","model":"m","fact":"name"}]"#,
+        )
+        .expect_err("consumer retained the provider's facts after removing its last model");
+        assert!(
+            failure.contains("leaves provider facts without models"),
+            "{failure}"
+        );
     }
-    for (model, kinds) in &set.kind_grades {
-        if kinds.iter().any(|(kind, grade)| {
-            !matches!(
-                kind.as_str(),
-                "transcription" | "speech" | "image" | "video" | "search" | "decision"
-            ) || !valid_number(grade)
-        }) {
-            return Err(format!("invalid task grade for {model}"));
-        }
+
+    #[test]
+    fn provider_level_replay_allows_replacing_models_and_removing_the_provider() {
+        let mut upstream = Upstream::new();
+        apply(
+            &mut upstream,
+            r#"[{"op":"set_provider","provider":"p","fact":"name","value":"P"},
+                {"op":"set","provider":"p","model":"m","fact":"name","value":"M"}]"#,
+        )
+        .unwrap();
+        apply(
+            &mut upstream,
+            r#"[{"op":"remove","provider":"p","model":"m","fact":"name"},
+                {"op":"set","provider":"p","model":"n","fact":"name","value":"N"}]"#,
+        )
+        .unwrap();
+        assert!(!upstream["p"].provider.is_empty());
+        assert_eq!(upstream["p"].models.keys().collect::<Vec<_>>(), ["n"]);
+        apply(
+            &mut upstream,
+            r#"[{"op":"remove_provider","provider":"p","fact":"name"},
+                {"op":"remove","provider":"p","model":"n","fact":"name"}]"#,
+        )
+        .unwrap();
+        assert!(upstream.is_empty());
     }
-    for (model, workloads) in &set.workload_efforts {
-        if workloads.iter().any(|(name, effort)| {
-            !fusiform_protocol::WORKLOADS.contains(&name.as_str())
-                || effort
-                    .default
-                    .as_deref()
-                    .is_some_and(|effort| effort.trim().is_empty())
-                || effort
-                    .minimum
-                    .as_deref()
-                    .is_some_and(|effort| effort.trim().is_empty())
-        }) {
-            return Err(format!("invalid workload effort for {model}"));
-        }
-    }
-    Ok(())
 }

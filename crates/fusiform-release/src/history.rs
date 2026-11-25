@@ -1,7 +1,7 @@
-use std::num::NonZeroU64;
+use std::{collections::BTreeMap, num::NonZeroU64};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, value::RawValue};
 use time::{Date, Month};
 
 use crate::{ArtifactRefusal, Hash, Release, Signatures, sha256, write_canonical_json};
@@ -56,15 +56,7 @@ pub fn validate_history_files(
 /// The `YYYY-MM-DD` day named by a `days/<day>.json` history path, if well formed.
 pub fn history_day_name(path: &str) -> Option<&str> {
     let day = path.strip_prefix("days/")?.strip_suffix(".json")?;
-    (day.len() == 10
-        && day.bytes().enumerate().all(|(i, byte)| {
-            if matches!(i, 4 | 7) {
-                byte == b'-'
-            } else {
-                byte.is_ascii_digit()
-            }
-        }))
-    .then_some(day)
+    history_day_start_ms(day).map(|_| day)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,7 +84,9 @@ pub fn history_day_bytes(day: &str, releases_jsonl: &[u8]) -> Result<Vec<u8>, Ar
     let mut out = format!("{{\"day\":\"{day}\",\"releases\":[").into_bytes();
     let mut previous: Option<u64> = None;
     for line in releases.lines() {
-        let Release { envelope, .. } = serde_json::from_str(line)
+        let Release {
+            envelope, change, ..
+        } = serde_json::from_str(line)
             .map_err(|err| ArtifactRefusal::new("invalid_history_release", err))?;
         if envelope.release == 1 {
             return Err(ArtifactRefusal::new(
@@ -112,13 +106,18 @@ pub fn history_day_bytes(day: &str, releases_jsonl: &[u8]) -> Result<Vec<u8>, Ar
                 "release publication time is outside the requested UTC day",
             ));
         }
+        if change.change_hash() != envelope.change_hash {
+            return Err(ArtifactRefusal::new(
+                "history_change_mismatch",
+                "change_hash does not match the release's change",
+            ));
+        }
+        drop(change);
         if previous.is_some() {
             out.push(b',');
         }
-        // Canonicalize the stored release object itself, including signatures.
-        let stored: Value = serde_json::from_str(line)
+        write_stored_release(&mut out, line)
             .map_err(|err| ArtifactRefusal::new("invalid_history_release", err))?;
-        write_canonical_json(&mut out, &stored).expect("writing to a Vec cannot fail");
         previous = Some(envelope.release);
     }
     if previous.is_none() {
@@ -129,6 +128,62 @@ pub fn history_day_bytes(day: &str, releases_jsonl: &[u8]) -> Result<Vec<u8>, Ar
     }
     out.extend_from_slice(b"]}");
     Ok(out)
+}
+
+// Preserve extensions in the stored object without building a second tree of
+// its change. Borrow the large upstream array and canonicalize one op at a time.
+fn write_stored_release(out: &mut Vec<u8>, line: &str) -> serde_json::Result<()> {
+    write_raw_object(out, line, |out, key, value| {
+        if key != "change" {
+            return write_raw_value(out, value);
+        }
+        write_raw_object(out, value.get(), |out, key, value| {
+            if key != "upstream" {
+                return write_raw_value(out, value);
+            }
+            let ops: Vec<&RawValue> = serde_json::from_str(value.get())?;
+            out.push(b'[');
+            for (i, op) in ops.into_iter().enumerate() {
+                if i != 0 {
+                    out.push(b',');
+                }
+                write_raw_value(out, op)?;
+            }
+            out.push(b']');
+            Ok(())
+        })
+    })
+}
+
+fn write_raw_object(
+    out: &mut Vec<u8>,
+    raw: &str,
+    mut write_member: impl FnMut(&mut Vec<u8>, &str, &RawValue) -> serde_json::Result<()>,
+) -> serde_json::Result<()> {
+    // Serde also accepts a struct as an array. Keep the archive spelling
+    // instead of rewriting one of those releases into an object.
+    if !raw.trim_start().starts_with('{') {
+        let value: Value = serde_json::from_str(raw)?;
+        return write_canonical_json(out, &value).map_err(serde_json::Error::io);
+    }
+    let members: BTreeMap<String, &RawValue> = serde_json::from_str(raw)?;
+    out.push(b'{');
+    for (i, (key, value)) in members.into_iter().enumerate() {
+        if i != 0 {
+            out.push(b',');
+        }
+        serde_json::to_writer(&mut *out, &key)?;
+        out.push(b':');
+        write_member(out, &key, value)?;
+    }
+    out.push(b'}');
+    Ok(())
+}
+
+fn write_raw_value(out: &mut Vec<u8>, raw: &RawValue) -> serde_json::Result<()> {
+    let value: Value = serde_json::from_str(raw.get())?;
+    write_canonical_json(out, &value).expect("writing to a Vec cannot fail");
+    Ok(())
 }
 
 /// Start of a history day in Unix milliseconds. Invalid UTC dates have no start.

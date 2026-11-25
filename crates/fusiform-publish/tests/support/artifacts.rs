@@ -47,7 +47,11 @@ fn models_with_rename() -> Vec<u8> {
 fn summary(models: &[u8], previous: &FactIndex) -> (Vec<u8>, FactIndex) {
     let step = publish_step(models, previous, &ChargeUnitEvidence::default()).unwrap();
     (
-        wire(json!({"ops": step.ops, "upstream_hash": step.upstream_hash})),
+        wire(json!({
+            "base_upstream_hash": previous.upstream_hash(),
+            "ops": step.ops,
+            "upstream_hash": step.upstream_hash,
+        })),
         step.index,
     )
 }
@@ -212,6 +216,27 @@ fn history_base(import: &Release) -> Vec<u8> {
 }
 
 #[test]
+fn signed_chain_refuses_curation_rollback() {
+    let (r1, mut r2, _) = two_releases();
+    let mut curation = r1.change.curation_set.clone().unwrap();
+    curation.version -= 1;
+    r2.envelope.curation_version = curation.version;
+    r2.envelope.curation_hash = curation.curation_hash();
+    r2.envelope.state_hash =
+        fusiform_release::state_hash(r2.envelope.curation_hash, r2.envelope.upstream_hash);
+    r2.change.curation_set = Some(curation);
+    r2.envelope.change_hash = r2.change.change_hash();
+    r2.signatures = sign_envelope(&r2.envelope, KID, &key()).unwrap();
+    let keys = BTreeMap::from([(KID.to_string(), key().verifying_key())]);
+    let failure = consumer::check_chain(&[r1, r2], &keys)
+        .expect_err("publisher chain checker accepted a signed curation rollback");
+    assert!(
+        failure.contains("curation version does not advance"),
+        "{failure}"
+    );
+}
+
+#[test]
 fn signed_chain_replays_and_snapshot_reproduces_state() {
     let (r1, r2, index) = two_releases();
     let r3 = third_release(&r2, &index);
@@ -235,13 +260,13 @@ fn signed_chain_replays_and_snapshot_reproduces_state() {
         .elo = "1.0".parse().unwrap();
     assert_eq!(
         consumer::check_chain(&tampered, &keys).unwrap_err(),
-        "change hash mismatch"
+        "verify release 3: change_hash does not match the release's change"
     );
     tampered[2].envelope.change_hash = tampered[2].change.change_hash();
     tampered[2].signatures = sign_envelope(&tampered[2].envelope, KID, &key()).unwrap();
     assert_eq!(
         consumer::check_chain(&tampered, &keys).unwrap_err(),
-        "replayed state does not match the envelope"
+        "verify release 3: curation_hash does not match verified state"
     );
 
     let fixtures = fixtures();
@@ -354,6 +379,7 @@ fn snapshot_builder_refuses_signed_invalid_history_lists() {
         &[][..],
         &["days/2026-11-19.json"][..],
         &["base.json", "days/2026-11-19.txt"][..],
+        &["base.json", "days/2026-02-30.json"][..],
         &["base.json", "days/2026-11-20.json", "days/2026-11-19.json"][..],
         &["base.json", "days/2026-11-19.json", "days/2026-11-19.json"][..],
     ] {
@@ -372,6 +398,78 @@ fn snapshot_builder_refuses_signed_invalid_history_lists() {
             "accepted signed history list {names:?}"
         );
     }
+}
+
+#[test]
+fn history_day_builder_keeps_unknown_fields_in_the_canonical_bytes() {
+    let (_, release, _) = two_releases();
+    let mut stored = serde_json::to_value(release).unwrap();
+    let extension: Value =
+        serde_json::from_str(r#"{"z":[9007199254740993,1.00],"a":true}"#).unwrap();
+    stored["extra"] = extension.clone();
+    stored["envelope"]["extra"] = extension.clone();
+    stored["change"]["extra"] = extension.clone();
+    stored["change"]["upstream"][0]["extra"] = extension;
+    let actual = history_day_bytes(DAY, &serde_json::to_vec(&stored).unwrap()).unwrap();
+    assert_eq!(actual, wire(json!({"day": DAY, "releases": [stored]})));
+}
+
+#[test]
+fn history_day_builder_refuses_a_change_that_does_not_match_its_envelope() {
+    let (_, mut release, _) = two_releases();
+    let fusiform_release::ChangeOp::Set { value, .. } = &mut release.change.upstream[0] else {
+        panic!("the release must set the new model name");
+    };
+    *value = json!("Different name");
+    let result = history_day_bytes(DAY, &jsonl(&[&release]));
+    assert_eq!(
+        result.err().map(|err| err.class),
+        Some("history_change_mismatch"),
+        "accepted a release whose change did not match its envelope"
+    );
+}
+
+#[test]
+fn snapshot_builders_refuse_semantically_invalid_curation() {
+    let fixtures = fixtures();
+    let mut snapshot: Snapshot = serde_json::from_slice(&fixtures["chain/snapshot.json"]).unwrap();
+    snapshot
+        .state
+        .curation_set
+        .vendor_facts
+        .insert("plan-prices".into(), json!({"cells": [{}]}));
+    let envelope = &mut snapshot.envelope;
+    envelope.curation_hash = snapshot.state.curation_set.curation_hash();
+    envelope.state_hash =
+        fusiform_release::state_hash(envelope.curation_hash, envelope.upstream_hash);
+    let attestation = snapshot.history_attestation.unwrap();
+    let mut release: Release = serde_json::from_slice(&fixtures["chain/release-2.json"]).unwrap();
+    release.envelope = envelope.clone();
+    release.signatures = sign_envelope(envelope, KID, &key()).unwrap();
+    let docs = SnapshotDocs::new(&release, attestation.body.history);
+    let curation = wire(&snapshot.state.curation_set);
+    let evidence = ChargeUnitEvidence::default();
+    let models = models_with_rename();
+    let refused = [
+        snapshot_bytes(SnapshotInputs {
+            curation_set_raw: &curation,
+            ..docs.inputs(&models, &evidence)
+        }),
+        fusiform_publish::snapshot_bytes_from_state(
+            &wire(snapshot.state),
+            &docs.envelope,
+            &docs.signatures,
+            &docs.history,
+            &docs.history_signatures,
+            PUBLIC_KEY,
+        ),
+    ]
+    .map(|result| result.err().map(|failure| failure.class));
+    assert_eq!(
+        refused,
+        [Some("invalid_curation"); 2],
+        "snapshot builders accepted a rejected plan-prices row"
+    );
 }
 
 #[test]

@@ -40,8 +40,13 @@ Release numbers and millisecond timestamps passed as arguments are `bigint`.
 | `head_signing_bytes` | Bare `head` body | Exact Ed25519 message bytes checked by Rust `verify_head` |
 | `history_attestation_signing_bytes` | Bare history attestation body | Exact Ed25519 message bytes checked by Rust `verify_history_attestation` |
 
-The publish summary is canonical JSON. Success has `ops`, `upstream_hash`,
-`model_count` and `conflicts`. Each conflict identifies `provider`, `model`,
+The publish summary is canonical JSON. Success has `ops`, `base_upstream_hash`,
+`upstream_hash`, `model_count` and `conflicts`. `base_upstream_hash` identifies
+the index the diff used; `upstream_hash` identifies the resulting index.
+`build_release` refuses a summary whose base does not match the parent
+(or the empty upstream for release 1). If the index is stale, recover it
+against the current head and compute a new diff before retrying.
+Each conflict identifies `provider`, `model`,
 `fact` and `values` (distinct storage JSON strings for the omitted fact).
 A refusal has just `ops: []`, `conflicts: []` and `refusal: {class, detail}`;
 its classes are `empty_index`, `parse`, and `implausible`. Keep the previous
@@ -112,8 +117,14 @@ given UTC day. Release 1 belongs in the separately generated `history/base.json`
 The day builder preserves signatures; it does not verify them.
 
 Pass history files as an ordered JSON array of `{"file": "base.json", "sha256": "…"}`
-entries. The host selects the files that cover the snapshot's release and
-hashes their exact bytes. Sign `history_attestation_signing_bytes` for
+entries and hash their exact bytes. Starting from `base.json`, the listed
+files must replay to exactly the snapshot's release. The consumer replays the
+entire last day file; it does not ignore releases after the snapshot. A day
+file at the same path can change as releases are added. Replacing it makes
+any attestation over the old bytes fail verification, so a snapshot that
+attests a final day file must end at the last release of that day.
+
+Sign `history_attestation_signing_bytes` for
 `{"release": n, "state_hash": "…", "history": [...]}` with the release key
 and pass the resulting `{kid, sig}` as `history_signatures`. The pinned key
 document is `{kid, public_key}`, where `public_key` is the raw 32-byte Ed25519

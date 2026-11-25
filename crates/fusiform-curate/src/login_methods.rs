@@ -24,6 +24,17 @@ pub fn load_with(
     seed: &serde_json::Value,
     curated: &crate::curated_models::CuratedModels,
 ) -> (Rows, Vec<String>) {
+    load_where(doc, curated, |provider, model| {
+        seed[provider]["models"][model].is_object()
+    })
+}
+
+/// Validate rows using the caller's catalog identity check.
+pub fn load_where(
+    doc: &str,
+    curated: &crate::curated_models::CuratedModels,
+    known_model: impl Fn(&str, &str) -> bool,
+) -> (Rows, Vec<String>) {
     #[derive(serde::Deserialize)]
     struct Doc {
         models: Vec<serde_json::Value>,
@@ -66,7 +77,7 @@ pub fn load_with(
             Some("review_by_ms must be 60 days after established_at_ms")
         } else if curated.contains_key(&key) {
             Some("row is already curated; keep its login methods in curated-models.json")
-        } else if !seed[&row.provider_id]["models"][&row.model_id].is_object() {
+        } else if !known_model(&row.provider_id, &row.model_id) {
             Some("row is missing from the embedded seed; correct or remove the login allowlist")
         } else if rows.contains_key(&key) {
             Some("duplicate login methods identity")

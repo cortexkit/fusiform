@@ -644,6 +644,7 @@ version = "0.1.0"
 dependencies = [
  "fusiform-core",
  "fusiform-curate",
+ "fusiform-module",
  "fusiform-publish",
  "fusiform-release",
  "js-sys",
@@ -658,6 +659,8 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
+ "fusiform-curate",
+ "fusiform-protocol",
  "serde",
  "serde_json",
  "sha2",

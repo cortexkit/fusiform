@@ -1,11 +1,12 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::{
-    Change, ChangeOp, CurationSet, Hash, ReleaseEnvelope, ReleaseFormat, canonical_json, fact_hash,
-    state_hash, validate_upstream_key,
+    Change, ChangeOp, CurationSet, Hash, ReleaseEnvelope, ReleaseFormat, fact_hash, state_hash,
+    upstream_hash_sorted, validate_judgments, validate_received, validate_upstream_key,
+    write_canonical_json,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -45,6 +46,9 @@ pub fn decode_curation(raw: &[u8]) -> Result<(CurationSet, Hash), ArtifactRefusa
             "stored curation does not round-trip in the release schema",
         ));
     }
+    validate_judgments(&curation)
+        .and_then(|()| validate_received(&curation.vendor_facts))
+        .map_err(|err| ArtifactRefusal::new("invalid_curation", err))?;
     Ok((curation, hash))
 }
 
@@ -60,6 +64,7 @@ pub fn build_release(
 ) -> Result<Vec<u8>, ArtifactRefusal> {
     #[derive(Deserialize)]
     struct Summary {
+        base_upstream_hash: Hash,
         ops: Vec<ChangeOp>,
         upstream_hash: Hash,
     }
@@ -67,6 +72,12 @@ pub fn build_release(
     let summary: Summary = serde_json::from_slice(summary)
         .map_err(|err| ArtifactRefusal::new("invalid_summary", err))?;
     for op in &summary.ops {
+        if matches!(op, ChangeOp::SetProvider { .. }) {
+            return Err(ArtifactRefusal::new(
+                "invalid_summary",
+                "set_provider is unsupported until the publisher produces provider facts",
+            ));
+        }
         validate_upstream_key(op.key())
             .map_err(|err| ArtifactRefusal::new("invalid_summary", err))?;
     }
@@ -106,6 +117,16 @@ pub fn build_release(
     envelope
         .validate_parent()
         .map_err(|err| ArtifactRefusal::new("invalid_parent", err))?;
+    let expected_base = parent.as_ref().map_or_else(
+        || upstream_hash_sorted(std::iter::empty()),
+        |prior| prior.upstream_hash,
+    );
+    if summary.base_upstream_hash != expected_base {
+        return Err(ArtifactRefusal::new(
+            "invalid_summary",
+            "summary base_upstream_hash does not match the parent upstream hash",
+        ));
+    }
     if parent
         .as_ref()
         .is_some_and(|prior| !envelope.chronology_follows(prior, !summary.ops.is_empty()))
@@ -147,7 +168,16 @@ pub fn build_release(
         curation_set: unchanged.is_none().then_some(curation),
     };
     envelope.change_hash = change.change_hash();
-    Ok(canonical_json(
-        &json!({"envelope": envelope, "change": change}),
-    ))
+    let mut out = br#"{"change":"#.to_vec();
+    change
+        .write_canonical(&mut out)
+        .expect("writing to a Vec cannot fail");
+    out.extend_from_slice(br#","envelope":"#);
+    write_canonical_json(
+        &mut out,
+        &serde_json::to_value(envelope).expect("an envelope is JSON"),
+    )
+    .expect("writing to a Vec cannot fail");
+    out.push(b'}');
+    Ok(out)
 }

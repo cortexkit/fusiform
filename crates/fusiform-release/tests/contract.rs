@@ -29,6 +29,7 @@ fn release_builder_checks_parent_chronology() {
         .unwrap();
     let curation_bytes = serde_json::to_vec(&curation).unwrap();
     let summary = serde_json::to_vec(&json!({
+        "base_upstream_hash": parent.upstream_hash,
         "ops": second.change.upstream,
         "upstream_hash": second.envelope.upstream_hash,
     }))
@@ -61,8 +62,12 @@ fn release_builder_checks_parent_chronology() {
         );
     }
 
-    let curation_only =
-        serde_json::to_vec(&json!({"ops": [], "upstream_hash": parent.upstream_hash})).unwrap();
+    let curation_only = serde_json::to_vec(&json!({
+        "base_upstream_hash": parent.upstream_hash,
+        "ops": [],
+        "upstream_hash": parent.upstream_hash,
+    }))
+    .unwrap();
     let mut newer_curation = curation;
     newer_curation.version = parent.curation_version + 1;
     assert!(
@@ -85,8 +90,12 @@ fn release_builder_refuses_curation_rollback() {
     ))
     .unwrap();
     let parent = first.envelope;
-    let summary =
-        serde_json::to_vec(&json!({"ops": [], "upstream_hash": parent.upstream_hash})).unwrap();
+    let summary = serde_json::to_vec(&json!({
+        "base_upstream_hash": parent.upstream_hash,
+        "ops": [],
+        "upstream_hash": parent.upstream_hash,
+    }))
+    .unwrap();
     let parent_bytes = serde_json::to_vec(&parent).unwrap();
     let mut curation = first.change.curation_set.unwrap();
     let build = |curation: &fusiform_release::CurationSet| {
@@ -122,6 +131,7 @@ fn release_builder_refuses_empty_op_keys() {
         ("p", "m", ""),
     ] {
         let summary = serde_json::to_vec(&json!({
+            "base_upstream_hash": upstream_hash(std::iter::empty()),
             "ops": [ChangeOp::Set {
                 provider: provider.into(), model: model.into(), fact: fact.into(), value: json!(true)
             }],
@@ -135,6 +145,33 @@ fn release_builder_refuses_empty_op_keys() {
             (provider, model, fact)
         );
     }
+}
+
+#[test]
+fn release_builder_refuses_provider_level_sets() {
+    let first: Release = serde_json::from_slice(include_bytes!(
+        "../fixtures/release-format-v1/chain/release-1.json"
+    ))
+    .unwrap();
+    let parent = &first.envelope;
+    let summary = canonical_json(&json!({
+        "base_upstream_hash": parent.upstream_hash,
+        "upstream_hash": parent.upstream_hash,
+        "ops": [{"op": "set_provider", "provider": "q", "fact": "provider.name", "value": "Q"}],
+    }));
+    let result = fusiform_release::build_release(
+        &summary,
+        &serde_json::to_vec(&first.change.curation_set.unwrap()).unwrap(),
+        &serde_json::to_vec(parent).unwrap(),
+        2,
+        parent.published_at_ms + 1,
+        parent.upstream_observed_at_ms + 1,
+    );
+    assert_eq!(
+        result.err().map(|err| err.class),
+        Some("invalid_summary"),
+        "builder accepted an unsupported set_provider operation"
+    );
 }
 
 #[test]

@@ -20,6 +20,7 @@ pub mod fact_overrides;
 pub mod input_audio;
 pub mod login_methods;
 pub mod model_lineage;
+pub mod plan_prices;
 pub mod speed_twins;
 pub mod temperature_ranges;
 pub mod wire_corrections;
