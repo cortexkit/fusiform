@@ -2563,6 +2563,10 @@ pub struct StatusResponse {
     /// false clean bill.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failures: Option<FailureHistoryWire>,
+    /// Process-local counts from the latest parsed body. Absence means the
+    /// process has not yet parsed a body; an empty count map means it found none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalization_findings: Option<NormalizationFindingsWire>,
     /// How many of those models carry at least one rate.
     ///
     /// Measured on the live store: 420 of 6,293 present models carry no rate at
@@ -2617,6 +2621,14 @@ impl CatalogGetResponse {
     pub fn fact_count(&self) -> usize {
         self.models.values().map(|f| f.len()).sum()
     }
+}
+
+/// Normalization findings from one body poll.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NormalizationFindingsWire {
+    pub observation_id: i64,
+    /// Counts by normalization finding variant, using snake_case names.
+    pub counts: BTreeMap<String, usize>,
 }
 
 /// Failed polls across the store's whole history.

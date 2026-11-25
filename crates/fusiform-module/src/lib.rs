@@ -25,6 +25,7 @@ pub mod input_audio;
 pub mod login_methods;
 pub mod loop_;
 pub mod model_lineage;
+mod normalization;
 pub mod output_audio;
 pub mod plan_prices;
 pub mod route;
@@ -119,6 +120,7 @@ pub async fn serve_catalog_request(
             status.bus_published_version = signals.bus_published_version();
             status.bus_publish_failures = signals.bus_publish_failures();
             status.bus_last_error = signals.bus_last_error();
+            status.normalization_findings = signals.normalization_findings();
         }
         Ok(response)
     }) {

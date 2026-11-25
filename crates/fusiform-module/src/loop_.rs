@@ -278,8 +278,8 @@ fn apply_with_count_reader(
             // documented unconditional token prices become audio rate facts.
             let outcome_parse = normalize_models_dev_with(&bytes, &crate::input_audio::evidence());
 
-            let catalog = match outcome_parse {
-                Ok(outcome) => outcome.catalog,
+            let outcome = match outcome_parse {
+                Ok(outcome) => outcome,
                 Err(e) => {
                     // The bytes arrived and could not be read. This is a parse
                     // failure rather than a network one, and the distinction is
@@ -302,6 +302,17 @@ fn apply_with_count_reader(
                     );
                 }
             };
+            let counts = crate::normalization::log_findings("poll", &outcome.findings);
+            let with_findings = |report: TickReport| {
+                ctx.signals.set_normalization_findings(
+                    fusiform_protocol::NormalizationFindingsWire {
+                        observation_id: report.observation_id,
+                        counts,
+                    },
+                );
+                report
+            };
+            let catalog = outcome.catalog;
 
             let (digest, conflicts) = catalog_digest_with_conflicts(&catalog);
             for conflict in conflicts {
@@ -339,12 +350,12 @@ fn apply_with_count_reader(
                     })
                     .map_err(TickError::Store)?;
                 ctx.signals.observed(now_ms);
-                return Ok(TickReport {
+                return Ok(with_findings(TickReport {
                     outcome: TickOutcome::Unchanged,
                     observation_id: id,
                     eras_written: 0,
                     composition: EraComposition::default(),
-                });
+                }));
             }
 
             // A document that describes far less than the last one is refused
@@ -370,7 +381,8 @@ fn apply_with_count_reader(
                     now_ms,
                     duration,
                     Some(raw_hash),
-                );
+                )
+                .map(with_findings);
             }
 
             let (observation_id, plan, next_version) = match ctx.store.commit_polled_document(
@@ -395,19 +407,20 @@ fn apply_with_count_reader(
                         now_ms,
                         duration,
                         Some(raw_hash),
-                    );
+                    )
+                    .map(with_findings);
                 }
                 Err(error) => return Err(TickError::Store(error)),
             };
             ctx.signals.observed(now_ms);
 
             let Some(next_version) = next_version else {
-                return Ok(TickReport {
+                return Ok(with_findings(TickReport {
                     outcome: TickOutcome::Unchanged,
                     observation_id,
                     eras_written: 0,
                     composition: EraComposition::default(),
-                });
+                }));
             };
             // This count only refreshes health telemetry; its failure must not
             // turn an already-appended ingest into a failed poll.
@@ -423,7 +436,7 @@ fn apply_with_count_reader(
             }
             ctx.signals.wrote(now_ms);
 
-            Ok(TickReport {
+            Ok(with_findings(TickReport {
                 outcome: TickOutcome::Changed {
                     new_version: next_version,
                 },
@@ -434,7 +447,7 @@ fn apply_with_count_reader(
                     models_withdrawn: plan.disappeared_models,
                     facts_changed: plan.changed_facts,
                 },
-            })
+            }))
         }
     }
 }

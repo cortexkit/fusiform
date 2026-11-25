@@ -1224,6 +1224,7 @@ What fusiform has been doing. Request: optional `source`, optional `polls`
 | `history_begins_at_ms` | the earliest instant a point-in-time read accepts; absent on an empty store |
 | `era_count` | total stored eras |
 | `failures` | absent when no poll has ever failed; otherwise `ever`, `last_at_ms`, `polls_back` and `last_class` (`served_corrections::a_failure_older_than_the_poll_window_is_still_reported`) |
+| `normalization_findings` | latest parsed body poll's `observation_id` and `counts` by finding variant (snake_case); empty `counts` means that body had no findings. This resets on restart and is absent until this process parses its first body. Absence means not known yet, never no findings. |
 | `recent_polls` | newest first, including 304s and failures (`route::status_reports_quiet_polls_and_failures`) |
 
 In store mode, `store.url` is the configured base URL. The `source` field still

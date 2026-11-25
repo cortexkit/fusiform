@@ -69,6 +69,70 @@ fn run(f: &Fixture, outcome: FetchOutcome, at: i64) -> fusiform_module::loop_::T
     apply(&f.store, &f.signals, SourceId::ModelsDev, outcome, at).unwrap()
 }
 
+#[tokio::test]
+async fn status_counts_normalization_findings_for_the_latest_parsed_body() {
+    use serde_json::{json, Value};
+    use subc_client_rs::HandlerOutcome;
+
+    async fn status(f: &Fixture, signals: Arc<Signals>) -> Value {
+        match fusiform_module::serve_catalog_request(
+            f.store.clone(),
+            signals,
+            br#"{"name":"catalog.status","arguments":{"polls":0}}"#.to_vec(),
+            false,
+        )
+        .await
+        {
+            HandlerOutcome::Response(bytes) => serde_json::from_slice(&bytes).unwrap(),
+            other => panic!("expected status, got {other:?}"),
+        }
+    }
+
+    let f = fixture();
+    assert!(status(&f, f.signals.clone())
+        .await
+        .get("normalization_findings")
+        .is_none());
+    let bad = br#"{"p":{"models":{
+        "bad":{"cost":{"input":"1.25","output":"2.5"}},
+        "good":{"cost":{"input":1,"output":2,"input_audio":3}}
+    }}}"#;
+    let first = run(&f, body(bad, None), 1_000);
+    assert!(matches!(first.outcome, TickOutcome::Changed { .. }));
+    let expected = json!({"observation_id":first.observation_id,
+                         "counts":{"refused_base_schedule":2,"unattributable_charge_unit":1}});
+    let first_status = status(&f, f.signals.clone()).await;
+    assert!(first_status.get("failures").is_none());
+    assert_eq!(
+        first_status["normalization_findings"], expected,
+        "a successful poll must disclose its normalization findings"
+    );
+
+    run(
+        &f,
+        FetchOutcome::NotModified {
+            etag: None,
+            duration: Duration::ZERO,
+        },
+        2_000,
+    );
+    assert_eq!(
+        status(&f, f.signals.clone()).await["normalization_findings"],
+        expected
+    );
+    assert!(status(&f, Arc::new(Signals::new()))
+        .await
+        .get("normalization_findings")
+        .is_none());
+
+    let good = br#"{"p":{"models":{"bad":{"cost":{"input":1,"output":2}},"good":{"cost":{"input":1,"output":2}}}}}"#;
+    let last = run(&f, body(good, None), 3_000);
+    assert_eq!(
+        status(&f, f.signals.clone()).await["normalization_findings"],
+        json!({"observation_id":last.observation_id,"counts":{}})
+    );
+}
+
 #[test]
 fn changed_poll_rolls_back_observation_and_retries() {
     let f = fixture();

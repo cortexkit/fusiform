@@ -565,6 +565,7 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
         catalog_version,
         rates_version,
         failures,
+        normalization_findings: None,
         // Read from the contract table rather than collected from the snapshot.
         //
         // Collecting the keys models happen to carry answers "what did the
