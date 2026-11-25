@@ -5,15 +5,24 @@ use fusiform_store::{ingest::plan_ingest, NewEra, NewObservation};
 use serde_json::{json, Value};
 
 fn empty_store() -> (CatalogStore, tempfile::TempDir) {
+    empty_store_in_mode(false)
+}
+
+fn empty_store_in_mode(store_mode: bool) -> (CatalogStore, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let store = CatalogStore::open(&StorageDescriptor {
+    let descriptor = StorageDescriptor {
         module_id: "fusiform".into(),
         storage_namespace: "default".into(),
         isolation: Isolation::Module,
         backend: StorageBackend::Sqlite {
             path: dir.path().join("paging.db").to_string_lossy().into(),
         },
-    })
+    };
+    let store = if store_mode {
+        CatalogStore::open_for_store(&descriptor)
+    } else {
+        CatalogStore::open(&descriptor)
+    }
     .unwrap();
     (store, dir)
 }
@@ -34,7 +43,11 @@ fn observation(store: &CatalogStore, at: i64) -> i64 {
 }
 
 pub(super) fn fixture() -> (CatalogStore, tempfile::TempDir) {
-    let (store, dir) = empty_store();
+    fixture_in_mode(false)
+}
+
+pub(super) fn fixture_in_mode(store_mode: bool) -> (CatalogStore, tempfile::TempDir) {
+    let (store, dir) = empty_store_in_mode(store_mode);
     let mut upstream = serde_json::Map::new();
     for i in 0..6 {
         let provider = format!("p{i:02}");
@@ -360,28 +373,48 @@ fn named_uncertainty_is_only_read_for_a_requested_instant() {
     let (store, dir) = fixture();
     let future = now_ms() + 86_400_000;
     for provider in ["p00", "p01"] {
-        store.append_eras(&[NewEra {
-            source: SourceId::ModelsDev,
-            provider_id: provider.into(),
-            model_id: "m".into(),
-            fact_key: FactKey::from_stored("limit.context".into()),
-            value_json: "2000".into(),
-            boundary_at: Timestamp(future),
-            boundary_kind: BoundaryKind::Observed,
-            observation_id: None,
-        }]).unwrap();
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: provider.into(),
+                model_id: "m".into(),
+                fact_key: FactKey::from_stored("limit.context".into()),
+                value_json: "2000".into(),
+                boundary_at: Timestamp(future),
+                boundary_kind: BoundaryKind::Observed,
+                observation_id: None,
+            }])
+            .unwrap();
     }
     let db = rusqlite::Connection::open(dir.path().join("paging.db")).unwrap();
     db.execute(
         "UPDATE era SET prior_observation_at_ms=8000 WHERE boundary_at_ms=?1",
         [future],
-    ).unwrap();
-    assert_eq!(store.uncertain_facts_at(SourceId::ModelsDev, Timestamp(9000)).unwrap().len(), 2);
-    let dated = get(&store, json!({"provider_id":"p00","model_id":"m","at_ms":9000}), usize::MAX);
+    )
+    .unwrap();
+    assert_eq!(
+        store
+            .uncertain_facts_at(SourceId::ModelsDev, Timestamp(9000))
+            .unwrap()
+            .len(),
+        2
+    );
+    let dated = get(
+        &store,
+        json!({"provider_id":"p00","model_id":"m","at_ms":9000}),
+        usize::MAX,
+    );
     assert_eq!(dated.uncertain.len(), 1);
     assert_eq!(dated.uncertain[0].provider_id, "p00");
-    let current = get(&store, json!({"provider_id":"p00","model_id":"m"}), usize::MAX);
-    assert!(current.uncertain.is_empty(), "current read included a historical uncertainty window");
+    let current = get(
+        &store,
+        json!({"provider_id":"p00","model_id":"m"}),
+        usize::MAX,
+    );
+    assert!(
+        current.uncertain.is_empty(),
+        "current read included a historical uncertainty window"
+    );
 }
 
 #[test]

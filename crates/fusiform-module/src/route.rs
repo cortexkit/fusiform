@@ -848,35 +848,7 @@ fn serve_catalog_get_with_cache(
             .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?
     };
 
-    if !store.is_store_mode() {
-        return serve_catalog_get_request(
-            store,
-            request,
-            page_budget,
-            frame_limit,
-            oversized,
-            None,
-        );
-    }
-    // Store releases update upstream and curation together, but rendering uses
-    // several connections. Never return a view that straddled a commit.
-    for _ in 0..2 {
-        let before = store.catalog_version().map_err(|e| store_error(&e))?;
-        let result = serve_catalog_get_request(
-            store,
-            request.clone(),
-            page_budget,
-            frame_limit,
-            oversized,
-            None,
-        );
-        if store.catalog_version().map_err(|e| store_error(&e))? == before {
-            return result;
-        }
-    }
-    Err(RouteError::unavailable(
-        "published catalog changed during the read; retry",
-    ))
+    serve_catalog_get_request(store, request, page_budget, frame_limit, oversized, None)
 }
 
 fn serve_catalog_get_request(
@@ -907,6 +879,8 @@ fn serve_catalog_get_prepared(
     page: Option<PageRender<'_>>,
     prepared: Option<&dated_model::DatedModel>,
 ) -> Result<CatalogGetResponse, RouteError> {
+    // with_read_snapshot pins one commit for upstream rows, curation, and all
+    // nested reads used to build page plans, resolve aliases, or join judgments.
     store
         .with_read_snapshot(|| {
             serve_catalog_get_snapshot(
@@ -1408,7 +1382,14 @@ fn serve_catalog_get_snapshot(
 
     // Count the route's main render, not nested renders used to derive aliases.
     #[cfg(test)]
-    CATALOG_RENDER_COUNT.with(|count| count.set(count.get() + 1));
+    {
+        CATALOG_RENDER_COUNT.with(|count| count.set(count.get() + 1));
+        serving_regression_tests::AFTER_UPSTREAM_READ.with(|hook| {
+            if let Some(hook) = hook.get() {
+                hook(store);
+            }
+        });
+    }
     let historical_overrides = at
         .map(|at| match prepared {
             Some(prepared) => Ok(prepared.overrides_at(at)),
@@ -1533,13 +1514,9 @@ fn serve_catalog_get_snapshot(
         let size = compact_size(&response)?;
         if size > frame_limit {
             if let Some(key) = whole_key {
-                // Aliases and curated rows consult the store after the snapshot.
-                // Do not remember a render that straddled a version change.
-                if response.catalog_version == key.catalog_version
-                    && store.catalog_version().map_err(|e| store_error(&e))? == key.catalog_version
-                    && store.latest_era_id().map_err(|e| store_error(&e))? == key.latest_era_id
-                    && response.resolved_at_ms.to_string().len() == key.timestamp_width
-                {
+                // with_read_snapshot pins the key and the render to one commit;
+                // only the wall-clock timestamp's serialized width can change.
+                if response.resolved_at_ms.to_string().len() == key.timestamp_width {
                     *oversized.lock().unwrap_or_else(|e| e.into_inner()) =
                         Some(OversizedCatalog { key, size });
                 }

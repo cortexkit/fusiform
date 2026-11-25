@@ -131,38 +131,25 @@ pub(super) fn serve_planned_page(
         {
             plan.clone()
         } else {
-            loop {
-                let plan = Arc::new(build_plan(
-                    store,
-                    &request,
-                    key.clone(),
-                    budget,
-                    frame_limit,
-                    oversized,
-                    &inputs,
-                )?);
-                check_page_version(
-                    store.catalog_version().map_err(|e| store_error(&e))?,
-                    &PageCursor {
-                        catalog_version: key.catalog_version,
-                        resolved_at_ms: 0,
-                        provider: String::new(),
-                        dated: request.at_ms.is_some(),
-                    },
-                )?;
-                let latest = store.latest_era_id().map_err(|e| store_error(&e))?;
-                if latest != key.latest_era_id {
-                    // Low-level era appends need not issue a version. Do not
-                    // publish a plan measured across such a write.
-                    key.latest_era_id = latest;
-                    continue;
-                }
-                *cached = Some(plan.clone());
-                break plan;
-            }
+            // with_read_snapshot pins both the key and every measured provider.
+            let plan = Arc::new(build_plan(
+                store,
+                &request,
+                key,
+                budget,
+                frame_limit,
+                oversized,
+                &inputs,
+            )?);
+            *cached = Some(plan.clone());
+            plan
         }
     };
     let range = plan.range_after(cursor.map(|c| c.provider.as_str()))?;
+    // The enclosing snapshot already validated the cursor. Nested range reads
+    // reuse it and need no token of their own.
+    let mut request = request;
+    request.page_token = None;
     let mut response = serve_catalog_get_request(
         store,
         request.clone(),
@@ -174,25 +161,7 @@ pub(super) fn serve_planned_page(
             inputs: &inputs,
         }),
     )?;
-    let rendered = PageCursor {
-        catalog_version: response.catalog_version,
-        resolved_at_ms: response.resolved_at_ms,
-        provider: String::new(),
-        dated: request.at_ms.is_some(),
-    };
-    check_page_version(
-        store.catalog_version().map_err(|e| store_error(&e))?,
-        &rendered,
-    )?;
-    check_page_version(
-        response.catalog_version,
-        &PageCursor {
-            catalog_version: plan.key.catalog_version,
-            ..rendered
-        },
-    )?;
     if let Some(cursor) = cursor {
-        check_page_version(response.catalog_version, cursor)?;
         // Current reads keep their derivations but report page one's instant.
         response.resolved_at_ms = cursor.resolved_at_ms;
     }

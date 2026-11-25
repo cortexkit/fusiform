@@ -1,4 +1,46 @@
 use super::*;
+
+thread_local! {
+    pub(super) static AFTER_UPSTREAM_READ: std::cell::Cell<Option<fn(&CatalogStore)>> = const { std::cell::Cell::new(None) };
+}
+
+#[test]
+fn store_mode_read_keeps_one_snapshot_when_a_write_commits_during_render() {
+    let (store, _dir) = paging_tests::fixture_in_mode(true);
+    let version = store.catalog_version().unwrap();
+    AFTER_UPSTREAM_READ.with(|hook| {
+        hook.set(Some(|store| {
+            let before = store.catalog_version().unwrap();
+            let marks = store.local_overrides_at(None).unwrap().marks;
+            store
+                .append_model_mark("p00/m", true, "user", "committed during render", now_ms())
+                .unwrap();
+            assert_eq!(
+                store.catalog_version().unwrap(),
+                before,
+                "snapshot saw a concurrent commit"
+            );
+            assert_eq!(
+                store.local_overrides_at(None).unwrap().marks.len(),
+                marks.len(),
+                "snapshot saw a new judgment"
+            );
+        }))
+    });
+    let before = CATALOG_RENDER_COUNT.with(std::cell::Cell::get);
+    let read = serve_catalog_get_with_limits(&store, b"{}", usize::MAX, usize::MAX);
+    AFTER_UPSTREAM_READ.with(|hook| hook.set(None));
+    assert_eq!(
+        CATALOG_RENDER_COUNT.with(std::cell::Cell::get) - before,
+        1,
+        "store-mode read rerendered despite using one committed snapshot"
+    );
+    let read = read.unwrap();
+    assert_eq!(read.catalog_version, version);
+    assert!(!read.models["p00/m"].contains_key("quality.decommissioned"));
+    assert!(store.catalog_version().unwrap() > version);
+    assert_eq!(store.local_overrides_at(None).unwrap().marks.len(), 1);
+}
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::{BoundaryKind, ObservationOutcome, TokenClass};
 use fusiform_store::{NewCuratedModel, NewEra, NewObservation};
