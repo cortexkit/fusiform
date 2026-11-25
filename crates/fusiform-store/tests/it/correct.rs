@@ -705,6 +705,20 @@ fn correction_does_not_fabricate_a_new_last_change() {
     );
 }
 
+#[test]
+fn a_window_ending_before_the_first_era_has_nothing_to_correct() {
+    let f = fixture();
+    let fields = [FieldId::Rate {
+        class: TokenClass::Input,
+    }];
+    let refused = refusals(&f, &fields, 100, 800);
+    assert_eq!(refused.len(), 1);
+    assert!(refused[0]
+        .to_string()
+        .contains("no value was recorded at or before"));
+    assert_eq!(plan(&f, &fields, 100, 1_000).rows.len(), 1);
+}
+
 /// A second correction landing between plan and apply is also refused.
 ///
 /// This is what makes the compare-and-swap compare BOUNDARIES rather than

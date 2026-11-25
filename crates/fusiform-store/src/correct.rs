@@ -85,6 +85,11 @@ pub enum CorrectionRefusal {
         model_id: String,
         fact_key: FactKey,
     },
+    /// The entire correction window precedes the first recorded value.
+    NoValueByWindowEnd {
+        fact_key: FactKey,
+        affected_until: Timestamp,
+    },
     /// The value in force was already in force during the window.
     ///
     /// Either it was established inside the window — so the fix has not reached
@@ -145,6 +150,15 @@ impl std::fmt::Display for CorrectionRefusal {
                 "{provider_id}/{model_id} has no history for {}; check the \
                  provider and model ids",
                 fact_key.as_str()
+            ),
+            Self::NoValueByWindowEnd {
+                fact_key,
+                affected_until,
+            } => write!(
+                f,
+                "{}: no value was recorded at or before the correction window's end ({})",
+                fact_key.as_str(),
+                affected_until.0
             ),
             Self::ValueUnchangedAcrossWindow {
                 fact_key,
@@ -274,6 +288,19 @@ pub fn plan_correction(
         // values on both sides. See `ValueUnchangedAcrossWindow`.
         let entering =
             store.recorded_value_at(source, provider_id, model_id, fact_key, affected_from)?;
+        // A conservative lower bound may be before the first record, but the
+        // window must reach an instant at which the fact was recorded.
+        if entering.is_none()
+            && store
+                .recorded_value_at(source, provider_id, model_id, fact_key, affected_until)?
+                .is_none()
+        {
+            refusals.push(CorrectionRefusal::NoValueByWindowEnd {
+                fact_key: fact_key.clone(),
+                affected_until,
+            });
+            continue;
+        }
         if let Some(entering) = entering {
             if crate::ingest::states_the_same_upstream_claim(
                 &entering.value_json,
