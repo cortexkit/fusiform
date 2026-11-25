@@ -1,36 +1,12 @@
-use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::{BoundaryKind, Timestamp};
-use fusiform_store::{ingest::plan_ingest, CatalogStore};
+use fusiform_store::CatalogStore;
 use serde_json::{json, Value};
 
 pub(crate) fn store() -> (CatalogStore, tempfile::TempDir) {
-    let seed: Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    let mut upstream = json!({"openai": seed["openai"].clone()});
-    upstream["openai"]["models"] = json!({});
-    for id in ["gpt-6.1-sol", "gpt-5.5", "gpt-4o"] {
-        assert!(seed["openai"]["models"][id].is_object(), "{id}");
-        upstream["openai"]["models"][id] = seed["openai"]["models"][id].clone();
-    }
-    let dir = tempfile::tempdir().unwrap();
-    let store = CatalogStore::open(&StorageDescriptor {
-        module_id: "fusiform".into(),
-        storage_namespace: "default".into(),
-        isolation: Isolation::Module,
-        backend: StorageBackend::Sqlite {
-            path: dir.path().join("store.db").to_string_lossy().into(),
-        },
-    })
-    .unwrap();
-    let catalog = fusiform_core::normalize_legacy_models_dev_for_tests(
-        &serde_json::to_vec(&upstream).unwrap(),
-    )
-    .unwrap()
-    .catalog;
-    let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
-    store.append_eras(&plan.eras).unwrap();
-    (store, dir)
+    super::media_catalog::v2_seed_store(&[
+        ("openai", "gpt-6.1-sol"),
+        ("openai", "gpt-5.5"),
+        ("openai", "gpt-4o"),
+    ])
 }
 
 fn get(store: &CatalogStore, args: Value) -> Value {

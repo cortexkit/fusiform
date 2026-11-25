@@ -1,17 +1,32 @@
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
+use fusiform_core::normalize::{normalize_models_dev, NormalizedCatalog, WireOrigin};
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::{serve_tool_call, ToolResponse};
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, NewObservation};
 
 const UPSTREAM: &[u8] = br#"{
-    "p": {"npm": "@sdk/provider", "api": "https://provider/v1/", "models": {
-        "model": {"provider": {"npm": "@sdk/model", "api": "https://model/v1//", "shape": "responses"}},
-        "provider": {}
+    "p": {"models": {
+        "model": {"type":"chat","capabilities":{},"api":{"responses":{"base_url":"https://model/v1//","sdk":{"aisdk":"@sdk/model"}}}},
+        "provider": {"type":"chat","capabilities":{},"api":{"chat-completions":{"base_url":"https://provider/v1/","sdk":{"aisdk":"@sdk/provider"}}}}
     }},
-    "unknown": {"models": {"none": {}}}
+    "unknown": {"models": {"none": {"type":"chat","capabilities":{},"api":{}}}}
 }"#;
+
+fn catalog() -> NormalizedCatalog {
+    let mut catalog = normalize_models_dev(UPSTREAM).unwrap().catalog;
+    // Replay provider-origin claims from storage: models.dev v2 puts the API
+    // connection claims on each model, so the parser cannot produce this origin.
+    let wire = &mut catalog.providers[0]
+        .models
+        .iter_mut()
+        .find(|row| row.key.model_id == "provider")
+        .unwrap()
+        .wire;
+    wire.npm.as_mut().unwrap().from = WireOrigin::Provider;
+    wire.api.as_mut().unwrap().from = WireOrigin::Provider;
+    catalog
+}
 
 fn store() -> (CatalogStore, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -36,9 +51,7 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(UPSTREAM)
-        .unwrap()
-        .catalog;
+    let catalog = catalog();
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     (store, dir)
@@ -124,10 +137,11 @@ fn published_wire_claims_reach_plain_reads_and_wire_namespace_reads() {
 #[test]
 fn withdrawn_wire_claims_are_absent_from_catalog_but_kept_in_history() {
     let (store, _dir) = store();
-    let catalog = normalize_legacy_models_dev_for_tests(
+    let catalog = normalize_models_dev(
         br#"{
-        "p": {"models": {"model": {}, "provider": {}}},
-        "unknown": {"models": {"none": {}}}
+        "p": {"models": {"model": {"type":"chat","capabilities":{},"api":{}},
+            "provider": {"type":"chat","capabilities":{},"api":{}}}},
+        "unknown": {"models": {"none": {"type":"chat","capabilities":{},"api":{}}}}
     }"#,
     )
     .unwrap()
@@ -212,14 +226,20 @@ fn withdrawn_wire_claims_are_absent_from_catalog_but_kept_in_history() {
 fn a_wire_claim_change_moves_the_digest_and_opens_one_era() {
     use fusiform_store::ingest::catalog_digest;
     let (store, _dir) = store();
-    let before = normalize_legacy_models_dev_for_tests(UPSTREAM)
+    let before = catalog();
+    let mut changed = before.clone();
+    // Replay the old explicit shape: models.dev v2 derives a completions claim
+    // only for SDKs that would otherwise use responses, not this generic SDK.
+    changed.providers[0]
+        .models
+        .iter_mut()
+        .find(|row| row.key.model_id == "model")
         .unwrap()
-        .catalog;
-    let mut upstream: serde_json::Value = serde_json::from_slice(UPSTREAM).unwrap();
-    upstream["p"]["models"]["model"]["provider"]["shape"] = serde_json::json!("completions");
-    let changed = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&upstream).unwrap())
+        .wire
+        .shape
+        .as_mut()
         .unwrap()
-        .catalog;
+        .value = "completions".into();
     assert_ne!(catalog_digest(&before), catalog_digest(&changed));
     let plan = plan_ingest(
         &store,

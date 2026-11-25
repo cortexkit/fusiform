@@ -1,5 +1,5 @@
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
+use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::serve_catalog_get;
 use fusiform_store::ingest::plan_ingest;
@@ -16,8 +16,7 @@ fn temperature_corrections_cover_exactly_the_seed_google_gemini_36_and_newer_row
         .collect();
     assert_eq!(rows.len(), 5);
     let seed: Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
     let ids = [
         "gemini-3.6-flash",
         "gemini-3.7-flash",
@@ -32,9 +31,12 @@ fn temperature_corrections_cover_exactly_the_seed_google_gemini_36_and_newer_row
             .unwrap();
         assert_eq!(row.replaces, true);
         assert_eq!(row.value, false);
-        assert_eq!(seed["google"]["models"][id]["temperature"], true);
+        assert_eq!(
+            seed["google"]["models"][id]["capabilities"]["temperature"],
+            true
+        );
     }
-    let upstream = json!({"google":{"models":ids.into_iter().map(|id| (id.to_string(), json!({"temperature":true}))).collect::<serde_json::Map<_, _>>()}});
+    let upstream = json!({"google":{"models":ids.into_iter().map(|id| (id.to_string(), model(Some(true)))).collect::<serde_json::Map<_, _>>()}});
     let (store, _dir) = store(upstream);
     for id in ids {
         let response = get(&store, json!({"provider_id":"google","model_id":id}));
@@ -72,7 +74,7 @@ pub(super) fn store(document: Value) -> (CatalogStore, tempfile::TempDir) {
 }
 
 fn ingest(store: &CatalogStore, document: Value, at: i64) {
-    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&document).unwrap())
+    let catalog = normalize_models_dev(&serde_json::to_vec(&document).unwrap())
         .unwrap()
         .catalog;
     let plan = plan_ingest(store, &catalog, Timestamp(at), BoundaryKind::Seed, None).unwrap();
@@ -84,10 +86,18 @@ fn get(store: &CatalogStore, args: Value) -> Value {
         .unwrap()
 }
 
+fn model(temperature: Option<bool>) -> Value {
+    let mut row = json!({"type": "chat", "api": {}, "capabilities": {}});
+    if let Some(temperature) = temperature {
+        row["capabilities"]["temperature"] = json!(temperature);
+    }
+    row
+}
+
 #[test]
 fn temperature_published_boolean_reaches_wire_and_absence_stays_unknown() {
     let (store, _dir) = store(json!({"acme":{"models":{
-        "unknown":{}, "supported":{"temperature":true}, "unsupported":{"temperature":false}
+        "unknown":model(None), "supported":model(Some(true)), "unsupported":model(Some(false))
     }}}));
     let response = get(
         &store,
@@ -114,8 +124,8 @@ fn temperature_published_boolean_reaches_wire_and_absence_stays_unknown() {
 #[test]
 fn temperature_ranges_are_current_first_party_and_guarded_before_prefix_filtering() {
     let (store, _dir) = store(json!({
-        "openai":{"models":{"gpt-4.1":{"temperature":true}, "unknown":{}, "none":{"temperature":false}}},
-        "gateway":{"models":{"gpt-4.1":{"temperature":true}}}
+        "openai":{"models":{"gpt-4.1":model(Some(true)), "unknown":model(None), "none":model(Some(false))}},
+        "gateway":{"models":{"gpt-4.1":model(Some(true))}}
     }));
     for prefixes in [json!(["limit."]), json!(["limit.temperature_"])] {
         let response = get(&store, json!({"fact_prefixes":prefixes}));
@@ -149,7 +159,7 @@ fn temperature_ranges_are_current_first_party_and_guarded_before_prefix_filterin
 #[test]
 fn temperature_google_correction_is_dated_and_stops_when_upstream_moves() {
     let document =
-        |temperature| json!({"google":{"models":{"gemini-4-carbon":{"temperature":temperature}}}});
+        |temperature| json!({"google":{"models":{"gemini-4-carbon":model(Some(temperature))}}});
     let (store, _dir) = store(document(true));
     fusiform_module::fact_overrides::apply_to_store(
         &store,
@@ -198,8 +208,8 @@ fn temperature_google_correction_is_dated_and_stops_when_upstream_moves() {
 #[test]
 fn temperature_aliases_inherit_only_safe_false_and_never_ranges() {
     let (store, _dir) = store(json!({
-        "anthropic":{"models":{"claude-sonnet-5-5":{"temperature":false}, "claude-opus-5-5":{"temperature":false}}},
-        "google":{"models":{"gemini-4-carbon":{"temperature":true}, "gemini-4-argon":{"temperature":true}, "gemini-4-hydrogen":{"temperature":true}}}
+        "anthropic":{"models":{"claude-sonnet-5-5":model(Some(false)), "claude-opus-5-5":model(Some(false))}},
+        "google":{"models":{"gemini-4-carbon":model(Some(true)), "gemini-4-argon":model(Some(true)), "gemini-4-hydrogen":model(Some(true))}}
     }));
     for alias in [
         "antigravity-claude-sonnet-5-5",

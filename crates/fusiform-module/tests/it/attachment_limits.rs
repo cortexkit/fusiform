@@ -1,7 +1,7 @@
 //! Attachment bounds are current provider evidence, not stored model claims.
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
+use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::serve_catalog_get;
 use fusiform_store::ingest::plan_ingest;
@@ -46,7 +46,7 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
             ("unknown", json!(["image", "pdf"]), Value::Null),
         ] {
             doc[provider]["models"][model] = json!({
-                "id": model, "name": model,
+                "id": model, "name": model, "type": "chat", "api": {}, "capabilities": {},
                 "limit": {"context": context, "output": 4096},
                 "modalities": {"input": modalities, "output": ["text"]}
             });
@@ -78,7 +78,7 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(doc.to_string().as_bytes())
+    let catalog = normalize_models_dev(doc.to_string().as_bytes())
         .unwrap()
         .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();

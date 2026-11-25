@@ -313,8 +313,7 @@ fn oscillating_store() -> (CatalogStore, tempfile::TempDir) {
     })
     .unwrap();
     let mut document: Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
     for index in 0..229 {
         for (model, count) in [
             ("deepseek/deepseek-v4.1-flash", 229),
@@ -323,8 +322,8 @@ fn oscillating_store() -> (CatalogStore, tempfile::TempDir) {
             if index < count {
                 let row = &mut document["openrouter"]["models"][model];
                 assert!(row.is_object(), "seed is missing {model}");
-                row["cost"]["input"] = json!(0.1 + (index % 2) as f64 * 0.1);
-                row["cost"]["output"] = json!(0.3 + (index % 2) as f64 * 0.2);
+                row["cost"]["text"]["input"]["price"] = json!(0.1 + (index % 2) as f64 * 0.1);
+                row["cost"]["text"]["output"]["price"] = json!(0.3 + (index % 2) as f64 * 0.2);
             }
         }
         let at = Timestamp(1_000 + index * 1_000);
@@ -340,7 +339,7 @@ fn oscillating_store() -> (CatalogStore, tempfile::TempDir) {
                 detail: None,
             })
             .unwrap();
-        let catalog = fusiform_core::normalize_legacy_models_dev_for_tests_with(
+        let catalog = fusiform_core::normalize_models_dev_v2_with(
             &serde_json::to_vec(&document).unwrap(),
             &fusiform_module::input_audio::evidence(),
         )

@@ -1,25 +1,81 @@
 //! Cache lifetimes through current, historical and billing-plane reads.
 
+use std::collections::BTreeMap;
+
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
+use fusiform_core::normalize::{normalize_models_dev, NormalizedCatalog};
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::serve_catalog_get;
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, NewObservation};
-use serde_json::{json, Value};
+use serde_json::{json, value::to_raw_value, value::RawValue, Value};
 
-fn legacy_seed() -> &'static str {
-    fusiform_core::normalize::legacy_models_dev_snapshot_for_tests()
+const SEED: &str = include_str!("../../data/models-dev-seed.json");
+
+type Object = BTreeMap<String, Box<RawValue>>;
+
+fn edit_object(value: &mut Box<RawValue>, edit: impl FnOnce(&mut Object)) {
+    let mut object = serde_json::from_str(value.get()).unwrap();
+    edit(&mut object);
+    *value = to_raw_value(&object).unwrap();
+}
+
+fn price_catalog(adjustment: Option<(&str, &str, Option<u64>, f64)>) -> NormalizedCatalog {
+    // This fixture exercises TTL pricing for the ordinary text schedule, not
+    // regional pricing. Keep its API and TTL entries in their published order.
+    let mut doc: Object = serde_json::from_str(SEED).unwrap();
+    doc.retain(|id, _| matches!(id.as_str(), "openai" | "anthropic"));
+    for (provider, row) in &mut doc {
+        edit_object(row, |row| {
+            edit_object(row.get_mut("models").unwrap(), |models| {
+                for (model, row) in models {
+                    edit_object(row, |row| {
+                        let Some(cost) = row.get_mut("cost") else {
+                            return;
+                        };
+                        edit_object(cost, |cost| {
+                            if let Some(multipliers) = cost.get_mut("multipliers") {
+                                let mut rules: Vec<&RawValue> =
+                                    serde_json::from_str(multipliers.get()).unwrap();
+                                rules.retain(|rule| {
+                                    let rule: Value = serde_json::from_str(rule.get()).unwrap();
+                                    rule.pointer("/when/region").is_none()
+                                        && rule.pointer("/when/not/region").is_none()
+                                });
+                                *multipliers = to_raw_value(&rules).unwrap();
+                            }
+                            if let Some((p, m, input, write)) = adjustment {
+                                if provider == p && model == m {
+                                    edit_object(cost.get_mut("text").unwrap(), |text| {
+                                        edit_object(text.get_mut("input").unwrap(), |entry| {
+                                            if let Some(price) = input {
+                                                entry.insert(
+                                                    "price".into(),
+                                                    to_raw_value(&price).unwrap(),
+                                                );
+                                            }
+                                            edit_object(entry.get_mut("cache").unwrap(), |cache| {
+                                                cache.insert(
+                                                    "write".into(),
+                                                    to_raw_value(&write).unwrap(),
+                                                );
+                                            });
+                                        });
+                                    });
+                                }
+                            }
+                        });
+                    });
+                }
+            });
+        });
+    }
+    normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+        .unwrap()
+        .catalog
 }
 
 pub(super) fn store(mismatch: Option<(&str, &str)>) -> (CatalogStore, tempfile::TempDir) {
-    let mut doc: Value = serde_json::from_str(legacy_seed()).unwrap();
-    doc.as_object_mut()
-        .unwrap()
-        .retain(|provider, _| provider == "openai" || provider == "anthropic");
-    if let Some((provider, model)) = mismatch {
-        doc[provider]["models"][model]["cost"]["cache_write"] = json!(99);
-    }
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -42,9 +98,7 @@ pub(super) fn store(mismatch: Option<(&str, &str)>) -> (CatalogStore, tempfile::
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(doc.to_string().as_bytes())
-        .unwrap()
-        .catalog;
+    let catalog = price_catalog(mismatch.map(|(provider, model)| (provider, model, None, 99.0)));
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     (store, dir)
@@ -255,15 +309,7 @@ fn dated_cache_lifetime_prices_start_at_first_serving() {
 #[test]
 fn dated_cache_lifetimes_use_the_upstream_prices_at_the_requested_instant() {
     let (store, _dir) = store(None);
-    let mut doc: Value = serde_json::from_str(legacy_seed()).unwrap();
-    doc.as_object_mut()
-        .unwrap()
-        .retain(|provider, _| provider == "openai" || provider == "anthropic");
-    doc["anthropic"]["models"]["claude-opus-5-5"]["cost"]["input"] = json!(6);
-    doc["anthropic"]["models"]["claude-opus-5-5"]["cost"]["cache_write"] = json!(7.5);
-    let catalog = normalize_legacy_models_dev_for_tests(doc.to_string().as_bytes())
-        .unwrap()
-        .catalog;
+    let catalog = price_catalog(Some(("anthropic", "claude-opus-5-5", Some(6), 7.5)));
     let change = DATED_READ - 100;
     let plan = plan_ingest(
         &store,

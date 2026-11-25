@@ -45,23 +45,23 @@ struct HandKeptDoc {
 }
 
 #[derive(Deserialize)]
-struct RawProvider {
+struct ProviderRow {
     name: Option<String>,
     doc: Option<String>,
     #[serde(default)]
     env: Vec<String>,
-    models: BTreeMap<String, RawModel>,
+    models: BTreeMap<String, ModelRow>,
 }
 
 #[derive(Deserialize)]
-struct RawModel {
+struct ModelRow {
     #[serde(rename = "type")]
     model_type: Option<String>,
-    modalities: Option<RawModalities>,
+    modalities: Option<ModalityLabels>,
 }
 
 #[derive(Deserialize)]
-struct RawModalities {
+struct ModalityLabels {
     output: Vec<String>,
 }
 
@@ -115,7 +115,7 @@ fn load_hand_kept_reporting_rejects(input: &str) -> (Vec<HandKeptProvider>, Vec<
     (providers, rejects)
 }
 
-fn seed() -> BTreeMap<String, RawProvider> {
+fn seed() -> BTreeMap<String, ProviderRow> {
     serde_json::from_str(SEED).expect("the embedded models.dev seed parses")
 }
 
@@ -180,7 +180,7 @@ fn served_outputs(models: ServedModels) -> ProviderOutputs {
     outputs
 }
 
-fn assert_no_upstream_ids(seed: &BTreeMap<String, RawProvider>, rows: &[HandKeptProvider]) {
+fn assert_no_upstream_ids(seed: &BTreeMap<String, ProviderRow>, rows: &[HandKeptProvider]) {
     for row in rows {
         assert!(
             !seed.contains_key(&row.id),
@@ -213,7 +213,7 @@ fn review_problems_at(rows: &[HandKeptProvider], now_ms: i64) -> Vec<String> {
 }
 
 fn vector(
-    seed: BTreeMap<String, RawProvider>,
+    seed: BTreeMap<String, ProviderRow>,
     rows: Vec<HandKeptProvider>,
     snapshot_fetched_at: String,
     served_outputs: &ProviderOutputs,

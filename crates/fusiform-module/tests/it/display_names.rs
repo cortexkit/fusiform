@@ -1,5 +1,5 @@
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
+use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::{serve_catalog_get, CatalogGetResponse};
 use fusiform_store::ingest::plan_ingest;
@@ -7,14 +7,14 @@ use fusiform_store::{CatalogStore, NewObservation};
 use serde_json::{json, Value};
 
 const UPSTREAM: &[u8] = br#"{
-    "openai": {"name":"OpenAI", "models":{"gpt-6.1-sol":{"name":"GPT-6.1 Sol"}}},
-    "unknown": {"models":{"none":{}}},
-    "empty": {"name":"", "models":{"none":{"name":""}}},
-    "spaces": {"name":" Provider ", "models":{"model":{"name":" Model "}}},
-    "meta": {"name":"Meta", "models":{"other":{"name":"Other"}}},
-    "cloudflare-workers-ai": {"name":"Cloudflare Workers AI", "models":{"other":{}}},
-    "google": {"name":"Google", "models":{"other":{}}},
-    "anthropic": {"name":"Anthropic", "models":{"claude-sonnet-5-5":{"name":"Target only"}}}
+    "openai": {"name":"OpenAI", "models":{"gpt-6.1-sol":{"type":"chat","api":{},"capabilities":{},"name":"GPT-6.1 Sol"}}},
+    "unknown": {"models":{"none":{"type":"chat","api":{},"capabilities":{}}}},
+    "empty": {"name":"", "models":{"none":{"type":"chat","api":{},"capabilities":{},"name":""}}},
+    "spaces": {"name":" Provider ", "models":{"model":{"type":"chat","api":{},"capabilities":{},"name":" Model "}}},
+    "meta": {"name":"Meta", "models":{"other":{"type":"chat","api":{},"capabilities":{},"name":"Other"}}},
+    "cloudflare-workers-ai": {"name":"Cloudflare Workers AI", "models":{"other":{"type":"chat","api":{},"capabilities":{}}}},
+    "google": {"name":"Google", "models":{"other":{"type":"chat","api":{},"capabilities":{}}}},
+    "anthropic": {"name":"Anthropic", "models":{"claude-sonnet-5-5":{"type":"chat","api":{},"capabilities":{},"name":"Target only"}}}
 }"#;
 
 fn empty_store() -> (CatalogStore, tempfile::TempDir) {
@@ -50,9 +50,7 @@ fn ingest(store: &CatalogStore, bytes: &[u8], at: i64) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(bytes)
-        .unwrap()
-        .catalog;
+    let catalog = normalize_models_dev(bytes).unwrap().catalog;
     let plan = plan_ingest(
         store,
         &catalog,
@@ -194,7 +192,7 @@ fn aliases_use_the_route_label_and_the_alias_provider_not_the_target() {
 
 #[test]
 fn embedded_seed_upgrade_records_exactly_the_published_names_as_first_values() {
-    let seed = fusiform_core::normalize::legacy_models_dev_snapshot_for_tests().as_bytes();
+    let seed = include_str!("../../data/models-dev-seed.json").as_bytes();
     let raw: Value = serde_json::from_slice(seed).unwrap();
     let mut expected = 0;
     let mut model_count = 0;
@@ -206,7 +204,7 @@ fn embedded_seed_upgrade_records_exactly_the_published_names_as_first_values() {
             }
         }
     }
-    let catalog = normalize_legacy_models_dev_for_tests(seed).unwrap().catalog;
+    let catalog = normalize_models_dev(seed).unwrap().catalog;
     let mut old_catalog = catalog.clone();
     for provider in &mut old_catalog.providers {
         for model in &mut provider.models {

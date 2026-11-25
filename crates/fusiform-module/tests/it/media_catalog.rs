@@ -308,22 +308,28 @@ fn omni_video_facts_survive_prefix_filters_and_are_not_shared() {
 
 fn image_store(output: i64) -> (CatalogStore, tempfile::TempDir) {
     let seed: Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
+        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
     let mut doc = json!({});
     for provider in ["google", "google-vertex"] {
         let mut row = seed[provider]["models"]["gemini-3.1-flash-image"].clone();
         assert!(row.is_object());
+        // Seed the earlier price card before either provider listed the image rate.
+        assert!(row["cost"]
+            .as_object_mut()
+            .unwrap()
+            .remove("image")
+            .is_some());
+        // Regional pricing is a separate schedule; this fixture isolates the split.
+        row["cost"].as_object_mut().unwrap().remove("multipliers");
         if provider == "google" {
-            row["cost"]["output"] = json!(output);
+            row["cost"]["text"]["output"]["price"] = json!(output);
         }
         doc[provider] = seed[provider].clone();
         doc[provider]["models"] = json!({"gemini-3.1-flash-image":row});
     }
-    let catalog =
-        fusiform_core::normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
-            .unwrap()
-            .catalog;
+    let catalog = fusiform_core::normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+        .unwrap()
+        .catalog;
     let (store, dir) = empty_store();
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();

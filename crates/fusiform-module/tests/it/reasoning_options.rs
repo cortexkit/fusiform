@@ -8,20 +8,20 @@
 //! does not interpret.
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
+use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::{serve_tool_call, ToolResponse};
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, NewObservation};
 
-/// The populated list, as text, so the expected value below is parsed from the
-/// same bytes the upstream document carries rather than restated by hand.
+/// A historical stored list, as text, so the expected value below is parsed
+/// from the stored bytes rather than restated by hand.
 ///
 /// Each element is a shape measured on the live payload: an effort entry whose
 /// `values` holds a `null` (published that way for `sarvam/sarvam-30b` and
 /// `sarvam/sarvam-105b`), a toggle entry with only `type`, and a budget entry
-/// carrying `min` without `max`. The last entry has a `type` no consumer knows
-/// yet, which must pass through rather than be dropped.
+/// carrying `min` without `max`. The last entry is a synthetic future `type`
+/// that the historical serve path must pass through rather than drop.
 const POPULATED: &str = r#"[
   { "type": "effort", "values": [null, "low", "medium", "high"] },
   { "type": "toggle" },
@@ -29,35 +29,17 @@ const POPULATED: &str = r#"[
   { "type": "not_yet_invented", "shape": { "anything": [1, 2] } }
 ]"#;
 
-fn upstream() -> String {
-    format!(
-        r#"{{
-  "sarvam": {{
+const UPSTREAM: &[u8] = br#"{
+  "sarvam": {
     "id": "sarvam",
     "name": "Sarvam",
-    "models": {{
-      "absent": {{
-        "id": "absent",
-        "reasoning": true,
-        "limit": {{ "context": 128000, "output": 8192 }}
-      }},
-      "empty": {{
-        "id": "empty",
-        "reasoning": false,
-        "reasoning_options": [],
-        "limit": {{ "context": 128000, "output": 8192 }}
-      }},
-      "populated": {{
-        "id": "populated",
-        "reasoning": true,
-        "reasoning_options": {POPULATED},
-        "limit": {{ "context": 128000, "output": 8192 }}
-      }}
-    }}
-  }}
-}}"#
-    )
-}
+    "models": {
+      "absent": {"type":"chat","api":{},"capabilities":{}},
+      "empty": {"type":"chat","api":{},"capabilities":{"reasoning":{"supported":true}}},
+      "populated": {"type":"chat","api":{},"capabilities":{"reasoning":{"supported":true}}}
+    }
+  }
+}"#;
 
 fn store() -> (CatalogStore, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -82,9 +64,16 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(upstream().as_bytes())
+    let mut catalog = normalize_models_dev(UPSTREAM).unwrap().catalog;
+    // Replay the opaque option from storage because models.dev v2 builds the
+    // option list only from the separate toggle, effort and budget fields.
+    catalog.providers[0]
+        .models
+        .iter_mut()
+        .find(|model| model.key.model_id == "populated")
         .unwrap()
-        .catalog;
+        .capabilities
+        .reasoning_options = Some(serde_json::from_str(POPULATED).unwrap());
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     (store, dir)
@@ -144,7 +133,7 @@ fn a_populated_list_round_trips_verbatim() {
 
     assert_eq!(
         got, expected,
-        "the served list must be the upstream's list unchanged"
+        "the served list must be the historical list unchanged"
     );
     // Stated separately because they are the two things a typed parser would
     // most plausibly lose, and a mismatch reported only as two whole arrays

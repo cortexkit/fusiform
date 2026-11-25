@@ -7,7 +7,7 @@
 //! what is served.
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
+use fusiform_core::normalize::normalize_models_dev;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::{serve_tool_call, ToolResponse};
 use fusiform_store::ingest::plan_ingest;
@@ -25,21 +25,20 @@ const DOC: &str = r#"{
     "models": {
       "gemini-3.8-flash": {
         "id": "gemini-3.8-flash",
+        "type": "chat", "api": {}, "capabilities": {},
         "family": "gemini-flash",
         "open_weights": false,
         "limit": { "context": 1048576, "output": 65536 },
-        "cost": { "input": 0.5, "output": 3, "cache_read": 0.05 },
+        "cost": {"text": {"input": {"price": 0.5, "cache": {"read": 0.05}}, "output": {"price": 3}}},
         "experimental": {
           "modes": {
             "fast": {
-              "cost": { "input": 1, "output": 6, "cache_read": 0.1 },
-              "provider": {
-                "body": { "service_tier": "priority", "speed": "fast" },
-                "headers": { "x-mode-header": "fast-mode-2026-02-01" }
-              }
+              "cost": {"text": {"input": {"price": 1, "cache": {"read": 0.1}}, "output": {"price": 6}}},
+              "body": { "service_tier": "priority", "speed": "fast" },
+              "headers": { "x-mode-header": "fast-mode-2026-02-01" }
             },
-            "pro": {
-              "provider": { "body": { "reasoning": { "mode": "pro" } } }
+            "flex": {
+              "body": { "reasoning": { "mode": "pro" } }
             }
           }
         }
@@ -71,9 +70,7 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(DOC.as_bytes())
-        .unwrap()
-        .catalog;
+    let catalog = normalize_models_dev(DOC.as_bytes()).unwrap().catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     (store, dir)
@@ -112,7 +109,7 @@ fn a_rate_read_returns_mode_rates_shaped_like_base_rates() {
             "rate.output",
             "rate.output.mode.fast",
         ],
-        "the rate plane is the base rates plus the priced mode's rates; `pro` \
+        "the rate plane is the base rates plus the priced mode's rates; `flex` \
          publishes no cost and serves nothing"
     );
 

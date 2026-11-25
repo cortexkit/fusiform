@@ -1,7 +1,7 @@
 //! `rate.input_audio`, served only where a provider's own pricing page bills
 //! audio input per token.
 //!
-//! The test rows come from the embedded seed and a historical v1 example.
+//! The test rows come from the embedded seed, with a synthetic control.
 //! The store is first seeded without the
 //! input-audio evidence (what a store written before this fact existed
 //! holds), then a poll is ingested with the shipped evidence, which is what
@@ -29,38 +29,41 @@ const ROWS: &[(&str, &str)] = &[
     ("ofox", "google/gemini-3.8-flash"),
     ("aihubmix", "gemini-3.8-flash"),
     ("google-vertex", "gemini-3.8-flash"),
+    ("openai", "gpt-realtime-2.1"),
 ];
 
 const SEEDED_AT: i64 = 1_000;
 const POLLED_AT: i64 = 5_000;
 
-fn doc() -> String {
-    let seed: serde_json::Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
+fn doc(with_audio: bool) -> String {
+    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
     let mut out = serde_json::Map::new();
     for (provider, model) in ROWS {
-        let row = seed[provider]["models"][model].clone();
+        let mut row = seed[provider]["models"][model].clone();
         assert!(
             row.is_object(),
             "{provider}/{model} must be in the embedded seed"
         );
+        let cost = row["cost"].as_object_mut().unwrap();
+        if *provider == "google-vertex" {
+            // These cases exercise the base rates, not the Vertex regional guard.
+            cost.remove("multipliers");
+        }
+        if !with_audio {
+            assert!(cost.remove("audio").is_some());
+        }
         out.entry(provider.to_string())
             .or_insert_with(|| serde_json::json!({"id": provider, "models": {}}))["models"]
             [model] = row;
     }
-    // The public v1 catalog no longer carries Realtime 2.1. Keep a small
-    // example of its former v1 shape to exercise upstream ingest and history.
-    out.insert(
-        "openai".into(),
-        serde_json::json!({"id":"openai", "name":"OpenAI", "models": {
-            "gpt-realtime-2.1": {
-                "name":"GPT-Realtime-2.1", "family":"gpt", "type":"realtime",
-                "cost":{"input":4,"output":24,"cache_read":0.4,"input_audio":32,"output_audio":64}
-            },
-            "future-audio-model": {"name":"Control", "cost":{"input":4,"input_audio":32}}
-        }}),
-    );
+    out.get_mut("openai").unwrap()["models"]["future-audio-model"] = serde_json::json!({
+        "name":"Control", "type":"realtime", "api":{}, "capabilities":{},
+        "cost":{"text":{"input":{"price":4}}}
+    });
+    if with_audio {
+        out.get_mut("openai").unwrap()["models"]["future-audio-model"]["cost"]["audio"] =
+            serde_json::json!({"input":{"price":32}});
+    }
     serde_json::Value::Object(out).to_string()
 }
 
@@ -91,9 +94,8 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
         },
     })
     .unwrap();
-    let doc = doc();
     observe(&store, SEEDED_AT, ObservationOutcome::Seeded);
-    let before = fusiform_core::normalize_legacy_models_dev_for_tests(doc.as_bytes())
+    let before = fusiform_core::normalize_models_dev(doc(false).as_bytes())
         .unwrap()
         .catalog;
     let plan = plan_ingest(
@@ -113,10 +115,9 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
     );
     let evidence = fusiform_module::input_audio::evidence()
         .with_input_audio_model("openai", "gpt-realtime-2.1");
-    let after =
-        fusiform_core::normalize_legacy_models_dev_for_tests_with(doc.as_bytes(), &evidence)
-            .unwrap()
-            .catalog;
+    let after = fusiform_core::normalize_models_dev_v2_with(doc(true).as_bytes(), &evidence)
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &store,
         &after,
@@ -172,7 +173,15 @@ fn realtime_audio_input_is_ingested_only_for_the_documented_model() {
     assert_eq!(history.len(), 1);
     let control = rates(&store, "openai", "future-audio-model", None);
     assert_eq!(control["rate.input"]["units"], 4_000_000_000i64);
-    assert!(control.get("rate.input_audio").is_none());
+    assert_unknown_audio_charge_basis(&control);
+}
+
+fn assert_unknown_audio_charge_basis(facts: &serde_json::Value) {
+    assert_eq!(
+        facts["rate.input_audio"],
+        serde_json::json!({"state":"unpriced", "reason":"unknown_charge_basis"}),
+        "no audio amount may be served without charge-unit evidence: {facts}"
+    );
 }
 
 fn rates(
@@ -250,7 +259,7 @@ fn audio_tokens_per_second_requires_a_served_audio_rate_and_provider_evidence() 
         );
         let facts = &response["models"][format!("{provider}/{model}")];
         assert!(facts.get("rate.input").is_some(), "{response}");
-        assert!(facts.get("rate.input_audio").is_none(), "{response}");
+        assert_unknown_audio_charge_basis(facts);
         assert!(
             facts.get("limit.audio_tokens_per_second").is_none(),
             "{response}"
@@ -339,8 +348,8 @@ fn an_evidenced_provider_serves_input_audio_on_a_rate_read() {
     }
 }
 
-/// A provider without evidence serves no audio rate, even when it publishes
-/// an audio number, and keeps every other rate.
+/// A provider without evidence serves no audio price, even when it publishes
+/// an audio number, and keeps its text rates.
 #[test]
 fn a_provider_without_evidence_serves_no_input_audio() {
     let (store, _dir) = store();
@@ -358,10 +367,7 @@ fn a_provider_without_evidence_serves_no_input_audio() {
             facts.get("rate.input").is_some(),
             "{provider}/{model}: {facts}"
         );
-        assert!(
-            facts.get("rate.input_audio").is_none(),
-            "{provider}/{model}: {facts}"
-        );
+        assert_unknown_audio_charge_basis(&facts);
     }
 }
 
