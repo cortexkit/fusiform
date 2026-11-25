@@ -89,6 +89,8 @@ struct Fusiform {
     store: Mutex<Option<Arc<CatalogStore>>>,
     fallback: Arc<Mutex<Option<Arc<SeedFallback>>>>,
     settings: Settings,
+    #[cfg(test)]
+    after_store_check: Option<fn(&CatalogStore)>,
 }
 
 impl Fusiform {
@@ -102,6 +104,8 @@ impl Fusiform {
             store: Mutex::new(None),
             fallback: Arc::new(Mutex::new(None)),
             settings,
+            #[cfg(test)]
+            after_store_check: None,
         }
     }
 }
@@ -193,8 +197,6 @@ impl ModuleHandler for Fusiform {
             }
         };
 
-        self.signals.store_opened();
-
         // Inspect the previous process's pages before seed or curated writes.
         // A read-pool connection avoids the poll writer, and the blocking pool
         // keeps the SQLite scan off the async runtime's reader thread.
@@ -208,6 +210,10 @@ impl ModuleHandler for Fusiform {
         eprintln!("fusiform: store quick_check: {result:?} ({duration_ms} ms)");
         self.signals
             .record_store_quick_check(result, checked_at_ms, duration_ms);
+        #[cfg(test)]
+        if let Some(after_store_check) = self.after_store_check {
+            after_store_check(&store);
+        }
 
         // Enroll the store with engram, the fleet's backup owner, by writing its
         // descriptor beside the database. Placed by the path the store actually
@@ -250,6 +256,7 @@ impl ModuleHandler for Fusiform {
             advance_versions_at_start(&store, startup_at);
             *self.fallback.lock().unwrap_or_else(|p| p.into_inner()) = fallback.map(Arc::new);
             *self.store.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&store));
+            self.signals.store_opened();
             if !bootstrap {
                 tokio::spawn(fusiform_module::catalog_bus::run_publisher(
                     Arc::clone(&store),
@@ -399,6 +406,7 @@ impl ModuleHandler for Fusiform {
             .adopt_from_store(&store, fusiform_core::SourceId::ModelsDev);
 
         *self.store.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&store));
+        self.signals.store_opened();
 
         tokio::spawn(fusiform_module::catalog_bus::run_publisher(
             Arc::clone(&store),
@@ -615,5 +623,52 @@ mod cache_lifetime_boot_tests {
             .unwrap()
             .iter()
             .all(|r| r.rule.is_none()));
+    }
+}
+
+#[cfg(test)]
+mod store_boot_tests {
+    use super::*;
+    use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+    use subc_protocol::session::HealthStatus;
+
+    #[tokio::test]
+    async fn store_cursor_read_failure_before_install_is_failing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut module = Fusiform::with_settings(Settings {
+            source: Source::Store {
+                url: "https://example.test/".into(),
+                keys: Vec::new(),
+            },
+        });
+        module.after_store_check = Some(|store| {
+            // Opening also reads the cursor. Fail only the later startup read.
+            rusqlite::Connection::open(store.path())
+                .unwrap()
+                .execute("DROP TABLE store_release", [])
+                .unwrap();
+        });
+        let descriptor = StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().into_owned(),
+            },
+        };
+        module
+            .on_hello_ack(&ModuleHelloAckBody {
+                negotiated_ver: 1,
+                subc_ops: Vec::new(),
+                subc_capabilities: Vec::new(),
+                storage: Some(serde_json::to_value(descriptor).unwrap()),
+                machine_id: None,
+            })
+            .await;
+
+        assert!(module.store.lock().unwrap().is_none());
+        let report = fusiform_module::health::report(&module.signals, now_ms());
+        assert_eq!(report.status, HealthStatus::Failing, "{report:?}");
+        assert!(report.detail.unwrap().contains("store_release"));
     }
 }
