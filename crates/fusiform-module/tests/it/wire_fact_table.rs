@@ -352,8 +352,9 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
 /// Served facts that only fusiform's curated rows state.
 ///
 /// models.dev publishes no such field, so the normalizer must never produce
-/// one. `model.kind` can also be derived from a recorded decision or extraction
-/// type when serving, but is never part of the stored upstream projection.
+/// one. `model.kind` is also derived at serve time from the stored
+/// `model.type` when that is `decision` or `extraction`, but it is never part
+/// of the stored upstream projection.
 pub(crate) const CURATED_ONLY: &[&str] = &[
     "model.kind",
     "route.reasoning_wire_ids",

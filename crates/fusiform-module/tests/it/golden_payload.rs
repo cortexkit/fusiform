@@ -34,8 +34,10 @@ use fusiform_module::route::serve_tool_call;
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, FactKey, NewEra, NewObservation};
 
-/// Keep the legacy test fixtures on their measured projection; current seed
-/// cases use the v2 normalization path with the seed's observation time.
+/// Legacy test fixtures are models.dev v1 documents, so they go through the
+/// test-only v1 parser and keep the stored facts they were recorded with.
+/// Cases built from the current seed use the v2 parser with the seed's
+/// observation time.
 fn normalize_legacy_models_dev_for_tests(
     bytes: &[u8],
 ) -> Result<fusiform_core::NormalizeOutcome, fusiform_core::NormalizeError> {

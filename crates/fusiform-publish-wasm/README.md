@@ -45,7 +45,9 @@ The publish summary is canonical JSON. Success has `ops`, `base_upstream_hash`,
 `next_date_boundary_ms`.
 
 An unreadable claim is reported in `findings` and is not a withdrawal.
-`held_fact_count` counts prior fact hashes retained under refusal scopes.
+`held_fact_count` counts facts whose new upstream value could not be read
+(for example a malformed number or an unsupported price condition): the
+previous fact hash is kept in the index, and no op is emitted for it.
 Once any fact is held, build daily snapshots with `snapshot_bytes_from_state`
 from verified materialized release state, not with `snapshot_bytes` from raw
 models.dev bytes. The original value is not in the new document; the incremental

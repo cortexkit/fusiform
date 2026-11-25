@@ -90,8 +90,10 @@ pub(crate) fn document_with_retired_test_models() -> serde_json::Value {
     doc
 }
 
-/// A test document that holds the System One claims. The retired rows are
-/// included so the tests do not depend on current upstream coverage.
+/// A test document that holds the curated decision and extraction model rows
+/// (Cloudflare's Clef and Clairic and TypeSafe's Jev, which answer typed
+/// questions instead of generating text). The retired rows are included so
+/// the tests do not depend on current upstream coverage.
 #[cfg(test)]
 pub(crate) fn document_holding_system_one() -> String {
     let mut doc = document_with_retired_test_models();
