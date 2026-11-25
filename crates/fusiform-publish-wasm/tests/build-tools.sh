@@ -4,7 +4,8 @@ cd "$(dirname "$0")/../../.."
 
 # Restrict PATH so the host's optimizer cannot hide a missing or wrong one.
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+finished=0
+trap 'rc=$?; rm -rf "$work"; if [ "$rc" -eq 0 ] && [ "$finished" -ne 1 ]; then exit 1; fi' EXIT
 ln -s "$(command -v dirname)" "$work/dirname"
 write_tool() {
     printf '#!%s\n%s\n' "$BASH" "$2" > "$work/$1"
@@ -35,3 +36,4 @@ if [[ "$status" != 42 || "$output" != *"cargo build reached"* ]]; then
     exit 1
 fi
 printf 'Passed: missing and wrong wasm-opt refused, pinned version reached cargo build\n'
+finished=1
