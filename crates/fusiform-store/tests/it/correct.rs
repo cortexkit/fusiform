@@ -682,6 +682,29 @@ fn an_unchanged_store_still_accepts_its_plan() {
     assert_eq!(written, 2);
 }
 
+#[test]
+fn correction_does_not_fabricate_a_new_last_change() {
+    let f = fixture();
+    let plan = plan(&f, &rates(), BAD_FROM, FIXED_AT);
+    let source = SourceId::ModelsDev;
+    let provider = "anthropic";
+    let model = "claude-sonnet-4-5";
+    let key = FactKey::rate(TokenClass::Input);
+    assert_eq!(
+        apply_correction(&f.store, source, &plan, Timestamp(NOW)).unwrap(),
+        2
+    );
+    let history = f.store.fact_history(source, provider, model, &key).unwrap();
+    assert_eq!(history.last().unwrap().boundary_kind, "corrected");
+    assert_eq!(history.last().unwrap().boundary_at, Timestamp(NOW));
+    assert_eq!(
+        f.store
+            .last_changed_at(source, provider, model, &key)
+            .unwrap(),
+        Some(Timestamp(FIXED_AT))
+    );
+}
+
 /// A second correction landing between plan and apply is also refused.
 ///
 /// This is what makes the compare-and-swap compare BOUNDARIES rather than

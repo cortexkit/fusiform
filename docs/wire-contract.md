@@ -1186,9 +1186,10 @@ only, and `correction` (`affected_from_ms`, `affected_until_ms`, `reason`,
 `route::history_carries_the_correction_extent`).
 
 1. `last_changed_at_ms` is when the value last genuinely changed. It ignores
-   eras from polls marked as artifacts, so it can be older than the newest
-   boundary (`route::the_served_last_change_ignores_an_artifact_poll`). It is
-   absent when the fact has no era.
+   correction eras and unchanged claims from polls marked as artifacts, so it
+   can be older than the newest boundary
+   (`route::the_served_last_change_ignores_an_artifact_poll`). It is absent when
+   the fact has no non-correction era.
 2. An empty `eras` list says which of its causes applies: an unknown provider
    or model is `no_coverage`; a known model with nothing recorded for the key
    returns an empty list (`route::an_empty_history_names_which_cause_applies`).

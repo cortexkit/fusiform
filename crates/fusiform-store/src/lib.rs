@@ -1261,7 +1261,8 @@ impl CatalogStore {
     /// whoever inherits the caller, and the resulting number does not look
     /// wrong — it makes every abandoned row appear freshly maintained.
     ///
-    /// Returns `None` when the fact has no era at all. A fact whose only era is
+    /// Corrections only restate the value in force. Returns `None` when the
+    /// fact has no non-correction era. A fact whose only era is
     /// the seed returns the seed instant, which is honest: the value has been
     /// true since at least then and has never been seen to move.
     pub fn last_changed_at(
@@ -1310,8 +1311,8 @@ impl CatalogStore {
                                          WHERE observation_id = ev.observation_id) \
                             AND ev.action = 'marked')) \
                  FROM era e \
-                 WHERE e.source = ?1 AND e.provider_id = ?2 AND e.model_id = ?3 \
-                   AND e.fact_key = ?4 AND e.boundary_at_ms <= ?5 \
+                  WHERE e.source = ?1 AND e.provider_id = ?2 AND e.model_id = ?3 \
+                    AND e.fact_key = ?4 AND e.boundary_at_ms <= ?5 AND e.boundary_kind <> 'corrected' \
                  ORDER BY e.boundary_at_ms DESC",
             )?;
             let mut rows = stmt.query(params![
