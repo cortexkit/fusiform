@@ -7,7 +7,7 @@ use std::{
 };
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_release::{canonical_json, sign_envelope, sign_head, SigningKey};
+use fusiform_release::{canonical_json, sha256, sign_envelope, sign_head, SigningKey};
 use serde_json::{json, Value};
 
 use super::*;
@@ -414,6 +414,7 @@ async fn store_poll_warm_catch_up_reads_only_the_missing_suffix() {
                 store.latest_store_release().unwrap().unwrap().release,
                 previous
             );
+            assert!(poller.verified.is_none());
             files
                 .lock()
                 .unwrap()
@@ -421,12 +422,22 @@ async fn store_poll_warm_catch_up_reads_only_the_missing_suffix() {
             requests.lock().unwrap().clear();
         }
         assert_eq!(poller.poll(&store).await.unwrap(), next);
-        assert_eq!(
-            *requests.lock().unwrap(),
-            ["/v1/head".into(), next_path],
-            "one newly applied release after {} published day files",
-            prior_days + 1
-        );
+        if prior_days == 0 {
+            // A rejected individual object invalidates the warm path. The
+            // next poll verifies the archived copy instead.
+            assert_eq!(
+                *requests.lock().unwrap(),
+                [
+                    "/v1/head".to_owned(),
+                    format!("/v1/snapshots/{next}"),
+                    "/v1/releases/1".into(),
+                    "/v1/history/days/2026-11-19.json".into(),
+                    "/v1/history/days/2026-11-21.json".into(),
+                ]
+            );
+        } else {
+            assert_eq!(*requests.lock().unwrap(), ["/v1/head".into(), next_path]);
+        }
 
         let archived = publish_snapshot_day(
             &mut files.lock().unwrap(),
@@ -1060,23 +1071,30 @@ async fn store_poll_keeps_one_state_and_refuses_tampered_bytes() {
         );
     }
 
-    // A trailing space changes the bytes but not the decoded state or its
-    // release hashes. Only the retained-buffer integrity check can reject it.
-    let retained = poller.verified.as_mut().unwrap();
-    let tampered = [retained.bytes.as_ref(), b" "].concat().into_boxed_slice();
-    let original = std::mem::replace(&mut retained.bytes, tampered);
     assert_eq!(poller.poll(&store).await.unwrap(), 32);
     let version = store.catalog_version().unwrap();
     publish(&mut snapshot, 33);
-    assert_eq!(
-        poller.poll(&store).await.unwrap_err(),
-        "retained store state does not match its verified hash"
-    );
+    let path = "/v1/releases/33";
+    let release = files.lock().unwrap().remove(path).unwrap();
+    assert!(poller.poll(&store).await.unwrap_err().contains("404"));
+    assert!(poller.verified.is_some(), "a transport miss keeps the anchor");
+    files.lock().unwrap().insert(path.into(), release);
+
+    // Broken JSON cannot recreate verified state from the retained copy.
+    poller.verified.as_mut().unwrap().bytes = Box::from(&b"{"[..]);
+    assert!(poller
+        .poll(&store)
+        .await
+        .unwrap_err()
+        .contains("decode verified store state"));
     assert_eq!(store.catalog_version().unwrap(), version);
     assert_eq!(store.latest_store_release().unwrap().unwrap().release, 32);
 
-    poller.verified.as_mut().unwrap().bytes = original;
-    assert_eq!(poller.poll(&store).await.unwrap(), 33);
+    assert_eq!(
+        poller.poll(&store).await,
+        Ok(33),
+        "the next poll must rebuild the rejected retained state from signed releases"
+    );
     assert_eq!(
         model_name_at(&store, snapshot.envelope.upstream_observed_at_ms),
         "Mini 3"

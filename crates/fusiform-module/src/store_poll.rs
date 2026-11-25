@@ -15,7 +15,7 @@ use std::{
 };
 
 use fusiform_release::{
-    history_day_name, sha256, validate_history_files, verify_head, verify_history_attestation,
+    history_day_name, validate_history_files, verify_head, verify_history_attestation,
     Hash, Head, HeadBody, HistoryFile, Release, ReleaseEnvelope, Snapshot,
 };
 use fusiform_store::{CatalogStore, StoreRelease};
@@ -33,6 +33,19 @@ const HISTORY_BASE_PATH: &str = "v1/history/base.json";
 pub(crate) const POLL_INTERVAL_MS: i64 = 60_000;
 const INTERVAL: Duration = Duration::from_millis(POLL_INTERVAL_MS as u64);
 
+enum ReplayError {
+    Verification(String),
+    Other(String),
+}
+
+impl From<ReplayError> for String {
+    fn from(error: ReplayError) -> Self {
+        match error {
+            ReplayError::Verification(detail) | ReplayError::Other(detail) => detail,
+        }
+    }
+}
+
 struct Replay<'a> {
     cursor: Option<&'a StoreRelease>,
     current: Verified,
@@ -45,13 +58,15 @@ impl<'a> Replay<'a> {
         cursor: Option<&'a StoreRelease>,
         current: Verified,
         last_observation: i64,
-    ) -> Result<Self, String> {
-        Self::check_cursor(cursor, &current)?;
+    ) -> Result<Self, ReplayError> {
+        Self::check_cursor(cursor, &current).map_err(ReplayError::Verification)?;
         let mut replay = Self {
             cursor,
             current,
             last_observation,
-            arrivals: BufWriter::new(step("open release replay spool", tempfile::tempfile())?),
+            arrivals: BufWriter::new(
+                step("open release replay spool", tempfile::tempfile()).map_err(ReplayError::Other)?,
+            ),
         };
         if cursor.is_none() {
             let first = translate::arrival(
@@ -61,11 +76,13 @@ impl<'a> Replay<'a> {
                 &[],
                 true,
                 &mut replay.last_observation,
-            )?;
+            )
+            .map_err(ReplayError::Other)?;
             step(
                 "write release replay spool",
                 first.spool(&mut replay.arrivals),
-            )?;
+            )
+            .map_err(ReplayError::Other)?;
         }
         Ok(replay)
     }
@@ -82,10 +99,10 @@ impl<'a> Replay<'a> {
         Ok(())
     }
 
-    fn advance(&mut self, release: Release, keys: &ReleaseKeys) -> Result<(), String> {
+    fn advance(&mut self, release: Release, keys: &ReleaseKeys) -> Result<(), ReplayError> {
         let previous_observed_at_ms = self.current.envelope.upstream_observed_at_ms;
-        let before = self.current.advance(&release, keys)?;
-        Self::check_cursor(self.cursor, &self.current)?;
+        let before = self.current.advance(&release, keys).map_err(ReplayError::Verification)?;
+        Self::check_cursor(self.cursor, &self.current).map_err(ReplayError::Verification)?;
         if self
             .cursor
             .is_none_or(|cursor| self.current.envelope.release > cursor.release)
@@ -97,11 +114,13 @@ impl<'a> Replay<'a> {
                 &release.change.upstream,
                 release.change.curation_set.is_some(),
                 &mut self.last_observation,
-            )?;
+            )
+            .map_err(ReplayError::Other)?;
             step(
                 "write release replay spool",
                 arrival.spool(&mut self.arrivals),
-            )?;
+            )
+            .map_err(ReplayError::Other)?;
         }
         Ok(())
     }
@@ -112,7 +131,6 @@ impl<'a> Replay<'a> {
 struct Retained {
     envelope: ReleaseEnvelope,
     bytes: Box<[u8]>,
-    hash: Hash,
 }
 
 impl Retained {
@@ -125,18 +143,10 @@ impl Retained {
     fn encode(Verified { envelope, state }: Verified) -> Result<Self, String> {
         let bytes =
             step("encode verified store state", serde_json::to_vec(&state))?.into_boxed_slice();
-        let hash = sha256(&bytes);
-        Ok(Self {
-            envelope,
-            bytes,
-            hash,
-        })
+        Ok(Self { envelope, bytes })
     }
 
     fn decode(&self) -> Result<Verified, String> {
-        if sha256(&self.bytes) != self.hash {
-            return Err("retained store state does not match its verified hash".into());
-        }
         Ok(Verified {
             envelope: self.envelope.clone(),
             state: step(
@@ -238,10 +248,10 @@ impl StorePoller {
         replay: &mut Replay<'_>,
         head: &HeadBody,
         progress: &impl Fn(),
-    ) -> Result<bool, String> {
+    ) -> Result<bool, ReplayError> {
         for number in replay.current.envelope.release + 1..=head.release.get() {
             let file = format!("v1/releases/{number}");
-            let url = step(&file, self.url.join(&file))?;
+            let url = step(&file, self.url.join(&file)).map_err(ReplayError::Other)?;
             let response = self.fetcher.store_response(url).await;
             // Only an absent object covered by the snapshot can use the
             // archive. Malformed releases and other fetch failures stay errors.
@@ -255,15 +265,17 @@ impl StorePoller {
             {
                 return Ok(false);
             }
-            let response = step(&file, response)?;
-            let bytes = step(&file, response.bytes().await)?;
-            let release: Release = step(&file, serde_json::from_slice(&bytes))?;
+            let response = step(&file, response).map_err(ReplayError::Other)?;
+            let bytes = step(&file, response.bytes().await).map_err(ReplayError::Other)?;
+            let release: Release =
+                step(&file, serde_json::from_slice(&bytes)).map_err(ReplayError::Verification)?;
             if release.envelope.release != number {
-                return Err(format!("{file}: wrong release number"));
+                return Err(ReplayError::Verification(format!("{file}: wrong release number")));
             }
             replay.advance(release, &self.keys)?;
             progress();
         }
+        check_head(&replay.current.envelope, head).map_err(ReplayError::Verification)?;
         Ok(true)
     }
 
@@ -386,10 +398,24 @@ impl StorePoller {
                 "read upstream observation watermark",
                 store.latest_observation_id(),
             )?;
-            let mut replay = Replay::new(cursor.as_ref(), retained.decode()?, last_observation)?;
-            self.suffix(&mut replay, &head, &progress)
-                .await?
-                .then_some(replay)
+            let warm = async {
+                let current = retained.decode().map_err(ReplayError::Verification)?;
+                let mut replay = Replay::new(cursor.as_ref(), current, last_observation)?;
+                Ok(self.suffix(&mut replay, &head, &progress).await?.then_some(replay))
+            }
+            .await;
+            match warm {
+                Ok(replay) => replay,
+                Err(error) => {
+                    // Keep the state on transport or disk failure. If
+                    // verification fails, let the next poll rebuild it from
+                    // a signed snapshot or archived history.
+                    if matches!(error, ReplayError::Verification(_)) {
+                        self.verified = None;
+                    }
+                    return Err(error.into());
+                }
+            }
         } else {
             None
         };
@@ -426,7 +452,6 @@ impl StorePoller {
         let Replay {
             current, arrivals, ..
         } = replay;
-        check_head(&current.envelope, &head)?;
         let retained = Retained::encode(current)?;
         let mut arrivals = step("flush release replay spool", arrivals.into_inner())?;
         step("rewind release replay spool", arrivals.rewind())?;
