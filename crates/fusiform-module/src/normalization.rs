@@ -2,6 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use fusiform_core::NormalizeError;
 
+#[cfg(all(test, target_os = "linux"))]
+mod v1_fixture;
+
 pub(crate) fn log_findings(origin: &str, findings: &[NormalizeError]) -> BTreeMap<String, usize> {
     count_findings(findings, |message| {
         // Model IDs and member names are upstream text and may contain newlines.
