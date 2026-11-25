@@ -992,7 +992,7 @@ fn serve_catalog_get_snapshot(
     let published;
     let owned_tables;
     let tables = if let Some(page) = page {
-        page.tables
+        page.inputs.tables
     } else {
         published = crate::curation::PublishedCuration::load(store, request.at_ms)
             .map_err(RouteError::unavailable)?;
@@ -1020,19 +1020,10 @@ fn serve_catalog_get_snapshot(
             wide.push("existence".to_string());
         }
         let selects_effort = prefixes.iter().any(|p| curate::selects_effort_facts(p));
-        let selects_chat_score = prefixes
-            .iter()
-            .any(|p| "quality.elo".starts_with(p) || "quality.eq".starts_with(p));
-        let selects_judgment = selects_effort
-            || selects_chat_score
-            || prefixes.iter().any(|p| {
-                "quality.decommissioned".starts_with(p)
-                    || "quality.grade.".starts_with(p)
-                    || p.starts_with("quality.grade.")
-            });
+        let selects_chat_score = prefixes.iter().any(|p| selects_chat_score(p));
         // All judgments join on the served canonical key. Keep the supporting
         // facts until the join, including when replaying a dated judgment.
-        if selects_judgment {
+        if selects_judgments(prefixes) {
             wide.extend(["model.canonical_id", "existence"].map(str::to_owned));
         }
         if selects_effort {
@@ -1315,6 +1306,7 @@ fn serve_catalog_get_snapshot(
                 at,
                 prepared,
                 tables,
+                None,
             );
         }
     }
@@ -1492,6 +1484,7 @@ fn serve_catalog_get_snapshot(
         at,
         prepared,
         tables,
+        page.map(|page| page.inputs.judgments),
     )?;
     // Observed plane rows keep their envelope when billing rules remove all
     // selected rates. Curated rows and plain bulk rows require a selected fact.
@@ -2040,6 +2033,43 @@ fn select_billing_plane<'a>(
     }))
 }
 
+fn selects_chat_score(prefix: &str) -> bool {
+    "quality.elo".starts_with(prefix) || "quality.eq".starts_with(prefix)
+}
+
+fn selects_judgments(prefixes: &[String]) -> bool {
+    prefixes.iter().any(|p| {
+        selects_chat_score(p)
+            || "quality.decommissioned".starts_with(p)
+            || curate::selects_effort_facts(p)
+    }) || curate::TaskGradeRequirement::required_facts_for_prefixes(prefixes)
+        .next()
+        .is_some()
+}
+
+#[derive(Default)]
+struct CatalogJudgments {
+    published: curate::Quality,
+    local: fusiform_store::LocalOverrides,
+}
+
+impl CatalogJudgments {
+    fn load(
+        store: &CatalogStore,
+        at: Option<i64>,
+        prefixes: Option<&[String]>,
+    ) -> Result<Self, RouteError> {
+        // Judgments and their disclosures are served only with selected judgment facts.
+        if prefixes.is_some_and(|p| !selects_judgments(p)) {
+            return Ok(Self::default());
+        }
+        Ok(Self {
+            published: read_quality_at(store, at)?,
+            local: read_local_overrides_at(store, at)?,
+        })
+    }
+}
+
 /// Gather the additional reads needed by the selected view. The transformations
 /// stay in the curation crate; historically resolved rules are passed as data.
 #[allow(clippy::too_many_arguments)]
@@ -2052,6 +2082,7 @@ fn finish_plane_view(
     at: Option<Timestamp>,
     prepared: Option<&dated_model::DatedModel>,
     tables: &curate::CurationSet<'_>,
+    judgments: Option<&CatalogJudgments>,
 ) -> Result<CatalogGetResponse, RouteError> {
     let historical_rules = at
         .map(|at| match prepared {
@@ -2062,21 +2093,25 @@ fn finish_plane_view(
         .map_err(|e| store_error(&e))?;
     let lifetimes = historical_rules.as_ref().unwrap_or(tables.cache_lifetimes);
     let current = at.is_none().then_some(tables);
-    let published_quality = if at.is_none() {
-        read_quality(store)?
+    let owned_judgments;
+    let judgments = if let Some(judgments) = judgments {
+        judgments
     } else {
-        read_quality_at(store, at.map(|time| time.0))?
+        owned_judgments = CatalogJudgments::load(
+            store,
+            at.map(|time| time.0),
+            requested_prefixes.map(Vec::as_slice),
+        )?;
+        &owned_judgments
     };
-    let local = store
-        .local_overrides_at(at.map(|time| time.0))
-        .map_err(|e| store_error(&e))?;
-    let (quality, metadata) = local_overrides::overlay(&published_quality, &local);
+    let published_quality = &judgments.published;
+    let (quality, metadata) = local_overrides::overlay(published_quality, &judgments.local);
     if metadata.is_empty() {
         curate::derive_row_facts(
             &mut response,
             current,
             lifetimes,
-            &published_quality,
+            published_quality,
             requested_prefixes,
         );
     } else {
@@ -2085,7 +2120,7 @@ fn finish_plane_view(
             &mut published,
             current,
             lifetimes,
-            &published_quality,
+            published_quality,
             requested_prefixes,
         );
         curate::derive_row_facts(
@@ -2169,11 +2204,18 @@ fn finish_plane_view(
     Ok(response)
 }
 
-fn read_quality(store: &CatalogStore) -> Result<curate::Quality, RouteError> {
-    read_quality_at(store, None)
+fn read_local_overrides_at(
+    store: &CatalogStore,
+    at: Option<i64>,
+) -> Result<fusiform_store::LocalOverrides, RouteError> {
+    #[cfg(test)]
+    paging_tests::LOCAL_OVERRIDE_READS.with(|count| count.set(count.get() + 1));
+    store.local_overrides_at(at).map_err(|e| store_error(&e))
 }
 
 fn read_quality_at(store: &CatalogStore, at: Option<i64>) -> Result<curate::Quality, RouteError> {
+    #[cfg(test)]
+    paging_tests::PUBLISHED_QUALITY_READS.with(|count| count.set(count.get() + 1));
     let grades = match at {
         Some(at) => store.quality_grades_at(at),
         None => store.quality_grades(),

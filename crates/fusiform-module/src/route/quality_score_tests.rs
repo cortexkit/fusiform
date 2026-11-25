@@ -136,7 +136,11 @@ fn assert_workload_minimum_serving(store_mode: bool) {
         .unwrap();
 
     let minimum = "workload.code.effort_minimum";
-    for args in [json!({}), json!({"at_ms":2200})] {
+    for args in [
+        json!({}),
+        json!({"at_ms": 2200}),
+        json!({"at_ms": 2200, "paged": true, "fact_prefixes": ["existence", minimum]}),
+    ] {
         let reply = get(&store, args);
         let reseller = &reply.models["reseller/shared"];
         let google = &reply.models["google/gemini-4-argon"];

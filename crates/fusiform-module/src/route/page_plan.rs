@@ -16,11 +16,16 @@ impl ProviderRange {
     }
 }
 
-/// The curation shared by every range render in one paging attempt.
+/// The curation and judgments shared by every range render in one paging attempt.
+pub(super) struct PageInputs<'a> {
+    pub tables: &'a curate::CurationSet<'a>,
+    pub judgments: &'a CatalogJudgments,
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct PageRender<'a> {
     pub range: &'a ProviderRange,
-    pub tables: &'a curate::CurationSet<'a>,
+    pub inputs: &'a PageInputs<'a>,
 }
 
 struct PagePlan {
@@ -111,6 +116,11 @@ pub(super) fn serve_planned_page(
         .as_ref()
         .map(|data| data.tables())
         .unwrap_or_else(|| crate::curation::embedded());
+    let judgments = CatalogJudgments::load(store, request.at_ms, request.fact_prefixes.as_deref())?;
+    let inputs = PageInputs {
+        tables: &tables,
+        judgments: &judgments,
+    };
     let plan = {
         // Hold the lock while building the small plan so concurrent misses do
         // not duplicate that work. Rendered providers are dropped during the
@@ -130,7 +140,7 @@ pub(super) fn serve_planned_page(
                     budget,
                     frame_limit,
                     oversized,
-                    &tables,
+                    &inputs,
                 )?);
                 check_page_version(
                     store.catalog_version().map_err(|e| store_error(&e))?,
@@ -161,7 +171,7 @@ pub(super) fn serve_planned_page(
         oversized,
         Some(PageRender {
             range: &range,
-            tables: &tables,
+            inputs: &inputs,
         }),
     )?;
     let rendered = PageCursor {
@@ -225,7 +235,7 @@ pub(super) fn serve_planned_page(
                     after: range.after.clone(),
                     through: Some(last.clone()),
                 },
-                tables: &tables,
+                inputs: &inputs,
             }),
         )?;
         if let Some(cursor) = cursor {
@@ -256,9 +266,10 @@ fn build_plan(
     budget: usize,
     frame_limit: usize,
     oversized: &Mutex<Option<OversizedCatalog>>,
-    tables: &curate::CurationSet<'_>,
+    inputs: &PageInputs<'_>,
 ) -> Result<PagePlan, RouteError> {
     let source = key.source;
+    let tables = inputs.tables;
     let mut identities: BTreeSet<String> = store
         .catalog_providers(source)
         .map_err(|e| store_error(&e))?
@@ -307,7 +318,7 @@ fn build_plan(
             oversized,
             Some(PageRender {
                 range: &range,
-                tables,
+                inputs,
             }),
         )?;
         retain_range(&mut response, &range);

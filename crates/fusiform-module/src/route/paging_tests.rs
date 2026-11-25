@@ -106,6 +106,59 @@ fn get(store: &CatalogStore, args: Value, budget: usize) -> CatalogGetResponse {
     serve_catalog_get_with_budget(store, &serde_json::to_vec(&args).unwrap(), budget).unwrap()
 }
 
+thread_local! {
+    pub(super) static PUBLISHED_QUALITY_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(super) static LOCAL_OVERRIDE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[test]
+fn cold_and_warm_pages_only_load_selected_judgments_once() {
+    let (store, _dir) = fixture();
+    store
+        .append_quality_grade(
+            "p00/m",
+            None,
+            Some(&fusiform_store::QualityGrade::Chat {
+                elo: 1.into(),
+                eq: 2.into(),
+            }),
+            "operator",
+            "fixture",
+            9000,
+        )
+        .unwrap();
+    let read = |prefixes: &[&str], paged| {
+        PUBLISHED_QUALITY_READS.with(|count| count.set(0));
+        LOCAL_OVERRIDE_READS.with(|count| count.set(0));
+        let result = get(
+            &store,
+            json!({"at_ms": 9999, "fact_prefixes": prefixes, "paged": paged}),
+            usize::MAX,
+        );
+        assert!(!result.models.is_empty());
+        let want_quality = prefixes.contains(&"quality.elo");
+        assert_eq!(
+            result.quality_scores.map(|scores| scores.graded_at_ms),
+            want_quality.then_some(9000)
+        );
+        (
+            PUBLISHED_QUALITY_READS.with(std::cell::Cell::get),
+            LOCAL_OVERRIDE_READS.with(std::cell::Cell::get),
+        )
+    };
+    let counts = |prefixes: &[&str]| {
+        let whole = read(prefixes, false);
+        let cold = read(prefixes, true);
+        let warm = read(prefixes, true);
+        println!("{prefixes:?} (published, local override) loads: whole={whole:?}, cold={cold:?}, warm={warm:?}");
+        [whole, cold, warm]
+    };
+    let family = counts(&["model.family"]);
+    let with_quality = counts(&["model.family", "quality.elo"]);
+    assert_eq!(family, [(0, 0); 3]);
+    assert_eq!(with_quality, [(1, 1); 3]);
+}
+
 #[test]
 fn disjoint_fact_filters_omit_retired_only_rows_from_bulk_and_pages() {
     let (store, _dir) = fixture();

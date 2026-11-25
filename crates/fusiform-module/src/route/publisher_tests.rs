@@ -22,7 +22,7 @@ fn publisher_seed_matches_catalog_get_for_every_row() {
     upstream.resolved_at_ms = served.resolved_at_ms;
     // A fresh store has operator claims from the historical schema import.
     // Pass them separately: they are not facts in the upstream models.dev seed.
-    let quality = read_quality(&store).unwrap();
+    let quality = read_quality_at(&store, None).unwrap();
     let mut published = curate(upstream, &crate::curation::embedded(), &quality);
     assert_eq!(published.models.len(), served.models.len());
     for (id, facts) in std::mem::take(&mut published.models) {
