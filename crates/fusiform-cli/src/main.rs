@@ -727,6 +727,7 @@ where
     'restart: loop {
         let mut request = first_request.clone();
         let mut merged: Option<fusiform_protocol::CatalogGetResponse> = None;
+        let mut seen_overrides = std::collections::HashSet::new();
         loop {
             let raw = match fetch(request.clone()).await {
                 Ok(raw) => raw,
@@ -751,6 +752,26 @@ where
                 restarts += 1;
                 continue 'restart;
             }
+            // Keep first-seen order, including on the first page. Index the
+            // full row so two disclosures that differ only in value stay distinct.
+            page.overrides.retain(|entry| {
+                let fusiform_protocol::LocalOverrideWire {
+                    key,
+                    fact,
+                    published,
+                    local,
+                    set_at_ms,
+                    reason,
+                } = entry;
+                seen_overrides.insert((
+                    key.clone(),
+                    fact.clone(),
+                    published.clone(),
+                    local.clone(),
+                    *set_at_ms,
+                    reason.clone(),
+                ))
+            });
             let next = page.next_page_token.take();
             if let Some(merged) = &mut merged {
                 // Total destructuring: a list field added to the response must
@@ -784,11 +805,7 @@ where
                 if quality_scores.is_some() {
                     merged.quality_scores = quality_scores;
                 }
-                for entry in overrides {
-                    if !merged.overrides.contains(&entry) {
-                        merged.overrides.push(entry);
-                    }
-                }
+                merged.overrides.extend(overrides);
                 merged.withheld.extend(withheld);
                 merged.retired.extend(retired);
                 merged.uncertain.extend(uncertain);
@@ -4395,6 +4412,22 @@ mod paging_tests {
     use super::*;
     use serde_json::{json, Value};
     use std::collections::VecDeque;
+
+    #[tokio::test]
+    async fn paging_loop_deduplicates_overrides_in_first_seen_order() {
+        let first = json!({"key":"p/m","fact":"limit.context","published":1,"local":2,"set_at_ms":1000,"reason":"first"});
+        let mut distinct = first.clone();
+        distinct["local"] = 3.into();
+        let mut pages = VecDeque::from([page(3, "p", Some("next")), page(3, "q", None)]);
+        pages[0]["overrides"] = json!([first, first]);
+        pages[1]["overrides"] = json!([first, distinct, distinct]);
+        let merged = read_catalog_pages(json!({"paged":true}), |_| {
+            std::future::ready(Ok(pages.pop_front().unwrap()))
+        })
+        .await
+        .unwrap();
+        assert_eq!(merged["overrides"], json!([first, distinct]));
+    }
 
     fn page(version: i64, provider: &str, next: Option<&str>) -> Value {
         let mut page = json!({
