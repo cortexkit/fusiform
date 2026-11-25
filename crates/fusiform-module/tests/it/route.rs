@@ -572,6 +572,7 @@ fn history_propagates_failure_to_establish_last_change() {
 fn status_reports_quiet_polls_and_failures() {
     let f = fixture();
 
+    let mut observation_ids = Vec::new();
     for (at, outcome) in [
         (2_000i64, ObservationOutcome::NotModified),
         (
@@ -582,7 +583,8 @@ fn status_reports_quiet_polls_and_failures() {
         ),
         (4_000, ObservationOutcome::NotModified),
     ] {
-        f.store
+        let observation_id = f
+            .store
             .record_observation(&NewObservation {
                 source: SourceId::ModelsDev,
                 observed_at: Timestamp(at),
@@ -594,6 +596,7 @@ fn status_reports_quiet_polls_and_failures() {
                 detail: Some("probe".to_string()),
             })
             .unwrap();
+        observation_ids.push(observation_id);
     }
 
     let status = match fusiform_module::route::serve_tool_call(
@@ -610,6 +613,18 @@ fn status_reports_quiet_polls_and_failures() {
     // Newest first.
     assert_eq!(status.recent_polls[0].observed_at_ms, 4_000);
     assert_eq!(status.recent_polls[0].outcome, "not_modified");
+    let wire = serde_json::to_value(&status).unwrap();
+    for (row, id) in wire["recent_polls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(observation_ids.into_iter().rev())
+    {
+        assert_eq!(
+            row["observation_id"], id,
+            "poll rows must expose the ID used by mark/retract"
+        );
+    }
 
     // The failure is present with its class, rather than being filtered out as
     // "not a real poll".

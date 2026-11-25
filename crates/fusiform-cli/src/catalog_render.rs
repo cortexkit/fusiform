@@ -585,12 +585,15 @@ mod tests {
                 }
             }
             assert!(
-                text.contains("retired: p/old (observed 1970-01-01 00:00:01Z); successor: p/new"),
+                text.contains(
+                    "retired: p/old (observed 1970-01-01 00:00:01Z [1000 ms]); successor: p/new"
+                ),
                 "{text}"
             );
             assert!(
-                text.lines()
-                    .any(|line| line == "retired: p/older (observed 1970-01-01 00:00:02Z)"),
+                text.lines().any(
+                    |line| line == "retired: p/older (observed 1970-01-01 00:00:02Z [2000 ms])"
+                ),
                 "{text}"
             );
         }

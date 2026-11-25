@@ -2384,6 +2384,9 @@ pub struct StatusRequest {
 /// One recorded poll.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StatusPoll {
+    /// Store-local observation ID accepted by mark and retract requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation_id: Option<i64>,
     pub observed_at_ms: i64,
     pub outcome: String,
     #[serde(skip_serializing_if = "Option::is_none")]

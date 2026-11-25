@@ -961,10 +961,6 @@ fn print_status(response: &serde_json::Value) {
         .map(|priced| format!("  ({} with no rate)", models - priced))
         .unwrap_or_default();
     println!("models           {models}{unpriced}");
-    // Overrides on the status surface, because "what is fusiform doing"
-    // includes "deliberately disagreeing with the upstream about these facts".
-    // An operator would otherwise learn it only by happening to read one of the
-    // affected models.
     println!(
         "eras             {}",
         get("era_count").and_then(|v| v.as_i64()).unwrap_or(-1)
@@ -998,27 +994,30 @@ fn print_status(response: &serde_json::Value) {
 
     println!("\nrecent polls (newest first)");
     for poll in polls {
-        let at = poll
-            .get("observed_at_ms")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        let outcome = poll.get("outcome").and_then(|v| v.as_str()).unwrap_or("?");
-        let class = poll
-            .get("failure_class")
-            .and_then(|v| v.as_str())
-            .map(|c| format!(" ({c})"))
-            .unwrap_or_default();
-        let took = poll
-            .get("duration_ms")
-            .and_then(|v| v.as_i64())
-            .map(|d| format!("  {d}ms"))
-            .unwrap_or_default();
-        println!(
-            "  {}  {outcome}{class}{took}{}",
-            format_instant(at),
-            render_changes(poll.get("changes"))
-        );
+        println!("{}", render_status_poll(poll));
     }
+}
+
+fn render_status_poll(poll: &serde_json::Value) -> String {
+    let at = poll["observed_at_ms"].as_i64().unwrap_or(0);
+    let outcome = poll["outcome"].as_str().unwrap_or("?");
+    let observation = poll["observation_id"]
+        .as_i64()
+        .map(|id| format!("  observation {id}"))
+        .unwrap_or_default();
+    let class = poll["failure_class"]
+        .as_str()
+        .map(|c| format!(" ({c})"))
+        .unwrap_or_default();
+    let took = poll["duration_ms"]
+        .as_i64()
+        .map(|d| format!("  {d}ms"))
+        .unwrap_or_default();
+    format!(
+        "  {}{observation}  {outcome}{class}{took}{}",
+        format_instant(at),
+        render_changes(poll.get("changes"))
+    )
 }
 
 /// The failed-poll history line, or nothing when no poll has ever failed.
@@ -1503,7 +1502,7 @@ fn format_instant(ms: i64) -> String {
     let time_of_day = secs % 86_400;
     let (y, mo, d) = civil_from_days(days);
     format!(
-        "{y:04}-{mo:02}-{d:02} {:02}:{:02}:{:02}Z",
+        "{y:04}-{mo:02}-{d:02} {:02}:{:02}:{:02}Z [{ms} ms]",
         time_of_day / 3600,
         (time_of_day % 3600) / 60,
         time_of_day % 60
@@ -3068,31 +3067,64 @@ mod tests {
     }
 
     #[test]
+    fn an_instant_includes_the_original_milliseconds() {
+        assert_eq!(
+            format_instant(1_784_494_281_391),
+            "2026-07-19 20:51:21Z [1784494281391 ms]"
+        );
+    }
+
+    #[test]
+    fn status_poll_identifies_the_observation_and_exact_instant() {
+        let row =
+            serde_json::json!({"observation_id":37, "observed_at_ms":1299, "outcome":"changed"});
+        assert_eq!(
+            render_status_poll(&row),
+            "  1970-01-01 00:00:01Z [1299 ms]  observation 37  changed"
+        );
+    }
+
+    #[test]
     fn instants_render_as_the_dates_they_are() {
         // One millisecond after the epoch, which is still second zero.
-        assert_eq!(format_instant(1), "1970-01-01 00:00:00Z");
+        assert_eq!(format_instant(1), "1970-01-01 00:00:00Z [1 ms]");
         // date -u -r 1 => Thu Jan  1 00:00:01 UTC 1970
-        assert_eq!(format_instant(1_000), "1970-01-01 00:00:01Z");
+        assert_eq!(format_instant(1_000), "1970-01-01 00:00:01Z [1000 ms]");
 
         // A leap day, which a naive 365-day division gets wrong.
         // date -u -r 1709208000 => Thu Feb 29 12:00:00 UTC 2024
-        assert_eq!(format_instant(1_709_208_000_000), "2024-02-29 12:00:00Z");
+        assert_eq!(
+            format_instant(1_709_208_000_000),
+            "2024-02-29 12:00:00Z [1709208000000 ms]"
+        );
 
         // 2000 is a leap year (divisible by 400) while 1900 is not: the two
         // cases a "divisible by 4" rule gets backwards.
         // date -u -r 951825600 => Tue Feb 29 12:00:00 UTC 2000
-        assert_eq!(format_instant(951_825_600_000), "2000-02-29 12:00:00Z");
+        assert_eq!(
+            format_instant(951_825_600_000),
+            "2000-02-29 12:00:00Z [951825600000 ms]"
+        );
 
         // A timestamp taken from a real upstream observation, kept as a fixed
         // value so the rendering can be checked against an independent source.
         // date -u -r 1784494281 => Sun Jul 19 20:51:21 UTC 2026
-        assert_eq!(format_instant(1_784_494_281_391), "2026-07-19 20:51:21Z");
+        assert_eq!(
+            format_instant(1_784_494_281_391),
+            "2026-07-19 20:51:21Z [1784494281391 ms]"
+        );
 
         // Year boundaries in both directions.
         // date -u -r 1767225599 => Wed Dec 31 23:59:59 UTC 2025
-        assert_eq!(format_instant(1_767_225_599_000), "2025-12-31 23:59:59Z");
+        assert_eq!(
+            format_instant(1_767_225_599_000),
+            "2025-12-31 23:59:59Z [1767225599000 ms]"
+        );
         // date -u -r 1767225600 => Thu Jan  1 00:00:00 UTC 2026
-        assert_eq!(format_instant(1_767_225_600_000), "2026-01-01 00:00:00Z");
+        assert_eq!(
+            format_instant(1_767_225_600_000),
+            "2026-01-01 00:00:00Z [1767225600000 ms]"
+        );
     }
 
     /// A module identity inherited from the environment is dropped.
@@ -3156,8 +3188,9 @@ mod tests {
         const DAYS: [u32; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
         for offset in 0..365 {
-            let rendered = format_instant((start + offset * 86_400) * 1000);
-            let want = format!("2025-{expected_month:02}-{expected_day:02} 00:00:00Z");
+            let ms = (start + offset * 86_400) * 1000;
+            let rendered = format_instant(ms);
+            let want = format!("2025-{expected_month:02}-{expected_day:02} 00:00:00Z [{ms} ms]");
             assert_eq!(rendered, want, "day {offset} of 2025");
 
             expected_day += 1;
@@ -3786,7 +3819,7 @@ mod tests {
         });
         assert_eq!(
             render_status_source(&applied),
-            "source           models.dev\nstore            https://models.example/  release 7 (applied 1970-01-01 00:00:02Z)\n"
+            "source           models.dev\nstore            https://models.example/  release 7 (applied 1970-01-01 00:00:02Z [2000 ms])\n"
         );
         let fallback = serde_json::json!({
             "source": "built_in_snapshot",

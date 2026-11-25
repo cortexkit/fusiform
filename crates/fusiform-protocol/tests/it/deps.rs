@@ -398,6 +398,7 @@ fn every_response_type_round_trips() {
         history_begins_at_ms: Some(1_786_529_249_396),
         era_count: 67_914,
         recent_polls: vec![StatusPoll {
+            observation_id: Some(7),
             observed_at_ms: 5_000,
             outcome: "changed".into(),
             failure_class: None,
