@@ -151,15 +151,18 @@ async fn the_live_document_normalizes_today() {
         "the conditional-GET design depends on this upstream sending an ETag"
     );
 
-    // Every finding must be an unattributable charge unit. Anything else is a
-    // shape the parser does not understand appearing in production.
+    // The catalog can include published prices we cannot safely serve. New
+    // schema keys or enumerated values still require a compatibility review.
+    use fusiform_core::normalize::v2::FindingKey;
     for finding in &parsed.findings {
         assert!(
             matches!(
-                finding,
-                fusiform_core::NormalizeError::UnattributableChargeUnit { .. }
+                finding.key,
+                FindingKey::UnattributableChargeUnit { .. }
+                    | FindingKey::UnservedCost { .. }
+                    | FindingKey::RefusedPrice { .. }
             ),
-            "unexpected finding on live data: {finding}"
+            "unexpected finding on live data: {finding:?}"
         );
     }
 }
