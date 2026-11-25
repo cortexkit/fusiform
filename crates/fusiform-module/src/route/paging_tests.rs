@@ -107,6 +107,35 @@ fn get(store: &CatalogStore, args: Value, budget: usize) -> CatalogGetResponse {
 }
 
 #[test]
+fn disjoint_fact_filters_omit_retired_only_rows_from_bulk_and_pages() {
+    let (store, _dir) = fixture();
+    let provider = "google";
+    let model = "antigravity-claude-sonnet-4-6-thinking";
+    let id = format!("{provider}/{model}");
+    let baseline = get(
+        &store,
+        json!({"provider_id": provider, "include_retired": true, "fact_prefixes": ["existence"]}),
+        usize::MAX,
+    );
+    assert_eq!(baseline.models[&id]["existence"], "absent");
+
+    let mut args = json!({"include_retired": true, "fact_prefixes": ["fixture.unmatched."]});
+    for paged in [false, true] {
+        args["paged"] = paged.into();
+        let result = get(&store, args.clone(), usize::MAX);
+        assert!(
+            !result.models.contains_key(&id),
+            "empty retirement in paged={paged}"
+        );
+    }
+
+    args["paged"] = false.into();
+    args["provider_id"] = provider.into();
+    args["model_id"] = model.into();
+    assert!(get(&store, args, usize::MAX).models[&id].is_empty());
+}
+
+#[test]
 fn pages_cover_whole_providers_in_order_and_scope_disclosures() {
     let (store, _dir) = fixture();
     for at in [None, Some(5000)] {
