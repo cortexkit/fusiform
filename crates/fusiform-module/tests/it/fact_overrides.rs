@@ -83,13 +83,54 @@ fn get(store: &CatalogStore, args: Value) -> CatalogGetResponse {
     serve_catalog_get(store, &serde_json::to_vec(&args).unwrap()).unwrap()
 }
 
+fn assert_no_added_reasoning_rate(reasoning: Option<bool>) {
+    let mut row = json!({"id":"speech", "name":"Speech", "cost":{"output":10}});
+    if let Some(reasoning) = reasoning {
+        row["reasoning"] = json!(reasoning);
+    }
+    let document = json!({"openai":{"id":"openai", "name":"OpenAI", "models":{"speech":row}}});
+    let (store, _dir) = store_document(&serde_json::to_vec(&document).unwrap());
+    let overrides = fusiform_module::fact_overrides::overrides();
+    let boundary =
+        overrides[&("openai".into(), "*".into(), "rate.reasoning".into())].established_at_ms;
+    fusiform_module::fact_overrides::apply_to_store(&store, overrides, boundary).unwrap();
+    for at_ms in [None, Some(boundary)] {
+        let read = get(
+            &store,
+            json!({"provider_id":"openai", "model_id":"speech", "at_ms":at_ms,
+            "fact_prefixes":["capability.reasoning", "rate."]}),
+        );
+        let facts = &read.models["openai/speech"];
+        assert_eq!(facts["rate.output"]["state"], "priced");
+        assert_eq!(
+            facts.get("capability.reasoning").and_then(Value::as_bool),
+            reasoning
+        );
+        assert!(
+            !facts.contains_key("rate.reasoning"),
+            "{reasoning:?} at {at_ms:?}"
+        );
+        assert!(read.fact_overrides.is_empty());
+    }
+}
+
+#[test]
+fn reasoning_rate_is_not_added_when_capability_is_false() {
+    assert_no_added_reasoning_rate(Some(false));
+}
+
+#[test]
+fn reasoning_rate_is_not_added_when_capability_is_unknown() {
+    assert_no_added_reasoning_rate(None);
+}
+
 #[test]
 fn reasoning_billed_as_output_on_current_and_dated_reads() {
     let upstream = json!({"openai":{"id":"openai", "name":"OpenAI", "models":{
-        "output-only":{"id":"output-only", "name":"Output only", "cost":{"output":10}},
-        "priced":{"id":"priced", "name":"Priced", "cost":{"output":10, "reasoning":1}},
-        "zero":{"id":"zero", "name":"Zero", "cost":{"output":10, "reasoning":0}},
-        "unpriced":{"id":"unpriced", "name":"Unpriced", "cost":{"output":10}}
+        "output-only":{"id":"output-only", "name":"Output only", "reasoning":true, "cost":{"output":10}},
+        "priced":{"id":"priced", "name":"Priced", "reasoning":true, "cost":{"output":10, "reasoning":1}},
+        "zero":{"id":"zero", "name":"Zero", "reasoning":true, "cost":{"output":10, "reasoning":0}},
+        "unpriced":{"id":"unpriced", "name":"Unpriced", "reasoning":true, "cost":{"output":10}}
     }}});
     let (store, _dir) = store_document(&serde_json::to_vec(&upstream).unwrap());
     let unpriced = json!({"state":"unpriced", "reason":"missing_rate"});
@@ -128,6 +169,10 @@ fn reasoning_billed_as_output_on_current_and_dated_reads() {
         assert_eq!(read.fact_overrides.len(), 1);
         assert_eq!(read.fact_overrides[0].model, "openai/output-only");
         assert_eq!(read.fact_overrides[0].model_id, "*");
+        assert!(read
+            .models
+            .values()
+            .all(|facts| !facts.contains_key("capability.reasoning")));
     };
     check(&get(&store, args.clone()));
 

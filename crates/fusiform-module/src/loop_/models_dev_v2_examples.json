@@ -368,6 +368,10 @@
         },
         "units": 12000000000
       },
+      "rate.reasoning": {
+        "key": "rate.output",
+        "state": "billed_as"
+      },
       "wire.api": {
         "from": "model",
         "value": "https://generativelanguage.googleapis.com/v1beta"
@@ -555,6 +559,10 @@
       "rate.output_audio": {
         "reason": "unknown_charge_basis",
         "state": "unpriced"
+      },
+      "rate.reasoning": {
+        "key": "rate.output",
+        "state": "billed_as"
       },
       "wire.api": {
         "from": "model",

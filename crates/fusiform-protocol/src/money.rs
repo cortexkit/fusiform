@@ -324,8 +324,8 @@ pub enum RateValue {
         inherited_from: Option<InheritedFrom>,
     },
     /// This class is billed at another rate on this row. Ordinary reads can
-    /// serve it for reasoning billed at the output price; billing-plane reads
-    /// can also serve it from a rule for the selected plane.
+    /// serve it for reasoning billed at the output price on a reasoning-capable
+    /// model; billing-plane reads can also serve it from a rule for the plane.
     /// Serve-only: this is a curated billing claim, not an upstream observation.
     BilledAs {
         /// The full fact key, including any context-tier suffix. For

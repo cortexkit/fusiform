@@ -456,9 +456,10 @@ A rate is a JSON object tagged by `state` (`RateValue` in
   reasoning tokens at the `rate.output` key that applies to the request,
   including its `.above_context.<n>` and `.mode.<m>` variants. On ordinary
   current and dated reads, a sourced addition supplies this value only when
-  the stored row has no `rate.reasoning` key; any published price, stated
-  zero, or unpriced value wins. On a billing-plane read, a plane rule for
-  that key takes precedence over the addition.
+  the stored row has `capability.reasoning: true` and no `rate.reasoning` key.
+  A false or unknown capability gets no addition. Any published price, stated
+  zero, or unpriced value wins. On a billing-plane read, a plane rule for that
+  key takes precedence over the addition.
   The `billed_as` object is only `{state, key}`: it names another rate on the
   same row and does not borrow an amount. The selected `rate.output` variant
   carries `inherited_from` when borrowed, so a reader that refuses borrowed

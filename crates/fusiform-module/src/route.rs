@@ -992,6 +992,15 @@ fn serve_catalog_get_snapshot(
     let requested_prefixes = request.fact_prefixes.clone();
     request.fact_prefixes = request.fact_prefixes.as_ref().map(|prefixes| {
         let mut wide = prefixes.clone();
+        if prefixes.iter().any(|p| "rate.reasoning".starts_with(p))
+            && !prefixes
+                .iter()
+                .any(|p| "capability.reasoning".starts_with(p))
+        {
+            // Rate-only reads still need the row's reasoning flag to know
+            // whether the sourced rate addition applies.
+            wide.push("capability.reasoning".to_string());
+        }
         if prefixes.iter().any(|prefix| {
             "capability.cache_lifetimes".starts_with(prefix)
                 || "rate.cache_write".starts_with(prefix)
@@ -2183,6 +2192,7 @@ fn finish_plane_view(
         let mut cards = BTreeMap::new();
         if let Some(provider) = plane.declared.and_then(Plane::borrows_rates_from) {
             let reasoning = FactKey::from_stored("rate.reasoning".into());
+            let reasoning_capability = FactKey::capability("reasoning");
             let reasoning_prefixes = vec![reasoning.as_str().to_string()];
             for (identity, facts) in &response.models {
                 if let Some(id) = curate::plane_rate_target(speed_twins, identity, facts, provider)
@@ -2199,11 +2209,22 @@ fn finish_plane_view(
                         let reasoning_override = if !origin.facts.contains_key(&reasoning)
                             && !withheld.iter().any(|row| row.fact_key == reasoning)
                         {
+                            let mut eligibility = origin
+                                .facts
+                                .get(&reasoning_capability)
+                                .map(|raw| {
+                                    (
+                                        reasoning_capability.as_str().to_string(),
+                                        fact_for_the_wire(raw),
+                                    )
+                                })
+                                .into_iter()
+                                .collect();
                             curate::fact_overrides::apply_rows(
                                 tables.fact_overrides,
                                 provider,
                                 id,
-                                &mut BTreeMap::new(),
+                                &mut eligibility,
                                 Some(&reasoning_prefixes),
                                 &[],
                             )

@@ -162,7 +162,14 @@ pub fn project_plane(
                     origin.map(|(id, card)| (id.as_str(), &card.facts)),
                 );
                 replaced_reasoning.insert(identity);
-                if let Some(mut row) = origin.and_then(|(_, card)| card.reasoning_override.clone())
+                if let Some(mut row) = origin
+                    .filter(|_| {
+                        facts
+                            .get("capability.reasoning")
+                            .and_then(serde_json::Value::as_bool)
+                            == Some(true)
+                    })
+                    .and_then(|(_, card)| card.reasoning_override.clone())
                 {
                     // Keep the claim's original provider, but disclose it on
                     // the plan row whose borrowed output price resolves it.
@@ -751,7 +758,10 @@ mod tests {
         let (overrides, _) = crate::fact_overrides::load_reporting_rejects(include_str!(
             "../../fusiform-module/data/fact-overrides.json"
         ));
-        let mut added = BTreeMap::from([("rate.output".into(), priced(100))]);
+        let mut added = BTreeMap::from([
+            ("capability.reasoning".into(), json!(true)),
+            ("rate.output".into(), priced(100)),
+        ]);
         response.fact_overrides =
             crate::fact_overrides::apply_rows(&overrides, "openai", "added", &mut added, None, &[]);
         assert_eq!(response.fact_overrides.len(), 1);

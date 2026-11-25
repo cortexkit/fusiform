@@ -71,9 +71,9 @@ const REVIEW_INTERVAL_MS: i64 = 60 * 86_400_000;
 /// replacement and an image-rate addition, before alias and plane projection.
 /// `capability.temperature` replaces only a published boolean when the vendor
 /// documents different acceptance; it never fills an unknown upstream claim.
-/// `rate.reasoning` can only fill an absent rate with a vendor's statement
-/// that reasoning is billed at the output price. It may cover every model
-/// under a provider (`model_id: "*"`).
+/// `rate.reasoning` can only fill an absent rate on a reasoning-capable model
+/// with a vendor's statement that reasoning is billed at the output price.
+/// It may cover all eligible models under a provider (`model_id: "*"`).
 pub const OVERRIDABLE_FACTS: [&str; 15] = [
     "limit.context",
     "limit.output",
@@ -268,16 +268,22 @@ pub fn options_list_effort(options: Option<&serde_json::Value>, effort: &str) ->
 }
 
 /// Whether an addition's value agrees with the other facts of the row it is
-/// added to. Only a reasoning default depends on another fact: the effort it
-/// names must be one the row's own options list, so a consumer that sends the
-/// default never sends an effort the row says the model refuses.
+/// added to. A reasoning default must name one of the row's supported efforts;
+/// a reasoning billing rule must not claim a price for tokens the model never
+/// generates or is not known to generate.
 fn consistent_with_row(row: &FactOverride, facts: &BTreeMap<String, serde_json::Value>) -> bool {
-    if row.fact_key != "capability.reasoning_default" {
-        return true;
+    match row.fact_key.as_str() {
+        "capability.reasoning_default" => default_effort(&row.value).is_some_and(|effort| {
+            options_list_effort(facts.get("capability.reasoning_options"), effort)
+        }),
+        "rate.reasoning" => {
+            facts
+                .get("capability.reasoning")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+        }
+        _ => true,
     }
-    default_effort(&row.value).is_some_and(|effort| {
-        options_list_effort(facts.get("capability.reasoning_options"), effort)
-    })
 }
 
 fn plain_token_rate(value: &serde_json::Value) -> bool {
@@ -470,6 +476,12 @@ pub fn stale_row(
     };
     let published = facts.get(&row.fact_key);
     if published.is_none() && is_addition(row) && !consistent_with_row(row, facts) {
+        if row.fact_key == "rate.reasoning" {
+            return Some(format!(
+                "{}/{} rate.reasoning: the embedded seed does not mark the model reasoning-capable, so the addition would not be served",
+                row.provider_id, row.model_id
+            ));
+        }
         return Some(format!(
             "{}/{} {}: the embedded seed's capability.reasoning_options {} do not list {}, so the default would never be served; re-verify the vendor's default against the model's listed efforts, or remove the override",
             row.provider_id,

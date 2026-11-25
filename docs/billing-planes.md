@@ -194,7 +194,8 @@ A plane may carry rules, each stating how one token class bills on that plane.
    A sourced `rate.reasoning` addition is not a published price: a plane
    rule for that key takes precedence over the addition.
    Cross-provider quota proxies also carry the donor's sourced reasoning
-   addition when the donor does not publish a reasoning rate. The disclosure
+   addition when both rows are reasoning-capable and the donor does not
+   publish a reasoning rate. The disclosure
    names the plan row and keeps the donor's source. On a `quota_proxy` plane
    a rule replaces the proxied price or addition
    (`billing_plane_tests::quota_rules_replace_published_prices_and_narrow_disclosures_last`).
