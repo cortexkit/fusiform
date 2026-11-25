@@ -399,46 +399,6 @@ pub fn apply_correction(
     plan: &CorrectionPlan,
     now: Timestamp,
 ) -> Result<usize, CatalogError> {
-    for row in &plan.rows {
-        let current = store
-            .recorded_value_at(source, &row.provider_id, &row.model_id, &row.fact_key, now)?
-            // Unreachable by construction, and left in place deliberately.
-            // Eras are append-only and the plan already found a row at or
-            // before this instant, so nothing can remove it. No test covers
-            // this arm because no test CAN — mutating it to succeed does not
-            // redden anything, which is the honest state rather than a gap.
-            // It exists so that a future change breaking append-only fails
-            // loudly here instead of writing a correction against a fact that
-            // is no longer there.
-            .ok_or_else(|| {
-                CatalogError::Invariant(format!(
-                    "{}/{} {}: the fact vanished between planning and applying, \
-                     which append-only eras should make impossible",
-                    row.provider_id,
-                    row.model_id,
-                    row.fact_key.as_str()
-                ))
-            })?;
-
-        // The boundary instant identifies the era. Comparing values instead
-        // would accept a poll that wrote the same value at a new boundary,
-        // which is harmless here but makes the check mean something weaker
-        // than "nothing moved".
-        if current.boundary_at != row.current_since {
-            return Err(CatalogError::Invariant(format!(
-                "{}/{} {}: the catalog changed after this correction was planned \
-                 — the value in force was recorded at {} and is now recorded at \
-                 {}. Applying the plan would write the old value back and revert \
-                 that change. Re-run without --commit to see the current state.",
-                row.provider_id,
-                row.model_id,
-                row.fact_key.as_str(),
-                row.current_since.0,
-                current.boundary_at.0
-            )));
-        }
-    }
-
     let correction = Correction {
         fields: plan.fields.clone(),
         affected_from: plan.affected_from,
@@ -467,5 +427,52 @@ pub fn apply_correction(
     // single defect and leave the rest reading clean, which is worse than
     // marking none: a consumer partitioning on the extent would believe the
     // unmarked facts were checked and found good.
-    store.append_correction_eras(&eras, now)
+    store.append_correction_eras(source, &eras, &plan.rows, now)
+}
+
+pub(crate) fn check_expected_eras_in(
+    tx: &rusqlite::Transaction<'_>,
+    source: SourceId,
+    expected: &[PlannedCorrection],
+    now: Timestamp,
+) -> rusqlite::Result<Result<(), CatalogError>> {
+    // The check must see the writer's view: a poll can commit after a reader
+    // checks the plan but before the correction starts its write transaction.
+    let mut stmt = tx.prepare_cached(
+        "SELECT MAX(boundary_at_ms) FROM era WHERE source = ?1 AND provider_id = ?2 \
+         AND model_id = ?3 AND fact_key = ?4 AND boundary_at_ms <= ?5",
+    )?;
+    for row in expected {
+        let boundary: Option<i64> = stmt.query_row(
+            rusqlite::params![
+                source.as_str(),
+                row.provider_id,
+                row.model_id,
+                row.fact_key.as_str(),
+                now.0
+            ],
+            |r| r.get(0),
+        )?;
+        // Compare era identity, not the value: another correction may have
+        // opened a new era holding the same value.
+        if boundary == Some(row.current_since.0) {
+            continue;
+        }
+        let current = boundary.map_or_else(
+            || "no longer recorded".into(),
+            |at| format!("now recorded at {at}"),
+        );
+        return Ok(Err(CatalogError::Invariant(format!(
+            "{}/{} {}: the catalog changed after this correction was planned \
+             — the value in force was recorded at {} and is {}. Applying the plan \
+             would write the old value back and revert that change. Re-run without \
+             --commit to see the current state.",
+            row.provider_id,
+            row.model_id,
+            row.fact_key.as_str(),
+            row.current_since.0,
+            current
+        ))));
+    }
+    Ok(Ok(()))
 }

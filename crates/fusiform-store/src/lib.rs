@@ -175,6 +175,11 @@ enum PollWrite<'a> {
         observation_id: Option<i64>,
         now: Timestamp,
     },
+    Correction {
+        source: SourceId,
+        expected: &'a [correct::PlannedCorrection],
+        now: Timestamp,
+    },
     Document {
         observation: &'a NewObservation,
         catalog: &'a fusiform_core::NormalizedCatalog,
@@ -505,7 +510,9 @@ impl CatalogStore {
     /// unchanged. Invalidate page tokens in the same transaction as the eras.
     pub(crate) fn append_correction_eras(
         &self,
+        source: SourceId,
         eras: &[NewEra],
+        expected: &[correct::PlannedCorrection],
         now: Timestamp,
     ) -> Result<usize, CatalogError> {
         if eras.is_empty() {
@@ -513,8 +520,9 @@ impl CatalogStore {
         }
         let written = self.append_eras_inner(
             eras,
-            Some(PollWrite::Existing {
-                observation_id: None,
+            Some(PollWrite::Correction {
+                source,
+                expected,
                 now,
             }),
         )?;
@@ -663,6 +671,17 @@ impl CatalogStore {
                     observation_id,
                     now,
                 }) => (observation_id, Some(now)),
+                Some(PollWrite::Correction {
+                    source,
+                    expected,
+                    now,
+                }) => {
+                    if let Err(error) = correct::check_expected_eras_in(tx, source, expected, now)?
+                    {
+                        return Ok(Err(error));
+                    }
+                    (None, Some(now))
+                }
                 Some(PollWrite::Document {
                     observation,
                     catalog,
