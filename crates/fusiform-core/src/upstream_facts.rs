@@ -370,15 +370,23 @@ pub fn facts_of(model: &NormalizedModel) -> ModelFacts {
                 }
                 RateCondition::Mode { ref name } => FactKey::rate_in_mode(*class, name),
             },
-            (ChargeBasis::PerMillionMediaTokens { class }, RateCondition::Always) => FactKey(
-                match class {
+            (ChargeBasis::PerMillionMediaTokens { class }, condition) => {
+                let base = match class {
                     MediaTokenClass::CachedInputAudio => "rate.cached_input_audio",
                     MediaTokenClass::InputImage => "rate.input_image",
                     MediaTokenClass::OutputImage => "rate.output_image",
                     MediaTokenClass::OutputVideo => "rate.output_video",
+                };
+                match condition {
+                    RateCondition::Always => FactKey(base.to_owned()),
+                    RateCondition::MinContextTokens { tokens } => {
+                        FactKey(format!("{base}{}{tokens}", rate_key::ABOVE_CONTEXT))
+                    }
+                    RateCondition::Mode { name } => {
+                        FactKey(format!("{base}{}{name}", rate_key::MODE))
+                    }
                 }
-                .to_owned(),
-            ),
+            }
             (ChargeBasis::PerCharacter, RateCondition::Always) => {
                 FactKey("rate.input.per_character".to_owned())
             }

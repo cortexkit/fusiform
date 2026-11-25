@@ -71,7 +71,6 @@ const LABEL: &str = "metadata, not a served model fact";
 const NOT_SERVED: &str = "no admitted fact for this dimension";
 const REQUEST: &str = "request shaping belongs to the caller";
 const MODE_CAPABILITIES: &str = "mode-specific capabilities are not served";
-const DEFERRED: &str = "conditional price projection is handled separately from base prices";
 
 impl Kind {
     fn keys(self) -> &'static [Key] {
@@ -152,10 +151,10 @@ impl Kind {
                 keys!["price", "unit", "reasoning", "overrides" => Array(OutputOverride)]
             }
             Self::InputOverride => keys![
-                "when" => Object(When), "price": DEFERRED, "cache": DEFERRED => Object(CacheCost),
+                "when" => Object(When), "price", "cache" => Object(CacheCost),
             ],
             Self::OutputOverride => {
-                keys!["when" => Object(When), "price": DEFERRED, "reasoning": DEFERRED]
+                keys!["when" => Object(When), "price", "reasoning"]
             }
             Self::CacheCost => keys![
                 "read", "write", "storage": NOT_SERVED, "explicit" => Object(CachePrices),
@@ -163,7 +162,7 @@ impl Kind {
             Self::CachePrices => keys!["read": NOT_SERVED, "write", "storage": NOT_SERVED],
             Self::WebSearch => keys!["price": NOT_SERVED, "overrides" => Array(SearchOverride)],
             Self::SearchOverride => keys!["price": NOT_SERVED, "when" => Object(When)],
-            Self::Multiplier => keys!["when" => Object(When), "factor": DEFERRED],
+            Self::Multiplier => keys!["when" => Object(When), "factor"],
             Self::When => keys![
                 "context" => Object(Predicate), "duration" => Object(Predicate),
                 "megapixels" => Object(Predicate), "input_images" => Object(Predicate),
@@ -177,13 +176,10 @@ impl Kind {
                 "domain" => Object(Predicate), "websocket" => Object(Predicate), "style" => Object(Predicate),
                 "voice_control" => Object(Predicate), "all" => Array(When), "any" => Array(When), "not" => Object(When),
             ],
-            Self::Predicate => keys![
-                "equals": DEFERRED, "in": DEFERRED, "gt": DEFERRED, "gte": DEFERRED,
-                "lt": DEFERRED, "lte": DEFERRED, "min_items": DEFERRED,
-            ],
+            Self::Predicate => keys!["equals", "in", "gt", "gte", "lt", "lte", "min_items",],
             Self::Experimental => keys!["modes" => Map(Mode)],
             Self::Mode => keys![
-                "service_tier": DEFERRED, "cost": DEFERRED => Object(Cost),
+                "service_tier", "cost" => Object(Cost),
                 "capabilities": MODE_CAPABILITIES => Object(Capabilities), "body": REQUEST, "headers": REQUEST,
             ],
         }

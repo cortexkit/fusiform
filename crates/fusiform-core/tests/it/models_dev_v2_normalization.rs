@@ -210,26 +210,279 @@ fn v2_token_audio_and_cached_audio_need_evidence() {
 }
 
 #[test]
-fn v2_deferred_overrides_are_not_silently_discarded() {
+fn v2_mode_audio_needs_directional_evidence_and_does_not_reprice_unit_audio() {
     let mut input = document();
-    input["provider"]["models"]["model"]["cost"]["audio"]["input"]["overrides"] = json!([
-        {"when": {"context": {"gt": 32}}, "price": 1},
-        {"when": {"context": {"gte": 128}}, "price": 2}
+    let row = model(&mut input);
+    row["cost"]["audio"]["output"] = json!({"unit": "token", "price": 2});
+    row["experimental"]["modes"]["fast"] = json!({"cost": {"audio": {
+        "input": {"unit": "token", "price": 1, "cache": {"read": 0.25}},
+        "output": {"unit": "token", "price": 3}
+    }}});
+    add_refused_mode(&mut input);
+    let outcome = normalize(&input);
+    assert_mode_refused(&outcome, "broken", "region");
+    let actual = facts(&outcome);
+    assert_unaffected(&actual);
+    assert_eq!(actual["rate.input_audio.per_second"]["per"], 60);
+    assert_eq!(actual["rate.output_audio"]["state"], "unpriced");
+    assert!(actual.keys().all(|key| !key.ends_with(".mode.fast")));
+
+    let evidence = ChargeUnitEvidence::input_audio_per_token(["provider"])
+        .with_output_audio_per_token(["provider"]);
+    let outcome =
+        normalize_models_dev_v2_with(&serde_json::to_vec(&input).unwrap(), &evidence).unwrap();
+    let actual = facts(&outcome);
+    assert_eq!(actual["rate.input_audio.per_second"]["per"], 60);
+    assert_eq!(actual["rate.input_audio.mode.fast"]["units"], 1_000_000_000);
+    assert_eq!(
+        actual["rate.cached_input_audio.mode.fast"]["units"],
+        250_000_000
+    );
+    assert_eq!(
+        actual["rate.output_audio.mode.fast"]["units"],
+        3_000_000_000u64
+    );
+}
+
+#[test]
+fn v2_unconditional_price_uses_base_key_beside_a_refused_mode() {
+    let mut input = document();
+    add_refused_mode(&mut input);
+    let outcome = normalize(&input);
+    assert_mode_refused(&outcome, "broken", "region");
+    assert_unaffected(&facts(&outcome));
+}
+
+#[test]
+fn v2_context_gt_and_gte_use_exclusive_selector_keys() {
+    let mut input = document();
+    model(&mut input)["cost"]["text"]["output"]["overrides"] = json!([
+        {"when": {"context": {"gte": 32}}, "price": 1},
+        {"when": {"context": {"gt": 32}}, "price": 2}
+    ]);
+    add_refused_mode(&mut input);
+    let outcome = normalize(&input);
+    assert_mode_refused(&outcome, "broken", "region");
+    let actual = facts(&outcome);
+    assert_unaffected(&actual);
+    assert_eq!(
+        actual["rate.output.above_context.31"]["units"],
+        1_000_000_000
+    );
+    assert_eq!(
+        actual["rate.output.above_context.32"]["units"],
+        2_000_000_000u64
+    );
+    assert!(!actual.contains_key("rate.output.above_context.33"));
+}
+
+#[test]
+fn v2_service_tier_override_uses_the_tier_unless_it_has_a_declared_mode() {
+    let mut input = document();
+    model(&mut input)["cost"]["text"]["output"]["overrides"] = json!([
+        {"when": {"service_tier": {"equals": "priority"}}, "price": 2}
+    ]);
+    add_refused_mode(&mut input);
+    let outcome = normalize(&input);
+    assert_mode_refused(&outcome, "broken", "region");
+    assert_eq!(
+        facts(&outcome)["rate.output.mode.priority"]["units"],
+        2_000_000_000
+    );
+
+    model(&mut input)["experimental"]["modes"]["fast"] = json!({"service_tier": "priority"});
+    let outcome = normalize(&input);
+    let actual = facts(&outcome);
+    assert_unaffected(&actual);
+    assert_eq!(actual["rate.output.mode.fast"]["units"], 2_000_000_000);
+    assert!(!actual.contains_key("rate.output.mode.priority"));
+}
+
+#[test]
+fn v2_service_tier_multiplier_is_exact_and_prices_only_named_roles() {
+    let mut input = document();
+    let cost = &mut model(&mut input)["cost"];
+    cost["text"]["input"] = json!({"price": 0.0000000015, "cache": {"read": 1}});
+    cost["multipliers"] = json!([
+        {"when": {"service_tier": {"equals": "priority"}}, "factor": {"text": {"input": {"price": 2}}}}
+    ]);
+    add_refused_mode(&mut input);
+    let outcome = normalize(&input);
+    assert_mode_refused(&outcome, "broken", "region");
+    let actual = facts(&outcome);
+    assert_unaffected(&actual);
+    // Rounding the base to two nanodollars before multiplying would give four.
+    assert_eq!(actual["rate.input"]["units"], 2);
+    assert_eq!(actual["rate.input.mode.priority"]["units"], 3);
+    assert!(!actual.contains_key("rate.output.mode.priority"));
+    assert!(!actual.contains_key("rate.cache_read.mode.priority"));
+}
+
+#[test]
+fn v2_declared_multiplier_mode_keeps_v1_base_scaling_without_tier_keys() {
+    let mut input = document();
+    let row = model(&mut input);
+    row["experimental"]["modes"]["fast"] = json!({"service_tier": "priority"});
+    row["cost"]["text"]["output"]["overrides"] = json!([
+        {"when": {"context": {"gt": 32}}, "price": 1}
+    ]);
+    row["cost"]["multipliers"] = json!([
+        {"when": {"service_tier": {"equals": "priority"}}, "factor": {"text": 2}},
+        {"when": {"service_tier": {"equals": "standby"}}, "factor": {"text": 2}}
     ]);
     let outcome = normalize(&input);
-    assert_unaffected(&facts(&outcome));
-    assert_eq!(outcome.finding_counts()["condition_deferred"], 2);
+    assert_mode_refused(&outcome, "standby", "tiered price");
+    let actual = facts(&outcome);
+    assert_unaffected(&actual);
+    assert_eq!(actual["rate.output.mode.fast"]["units"], 250_000_000);
     assert_eq!(
-        outcome.findings[0].key,
-        FindingKey::ConditionDeferred {
-            role: "audio.input".to_owned(),
-            condition: "context".to_owned()
-        }
+        actual["rate.output.above_context.32"]["units"],
+        1_000_000_000
     );
-    assert!(!facts(&outcome)
-        .keys()
-        .any(|key| key.contains("above_context")));
+    assert!(!actual.contains_key("rate.output.mode.priority"));
+    assert!(actual.keys().all(|key| !key.contains(".mode.fast.")));
 }
+
+#[test]
+fn v2_empty_multiplier_factor_refuses_its_mode() {
+    let mut input = document();
+    model(&mut input)["cost"]["multipliers"] = json!([
+        {"when": {"service_tier": {"equals": "priority"}}, "factor": {}}
+    ]);
+    let outcome = normalize(&input);
+    assert_mode_refused(&outcome, "priority", "names no priced base roles");
+    assert_unaffected(&facts(&outcome));
+}
+
+#[test]
+fn v2_same_spelling_different_tiers_do_not_chain_multipliers() {
+    let mut input = document();
+    let row = model(&mut input);
+    row["experimental"]["modes"]["fast"] = json!({"service_tier": "priority"});
+    row["cost"]["multipliers"] = json!([
+        {"when": {"service_tier": {"equals": "priority"}}, "factor": {"text": 2}},
+        {"when": {"service_tier": {"equals": "fast"}}, "factor": {"text": 2}}
+    ]);
+    add_refused_mode(&mut input);
+    let outcome = normalize(&input);
+    assert_mode_refused(&outcome, "broken", "region");
+    let actual = facts(&outcome);
+    assert_unaffected(&actual);
+    assert_eq!(actual["rate.output.mode.fast"]["units"], 250_000_000);
+    assert!(!actual.contains_key("rate.output.mode.priority"));
+
+    model(&mut input)["cost"]["multipliers"][1]["factor"]["text"] = json!(3);
+    let outcome = normalize(&input);
+    assert_mode_refused(&outcome, "fast", "conflicting prices");
+    assert_unaffected(&facts(&outcome));
+}
+
+#[test]
+fn v2_conflicting_named_and_direct_mode_rates_refuse_the_mode() {
+    let mut input = document();
+    let row = model(&mut input);
+    row["experimental"]["modes"]["fast"] = json!({
+        "service_tier": "priority", "cost": {"text": {"output": {"price": 1}}}
+    });
+    row["cost"]["text"]["output"]["overrides"] = json!([
+        {"when": {"service_tier": {"equals": "priority"}}, "price": 2}
+    ]);
+    let outcome = normalize(&input);
+    assert_mode_refused(&outcome, "fast", "conflicting prices");
+    let actual = facts(&outcome);
+    assert_unaffected(&actual);
+    assert!(!actual.contains_key("rate.output.mode.priority"));
+}
+
+#[test]
+fn v2_context_and_service_tier_cannot_be_combined() {
+    let mut input = document();
+    model(&mut input)["cost"]["text"]["output"]["overrides"] = json!([
+        {"when": {"service_tier": {"equals": "priority"}, "context": {"gt": 32}}, "price": 2}
+    ]);
+    let outcome = normalize(&input);
+    assert_mode_refused(&outcome, "priority", "combined conditions");
+    let actual = facts(&outcome);
+    assert_unaffected(&actual);
+    assert!(actual.keys().all(|key| !key.contains(".above_context.")));
+}
+
+fn model(document: &mut Value) -> &mut Value {
+    &mut document["provider"]["models"]["model"]
+}
+
+fn add_refused_mode(document: &mut Value) {
+    model(document)["experimental"]["modes"]["broken"] = json!({"cost": {"text": {"output": {
+        "price": 8, "overrides": [{"when": {"region": {"equals": "us"}}, "price": 9}]
+    }}}});
+}
+
+fn assert_mode_refused(outcome: &NormalizeV2Outcome, mode: &str, reason: &str) {
+    let model = outcome.catalog.models().next().unwrap();
+    let scope = RefusedFactScope::ModeRates(Some(mode.to_owned()));
+    assert!(model.refused.contains(&scope), "{:?}", outcome.findings);
+    let old_key = FactKey::from_stored(format!("rate.output.mode.{mode}"));
+    assert!(scope.covers(&old_key), "held price must not be withdrawn");
+    assert!(!facts(outcome).contains_key(old_key.as_str()));
+    assert_refused_finding(outcome, reason);
+}
+
+fn assert_refused_finding(outcome: &NormalizeV2Outcome, reason: &str) {
+    assert!(
+        outcome.findings.iter().any(|finding| {
+            matches!(&finding.key, FindingKey::RefusedPrice {detail, ..} if detail.contains(reason))
+                && finding.first_model_id.as_deref() == Some("model")
+        }),
+        "{reason} missing from {:?}",
+        outcome.findings
+    );
+}
+
+fn assert_refused_base_condition(when: Value, reason: &str) {
+    let mut input = document();
+    let row = model(&mut input);
+    row["cost"]["text"]["output"]["overrides"] = json!([{"when": when, "price": 2}]);
+    row["experimental"]["modes"]["fast"] = json!({"cost": {"text": {"output": {"price": 3}}}});
+    let outcome = normalize(&input);
+    let model = outcome.catalog.models().next().unwrap();
+    assert_eq!(model.refused, [RefusedFactScope::BaseAndTierRates].into());
+    assert!(
+        RefusedFactScope::BaseAndTierRates.covers(&FactKey::from_stored("rate.output".to_owned()))
+    );
+    let actual = facts(&outcome);
+    assert_eq!(actual["rate.output.mode.fast"]["units"], 3_000_000_000u64);
+    assert_eq!(actual["limit.context"], 2048);
+    assert!(actual
+        .keys()
+        .filter(|key| key.starts_with("rate."))
+        .eq(["rate.output.mode.fast"]));
+    assert_refused_finding(&outcome, reason);
+}
+
+macro_rules! refused_condition {
+    ($test:ident, $reason:literal, $when:tt) => {
+        #[test]
+        fn $test() {
+            assert_refused_base_condition(json!($when), $reason);
+        }
+    };
+}
+
+refused_condition!(v2_context_lt_is_refused, "lt", {"context": {"lt": 32}});
+refused_condition!(v2_context_lte_is_refused, "lte", {"context": {"lte": 32}});
+refused_condition!(v2_context_eq_is_refused, "eq", {"context": {"eq": 32}});
+refused_condition!(v2_context_equals_is_refused, "equals", {"context": {"equals": 32}});
+refused_condition!(v2_context_band_is_refused, "lte", {"context": {"gt": 32, "lte": 64}});
+refused_condition!(v2_unknown_operator_is_named_in_the_refusal, "future_operator", {"context": {"future_operator": 32}});
+refused_condition!(v2_unknown_key_is_named_in_the_refusal, "future_key", {"future_key": {"equals": true}});
+refused_condition!(v2_region_is_refused, "region", {"region": {"equals": "us"}});
+refused_condition!(v2_utc_hours_is_refused, "utc_hours", {"utc_hours": {"gt": "02:00"}});
+refused_condition!(v2_utc_days_is_refused, "utc_days", {"utc_days": {"in": ["sun"]}});
+refused_condition!(v2_date_is_refused, "date", {"date": {"gte": "2027-01-01"}});
+refused_condition!(v2_holiday_is_refused, "holiday", {"holiday": {"equals": "US"}});
+refused_condition!(v2_resolution_is_refused, "resolution", {"resolution": {"equals": "720p"}});
+refused_condition!(v2_quality_is_refused, "quality", {"quality": {"equals": "high"}});
+refused_condition!(v2_duration_is_refused, "duration", {"duration": {"gt": 32}});
 
 #[test]
 fn v2_malformed_non_object_and_v1_documents_return_no_catalog() {

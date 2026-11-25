@@ -30,7 +30,6 @@ pub enum FindingKey {
     UnservedCost { role: String, unit: String },
     UnattributableChargeUnit { role: String },
     RefusedPrice { role: String, detail: String },
-    ConditionDeferred { role: String, condition: String },
 }
 
 impl FindingKey {
@@ -43,7 +42,6 @@ impl FindingKey {
             Self::UnservedCost { .. } => "unserved_cost",
             Self::UnattributableChargeUnit { .. } => "unattributable_charge_unit",
             Self::RefusedPrice { .. } => "refused_price",
-            Self::ConditionDeferred { .. } => "condition_deferred",
         }
     }
 
@@ -250,15 +248,6 @@ fn normalize_model(
     let modes = fields
         .object("experimental")
         .and_then(|experimental| experimental.object("modes"));
-    if let Some(modes) = &modes {
-        for (name, mode) in &modes.0 {
-            if let Ok(mode) = Object::parse(mode) {
-                if let Some(cost) = mode.object("cost") {
-                    rates::defer_mode(model, name, &cost, findings);
-                }
-            }
-        }
-    }
     let modalities = fields.object("modalities");
     let input_modalities = read_modalities(modalities.as_ref(), "input");
     let attachment = input_modalities
@@ -271,9 +260,14 @@ fn normalize_model(
         provider_id: provider.to_owned(),
         model_id: model.to_owned(),
     };
-    let rates = fields.object("cost").map_or_else(Vec::new, |cost| {
-        rates::base_rates(&key, &cost, evidence, findings)
-    });
+    let rates = rates::normalize_rates(
+        &key,
+        fields.raw("cost"),
+        modes.as_ref(),
+        evidence,
+        findings,
+        &mut refused,
+    );
     NormalizedModel {
         key,
         provider_name: provider_name.map(str::to_owned),

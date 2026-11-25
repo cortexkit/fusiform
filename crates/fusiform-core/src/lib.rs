@@ -430,7 +430,7 @@ impl ChargeBasis {
 #[serde(rename_all = "snake_case", tag = "condition")]
 pub enum RateCondition {
     Always,
-    /// Applies at or above this prompt size in tokens.
+    /// Applies strictly above this prompt size in tokens.
     MinContextTokens {
         tokens: u64,
     },

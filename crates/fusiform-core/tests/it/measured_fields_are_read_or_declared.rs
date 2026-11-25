@@ -282,7 +282,8 @@ fn v2_unaccounted(outcome: &fusiform_core::NormalizeV2Outcome) -> Vec<&str> {
 
 #[test]
 fn every_saved_v2_key_is_read_or_declared_and_v2_only_facts_are_admitted() {
-    use fusiform_core::upstream_facts::facts_of;
+    use fusiform_core::normalize::is_servable_mode_name;
+    use fusiform_core::upstream_facts::{facts_of, rate_key};
     use fusiform_core::{normalize_models_dev_v2_with, ChargeUnitEvidence};
     use fusiform_protocol::{served_fact_key_matches, SERVED_FACTS};
 
@@ -301,24 +302,71 @@ fn every_saved_v2_key_is_read_or_declared_and_v2_only_facts_are_admitted() {
     let mut v2_only = 0;
     let mut unit_examples = BTreeSet::new();
     let mut chat_differences = Vec::new();
+    let mut legacy_mode_rates = 0;
+    let mut priority_models = 0;
+    let mut priority_rates = 0;
     for provider in &outcome.catalog.providers {
         let prior_models = old["providers"][&provider.provider_id]["models"].as_object();
         for model in &provider.models {
             let prior_model = prior_models.and_then(|rows| rows.get(&model.key.model_id));
             let only_in_v2 = prior_model.is_none();
             v2_only += usize::from(only_in_v2);
-            for (key, value) in facts_of(model).values {
+            let projected = facts_of(model).values;
+            if let Some(old) = prior_model.and_then(Value::as_object) {
+                let actual: BTreeMap<_, _> = projected
+                    .iter()
+                    .filter(|(key, _)| key.as_str().contains(rate_key::MODE))
+                    .map(|(key, value)| (key.as_str(), value.as_str()))
+                    .collect();
+                let mut priority = 0;
+                for (key, value) in old.iter().filter(|(key, _)| key.contains(rate_key::MODE)) {
+                    assert_eq!(
+                        actual.get(key.as_str()).copied(),
+                        value.as_str(),
+                        "{key} on {:?}",
+                        model.key
+                    );
+                    legacy_mode_rates += 1;
+                    priority += usize::from(key.ends_with(".mode.priority"));
+                }
+                if priority != 0 {
+                    assert_eq!(
+                        actual
+                            .keys()
+                            .filter(|key| key.ends_with(".mode.priority"))
+                            .count(),
+                        priority
+                    );
+                    priority_models += 1;
+                    priority_rates += priority;
+                }
+            }
+            for (key, value) in projected {
                 let key = key.as_str();
                 let requires_unit = matches!(
                     key,
                     "rate.input.per_character" | "rate.input_audio.per_second"
                 );
                 if only_in_v2 {
+                    let base =
+                        if let Some((base, threshold)) = key.split_once(rate_key::ABOVE_CONTEXT) {
+                            assert!(base.starts_with("rate."));
+                            assert!(threshold
+                                .parse::<u64>()
+                                .is_ok_and(|n| n > 0 && n.to_string() == threshold));
+                            base
+                        } else if let Some((base, mode)) = key.split_once(rate_key::MODE) {
+                            assert!(base.starts_with("rate."));
+                            assert!(is_servable_mode_name(mode));
+                            base
+                        } else {
+                            key
+                        };
                     assert!(
                         requires_unit
                             || SERVED_FACTS
                                 .iter()
-                                .any(|fact| served_fact_key_matches(fact.key, key)),
+                                .any(|fact| served_fact_key_matches(fact.key, base)),
                         "unadmitted fact {key} on {}/{}",
                         provider.provider_id,
                         model.key.model_id
@@ -348,6 +396,9 @@ fn every_saved_v2_key_is_read_or_declared_and_v2_only_facts_are_admitted() {
         }
     }
     assert_eq!(v2_only, 861);
+    assert_eq!(legacy_mode_rates, 548);
+    assert_eq!(priority_models, 38);
+    assert_eq!(priority_rates, 114);
     let explained: Value =
         serde_json::from_slice(&saved_gzip("explained-differences.json.gz")).unwrap();
     let expected: Vec<_> = explained["differences"]
