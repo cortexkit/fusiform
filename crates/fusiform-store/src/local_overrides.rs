@@ -22,6 +22,15 @@ pub struct LocalOverrides {
     pub marks: Vec<LocalMark>,
 }
 
+fn active_grades(conn: &rusqlite::Connection, at: i64) -> rusqlite::Result<Vec<QualityGradeEra>> {
+    conn.prepare(
+        "SELECT id,model,elo,eq,graded_by,reason,recorded_at_ms,grade,kind,graded_effort FROM override_grade_era e
+         WHERE withdrawn=0 AND id=(SELECT MAX(id) FROM override_grade_era WHERE model=e.model AND kind IS e.kind AND recorded_at_ms<=?1)",
+    )?
+    .query_map([at], quality::decode)?
+    .collect()
+}
+
 impl CatalogStore {
     pub fn append_override_mark(
         &self,
@@ -90,6 +99,26 @@ impl CatalogStore {
         Ok(())
     }
 
+    /// Current local grades. A withdrawal clears the override for its kind.
+    pub fn local_quality_grades(&self) -> Result<Vec<QualityGradeEra>, CatalogError> {
+        self.raw_conn(|conn| active_grades(conn, i64::MAX))
+    }
+
+    /// Full local grade history in insertion order, including withdrawals.
+    pub fn local_quality_grade_history(
+        &self,
+        model: &str,
+    ) -> Result<Vec<QualityGradeEra>, CatalogError> {
+        self.raw_conn(|conn| {
+            conn.prepare(
+                "SELECT id,model,elo,eq,graded_by,reason,recorded_at_ms,grade,kind,graded_effort
+                 FROM override_grade_era WHERE model=?1 ORDER BY id",
+            )?
+            .query_map([model], quality::decode)?
+            .collect()
+        })
+    }
+
     pub fn local_overrides_at(&self, at: Option<i64>) -> Result<LocalOverrides, CatalogError> {
         if !self.is_store_mode() {
             return Ok(LocalOverrides::default());
@@ -99,8 +128,7 @@ impl CatalogStore {
                 db.prepare(sql)?.query_map([at], decode)?.collect()
             }
             let at = at.unwrap_or(i64::MAX);
-            let grades = read(conn, "SELECT id,model,elo,eq,graded_by,reason,recorded_at_ms,grade,kind,graded_effort FROM override_grade_era e
-                WHERE withdrawn=0 AND id=(SELECT MAX(id) FROM override_grade_era WHERE model=e.model AND kind IS e.kind AND recorded_at_ms<=?1)", at, quality::decode)?;
+            let grades = active_grades(conn, at)?;
             let efforts = read(conn, "SELECT model,effort,elo,eq,reason,recorded_at_ms FROM override_effort_grade_era e
                 WHERE withdrawn=0 AND id=(SELECT MAX(id) FROM override_effort_grade_era WHERE model=e.model AND effort=e.effort AND recorded_at_ms<=?1)", at,
                 |r| Ok(EffortGradeEra { model:r.get(0)?, effort:r.get(1)?, elo:quality_efforts::number(r,2)?, eq:quality_efforts::number(r,3)?, reason:r.get(4)?, recorded_at_ms:r.get(5)? }))?;

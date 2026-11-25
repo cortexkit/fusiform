@@ -739,6 +739,72 @@ fn quality_grades_lists_current_or_newest_first_history_and_response_dates() {
     );
 }
 
+#[test]
+fn store_mode_grade_refresh_and_history_follow_local_writes() {
+    let (store, dir) = fixture_in_mode(false, true);
+    let db = rusqlite::Connection::open(dir.path().join("quality.db")).unwrap();
+    let model = "local:fixture/stt";
+    let call = |name, arguments| {
+        serve_tool_call(
+            &store,
+            &serde_json::to_vec(&json!({"name": name, "arguments": arguments})).unwrap(),
+        )
+        .unwrap()
+    };
+    let list = |args| {
+        let ToolResponse::QualityGrades(response) = call("quality.grades", args) else {
+            panic!("expected grades response");
+        };
+        response.grades
+    };
+    let refresh = || list(json!({"prefix": "local:"}));
+    let history = || list(json!({"model": model}));
+    let ToolResponse::QualityWrite(write) = call(
+        "quality.grade",
+        json!({"model": model, "kind": "transcription", "grade": 42,
+               "reason": "local fixture", "dry_run": false}),
+    ) else {
+        panic!("expected write response");
+    };
+    assert!(!write.dry_run);
+    assert_eq!(store.local_overrides_at(None).unwrap().grades.len(), 1);
+    let rows = refresh();
+    assert_eq!(rows.len(), 1, "committed active grade missing from refresh");
+    assert_eq!(rows[0], write.new);
+    assert_eq!(history(), vec![write.new.clone()]);
+
+    // Add published grades for the same key and for a different kind. Only
+    // the matching kind should be shadowed by the local grade.
+    for (kind, grade) in [("transcription", "21"), ("speech", "23")] {
+        db.execute(
+            "INSERT INTO quality_grade_era (model, kind, grade, withdrawn, graded_by, reason, recorded_at_ms) \
+             VALUES (?1, ?2, ?3, 0, 'operator', 'published fixture', 1000)",
+            rusqlite::params![model, kind, grade],
+        )
+        .unwrap();
+    }
+    let rows = refresh();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].grade, Some(23.into()));
+    assert_eq!(rows[1], write.new);
+    assert!(list(json!({"prefix": "local:other/"})).is_empty());
+    let ToolResponse::QualityWrite(withdraw) = call(
+        "quality.withdraw",
+        json!({"model": model, "kind": "transcription", "reason": "withdraw fixture",
+               "dry_run": false}),
+    ) else {
+        panic!("expected withdrawal response");
+    };
+    assert!(withdraw.new.withdrawn);
+    let rows = refresh();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1].grade, Some(21.into()));
+    let rows = history();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[..2], [withdraw.new, write.new]);
+    assert!(rows[2..].iter().all(|row| row.graded_by == "operator"));
+}
+
 const GRADES: &str = r#"{"graded_by":"operator","graded_at_ms":123,"purpose":"routing","rows":[
     {"model":"lab/shared","elo":1284,"eq":1599.8},
     {"model":"reseller/own","elo":1000.00,"eq":900.00},
