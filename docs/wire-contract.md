@@ -1239,8 +1239,11 @@ restored from the local store on startup.
 
 Each poll carries `observed_at_ms`, `outcome`, and when set `failure_class`,
 `detail`, `duration_ms`, and `changes` (`eras`, `models_arrived`,
-`models_withdrawn`, `facts_changed`). `changes` is absent for a poll that
-wrote nothing (`route::status_reports_what_each_poll_changed`,
+`models_withdrawn`, `facts_changed`). Failure classes are `network`,
+`http_status`, `parse`, `implausible` and `transient`. A `transient` failure is
+a local condition that clears on the next poll, such as a correction committed
+while the poll was fetching; the change is applied on the next tick. `changes`
+is absent for a poll that wrote nothing (`route::status_reports_what_each_poll_changed`,
 `route::a_poll_that_wrote_nothing_reports_no_changes`). Optional fields absent
 from an older module's response still decode
 (`deps::a_status_response_without_the_newest_fields_still_parses`).

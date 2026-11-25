@@ -24,6 +24,7 @@ fn every_class() -> Vec<FailureClass> {
         FailureClass::HttpStatus,
         FailureClass::Parse,
         FailureClass::Implausible,
+        FailureClass::Transient,
     ];
     // The exhaustiveness fence: a new variant makes this match fail to compile,
     // which is the moment to add it to the array above.
@@ -32,7 +33,8 @@ fn every_class() -> Vec<FailureClass> {
             FailureClass::Network
             | FailureClass::HttpStatus
             | FailureClass::Parse
-            | FailureClass::Implausible => {}
+            | FailureClass::Implausible
+            | FailureClass::Transient => {}
         }
     }
     all.to_vec()

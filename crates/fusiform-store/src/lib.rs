@@ -87,6 +87,11 @@ pub enum CatalogError {
         observed_at: Timestamp,
         latest: Timestamp,
     },
+    /// Only a correction boundary prevents the poll from writing at this time.
+    PollOvertakenByCorrection {
+        observed_at: Timestamp,
+        correction_at: Timestamp,
+    },
     /// A read or write violated a domain invariant the schema could not express.
     Invariant(String),
     /// A value in the database did not round-trip back to the domain.
@@ -113,6 +118,14 @@ impl std::fmt::Display for CatalogError {
                 f,
                 "poll clock is at {} ms, not after the newest written boundary or observation at {} ms",
                 observed_at.0, latest.0
+            ),
+            CatalogError::PollOvertakenByCorrection {
+                observed_at,
+                correction_at,
+            } => write!(
+                f,
+                "poll at {} ms was overtaken by a correction recorded at {} ms; retrying on the next poll",
+                observed_at.0, correction_at.0
             ),
             CatalogError::Invariant(msg) => write!(f, "invariant violated: {msg}"),
             CatalogError::Decode { column, value } => {
@@ -708,11 +721,14 @@ impl CatalogStore {
                     let changed = !plan.is_empty();
                     if changed {
                         let source = [observation.source.as_str()];
-                        let latest_boundary: Option<i64> = tx.query_row(
-                            "SELECT MAX(boundary_at_ms) FROM era WHERE source = ?1",
-                            source,
-                            |r| r.get(0),
-                        )?;
+                        let (latest_boundary, latest_correction): (Option<i64>, Option<i64>) = tx
+                            .query_row(
+                                "SELECT MAX(CASE WHEN boundary_kind <> 'corrected' THEN boundary_at_ms END), \
+                                        MAX(CASE WHEN boundary_kind = 'corrected' THEN boundary_at_ms END) \
+                                 FROM era WHERE source = ?1",
+                                source,
+                                |r| Ok((r.get(0)?, r.get(1)?)),
+                            )?;
                         // An unchanged poll or 304 can confirm the old value
                         // without opening a new era. Do not write a change
                         // before that observation.
@@ -728,6 +744,15 @@ impl CatalogStore {
                             return Ok(Err(CatalogError::PollBoundaryNotIncreasing {
                                 observed_at: at,
                                 latest: Timestamp(latest),
+                            }));
+                        }
+                        // A correction can land while the fetch is in flight.
+                        // Writing behind it would let its copy of the old
+                        // value supersede this change.
+                        if let Some(latest) = latest_correction.filter(|&latest| latest >= at.0) {
+                            return Ok(Err(CatalogError::PollOvertakenByCorrection {
+                                observed_at: at,
+                                correction_at: Timestamp(latest),
                             }));
                         }
                     }
@@ -1901,6 +1926,7 @@ pub fn failure_class_word(class: FailureClass) -> &'static str {
         FailureClass::HttpStatus => "http_status",
         FailureClass::Parse => "parse",
         FailureClass::Implausible => "implausible",
+        FailureClass::Transient => "transient",
     }
 }
 
@@ -1910,6 +1936,7 @@ pub fn failure_class_from_stored(word: &str) -> Option<FailureClass> {
         "http_status" => Some(FailureClass::HttpStatus),
         "parse" => Some(FailureClass::Parse),
         "implausible" => Some(FailureClass::Implausible),
+        "transient" => Some(FailureClass::Transient),
         _ => None,
     }
 }

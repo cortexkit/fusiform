@@ -23,7 +23,8 @@ Read, in order:
    `not_modified` and `unchanged` is normal. A `changed` poll shows how many
    models arrived, were withdrawn, and how many facts changed.
 2. `failures`: present only if a poll has ever failed. It shows the total, the
-   last failure's class (`network`, `http_status`, `parse`, `implausible`) and
+   last failure's class (`network`, `http_status`, `parse`, `implausible`,
+   `transient`) and
    how many polls back it is; pass that number to `--polls` to see it.
 3. `history_begins_at_ms`: the earliest instant a point-in-time read accepts.
 
@@ -31,10 +32,12 @@ The supervisor's health report for the module (see
 [`module-surface.md`](module-surface.md) §6) answers whether it is running and
 fresh; `status` answers what it has been doing.
 
-An `implausible` failure means the shrink guard refused a document that would
-have removed more than a quarter of the catalog. Fusiform keeps serving the
-previous catalog. Check the upstream; the guard clears on its own when a
-normal document arrives.
+An `implausible` failure means a safety check refused to write the document.
+Read the poll detail to distinguish an unexpected catalog shrink from a clock
+that moved backwards. Fusiform keeps serving the previous catalog. A
+`transient` failure means a local condition prevented the write, for example a
+correction was recorded while the poll was fetching. The change is retried on
+the next poll.
 
 ## Read the catalog
 

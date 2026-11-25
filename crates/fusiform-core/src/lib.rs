@@ -565,6 +565,8 @@ pub enum FailureClass {
     /// A fetched document was refused by a safety check before any catalog write.
     /// The failed observation's `detail` field identifies the check and its cause.
     Implausible,
+    /// A local condition deferred the write until the next poll.
+    Transient,
 }
 
 #[cfg(test)]

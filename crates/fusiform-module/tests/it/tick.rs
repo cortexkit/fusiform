@@ -254,6 +254,118 @@ fn a_changed_poll_cannot_write_behind_a_later_observation() {
 }
 
 #[test]
+fn a_poll_overtaken_by_a_correction_records_a_transient_failure_and_retries() {
+    use fusiform_core::{FieldId, LimitId};
+    use fusiform_store::correct::{apply_correction, plan_correction};
+    use serde_json::{json, Value};
+    use subc_protocol::session::HealthStatus;
+
+    let f = fixture();
+    f.signals.store_opened();
+    let source = SourceId::ModelsDev;
+    let provider = "anthropic";
+    let model = "claude-sonnet-4-5";
+    let document = |context| {
+        let mut doc: Value = serde_json::from_slice(FIXTURE).unwrap();
+        doc[provider]["models"][model]["limit"]["context"] = json!(context);
+        serde_json::to_vec(&doc).unwrap()
+    };
+    for (at, limit) in [(1_000, 10_000), (2_000, 99_000), (4_000, 10_000)] {
+        assert!(matches!(
+            run(&f, body(&document(limit), None), at).outcome,
+            TickOutcome::Changed { .. }
+        ));
+    }
+    let correction = plan_correction(
+        &f.store,
+        source,
+        provider,
+        model,
+        &[FieldId::Limit {
+            limit: LimitId::Context,
+        }],
+        Timestamp(2_000),
+        Timestamp(3_999),
+        "wrong context limit",
+        Timestamp(5_000),
+    )
+    .unwrap()
+    .unwrap();
+    apply_correction(&f.store, source, &correction, Timestamp(5_000)).unwrap();
+    let version = f.store.catalog_version().unwrap();
+    let updated = document(20_000);
+    let report = run(&f, body(&updated, Some("overtaken")), 4_500);
+    assert_eq!(
+        report.outcome,
+        TickOutcome::Failed {
+            class: FailureClass::Transient
+        }
+    );
+    let observation = f
+        .store
+        .recent_observations(source, 5)
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == report.observation_id)
+        .unwrap();
+    assert_eq!(observation.outcome, "failed");
+    assert_eq!(
+        observation.failure_class.as_deref(),
+        Some("transient"),
+        "a correction overtaking a poll is not an implausible document or clock fault"
+    );
+    let detail = observation.detail.unwrap();
+    assert!(
+        detail.contains("correction") && detail.contains("5000"),
+        "{detail}"
+    );
+    assert_eq!(report.eras_written, 0);
+    assert_eq!(f.store.catalog_version().unwrap(), version);
+    assert_ne!(
+        f.store.last_etag(source).unwrap().as_deref(),
+        Some("overtaken")
+    );
+    let health = health::report(&f.signals, 4_500);
+    assert_eq!(health.status, HealthStatus::Ok);
+    assert_eq!(health.metrics.unwrap()["last_failure_class"], "transient");
+    let status = fusiform_module::route::serve_status(&f.store, b"{}").unwrap();
+    assert_eq!(
+        status.failures.unwrap().last_class.as_deref(),
+        Some("transient")
+    );
+    let poll = status
+        .recent_polls
+        .iter()
+        .find(|poll| poll.observed_at_ms == 4_500)
+        .unwrap();
+    assert_eq!(poll.failure_class.as_deref(), Some("transient"));
+
+    // If an ordinary observation also blocks the write, it is not just the
+    // correction that overtook the poll.
+    assert_eq!(
+        run(&f, body(&updated, None), 4_000).outcome,
+        TickOutcome::Failed {
+            class: FailureClass::Implausible
+        }
+    );
+
+    let retry = run(&f, body(&updated, Some("retry")), 5_001);
+    assert!(matches!(retry.outcome, TickOutcome::Changed { .. }));
+    let era = f
+        .store
+        .recorded_value_at(
+            source,
+            provider,
+            model,
+            &fusiform_store::FactKey::limit("context"),
+            Timestamp(5_001),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(era.value_json, "20000");
+}
+
+#[test]
 fn a_different_saved_digest_with_no_era_changes_does_not_advance_version() {
     use fusiform_core::ObservationOutcome;
     use fusiform_store::NewObservation;

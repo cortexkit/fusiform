@@ -350,6 +350,7 @@ fn describe_failure(signals: &Signals) -> &'static str {
         // believing it would have deleted most of the catalog. An operator
         // needs to look at the upstream, not at this module.
         Some(FailureClass::Implausible) => "upstream document dropped too much of the catalog",
+        Some(FailureClass::Transient) => "a local write was deferred until the next poll",
         // The streak is nonzero but no class is recorded, which this build
         // cannot produce. Reported as unknown rather than guessed: a wrong
         // cause sends an operator somewhere specific and wrong.
@@ -409,12 +410,7 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
         "last_failure_age_ms": last_failure_age,
         // Present so a machine reading health can branch on the cause without
         // parsing the detail sentence.
-        "last_failure_class": signals.last_failure_class().map(|c| match c {
-            FailureClass::Network => "network",
-            FailureClass::HttpStatus => "http_status",
-            FailureClass::Parse => "parse",
-            FailureClass::Implausible => "implausible",
-        }),
+        "last_failure_class": signals.last_failure_class().map(fusiform_store::failure_class_word),
         // Catalog history: adopted from the store at startup, so
         // these describe the catalog rather than the process reading it.
         "observation_age_ms": signals.observation_age_ms(now_ms),

@@ -2640,7 +2640,7 @@ pub struct FailureHistoryWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub polls_back: Option<i64>,
     /// What kind the most recent failure was: `network`, `http_status`,
-    /// `parse`, or `implausible`.
+    /// `parse`, `implausible`, or `transient`.
     ///
     /// # Why this is here as well as on health
     ///
@@ -2653,8 +2653,9 @@ pub struct FailureHistoryWire {
     ///
     /// The class is what decides where an operator looks. `network` sends them
     /// to the upstream, `parse` to the payload, and `implausible` to a safety
-    /// check that refused the fetched document. A count and an age alone
-    /// cannot identify the cause.
+    /// check that refused the fetched document. `transient` describes a local
+    /// condition that deferred the write to the next poll. A count and an age
+    /// alone cannot identify the cause.
     ///
     /// `None` when the stored word is one this build does not recognise, which
     /// reports no class rather than guessing one — a wrong cause sends an

@@ -78,7 +78,7 @@ One `observation` row is written per poll, whatever happened. Columns:
 | `source` | the upstream; `models.dev` is the only source |
 | `observed_at_ms` | when the poll happened |
 | `outcome` | `changed`, `unchanged`, `not_modified`, `failed` or `seeded` |
-| `failure_class` | set only for `failed`: `network`, `http_status`, `parse` or `implausible` |
+| `failure_class` | set only for `failed`: `network`, `http_status`, `parse`, `implausible` or `transient` |
 | `detail` | producer detail for diagnostics; consumers do not branch on it |
 | `normalized_hash` | hash of the normalized catalog; moves only when a served fact moves |
 | `raw_hash` | hash of the fetched bytes; moves when the upstream reformats |

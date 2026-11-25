@@ -172,6 +172,7 @@ timeout and records exactly one observation:
 | 200, changed content | `changed` | writes one era per changed fact, then advances the catalog version (`tick::the_version_advances_once_per_change`) |
 | network error, error status, unparseable body | `failed` with class `network`, `http_status` or `parse` | writes nothing else (`tick::a_failed_poll_records_the_attempt_and_nothing_more`) |
 | a document that drops too much of the catalog | `failed` with class `implausible` | writes nothing else (`shrink_guard::a_collapsed_document_is_refused_and_writes_nothing`) |
+| a correction is recorded while a changed poll is fetching | `failed` with class `transient` | leaves the correction in force and retries the change on the next tick |
 
 1. Every poll after the first sends the stored ETag as `If-None-Match`, verbatim
    (`conditional_get::a_stored_etag_is_sent_as_if_none_match`,

@@ -397,6 +397,16 @@ fn apply_with_count_reader(
                         Some(raw_hash),
                     );
                 }
+                Err(error @ fusiform_store::CatalogError::PollOvertakenByCorrection { .. }) => {
+                    return record_failure(
+                        ctx,
+                        FailureClass::Transient,
+                        error.to_string(),
+                        now_ms,
+                        duration,
+                        Some(raw_hash),
+                    );
+                }
                 Err(error) => return Err(TickError::Store(error)),
             };
             ctx.signals.observed(now_ms);
