@@ -6,10 +6,12 @@ use serde_json::{json, Value};
 /// Curated endpoints are their own documented claims, never provider defaults.
 /// Rows without a declaration must keep every wire fact absent.
 pub(crate) fn expected_curated_wire(model: &str) -> std::collections::BTreeMap<String, Value> {
-    // These transcription rows have sourced endpoints but no verified
-    // request-format token, so each declares an endpoint and no family.
+    // These transcription and realtime rows have sourced endpoints but no
+    // verified request-format token, so each declares an endpoint and no family.
     let endpoint_only = match model {
-        "openai/gpt-transcribe" | "openai/gpt-live-transcribe" => Some("https://api.openai.com/v1"),
+        "openai/gpt-transcribe" | "openai/gpt-live-transcribe" | "openai/gpt-realtime-2.1" => {
+            Some("https://api.openai.com/v1")
+        }
         "google/gemini-3.5-transcribe" | "google/gemini-3.5-transcribe-live" => {
             Some("https://generativelanguage.googleapis.com/v1beta")
         }
@@ -127,14 +129,45 @@ fn eleven_flash_serves_only_documented_character_billing() {
 }
 
 #[test]
+fn realtime_is_restored_on_a_fresh_store_without_an_upstream_row() {
+    let (store, _dir) = empty_store();
+    fusiform_module::seed::seed_if_empty(&store).unwrap();
+    let response = super::curated_wire::get(
+        &store,
+        json!({"provider_id":"openai","model_id":"gpt-realtime-2.1"}),
+    );
+    assert!(response.fact_overrides.is_empty());
+    assert_eq!(response.curated.len(), 1);
+    assert_eq!(response.curated[0].model, "openai/gpt-realtime-2.1");
+    assert_eq!(response.curated[0].auth_methods, ["apikey"]);
+    assert_eq!(
+        serde_json::to_value(&response.models["openai/gpt-realtime-2.1"]).unwrap(),
+        json!({
+            "existence":"present", "provider.name":"OpenAI", "model.name":"GPT-Realtime-2.1",
+            "model.type":"realtime", "model.canonical_id":"openai/gpt-realtime-2.1",
+            "model.lineage":"gpt", "capability.input_modalities":["audio","image","text"],
+            "capability.output_modalities":["audio","text"], "capability.attachment":true,
+            "capability.reasoning":true, "capability.tool_call":true,
+            "capability.structured_output":false, "capability.temperature":false,
+            "capability.reasoning_options":[{"type":"effort","values":["minimal","low","medium","high","xhigh"]}],
+            "limit.context":128000, "limit.output":32000, "limit.images_per_request":1500,
+            "rate.input":price(4_000_000_000,9), "rate.cache_read":price(400_000_000,9),
+            "rate.output":price(24_000_000_000,9), "rate.input_audio":price(32_000_000_000,9),
+            "rate.cached_input_audio":price(400_000_000,9), "rate.output_audio":price(64_000_000_000,9),
+            "wire.api":{"value":"https://api.openai.com/v1","from":"curated"}
+        })
+    );
+}
+
+#[test]
 fn output_audio_is_sourced_and_seeded() {
     let catalog = fusiform_module::seed::catalog().unwrap();
     let (store, _dir) = empty_store();
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     for (provider, model, units) in [
-        ("openai", "gpt-realtime-2.1", 64),
         ("google", "gemini-3.1-flash-live-preview", 12),
+        ("google", "gemini-3.5-live-translate-preview", 21),
     ] {
         let response = super::curated_wire::get(
             &store,
@@ -152,7 +185,7 @@ fn output_audio_is_sourced_and_seeded() {
     }
     for model in catalog
         .models()
-        .filter(|model| !["google", "openai"].contains(&model.key.provider_id.as_str()))
+        .filter(|model| model.key.provider_id != "google")
     {
         assert!(!model.rates.iter().any(|rate| rate.basis
             == ChargeBasis::PerMillionTokens {

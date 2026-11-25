@@ -201,6 +201,7 @@ mod tests {
         ("openai", "gpt-6-luna-decisions"),
         ("openai", "gpt-image-2.6-flare"),
         ("openai", "gpt-live-transcribe"),
+        ("openai", "gpt-realtime-2.1"),
         ("openai", "gpt-transcribe"),
         ("tavily", "search"),
         ("typesafe", "jev-1.13.0"),

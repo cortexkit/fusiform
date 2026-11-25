@@ -1688,111 +1688,6 @@
       "source": "models.dev"
     }
   },
-  "catalog.get — Realtime audio input from upstream": {
-    "request": {
-      "arguments": {
-        "fact_prefixes": [
-          "rate."
-        ],
-        "model_id": "gpt-realtime-2.1",
-        "provider_id": "openai"
-      },
-      "name": "catalog.get"
-    },
-    "response": {
-      "catalog_version": 0,
-      "fact_overrides": [
-        {
-          "established_at_ms": 1794528000000,
-          "established_by": "fusiform",
-          "fact_key": "rate.cached_input_audio",
-          "model": "openai/gpt-realtime-2.1",
-          "model_id": "gpt-realtime-2.1",
-          "notes": "USD per million cached audio input tokens; not rate.cache_read, which prices cached text. Only this exact provider/model row is covered.",
-          "provider_id": "openai",
-          "quote": "Realtime & Audio, columns Model | Modality | Input | Output | Cached input: | gpt-realtime-2.1 | Audio | $32.00 | $64.00 | $0.40 |. The model page's Audio tokens table: Cached input | $0.4 | 1M tokens",
-          "reason": "Cached audio input has its own token price, separate from cached text input. models.dev publishes no cached-audio rate, so the vendor's documented price is added only while upstream records no value for this role.",
-          "replaces": null,
-          "review_by_ms": 1799712000000,
-          "source_ref": "https://developers.openai.com/api/docs/pricing (accessed 2026-11-13); https://developers.openai.com/api/docs/models/gpt-realtime-2.1 (accessed 2026-11-13)",
-          "value": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 400000000
-          }
-        }
-      ],
-      "models": {
-        "openai/gpt-realtime-2.1": {
-          "rate.cache_read": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 400000000
-          },
-          "rate.cached_input_audio": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 400000000
-          },
-          "rate.input": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 4000000000
-          },
-          "rate.input_audio": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 32000000000
-          },
-          "rate.output": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 24000000000
-          },
-          "rate.output_audio": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 64000000000
-          }
-        }
-      },
-      "resolved_at_ms": -1,
-      "source": "models.dev"
-    }
-  },
   "catalog.get — a curated alias": {
     "request": {
       "arguments": {
@@ -4390,6 +4285,127 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — curated GPT-Realtime-2.1": {
+    "request": {
+      "arguments": {
+        "model_id": "gpt-realtime-2.1",
+        "provider_id": "openai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "curated": [
+        {
+          "auth_methods": [
+            "apikey"
+          ],
+          "model": "openai/gpt-realtime-2.1",
+          "review_by_ms": 1800748800000,
+          "source_ref": "Read 2026-11-25. https://developers.openai.com/api/docs/models/gpt-realtime-2.1: \"Input modalities: text, audio, image\"; \"Output modalities: text, audio\"; \"128,000 context window\"; \"32,000 max output tokens\"; \"Reasoning token support\"; \"GPT-Realtime-2.1 supports configurable reasoning effort\"; Text tokens \"Input | $4\", \"Cached input | $0.4\", \"Output | $24\"; Audio tokens \"Input | $32\", \"Cached input | $0.4\", \"Output | $64\" (per 1M tokens). Curated because models.dev made its realtime models v2-only on 2026-11-23 (commit f52df4a220, \"make gpt-realtime-2.1 v2-only like the other realtime models\"), so the v1 catalog fusiform reads no longer lists it. Effort values and structured_output false are the last models.dev values, which its v2 file still states. Image-token rates ($5, cached $0.50) are not served: no image-token rate role exists. Same OpenAI v1 API base as the other curated OpenAI rows; no unverified wire.family is served."
+        }
+      ],
+      "models": {
+        "openai/gpt-realtime-2.1": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "audio",
+            "image",
+            "text"
+          ],
+          "capability.output_modalities": [
+            "audio",
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ]
+            }
+          ],
+          "capability.structured_output": false,
+          "capability.temperature": false,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 128000,
+          "limit.images_per_request": 1500,
+          "limit.output": 32000,
+          "model.canonical_id": "openai/gpt-realtime-2.1",
+          "model.lineage": "gpt",
+          "model.name": "GPT-Realtime-2.1",
+          "model.type": "realtime",
+          "provider.name": "OpenAI",
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "stated"
+            },
+            "units": 400000000
+          },
+          "rate.cached_input_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "stated"
+            },
+            "units": 400000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "stated"
+            },
+            "units": 4000000000
+          },
+          "rate.input_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "stated"
+            },
+            "units": 32000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "stated"
+            },
+            "units": 24000000000
+          },
+          "rate.output_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "stated"
+            },
+            "units": 64000000000
+          },
+          "wire.api": {
+            "from": "curated",
+            "value": "https://api.openai.com/v1"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — curated search engines": {
     "request": [
       {
@@ -5661,7 +5677,7 @@
           "limit.context": 1000000,
           "limit.output": 131072,
           "model.canonical_id": "minimax/MiniMax-M3",
-          "model.family": "minimax-m3",
+          "model.family": "minimax-m",
           "model.lineage": "minimax",
           "model.name": "MiniMax-M3",
           "model.open_weights": true,
@@ -5971,7 +5987,7 @@
           "limit.context": 1048576,
           "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3",
-          "model.family": "kimi-k3",
+          "model.family": "kimi",
           "model.lineage": "kimi",
           "model.name": "Kimi K3.1 Pro",
           "model.open_weights": true,
@@ -6082,7 +6098,7 @@
           "limit.context": 204800,
           "limit.output": 131072,
           "model.canonical_id": "minimax/MiniMax-M2.7",
-          "model.family": "minimax",
+          "model.family": "minimax-m",
           "model.lineage": "minimax",
           "model.name": "MiniMax-M2.7",
           "model.open_weights": true,
@@ -7004,7 +7020,7 @@
           "limit.context": 1048576,
           "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3.1-pro",
-          "model.family": "kimi-k3",
+          "model.family": "kimi-pro",
           "model.lineage": "kimi",
           "model.name": "Kimi K3.1 Pro",
           "model.open_weights": true,
@@ -7017,7 +7033,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi-pro",
               "model_id": "kimi-k3.1-pro",
               "provider_id": "moonshotai"
             },
@@ -7033,7 +7049,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi-pro",
               "model_id": "kimi-k3.1-pro-highspeed",
               "provider_id": "moonshotai"
             },
@@ -7049,7 +7065,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi-pro",
               "model_id": "kimi-k3.1-pro",
               "provider_id": "moonshotai"
             },
@@ -7065,7 +7081,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi-pro",
               "model_id": "kimi-k3.1-pro-highspeed",
               "provider_id": "moonshotai"
             },
@@ -7081,7 +7097,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi-pro",
               "model_id": "kimi-k3.1-pro",
               "provider_id": "moonshotai"
             },
@@ -7097,7 +7113,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi-pro",
               "model_id": "kimi-k3.1-pro-highspeed",
               "provider_id": "moonshotai"
             },
@@ -7113,7 +7129,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi-pro",
               "model_id": "kimi-k3.1-pro",
               "provider_id": "moonshotai"
             },
@@ -7129,7 +7145,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi-pro",
               "model_id": "kimi-k3.1-pro-highspeed",
               "provider_id": "moonshotai"
             },
@@ -7221,7 +7237,7 @@
           "limit.context": 1048576,
           "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3.1-pro",
-          "model.family": "kimi-k3",
+          "model.family": "kimi-pro",
           "model.lineage": "kimi",
           "model.name": "Kimi K3.1 Pro",
           "model.open_weights": true,
@@ -7328,7 +7344,7 @@
           "limit.context": 1048576,
           "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3.1-pro",
-          "model.family": "kimi-k3",
+          "model.family": "kimi-pro",
           "model.lineage": "kimi",
           "model.mode_of": {
             "mode": "fast",
@@ -7345,7 +7361,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi-pro",
               "model_id": "kimi-k3.1-pro-highspeed",
               "provider_id": "moonshotai"
             },
@@ -7361,7 +7377,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi-pro",
               "model_id": "kimi-k3.1-pro-highspeed",
               "provider_id": "moonshotai"
             },
@@ -7377,7 +7393,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi-pro",
               "model_id": "kimi-k3.1-pro-highspeed",
               "provider_id": "moonshotai"
             },
@@ -7393,7 +7409,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi-pro",
               "model_id": "kimi-k3.1-pro-highspeed",
               "provider_id": "moonshotai"
             },
@@ -7479,7 +7495,7 @@
           "limit.context": 1048576,
           "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3.1-pro",
-          "model.family": "kimi-k3",
+          "model.family": "kimi-pro",
           "model.lineage": "kimi",
           "model.mode_of": {
             "mode": "fast",
@@ -7595,7 +7611,7 @@
           "limit.context": 1048576,
           "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3.1-pro",
-          "model.family": "kimi-k3",
+          "model.family": "kimi-pro",
           "model.lineage": "kimi",
           "model.name": "Kimi K3.1 Pro",
           "model.open_weights": true,
@@ -7757,7 +7773,7 @@
           "limit.context": 1048576,
           "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3.1-pro",
-          "model.family": "kimi-k3",
+          "model.family": "kimi-pro",
           "model.lineage": "kimi",
           "model.mode_of": {
             "mode": "fast",
@@ -8767,9 +8783,9 @@
   "catalog.history — historical rate keys": {
     "request": {
       "arguments": {
-        "fact_prefix": "rate.cached_",
-        "model_id": "gpt-realtime-2.1",
-        "provider_id": "openai",
+        "fact_prefix": "rate.output",
+        "model_id": "gemini-3.1-flash-image",
+        "provider_id": "google",
         "served": true
       },
       "name": "catalog.history"
@@ -8777,23 +8793,44 @@
     "response": {
       "eras": [],
       "fact_keys": [
-        "rate.cached_input_audio"
+        "rate.output",
+        "rate.output_image"
       ],
-      "fact_prefix": "rate.cached_",
-      "model_id": "gpt-realtime-2.1",
-      "provider_id": "openai",
+      "fact_prefix": "rate.output",
+      "model_id": "gemini-3.1-flash-image",
+      "provider_id": "google",
       "served_by_key": {
-        "rate.cached_input_audio": [
+        "rate.output": [
           {
             "from_ms": 1000,
-            "state": "absent",
-            "until_ms": 1794528000000
+            "source": "upstream",
+            "state": "value",
+            "until_ms": 1794268800000,
+            "value": {
+              "currency": "USD",
+              "exponent": 9,
+              "state": "priced",
+              "unit_provenance": {
+                "kind": "assumed_by_policy",
+                "policy": "models-dev-usd-v1"
+              },
+              "units": 60000000000
+            }
           },
           {
-            "from_ms": 1794528000000,
+            "from_ms": 1794268800000,
             "override": {
-              "replaces": null,
-              "source_ref": "https://developers.openai.com/api/docs/pricing (accessed 2026-11-13); https://developers.openai.com/api/docs/models/gpt-realtime-2.1 (accessed 2026-11-13)"
+              "replaces": {
+                "currency": "USD",
+                "exponent": 9,
+                "state": "priced",
+                "unit_provenance": {
+                  "kind": "assumed_by_policy",
+                  "policy": "models-dev-usd-v1"
+                },
+                "units": 60000000000
+              },
+              "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)"
             },
             "source": "override",
             "state": "value",
@@ -8805,7 +8842,33 @@
               "unit_provenance": {
                 "kind": "stated"
               },
-              "units": 400000000
+              "units": 3000000000
+            }
+          }
+        ],
+        "rate.output_image": [
+          {
+            "from_ms": 1000,
+            "state": "absent",
+            "until_ms": 1794268800000
+          },
+          {
+            "from_ms": 1794268800000,
+            "override": {
+              "replaces": null,
+              "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)"
+            },
+            "source": "override",
+            "state": "value",
+            "until_ms": null,
+            "value": {
+              "currency": "USD",
+              "exponent": 9,
+              "state": "priced",
+              "unit_provenance": {
+                "kind": "stated"
+              },
+              "units": 60000000000
             }
           }
         ]
@@ -8898,29 +8961,29 @@
   "catalog.history — served override addition": {
     "request": {
       "arguments": {
-        "fact_key": "rate.cached_input_audio",
-        "model_id": "gpt-realtime-2.1",
-        "provider_id": "openai",
+        "fact_key": "rate.output_image",
+        "model_id": "gemini-3.1-flash-image",
+        "provider_id": "google",
         "served": true
       },
       "name": "catalog.history"
     },
     "response": {
       "eras": [],
-      "fact_key": "rate.cached_input_audio",
-      "model_id": "gpt-realtime-2.1",
-      "provider_id": "openai",
+      "fact_key": "rate.output_image",
+      "model_id": "gemini-3.1-flash-image",
+      "provider_id": "google",
       "served": [
         {
           "from_ms": 1000,
           "state": "absent",
-          "until_ms": 1794528000000
+          "until_ms": 1794268800000
         },
         {
-          "from_ms": 1794528000000,
+          "from_ms": 1794268800000,
           "override": {
             "replaces": null,
-            "source_ref": "https://developers.openai.com/api/docs/pricing (accessed 2026-11-13); https://developers.openai.com/api/docs/models/gpt-realtime-2.1 (accessed 2026-11-13)"
+            "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)"
           },
           "source": "override",
           "state": "value",
@@ -8932,7 +8995,7 @@
             "unit_provenance": {
               "kind": "stated"
             },
-            "units": 400000000
+            "units": 60000000000
           }
         }
       ],
@@ -11053,7 +11116,7 @@
           "limit.context": 1048576,
           "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3",
-          "model.family": "kimi-k3",
+          "model.family": "kimi",
           "model.lineage": "kimi",
           "model.name": "Kimi K3",
           "model.open_weights": true,
@@ -11067,7 +11130,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11083,7 +11146,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11099,7 +11162,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11115,7 +11178,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11164,7 +11227,7 @@
           "limit.context": 262144,
           "limit.output": 262144,
           "model.canonical_id": "moonshotai/kimi-k3",
-          "model.family": "kimi-k3",
+          "model.family": "kimi",
           "model.lineage": "kimi",
           "model.name": "Kimi K3-256K",
           "model.open_weights": true,
@@ -11178,7 +11241,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11194,7 +11257,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11210,7 +11273,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11226,7 +11289,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11275,7 +11338,7 @@
           "limit.context": 1048576,
           "limit.output": 32768,
           "model.canonical_id": "moonshotai/kimi-k2.8-preview",
-          "model.family": "kimi-k2",
+          "model.family": "kimi",
           "model.lineage": "kimi",
           "model.name": "kimi-for-coding",
           "model.open_weights": false,
@@ -11331,7 +11394,7 @@
           "limit.context": 262144,
           "limit.output": 32768,
           "model.canonical_id": "moonshotai/kimi-k2.7-code-highspeed",
-          "model.family": "kimi-k2",
+          "model.family": "kimi-code",
           "model.lineage": "kimi",
           "model.name": "Kimi For Coding HighSpeed",
           "model.open_weights": true,
@@ -11342,7 +11405,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k2",
+              "family": "kimi-code",
               "model_id": "kimi-k2.7-code-highspeed",
               "provider_id": "moonshotai"
             },
@@ -11358,7 +11421,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k2",
+              "family": "kimi-code",
               "model_id": "kimi-k2.7-code-highspeed",
               "provider_id": "moonshotai"
             },
@@ -11374,7 +11437,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k2",
+              "family": "kimi-code",
               "model_id": "kimi-k2.7-code-highspeed",
               "provider_id": "moonshotai"
             },
@@ -11432,7 +11495,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11448,7 +11511,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11464,7 +11527,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11480,7 +11543,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11525,7 +11588,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11541,7 +11604,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11557,7 +11620,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11573,7 +11636,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k3",
+              "family": "kimi",
               "model_id": "kimi-k3",
               "provider_id": "moonshotai"
             },
@@ -11667,7 +11730,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k2",
+              "family": "kimi-code",
               "model_id": "kimi-k2.7-code-highspeed",
               "provider_id": "moonshotai"
             },
@@ -11683,7 +11746,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k2",
+              "family": "kimi-code",
               "model_id": "kimi-k2.7-code-highspeed",
               "provider_id": "moonshotai"
             },
@@ -11699,7 +11762,7 @@
             "exponent": 9,
             "inherited_from": {
               "basis": "quota_proxy",
-              "family": "kimi-k2",
+              "family": "kimi-code",
               "model_id": "kimi-k2.7-code-highspeed",
               "provider_id": "moonshotai"
             },
@@ -11762,7 +11825,7 @@
           "limit.context": 1048576,
           "limit.output": 1048576,
           "model.canonical_id": "moonshotai/kimi-k3",
-          "model.family": "kimi-k3",
+          "model.family": "kimi",
           "model.lineage": "kimi",
           "model.name": "Kimi K3",
           "model.open_weights": true,
@@ -11821,7 +11884,7 @@
           "limit.context": 262144,
           "limit.output": 262144,
           "model.canonical_id": "moonshotai/kimi-k3",
-          "model.family": "kimi-k3",
+          "model.family": "kimi",
           "model.lineage": "kimi",
           "model.name": "Kimi K3-256K",
           "model.open_weights": true,
@@ -11880,7 +11943,7 @@
           "limit.context": 1048576,
           "limit.output": 32768,
           "model.canonical_id": "moonshotai/kimi-k2.8-preview",
-          "model.family": "kimi-k2",
+          "model.family": "kimi",
           "model.lineage": "kimi",
           "model.name": "kimi-for-coding",
           "model.open_weights": false,
@@ -11928,7 +11991,7 @@
           "limit.context": 262144,
           "limit.output": 32768,
           "model.canonical_id": "moonshotai/kimi-k2.7-code-highspeed",
-          "model.family": "kimi-k2",
+          "model.family": "kimi-code",
           "model.lineage": "kimi",
           "model.name": "Kimi For Coding HighSpeed",
           "model.open_weights": true,

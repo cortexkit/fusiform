@@ -184,7 +184,7 @@ mod tests {
     fn shipped_overrides_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 104);
+        assert_eq!(rows.len(), 103);
         let row = argon();
         assert_eq!(row.value, json!(65_536));
         assert_eq!(row.replaces, json!(32_768));
@@ -493,7 +493,23 @@ mod tests {
 
     #[test]
     fn malformed_addition_rows_are_rejected() {
+        let doc = document();
         for key in ADDED_FACTS {
+            let example_key = if key == "rate.cached_input_audio" {
+                "rate.output_image"
+            } else {
+                key
+            };
+            let mut example = doc["overrides"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["fact_key"] == example_key)
+                .unwrap()
+                .clone();
+            example["fact_key"] = json!(key);
+            let (_, rejects) = load_reporting_rejects(&json!({"overrides": [example]}).to_string());
+            assert!(rejects.is_empty(), "{key}: {rejects:?}");
             for (field, value, reason) in [
                 ("value", json!(null), "must be a boolean"),
                 ("value", json!("true"), "must be a boolean"),
@@ -504,14 +520,7 @@ mod tests {
                 ("source_ref", json!(" "), "empty identity"),
                 ("review_by_ms", json!(1), "review_by_ms"),
             ] {
-                let doc = document();
-                let mut row = doc["overrides"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .find(|row| row["fact_key"] == key)
-                    .unwrap()
-                    .clone();
+                let mut row = example.clone();
                 // A route names a model id, so the string case is a valid
                 // value there; a blank id is the malformed string instead.
                 let value = if key.starts_with("route.") && value.is_string() {

@@ -29,7 +29,7 @@ mod tests {
         assert!(rejects.is_empty(), "{rejects:?}");
         assert_eq!(
             rows.keys().map(String::as_str).collect::<Vec<_>>(),
-            ["google", "openai"]
+            ["google"]
         );
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

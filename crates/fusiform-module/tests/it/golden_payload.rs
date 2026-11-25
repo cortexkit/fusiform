@@ -523,7 +523,7 @@ fn render_all() -> String {
         .unwrap()
         .extend(render_login_methods());
     ordinary.as_object_mut().unwrap().insert(
-        "catalog.get — Realtime audio input from upstream".into(),
+        "catalog.get — curated GPT-Realtime-2.1".into(),
         render_realtime_audio(),
     );
     ordinary.as_object_mut().unwrap().insert(
@@ -1125,9 +1125,11 @@ fn render_search_engines() -> serde_json::Value {
 
 fn render_realtime_audio() -> serde_json::Value {
     let request = serde_json::json!({"name":"catalog.get", "arguments":{
-        "provider_id":"openai", "model_id":"gpt-realtime-2.1", "fact_prefixes":["rate."]
+        "provider_id":"openai", "model_id":"gpt-realtime-2.1"
     }});
-    let mut response = super::input_audio_rates::realtime_audio_response();
+    let (store, _dir) = super::cache_lifetimes::store(None);
+    let response = serve_tool_call(&store, &serde_json::to_vec(&request).unwrap()).unwrap();
+    let mut response = serde_json::to_value(response).unwrap();
     response["resolved_at_ms"] = serde_json::json!(NOW_PLACEHOLDER);
     serde_json::json!({"request":request, "response":response})
 }
@@ -3056,16 +3058,10 @@ const NOW_PLACEHOLDER: i64 = -1;
 
 #[test]
 fn served_history_override_addition_tracks_dated_get() {
-    let (store, _dir) = super::cache_lifetimes::store(None);
-    fusiform_module::fact_overrides::apply_to_store(
-        &store,
-        fusiform_module::fact_overrides::overrides(),
-        1_800_000_000_000,
-    )
-    .unwrap();
+    let (store, _dir) = super::fact_overrides::historical_flash_store();
     let response = serve_tool_call(
         &store,
-        br#"{"name":"catalog.history","arguments":{"provider_id":"openai","model_id":"gpt-realtime-2.1","fact_key":"rate.cached_input_audio","served":true}}"#,
+        br#"{"name":"catalog.history","arguments":{"provider_id":"google","model_id":"gemini-3.1-flash-image","fact_key":"rate.output_image","served":true}}"#,
     )
     .expect("served history accepts the dated-read selector");
     let response = serde_json::to_value(response).unwrap();
@@ -3080,14 +3076,14 @@ fn served_history_override_addition_tracks_dated_get() {
     let dated = fusiform_module::route::serve_catalog_get(
         &store,
         &serde_json::to_vec(&serde_json::json!({
-            "provider_id":"openai", "model_id":"gpt-realtime-2.1", "at_ms":at
+            "provider_id":"google", "model_id":"gemini-3.1-flash-image", "at_ms":at
         }))
         .unwrap(),
     )
     .unwrap();
     assert_eq!(
         last["value"],
-        dated.models["openai/gpt-realtime-2.1"]["rate.cached_input_audio"]
+        dated.models["google/gemini-3.1-flash-image"]["rate.output_image"]
     );
 }
 

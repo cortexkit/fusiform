@@ -35,7 +35,14 @@ mod tests {
 
     #[test]
     fn included_models_are_exact_nonempty_and_exclusive() {
-        let openai = document()["providers"][1].clone();
+        let openai = json!({
+            "provider_id": "openai",
+            "included_models": ["gpt-realtime-2.1"],
+            "source_ref": "https://example.org/audio-pricing",
+            "quote": "Audio input: USD 32 per million tokens",
+            "established_at_ms": 1794528000000_i64,
+            "review_by_ms": 1799712000000_i64
+        });
         let load = |row: serde_json::Value| {
             load_reporting_rejects(&json!({"schema":SCHEMA, "providers":[row]}).to_string())
         };
@@ -72,26 +79,10 @@ mod tests {
         let (rows, rejects) = load(row);
         assert!(rejects.is_empty());
         let unused = unused_rows(&rows, &seed());
-        assert_eq!(unused.len(), 1, "{unused:?}");
+        assert_eq!(unused.len(), 2, "{unused:?}");
         assert!(unused[0].starts_with("openai/not-in-the-embedded-seed:"));
         assert!(unused[0].contains("correct or remove the inclusion"));
-    }
-
-    #[test]
-    fn realtime_audio_source_matches_the_embedded_price() {
-        let row = &sources()["openai"];
-        assert_eq!(
-            row.included_models.as_deref(),
-            Some(["gpt-realtime-2.1".to_string()].as_slice())
-        );
-        assert!(row
-            .quote
-            .contains("gpt-realtime-2.1 | Audio | $32.00 | $64.00 | $0.40"));
-        assert!(row.quote.contains("Input | $32 | 1M tokens"));
-        assert_eq!(
-            seed()["openai"]["models"]["gpt-realtime-2.1"]["cost"]["input_audio"],
-            json!(32)
-        );
+        assert!(unused[1].starts_with("openai: no row"));
     }
 
     #[test]
@@ -101,7 +92,7 @@ mod tests {
         assert!(!rows.is_empty());
         assert!(rows.contains_key("google"));
         assert!(evidence().bills_input_audio_per_token("google", "gemini-3.8-flash"));
-        assert!(!evidence().bills_input_audio_per_token("google", "gemini-3.1-flash-lite-preview"));
+        assert!(!evidence().bills_input_audio_per_token("openai", "gpt-realtime-2.1"));
         assert!(!evidence().bills_input_audio_per_token("google-vertex", "gemini-3.8-flash"));
         assert_eq!(
             rows["google"]
@@ -228,13 +219,18 @@ mod tests {
     #[test]
     fn planted_stale_exclusion_is_named() {
         let mut seed = seed();
-        let row = &sources()["google"];
-        let excluded = &row.excluded_models[0].model_id;
+        let mut doc = document();
+        let excluded = "gemini-3.8-flash";
+        doc["providers"][0]["excluded_models"] =
+            json!([{"model_id": excluded, "reason": "Not in the fixture pricing table"}]);
+        let (rows, rejects) = load_reporting_rejects(&doc.to_string());
+        assert!(rejects.is_empty(), "{rejects:?}");
+        assert!(unused_rows(&rows, &seed).is_empty());
         seed["google"]["models"][excluded]["cost"]
             .as_object_mut()
             .unwrap()
             .remove("input_audio");
-        let unused = unused_rows(sources(), &seed);
+        let unused = unused_rows(&rows, &seed);
         assert_eq!(unused.len(), 1, "{unused:?}");
         assert!(unused[0].starts_with(&format!("google/{excluded}:")));
         assert!(unused[0].contains("remove the exclusion"));
@@ -318,8 +314,7 @@ mod tests {
             }
         }
         let unused = unused_rows(sources(), &seed);
-        // Stripping every audio key also strands the provider's exclusions,
-        // which are reported on their own lines.
+        // Missing model-level evidence is reported separately from the provider.
         let provider_level: Vec<_> = unused
             .iter()
             .filter(|line| line.starts_with(&format!("{provider}:")))
