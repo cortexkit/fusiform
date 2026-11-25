@@ -172,13 +172,17 @@ pub(crate) fn needs_catalog_permit(body: &[u8]) -> bool {
                 .get("model_id")
                 .and_then(serde_json::Value::as_str)
                 .is_none(),
-            // These tools count or validate the affected rows against a whole
-            // served catalog, including for a dry run.
+            // Catalog keys count or validate affected rows, even on a dry run.
+            // A local engine key does not join any catalog row.
             TOOL_QUALITY_DECOMMISSION
             | TOOL_QUALITY_RESTORE
             | TOOL_QUALITY_GRADE
             | TOOL_QUALITY_WITHDRAW
-            | fusiform_protocol::TOOL_QUALITY_WORKLOAD => true,
+            | fusiform_protocol::TOOL_QUALITY_WORKLOAD => !call
+                .arguments
+                .get("model")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|model| model.starts_with("local:")),
             _ => false,
         }
     })

@@ -94,6 +94,59 @@ fn store_mode_effort_write_reports_the_recorded_grader() {
 }
 
 #[test]
+fn operator_preview_keeps_key_resolution_without_loading_judgments() {
+    let (store, _dir) = fixture(true);
+    let checks = [
+        (
+            "quality.decommission",
+            json!({"model":"lab/shared","reason":"fixture"}),
+            json!([
+                "google/antigravity-gemini-4-argon",
+                "google/gemini-4-argon",
+                "reseller/shared"
+            ]),
+        ),
+        (
+            "quality.restore",
+            json!({"model":"reseller/own","reason":"fixture"}),
+            json!(["reseller/own"]),
+        ),
+        (
+            "quality.grade",
+            json!({"model":"reseller/own","elo":1200,"eq":900,"reason":"fixture"}),
+            json!(["reseller/own"]),
+        ),
+        (
+            "quality.grade",
+            json!({"model":"local:fixture/stt","kind":"transcription","grade":42,"reason":"fixture"}),
+            json!([]),
+        ),
+    ];
+    let mut actual = Vec::new();
+    for (name, arguments, affected) in checks {
+        let local = arguments["model"].as_str().unwrap().starts_with("local:");
+        let body = serde_json::to_vec(&json!({"name":name,"arguments":arguments})).unwrap();
+        paging_tests::PUBLISHED_QUALITY_READS.with(|count| count.set(0));
+        let preview = serde_json::to_value(serve_tool_call(&store, &body).unwrap()).unwrap();
+        assert_eq!(preview["dry_run"], true);
+        assert_eq!(preview["affected_ids"], affected, "{name} {arguments}");
+        assert_eq!(
+            preview["affected_count"],
+            affected.as_array().unwrap().len()
+        );
+        actual.push((
+            needs_catalog_permit(&body) != local,
+            paging_tests::PUBLISHED_QUALITY_READS.with(std::cell::Cell::get),
+        ));
+    }
+    assert_eq!(
+        actual,
+        [(true, 0); 4],
+        "previews rendered unrelated judgments or took the catalog permit for a local key"
+    );
+}
+
+#[test]
 fn effort_curation_is_row_gated_and_dated() {
     let (store, _dir) = fixture(true);
     for (provider, model, efforts) in [

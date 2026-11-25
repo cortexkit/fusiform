@@ -9,6 +9,19 @@ use fusiform_protocol::{
 };
 use fusiform_store::{QualityGrade, QualityGradeEra};
 
+/// Read all identities and only the facts used to resolve a judgment target.
+/// Only the affected IDs and count go on the wire, so this read has no size limit.
+pub(super) fn judgment_targets(store: &CatalogStore) -> Result<CatalogGetResponse, RouteError> {
+    serve_catalog_get_with_limits(
+        store,
+        br#"{"fact_prefixes":["model.canonical_id","model.type","model.kind",
+            "capability.input_modalities","capability.output_modalities",
+            "capability.reasoning_options","existence"]}"#,
+        usize::MAX,
+        usize::MAX,
+    )
+}
+
 fn local_key(model: &str) -> Result<bool, RouteError> {
     let Some(key) = model.strip_prefix("local:") else {
         return Ok(false);
@@ -123,8 +136,7 @@ pub(super) fn mark(
     if request.reason.trim().is_empty() {
         return Err(RouteError::bad_request("reason must not be empty"));
     }
-    // Count all served identities, independent of the public reply frame budget.
-    let catalog = serve_catalog_get_with_limits(store, b"{}", usize::MAX, usize::MAX)?;
+    let catalog = judgment_targets(store)?;
     let affected: Vec<_> = catalog
         .models
         .iter()
@@ -467,17 +479,10 @@ fn write(
             message: format!("no current quality grade for {model:?}"),
         });
     }
-    // Operator previews need the full served identity set, not the public reply
-    // frame budget. Nothing from this read is returned except ten row ids.
     let catalog = if local {
         None
     } else {
-        Some(serve_catalog_get_with_limits(
-            store,
-            b"{}",
-            usize::MAX,
-            usize::MAX,
-        )?)
+        Some(judgment_targets(store)?)
     };
     let mut affected: Vec<_> = catalog
         .as_ref()
@@ -513,7 +518,7 @@ fn write(
     } else if !withdraw && !local {
         let catalog = catalog.as_ref().expect("catalog keys resolve current rows");
         if let Some(effort) = &graded_effort {
-            super::quality_efforts::require_effort(catalog, &affected, effort)?;
+            super::quality_efforts::require_effort(&catalog.models, &affected, effort)?;
         }
         if affected.iter().any(|id| {
             catalog.models[id]
