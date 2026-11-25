@@ -88,8 +88,9 @@ instant; current reads keep using the compiled rules.
     diffed into their own append-only tables on every boot. A point-in-time read serves their claims
     in force at its instant; an override's upstream guard uses the upstream
     value stored at that same instant. Current reads keep using the compiled
-    files ([`data-model.md`](data-model.md) §7a, §7c, §7d). Operator quality grades
-    have their own store history but are omitted from catalog `at_ms` reads.
+    files ([`data-model.md`](data-model.md) §7a, §7c, §7d). Catalog `at_ms` reads
+    also use the quality judgments in force at the requested instant
+    ([`wire-contract.md`](wire-contract.md) §5.9).
 7. **Refuse rather than answer wrongly.** An unknown provider, an instant
    before the record begins, an undeclared billing plane, and a store that
    cannot be read are refusals with distinct codes, never an empty catalog

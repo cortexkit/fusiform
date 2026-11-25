@@ -13,15 +13,17 @@ are in `crates/fusiform-module/src/plan_prices.rs` unless another file is named.
 
 ## 1. Request and response
 
-Request: optional `provider_id`, a models.dev provider slug. Absent means every
-provider.
+Request: optional `provider_id`, a provider slug. Absent means every provider.
+In store mode, optional `at_ms` selects the rows in force at that instant (Unix
+milliseconds). Without `at_ms`, the tool reads the current rows. See
+[`module-surface.md`](module-surface.md) for source mode configuration.
 
 Response:
 
 | Field | Meaning |
 | --- | --- |
-| `prices` | every row in force now, refusals included |
-| `resolved_at_ms` | the instant the answer describes; always the current time |
+| `prices` | selected rows in force at `resolved_at_ms`, refusals included |
+| `resolved_at_ms` | the requested `at_ms`, or the current time if omitted |
 | `tier_vocabulary` | a statement of what the `tier` strings name (§3) |
 | `unit_policy` | a statement of what the prices are quoted on (§4) |
 
@@ -53,8 +55,9 @@ Rules:
    (`route::an_uncurated_provider_is_refused_rather_than_empty`).
 4. Rows serve with their provenance
    (`route::plan_prices_serves_rows_with_their_provenance`).
-5. Reads are current-only; there is no `at_ms`. The store keeps the history so
-   a past price can be established, but the tool does not serve it.
+5. In store mode, a dated read returns the price and plan metadata in force
+   at `at_ms`. In models.dev mode, reads are current-only; supplying `at_ms`
+   returns `bad_request`.
 
 ## 2. Matching a tier
 
