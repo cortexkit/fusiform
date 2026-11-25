@@ -920,17 +920,18 @@ fn render_login_methods() -> serde_json::Map<String, serde_json::Value> {
 fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
     let mut cases = serde_json::Map::new();
     let (store, _dir) = super::curated_wire::store();
-    let media = [
+    let v2_rows = [
         ("openai", "gpt-image-2.6-flare"),
         ("google", "gemini-omni-1.2-flash"),
         ("google", "gemini-3.8-flash-tts"),
         ("elevenlabs", "eleven_flash_v2_5"),
+        ("opencode-go", "hy4-flash-free"),
         ("openai", "gpt-transcribe"),
         ("openai", "gpt-live-transcribe"),
         ("google", "gemini-3.5-transcribe-live"),
         ("google", "gemini-3.1-flash-image"),
     ];
-    let (v2, _v2_dir) = super::media_catalog::v2_seed_store(&media);
+    let (v2, _v2_dir) = super::media_catalog::v2_seed_store(&v2_rows);
     for (label, arguments) in [
         (
             "catalog.get — GPT Image Flare",
@@ -977,22 +978,20 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
             serde_json::json!({"provider_id":"openai","model_id":"gpt-6.1-sol"}),
         ),
         (
-            "catalog.get — pi corrected endpoint",
+            "catalog.get — per-model Go Claude endpoint",
             serde_json::json!({"provider_id":"opencode-go","model_id":"claude-haiku-5-5"}),
         ),
         (
-            "catalog.get — pi Anthropic effective endpoint",
+            "catalog.get — per-model Go Anthropic endpoint (MiniMax M3)",
             serde_json::json!({"provider_id":"opencode-go","model_id":"minimax-m3"}),
         ),
         (
-            "catalog.get — pi withheld endpoint",
+            "catalog.get — per-model Go MiniMax M2.7 endpoint",
             serde_json::json!({"provider_id":"opencode-go","model_id":"minimax-m2.7"}),
         ),
         (
-            // Synthetic: the embedded seed predates this model, so the store
-            // carries a stand-in with its own observed endpoint.
-            "catalog.get — pi unrouted new model",
-            serde_json::json!({"provider_id":"opencode-go","model_id":"kimi-k3.1-pro"}),
+            "catalog.get — per-model Go Hy4 Flash v2 wire facts",
+            serde_json::json!({"provider_id":"opencode-go","model_id":"hy4-flash-free","fact_prefixes":["wire."]}),
         ),
         (
             "catalog.get — alias tier wire ids",
@@ -1023,7 +1022,7 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
             serde_json::json!({"provider_id":"anthropic","model_id":"claude-opus-5-5","fact_prefixes":["capability."]}),
         ),
     ] {
-        let view = if media
+        let view = if v2_rows
             .iter()
             .any(|(p, m)| arguments["provider_id"] == *p && arguments["model_id"] == *m)
         {
@@ -3365,8 +3364,6 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
         // A sourced value served in place of the upstream's, and what it replaces.
         r#""fact_overrides""#,
         r#""replaces": 32768"#,
-        // An endpoint withheld because the provider's route list is complete.
-        "not routed by pi at 74f46864",
         r#""route.reasoning_wire_ids""#,
         r#""route.reasoning_default""#,
         r#""successor""#,
@@ -3391,6 +3388,19 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
              dropped a case this file exists to hold"
         );
     }
+    let golden: serde_json::Value = serde_json::from_str(GOLDEN).unwrap();
+    let hy4 = &golden["catalog.get — per-model Go Hy4 Flash v2 wire facts"]["response"]["models"]
+        ["opencode-go/hy4-flash-free"];
+    assert_eq!(hy4["wire.family"], "openai.chat_completions");
+    assert_eq!(
+        hy4["wire.api"]["value"],
+        "https://opencode.ai/inference/go/openai/v1"
+    );
+    let elevenlabs = &golden["catalog.get — Eleven Flash TTS"]["response"]["wire_corrections"][0];
+    assert_eq!(elevenlabs["provider"], "elevenlabs");
+    assert!(elevenlabs["notes"]
+        .as_str()
+        .is_some_and(|note| note.contains("/v1/text-to-speech")));
 }
 
 #[test]

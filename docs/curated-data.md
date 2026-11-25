@@ -920,48 +920,25 @@ malformed rows and duplicate identities are counted as rejects, never silently
 resolved by ordering. `overdue_at` enforces review dates, with a planted overdue
 row driving the same check as the shipped-data gate.
 
-OpenCode Go follows the pi coding agent, not models.dev's endpoint spelling.
-The sources read were `earendil-works/pi@74f46864`'s
-`packages/ai/src/providers/opencode-go.ts` and the built
-[`@earendil-works/pi-ai` 1.4.0 catalog](https://unpkg.com/@earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json),
-keyed by API group and `chat:<model-id>`. Compared with models.dev on
-2026-10-23, all 29 shared rows had matching API-kind/npm families and differing
-base URLs: pi gives five Anthropic rows the raw base
-`https://opencode.ai/inference/go`; its Anthropic SDK appends `/v1/messages`.
-Fusiform serves their effective base `https://opencode.ai/inference/go/v1`,
-so consumers append only `/messages`, as with observed models.dev endpoints.
-All other shared rows, including Google, already include `/v1` in pi's base.
-
-Pi's route list is complete for OpenCode Go: the file's `complete_providers`
-array names `opencode-go` with the same pi source, and every OpenCode Go model
-without a per-model row has `wire.api` withheld on current reads. That covers
-the upstream-only models seen on 2026-10-23 (`cat-jam-free`, `minimax-m2.7`,
-`minimax-m3.1-flash`, `space-bunny`, `step-5-preview-free`) and every model
-upstream adds later, such as `kimi-k3.1-pro`, until pi routes it and a
-per-model row is added. The disclosure is marked `withheld: true`, cites the
-completeness entry's `source_ref` and dates, and carries its `notes`
-(`not routed by pi at 74f46864`); per-model rows win, so a routed model keeps
-its curated base. Which providers are complete is declared in the data, never
-named in code, which only validates and applies the declaration. A
-`complete_providers` entry has `provider`, `field` (`wire.api`), `source_ref`,
-`notes`, `established_by`, `established_at_ms` and `review_by_ms`, under the
-same review interval as corrections. The loader rejects an entry whose notes do
-not name its source commit, a provider that also has a `*` default (which would
-fill what completeness withholds), a provider with no routed per-model row, or
-a per-model row of that provider citing a different source; a rejected entry
-leaves the provider with its per-model rows alone. Explicit per-model
-withholding is still accepted, but none ships for a complete provider because
-completeness already covers it.
+OpenCode Go serves the endpoint and SDK from each model's models.dev v2 API
+entry, rather than the pi coding agent's route list. For example, Hy4 Flash uses
+`https://opencode.ai/inference/go/openai/v1` for Chat Completions, and Qwen4 Max
+uses `https://opencode.ai/inference/go/anthropic/v1` for Messages. Wire families
+stay the same when `catalog.get` requests the OpenCode Go subscription's
+API-key pricing (`auth_method: "apikey"`). The retired
+`complete_providers` field is ignored when reading signed releases and rejected
+in newly authored documents. A missing per-model correction no longer
+withholds an endpoint; explicit per-model withholding is still supported.
 
 The current-read overlay replaces only that field with `{value, from: curated}`
 or removes it when withheld, and discloses each change in `wire_corrections`
 ([wire contract](wire-contract.md) §4.1). It does not touch `wire.npm`,
 `wire.shape`, stored eras or historical `at_ms` reads, and never applies to
 alias or curated rows. Filters and paging keep
-disclosures with their provider, including a withheld-only provider. Tests in
-`tests/it/curated_wire.rs` drive named, bulk, filtered and paged reads plus
-uncorrected history; mutation controls remove the application call, the
-withholding operation and the completeness fallback independently.
+disclosures with their provider, including a withheld-only provider. Tests
+drive named, bulk, filtered, and paged reads plus uncorrected history.
+Provider-wide corrections may disclose a sourced `notes` explanation;
+historical per-model curation notes are not served.
 
 Provider defaults use `model: "*"`, a nonempty `quote` from the provider's
 official documentation, and a non-withheld value. The source reference records

@@ -202,3 +202,43 @@ fn builder_refuses_changed_curation_with_retired_alias_output_override() {
         "{error}"
     );
 }
+
+fn legacy_wire_curation() -> (ReleaseEnvelope, CurationSet) {
+    let first: Release = serde_json::from_slice(include_bytes!(
+        "../fixtures/release-format-v1/chain/release-1.json"
+    ))
+    .unwrap();
+    let mut curation = first.change.curation_set.unwrap();
+    curation.vendor_facts.insert(
+        "wire-corrections".into(),
+        serde_json::from_str(include_str!("../fixtures/legacy-wire-corrections.json")).unwrap(),
+    );
+    let mut parent = first.envelope;
+    parent.curation_hash = curation.curation_hash();
+    (parent, curation)
+}
+
+#[test]
+fn stored_wire_curation_preserves_retired_completeness_in_the_hash() {
+    let (parent, curation) = legacy_wire_curation();
+    let raw = serde_json::to_vec(&curation).unwrap();
+    let (decoded, hash) = decode_curation(&raw).unwrap();
+    assert_eq!(decoded, curation);
+    assert_eq!(hash, parent.curation_hash);
+    let release: Value =
+        serde_json::from_slice(&build_next_with_curation(&parent, &curation).unwrap()).unwrap();
+    assert_eq!(release["change"].get("curation_set"), Some(&Value::Null));
+    assert_eq!(release["envelope"]["curation_hash"], json!(hash));
+}
+
+#[test]
+fn authored_wire_curation_refuses_retired_completeness() {
+    let (parent, mut curation) = legacy_wire_curation();
+    const DETAIL: &str = "wire-corrections: unknown field `complete_providers`";
+    let error = validate_published(&curation.vendor_facts, &Upstream::new()).unwrap_err();
+    assert_eq!(error, DETAIL);
+    curation.version += 1;
+    let error = build_next_with_curation(&parent, &curation).unwrap_err();
+    assert_eq!(error.class, "invalid_curation");
+    assert_eq!(error.detail, DETAIL);
+}

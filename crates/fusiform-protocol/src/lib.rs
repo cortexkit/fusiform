@@ -1853,9 +1853,8 @@ pub struct WireCorrectionWire {
     pub established_by: String,
     pub established_at_ms: i64,
     pub review_by_ms: i64,
-    /// Why the endpoint was withheld, when the model is absent from a provider
-    /// whose sourced route list is complete, e.g. "not routed by pi at
-    /// 74f46864". Omitted on per-model corrections and withholdings.
+    /// Optional explanation of an endpoint correction or withholding.
+    /// Current provider-wide corrections may include a sourced explanation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
 }

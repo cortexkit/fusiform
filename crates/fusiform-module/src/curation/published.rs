@@ -35,7 +35,6 @@ pub(crate) struct PublishedCuration {
     speed_twins: curate::speed_twins::SpeedTwins,
     temperature_ranges: curate::temperature_ranges::Ranges,
     wire_corrections: curate::wire_corrections::WireCorrections,
-    complete_providers: curate::wire_corrections::CompleteProviders,
     wire_families: curate::wire_families::Families,
 }
 
@@ -166,7 +165,7 @@ impl PublishedCuration {
         let wire_corrections = load(
             &docs,
             "wire-corrections",
-            curate::wire_corrections::load_reporting_rejects,
+            curate::wire_corrections::load_stored_reporting_rejects,
         )?;
         let login_methods = load(&docs, "login-methods", |doc| {
             // The release validator already established that these identities
@@ -231,12 +230,6 @@ impl PublishedCuration {
                 "temperature-ranges",
                 curate::temperature_ranges::load_reporting_rejects,
             )?,
-            complete_providers: load(&docs, "wire-corrections", |doc| {
-                curate::wire_corrections::load_complete_providers_reporting_rejects(
-                    doc,
-                    &wire_corrections,
-                )
-            })?,
             wire_corrections,
             wire_families: load(
                 &docs,
@@ -263,7 +256,6 @@ impl PublishedCuration {
             speed_twins: &self.speed_twins,
             temperature_ranges: &self.temperature_ranges,
             wire_corrections: &self.wire_corrections,
-            complete_providers: &self.complete_providers,
             wire_families: &self.wire_families,
         }
     }
@@ -795,6 +787,85 @@ mod tests {
         assert!(validate_published(&unknown, &Upstream::new())
             .unwrap_err()
             .contains("unrecognized published vendor document"));
+    }
+
+    #[test]
+    fn stored_wire_curation_ignores_retired_completeness_when_serving() {
+        use fusiform_core::{BoundaryKind, SourceId, Timestamp};
+        use fusiform_store::{FactKey, NewEra};
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open_for_store(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().into_owned(),
+            },
+        })
+        .unwrap();
+        let docs = Documents::from([(
+            "wire-corrections".into(),
+            serde_json::from_str(include_str!(
+                "../../../fusiform-release/fixtures/legacy-wire-corrections.json"
+            ))
+            .unwrap(),
+        )]);
+        validate_received(&docs).unwrap();
+        let mut rows = ImportedTables::new();
+        let at = 1795629037000;
+        document_rows(&mut rows, None, &docs, at).unwrap();
+        store
+            .apply_store_releases(
+                Some(&ImportedTables::new()),
+                &[ReleaseArrival {
+                    published_at_ms: at,
+                    release: StoreRelease {
+                        release: 1,
+                        state_hash: "a".repeat(64),
+                        curation_hash: "b".repeat(64),
+                        applied_at_ms: at,
+                    },
+                    rows,
+                    upstream: None,
+                }],
+            )
+            .unwrap();
+        let observed = json!({
+            "value": "https://opencode.ai/inference/go/openai/v1",
+            "from": "model"
+        });
+        let eras = ["beam-free", "hy4-flash-free"]
+            .into_iter()
+            .flat_map(|model| {
+                [
+                    ("existence", json!("present")),
+                    ("wire.api", observed.clone()),
+                ]
+                .map(|(key, value)| NewEra {
+                    source: SourceId::ModelsDev,
+                    provider_id: "opencode-go".into(),
+                    model_id: model.into(),
+                    fact_key: FactKey::from_stored(key.into()),
+                    value_json: value.to_string(),
+                    boundary_at: Timestamp(at),
+                    boundary_kind: BoundaryKind::Seed,
+                    observation_id: None,
+                })
+            });
+        store.append_eras(&eras.collect::<Vec<_>>()).unwrap();
+        let result =
+            crate::route::serve_catalog_get(&store, br#"{"provider_id":"opencode-go"}"#).unwrap();
+        assert_eq!(
+            result.models["opencode-go/hy4-flash-free"].get("wire.api"),
+            Some(&observed)
+        );
+        assert_eq!(
+            result.models["opencode-go/beam-free"]["wire.api"]["from"],
+            "curated"
+        );
+        assert_eq!(result.wire_corrections.len(), 1);
+        assert_eq!(result.wire_corrections[0].model, "beam-free");
     }
 
     #[test]

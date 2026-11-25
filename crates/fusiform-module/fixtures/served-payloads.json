@@ -1335,6 +1335,7 @@
           "established_by": "fusiform",
           "field": "wire.api",
           "model": "eleven_flash_v2_5",
+          "notes": "models.dev publishes the host without a version path. ElevenLabs documents POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}, so the served base includes /v1 and callers append only the operation.",
           "provider": "elevenlabs",
           "review_by_ms": 1800748800000,
           "source_ref": {
@@ -6112,7 +6113,7 @@
       "source": "models.dev"
     }
   },
-  "catalog.get — pi Anthropic effective endpoint": {
+  "catalog.get — per-model Go Anthropic endpoint (MiniMax M3)": {
     "request": {
       "arguments": {
         "model_id": "minimax-m3",
@@ -6214,8 +6215,8 @@
             "units": 2400000000
           },
           "wire.api": {
-            "from": "curated",
-            "value": "https://opencode.ai/inference/go/v1"
+            "from": "model",
+            "value": "https://opencode.ai/inference/go/anthropic/v1"
           },
           "wire.family": "anthropic.messages",
           "wire.npm": {
@@ -6229,26 +6230,10 @@
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
-      "source": "models.dev",
-      "wire_corrections": [
-        {
-          "established_at_ms": 1792713600000,
-          "established_by": "fusiform",
-          "field": "wire.api",
-          "model": "minimax-m3",
-          "provider": "opencode-go",
-          "review_by_ms": 1797897600000,
-          "source_ref": {
-            "commit": "74f46864",
-            "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)",
-            "repo": "https://github.com/earendil-works/pi"
-          },
-          "withheld": false
-        }
-      ]
+      "source": "models.dev"
     }
   },
-  "catalog.get — pi corrected endpoint": {
+  "catalog.get — per-model Go Claude endpoint": {
     "request": {
       "arguments": {
         "model_id": "claude-haiku-5-5",
@@ -6381,8 +6366,8 @@
             "units": 2500000000
           },
           "wire.api": {
-            "from": "curated",
-            "value": "https://opencode.ai/inference/go/v1"
+            "from": "model",
+            "value": "https://opencode.ai/inference/go/anthropic/v1"
           },
           "wire.npm": {
             "from": "model",
@@ -6399,29 +6384,16 @@
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
-      "source": "models.dev",
-      "wire_corrections": [
-        {
-          "established_at_ms": 1792713600000,
-          "established_by": "fusiform",
-          "field": "wire.api",
-          "model": "claude-haiku-5-5",
-          "provider": "opencode-go",
-          "review_by_ms": 1797897600000,
-          "source_ref": {
-            "commit": "74f46864",
-            "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)",
-            "repo": "https://github.com/earendil-works/pi"
-          },
-          "withheld": false
-        }
-      ]
+      "source": "models.dev"
     }
   },
-  "catalog.get — pi unrouted new model": {
+  "catalog.get — per-model Go Hy4 Flash v2 wire facts": {
     "request": {
       "arguments": {
-        "model_id": "kimi-k3.1-pro",
+        "fact_prefixes": [
+          "wire."
+        ],
+        "model_id": "hy4-flash-free",
         "provider_id": "opencode-go"
       },
       "name": "catalog.get"
@@ -6429,117 +6401,23 @@
     "response": {
       "catalog_version": 0,
       "models": {
-        "opencode-go/kimi-k3.1-pro": {
-          "capability.attachment": true,
-          "capability.input_modalities": [
-            "image",
-            "text",
-            "video"
-          ],
-          "capability.output_modalities": [
-            "text"
-          ],
-          "capability.reasoning": true,
-          "capability.reasoning_options": [
-            {
-              "type": "effort",
-              "values": [
-                "max"
-              ]
-            }
-          ],
-          "capability.structured_output": true,
-          "capability.temperature": false,
-          "capability.tool_call": true,
-          "existence": "present",
-          "limit.context": 1048576,
-          "limit.output": 1048576,
-          "model.canonical_id": "moonshotai/kimi-k3",
-          "model.family": "kimi",
-          "model.lineage": "kimi",
-          "model.name": "Kimi K3.1 Pro",
-          "model.open_weights": true,
-          "model.status": null,
-          "provider.name": "OpenCode Go",
-          "quality.decommissioned": true,
-          "quality.elo": 1703,
-          "quality.eq": 1819,
-          "rate.cache_read": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 300000000
-          },
-          "rate.cache_write": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 3000000000
-          },
-          "rate.input": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 3000000000
-          },
-          "rate.output": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "assumed_by_policy",
-              "policy": "models-dev-usd-v1"
-            },
-            "units": 15000000000
-          },
-          "wire.npm": {
-            "from": "provider",
-            "value": "@ai-sdk/openai-compatible"
-          },
-          "wire.shape": {
+        "opencode-go/hy4-flash-free": {
+          "wire.api": {
             "from": "model",
-            "value": "observed-shape"
+            "value": "https://opencode.ai/inference/go/openai/v1"
+          },
+          "wire.family": "openai.chat_completions",
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/openai-compatible"
           }
         }
       },
-      "quality_scores": {
-        "graded_at_ms": 1794564000000,
-        "graded_by": "operator"
-      },
       "resolved_at_ms": -1,
-      "source": "models.dev",
-      "wire_corrections": [
-        {
-          "established_at_ms": 1792713600000,
-          "established_by": "fusiform",
-          "field": "wire.api",
-          "model": "kimi-k3.1-pro",
-          "notes": "not routed by pi at 74f46864",
-          "provider": "opencode-go",
-          "review_by_ms": 1797897600000,
-          "source_ref": {
-            "commit": "74f46864",
-            "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)",
-            "repo": "https://github.com/earendil-works/pi"
-          },
-          "withheld": true
-        }
-      ]
+      "source": "models.dev"
     }
   },
-  "catalog.get — pi withheld endpoint": {
+  "catalog.get — per-model Go MiniMax M2.7 endpoint": {
     "request": {
       "arguments": {
         "model_id": "minimax-m2.7",
@@ -6615,6 +6493,10 @@
             },
             "units": 1200000000
           },
+          "wire.api": {
+            "from": "model",
+            "value": "https://opencode.ai/inference/go/anthropic/v1"
+          },
           "wire.npm": {
             "from": "model",
             "value": "@ai-sdk/anthropic"
@@ -6630,24 +6512,7 @@
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
-      "source": "models.dev",
-      "wire_corrections": [
-        {
-          "established_at_ms": 1792713600000,
-          "established_by": "fusiform",
-          "field": "wire.api",
-          "model": "minimax-m2.7",
-          "notes": "not routed by pi at 74f46864",
-          "provider": "opencode-go",
-          "review_by_ms": 1797897600000,
-          "source_ref": {
-            "commit": "74f46864",
-            "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)",
-            "repo": "https://github.com/earendil-works/pi"
-          },
-          "withheld": true
-        }
-      ]
+      "source": "models.dev"
     }
   },
   "catalog.get — provider default endpoint": {
@@ -13281,6 +13146,11 @@
             },
             "units": 140000000
           },
+          "wire.api": {
+            "from": "provider",
+            "value": "https://opencode.ai/zen/go/v1"
+          },
+          "wire.family": "openai.chat_completions",
           "wire.npm": {
             "from": "provider",
             "value": "@ai-sdk/openai-compatible"
@@ -13439,8 +13309,8 @@
             "units": 4800000000
           },
           "wire.api": {
-            "from": "curated",
-            "value": "https://opencode.ai/inference/go/v1"
+            "from": "provider",
+            "value": "https://opencode.ai/zen/go/v1"
           },
           "wire.family": "anthropic.messages",
           "wire.npm": {
@@ -13457,38 +13327,7 @@
         "source_ref": "https://opencode.ai/v2/docs/console/go/"
       },
       "resolved_at_ms": -1,
-      "source": "models.dev",
-      "wire_corrections": [
-        {
-          "established_at_ms": 1792713600000,
-          "established_by": "fusiform",
-          "field": "wire.api",
-          "model": "deepseek-v4-flash",
-          "notes": "not routed by pi at 74f46864",
-          "provider": "opencode-go",
-          "review_by_ms": 1797897600000,
-          "source_ref": {
-            "commit": "74f46864",
-            "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)",
-            "repo": "https://github.com/earendil-works/pi"
-          },
-          "withheld": true
-        },
-        {
-          "established_at_ms": 1792713600000,
-          "established_by": "fusiform",
-          "field": "wire.api",
-          "model": "qwen3.7-plus",
-          "provider": "opencode-go",
-          "review_by_ms": 1797897600000,
-          "source_ref": {
-            "commit": "74f46864",
-            "file": "packages/ai/src/providers/opencode-go.ts; @earendil-works/pi-ai@1.4.0/dist/providers/data/opencode-go.json (API group / chat:<model-id>)",
-            "repo": "https://github.com/earendil-works/pi"
-          },
-          "withheld": false
-        }
-      ]
+      "source": "models.dev"
     }
   },
   "plan.prices — every curated row": {
