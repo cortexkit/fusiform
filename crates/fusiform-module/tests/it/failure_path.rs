@@ -73,7 +73,7 @@ impl Upstream {
 
         Self {
             _server: server,
-            url: format!("http://127.0.0.1:{port}/api.json"),
+            url: format!("http://127.0.0.1:{port}/experimental/v2.0/api.json"),
             behaviour,
             requests,
         }
@@ -151,7 +151,7 @@ fn serve_one(mut stream: TcpStream, behaviour: Behaviour) {
     }
 }
 
-const CATALOG: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
+const CATALOG: &[u8] = include_bytes!("fixtures/models-dev-v2-excerpt.json");
 
 struct Harness {
     ctx: PollContext,

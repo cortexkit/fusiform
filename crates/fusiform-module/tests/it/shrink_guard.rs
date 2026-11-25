@@ -6,10 +6,9 @@
 //! response — a truncated CDN cache entry, a provider index caught mid-rebuild,
 //! an API returning `{}` on an internal error.
 //!
-//! Nothing else catches it: the bytes parse, the hash differs, and the
-//! tombstones are exactly what the diff asks for. Found by a probe that asked
-//! what one such response does, then measured: it took a seeded store from 14
-//! models to 1, and `{}` normalizes cleanly as a zero-model catalog.
+//! A truncated but non-empty v2 document still parses and the tombstones are
+//! exactly what the diff asks for. An empty response such as `{}` is refused by
+//! the parser before the shrink guard is needed.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -47,7 +46,7 @@ fn fixture() -> Fixture {
     }
 }
 
-/// A synthetic models.dev document with `n` models under one provider.
+/// A synthetic models.dev v2 document with `n` models under one provider.
 ///
 /// Generated rather than cut from a fixture because the guard's threshold is a
 /// fraction of the catalog, and the excerpt has 14 models — below the minimum
@@ -60,10 +59,12 @@ fn document(n: usize) -> Vec<u8> {
             models.push(',');
         }
         models.push_str(&format!(
-            r#""m{i}":{{"id":"m{i}","name":"Model {i}","limit":{{"context":100000,"output":8000}},"cost":{{"input":1,"output":2}}}}"#
+            r#""m{i}":{{"name":"Model {i}","type":"chat","capabilities":{{}},"api":{{}},
+                "limit":{{"context":100000,"output":8000}},
+                "cost":{{"text":{{"input":{{"price":1}},"output":{{"price":2}}}}}}}}"#
         ));
     }
-    format!(r#"{{"p":{{"id":"p","name":"P","models":{{{models}}}}}}}"#).into_bytes()
+    format!(r#"{{"p":{{"name":"P","models":{{{models}}}}}}}"#).into_bytes()
 }
 
 fn body(bytes: Vec<u8>) -> FetchOutcome {
@@ -129,14 +130,12 @@ fn a_collapsed_document_is_refused_and_writes_nothing() {
     );
 }
 
-/// An empty document is refused too.
-///
-/// `{}` normalizes cleanly as a zero-model catalog, which is the most extreme
-/// version of the same failure and the easiest for an upstream to produce.
+/// An empty response cannot reach the shrink guard: v2 requires at least one model.
 #[test]
-fn an_empty_document_is_refused() {
+fn an_empty_document_is_refused_at_parse() {
     let f = fixture();
     seed(&f, 400, 1_000);
+    let eras_before = f.store.era_count(SourceId::ModelsDev).unwrap();
 
     let report = apply(
         &f.store,
@@ -149,9 +148,11 @@ fn an_empty_document_is_refused() {
     assert!(matches!(
         report.outcome,
         fusiform_module::loop_::TickOutcome::Failed {
-            class: FailureClass::Implausible
+            class: FailureClass::Parse
         }
     ));
+    assert_eq!(report.eras_written, 0);
+    assert_eq!(f.store.era_count(SourceId::ModelsDev).unwrap(), eras_before);
     assert_eq!(
         f.store.present_model_count(SourceId::ModelsDev).unwrap(),
         400
