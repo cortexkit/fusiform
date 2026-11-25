@@ -803,6 +803,88 @@ mod tests {
     }
 
     #[test]
+    fn plan_price_reply_does_not_mix_releases() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            CatalogStore::open_for_store(&StorageDescriptor {
+                module_id: "fusiform".into(),
+                storage_namespace: "default".into(),
+                isolation: Isolation::Module,
+                backend: StorageBackend::Sqlite {
+                    path: dir.path().join("store.db").to_string_lossy().into_owned(),
+                },
+            })
+            .unwrap(),
+        );
+        let arrival = |release, price, limit, quote, published_at_ms| {
+            let concurrency = json!({"limit":limit,"quote":quote,"scope":"account",
+                "established_at_ms":1500,"review_by_ms":6000,"source_ref":"https://example.test/prices"});
+            let row = json!({"provider_id":"provider","tier":"pro", "boundary_at_ms":1000,
+                "boundary_kind":"asserted","established_by":"operator", "source_ref":"https://example.test/prices",
+                "established_at_ms":1500, "review_by_ms":6000,
+                "currency":"USD","exponent":2,"period":"month","minor_units":price,
+                "concurrency_json":concurrency.to_string()});
+            ReleaseArrival {
+                published_at_ms,
+                release: StoreRelease {
+                    release,
+                    state_hash: "a".repeat(64),
+                    curation_hash: "b".repeat(64),
+                    applied_at_ms: published_at_ms,
+                },
+                rows: ImportedTables::from([(
+                    "plan_price_era".to_string(),
+                    vec![row.as_object().unwrap().clone()],
+                )]),
+                upstream: None,
+            }
+        };
+        store
+            .apply_store_releases(
+                Some(&ImportedTables::new()),
+                &[arrival(
+                    1,
+                    1000,
+                    2,
+                    "Two concurrent requests per account",
+                    2000,
+                )],
+            )
+            .unwrap();
+        let writer = std::sync::Arc::clone(&store);
+        crate::route::AFTER_PLAN_PRICE_READ.with(|slot| {
+            slot.replace(Some(Box::new(move || {
+                writer
+                    .apply_store_releases(
+                        None,
+                        &[arrival(
+                            2,
+                            2000,
+                            4,
+                            "Four concurrent requests per account",
+                            2500,
+                        )],
+                    )
+                    .unwrap();
+            })))
+        });
+        let read =
+            || {
+                let reply = crate::route::serve_tool_call(&store,
+                br#"{"name":"plan.prices","arguments":{"provider_id":"provider","at_ms":3000}}"#,
+            ).unwrap();
+                serde_json::to_value(reply).unwrap()["prices"][0].clone()
+            };
+        let with_interleaved_commit = read();
+        assert_eq!(store.latest_store_release().unwrap().unwrap().release, 2);
+        assert_eq!(with_interleaved_commit["price"]["minor_units"], 1000);
+        assert_eq!(with_interleaved_commit["concurrency"]["limit"], 2);
+        let after_commit = read();
+        assert_eq!(after_commit["price"]["minor_units"], 2000);
+        assert_eq!(after_commit["concurrency"]["limit"], 4);
+    }
+
+    #[test]
     fn plan_backfills_and_document_withdrawals_keep_effective_history() {
         let dir = tempfile::tempdir().unwrap();
         let store = CatalogStore::open_for_store(&StorageDescriptor {

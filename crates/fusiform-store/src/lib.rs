@@ -2188,6 +2188,19 @@ impl CatalogStore {
         at_ms: i64,
         provider_id: Option<&str>,
     ) -> Result<Vec<NewPlanPrice>, CatalogError> {
+        Ok(self
+            .plan_prices_with_metadata_at(at_ms, provider_id)?
+            .into_iter()
+            .map(|(price, _)| price)
+            .collect())
+    }
+
+    /// The price and metadata from the same row, even during a release commit.
+    pub fn plan_prices_with_metadata_at(
+        &self,
+        at_ms: i64,
+        provider_id: Option<&str>,
+    ) -> Result<Vec<(NewPlanPrice, store_consumer::PlanMetadata)>, CatalogError> {
         let rows = self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT provider_id, tier, minor_units, exponent, currency, period, \
@@ -2205,7 +2218,8 @@ impl CatalogStore {
                                      AND previous.refusal_reason IS p.refusal_reason) \
                             ) \
                           ORDER BY origin.boundary_at_ms, origin.id LIMIT 1), established_by, established_at_ms, \
-                        review_by_ms, source_ref, refusal_reason \
+                         review_by_ms, source_ref, refusal_reason, \
+                         quota_value_json, service_tiers_json, concurrency_json \
                  FROM plan_price_era p \
                  WHERE boundary_at_ms <= ?1 \
                    AND (?2 IS NULL OR provider_id = ?2) \
@@ -2219,7 +2233,7 @@ impl CatalogStore {
             )?;
             let rows = stmt
                 .query_map(params![at_ms, provider_id], |r| {
-                    Ok(NewPlanPrice {
+                     let price = NewPlanPrice {
                         provider_id: r.get(0)?,
                         tier: r.get(1)?,
                         minor_units: r.get(2)?,
@@ -2232,7 +2246,8 @@ impl CatalogStore {
                         review_by_ms: r.get(9)?,
                         source_ref: r.get(10)?,
                         refusal_reason: r.get(11)?,
-                    })
+                     };
+                     Ok((price, (r.get(12)?, r.get(13)?, r.get(14)?)))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(rows)

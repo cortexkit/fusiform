@@ -303,18 +303,6 @@ fn resolve_plan_boundary(
 }
 
 impl CatalogStore {
-    pub fn published_plan_metadata(
-        &self,
-        provider: &str,
-        tier: &str,
-        at: i64,
-    ) -> Result<PlanMetadata, CatalogError> {
-        self.raw_conn(|conn| conn.query_row(
-            "SELECT quota_value_json, service_tiers_json, concurrency_json FROM plan_price_era
-             WHERE provider_id = ?1 AND tier = ?2 AND boundary_at_ms <= ?3 ORDER BY id DESC LIMIT 1",
-            params![provider, tier, at], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        ))
-    }
     pub fn latest_store_release(&self) -> Result<Option<StoreRelease>, CatalogError> {
         self.raw_conn(cursor)
     }
