@@ -1335,59 +1335,62 @@ fn an_annotation_fusiform_added_does_not_open_an_era() {
     );
 }
 
-/// A producer annotation moves NEITHER the digest nor the diff.
-///
-/// # The gap this closes, which I opened while fixing the incident
-///
-/// `catalog_digest` says in its own doc that the change SIGNAL and the era SET
-/// are derived from one function so they cannot disagree. Stripping
-/// annotations in the comparison alone broke that conditionally: a future
-/// annotation added to stored values would move the digest — waking every
-/// consumer — while the diff correctly wrote no eras. The consumer refetches
-/// and finds nothing changed, which is the "woken for a change that produced
-/// none" failure the digest doc names as the thing it prevents.
-///
-/// `the_digest_moves_exactly_when_the_diff_does` did not catch it: that test
-/// reserializes the UPSTREAM document, so it covers the upstream reformatting
-/// case. This one covers fusiform reformatting its own stored value, which is
-/// the case that cost 17,455 eras.
+/// Historical producer annotations are not claims from a new upstream poll.
 #[test]
 fn a_producer_annotation_moves_neither_the_digest_nor_the_diff() {
+    use fusiform_core::TokenClass;
     use fusiform_store::ingest::catalog_digest;
+    use serde_json::{json, Value};
 
+    let f = fixture();
+    let provider = "anthropic";
+    let model = "claude-sonnet-4-5";
+    let annotation = json!({"kind": "assumed_by_policy", "policy": "models-dev-usd-v1"});
     let catalog = normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog;
-    let digest = catalog_digest(&catalog);
-
-    // Every stored value, as the digest and the diff both see it.
-    let mut priced = 0usize;
-    for model in catalog.models() {
-        for (key, value) in fusiform_store::ingest::facts_with_values(model) {
-            if !key.as_str().starts_with("rate.") {
-                continue;
-            }
-            let v: serde_json::Value = serde_json::from_str(&value).unwrap();
-            if v["state"] != "priced" {
-                continue;
-            }
-            priced += 1;
-            assert!(
-                v.get("unit_provenance").is_none(),
-                "storage must carry no producer annotation, or the digest \
-                 hashes one: {value}"
-            );
-        }
-    }
+    let seed_at = Timestamp(1_000);
+    let mut seed = plan_ingest(&f.store, &catalog, seed_at, BoundaryKind::Seed, None).unwrap();
+    let rate = seed
+        .eras
+        .iter_mut()
+        .find(|era| {
+            era.provider_id == provider
+                && era.model_id == model
+                && era.fact_key == FactKey::rate(TokenClass::Input)
+        })
+        .unwrap();
+    let mut value: Value = serde_json::from_str(&rate.value_json).unwrap();
+    assert_eq!(value["state"], "priced");
     assert!(
-        priced >= 2,
-        "the fixture must contain priced rates: {priced}"
+        value.get("unit_provenance").is_none(),
+        "incoming rate projection must exclude producer annotations"
     );
+    value["unit_provenance"] = annotation.clone();
+    rate.value_json = value.to_string();
+    f.store.append_eras(&seed.eras).unwrap();
 
-    // The digest is stable across a re-run, which is the property consumers
-    // depend on when nothing upstream has changed.
-    assert_eq!(
-        digest,
-        catalog_digest(&normalize_models_dev(FIXTURE.as_bytes()).unwrap().catalog),
-        "the digest must be a function of the catalog alone"
+    // Even if the source sends a field with the same name, it is not part of
+    // the incoming rate projection that the digest hashes.
+    let mut body: Value = serde_json::from_str(FIXTURE).unwrap();
+    let cost = &mut body[provider]["models"][model]["cost"];
+    assert!(cost.get("unit_provenance").is_none());
+    cost["unit_provenance"] = annotation;
+    let incoming = normalize_models_dev(body.to_string().as_bytes())
+        .unwrap()
+        .catalog;
+    assert_eq!(catalog_digest(&catalog), catalog_digest(&incoming));
+
+    let plan = plan_ingest(
+        &f.store,
+        &incoming,
+        Timestamp(2_000),
+        BoundaryKind::Observed,
+        None,
+    )
+    .unwrap();
+    assert!(
+        plan.is_empty(),
+        "the stored annotation must not open an era: {:?}",
+        plan.eras
     );
 }
 
@@ -1593,9 +1596,9 @@ fn the_artifact_signature_survives_a_serialization_change() {
     );
 }
 
-/// The signature finds the artifact poll and leaves real polls alone.
+/// A genuine change does not count as a restatement of the previous claim.
 #[test]
-fn a_poll_that_restates_what_is_held_is_found_and_a_real_one_is_not() {
+fn the_artifact_signature_distinguishes_restated_and_changed_claims() {
     let f = fixture();
     let key = FactKey::rate(fusiform_core::TokenClass::Input);
     let bare = r#"{"state":"priced","units":132000000,"exponent":9,"currency":"USD"}"#;
@@ -1639,13 +1642,8 @@ fn a_poll_that_restates_what_is_held_is_found_and_a_real_one_is_not() {
             .expect("era");
     }
 
-    let found = f.store.artifact_observations().expect("scan");
-    assert_eq!(
-        found,
-        vec![artifact],
-        "the poll that restated the held claim is an artifact; the one that \
-         moved the price is not, and marking it would delete real history"
-    );
+    assert_eq!(f.store.same_claim_era_fraction(artifact).unwrap(), (1, 1));
+    assert_eq!(f.store.same_claim_era_fraction(real).unwrap(), (0, 1));
 }
 
 /// A genuine change inside a marked poll survives the mark.

@@ -908,11 +908,6 @@ impl CatalogStore {
         Ok(rows)
     }
 
-    /// Every era for one fact, oldest first.
-    ///
-    /// Oldest first because a history is read forwards: "it was X, then Y from
-    /// this window, then Z". The catalog reads are newest-first because they
-    /// answer a different question.
     /// Has fusiform ever recorded anything for this provider?
     ///
     /// Includes retired models and every historical era, because the question
@@ -956,6 +951,8 @@ impl CatalogStore {
         Ok(found.is_some())
     }
 
+    /// Every era for one fact, in chronological order so a reader can follow
+    /// the changes from the first era to the latest.
     pub fn fact_history(
         &self,
         source: SourceId,

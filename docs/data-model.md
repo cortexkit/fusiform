@@ -164,11 +164,11 @@ only facts whose value changed
 (`ingest::re_ingesting_the_same_document_writes_nothing`,
 `ingest::one_rate_change_opens_exactly_one_era`). Values are compared as
 parsed JSON, not as text, and with every field fusiform adds removed first.
-That removal is one function, `upstream_claim_of` in
-`crates/fusiform-store/src/ingest.rs`, used by both the diff and the catalog
-digest so the two always agree about what counts as a change. A field that
-fusiform attaches to a stored value, rather than one the upstream published,
-must be listed there or it will open eras and move the digest
+The diff calls `upstream_claim_of` in `crates/fusiform-store/src/ingest.rs` to
+ignore producer annotations on historical values. The catalog digest hashes
+the incoming projected JSON strings directly. Keep producer annotations out
+of that projection, and strip any that exist in historical values when
+comparing claims
 (`ingest::a_producer_annotation_moves_neither_the_digest_nor_the_diff`,
 `ingest::the_digest_moves_exactly_when_the_diff_does`).
 

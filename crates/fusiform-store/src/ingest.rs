@@ -345,15 +345,6 @@ pub fn catalog_digest_with_conflicts(catalog: &NormalizedCatalog) -> (String, Ve
     (hasher.finalize().to_hex().to_string(), conflicts)
 }
 
-/// Every fact a model publishes, as `(key, value)` pairs.
-///
-/// The value is JSON so a fact's shape can evolve without a schema migration,
-/// and because era comparison is then string equality on a canonical rendering
-/// rather than a per-type comparison that must be written for each new fact.
-///
-/// Published connection claims are served verbatim. Header and body overrides
-/// remain absent; consumers own transport behavior, including how to select a
-/// mode whose price is served as a mode rate.
 /// The complete set of fact keys a model contributes to the store.
 ///
 /// Public so a test can assert the SET rather than spot-check members. The fact
@@ -417,7 +408,12 @@ pub const SERVED_FACT_NAMESPACE: &[&str] = &[
     "rate.output_audio",
 ];
 
-/// The facts a model contributes, with their stored values.
+/// The facts a model contributes, as `(key, JSON value)` pairs.
+///
+/// JSON lets a fact's value evolve without a database migration. Published
+/// wire facts (`wire.npm`, `wire.api` and `wire.shape`) are kept verbatim. HTTP
+/// headers and request body overrides are omitted because consumers build the
+/// requests they send.
 ///
 /// Public for the same reason as [`fact_keys_of`], one level down: a test that
 /// asserts on values it renders itself proves nothing about what is stored. The
