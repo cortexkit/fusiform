@@ -215,14 +215,14 @@ impl NormalizedCatalog {
 
 /// What went wrong, precisely enough to fix without re-fetching.
 ///
-/// Every variant carries the model it happened on. When one variant lacks the
-/// context its siblings carry, that is nearly always an oversight rather than a
-/// decision, and the cost lands on whoever reads the log at 3am with no way to
-/// tell which of 6,000 rows caused it.
+/// Model-level errors identify the affected row; document parse errors retain
+/// the parser's diagnostic and source location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NormalizeError {
     /// The document's top level was not an object of providers.
     NotAProviderMap,
+    /// The parser rejected the document's JSON or a nested value.
+    DocumentParse { diagnostic: String },
     /// A rate literal could not be scaled to minor units.
     BadRate {
         model: String,
@@ -269,6 +269,8 @@ pub enum NormalizeError {
     /// pricing documentation settles the unit, and the key becomes a priced
     /// `rate.input_audio`.
     UnattributableChargeUnit { model: String, key: String },
+    /// An unreadable cost member made the model's base and tier rates unsafe to serve.
+    RefusedBaseSchedule { model: String, member: String },
     /// A named mode under `experimental.modes` whose price could not be served.
     ///
     /// Not fatal, and never a fallback: the mode produces no rate at all, the
@@ -292,6 +294,9 @@ impl std::fmt::Display for NormalizeError {
         match self {
             NormalizeError::NotAProviderMap => {
                 write!(f, "document root is not a map of provider entries")
+            }
+            NormalizeError::DocumentParse { diagnostic } => {
+                write!(f, "could not parse models.dev document: {diagnostic}")
             }
             NormalizeError::BadRate {
                 model,
@@ -331,6 +336,9 @@ impl std::fmt::Display for NormalizeError {
             ),
             NormalizeError::UnattributableChargeUnit { model, key } => {
                 write!(f, "{model}: cost key {key:?} has no establishable charge unit")
+            }
+            NormalizeError::RefusedBaseSchedule { model, member } => {
+                write!(f, "{model}: cannot read {member}; base and tier rates refused")
             }
             NormalizeError::RefusedMode {
                 model,
@@ -485,8 +493,20 @@ pub fn normalize_models_dev_with(
     bytes: &[u8],
     evidence: &ChargeUnitEvidence,
 ) -> Result<NormalizeOutcome, NormalizeError> {
+    let document_parse = |error: serde_json::Error| NormalizeError::DocumentParse {
+        diagnostic: error.to_string(),
+    };
+    let root = bytes
+        .iter()
+        .find(|&&b| !matches!(b, b' ' | b'\t' | b'\r' | b'\n'));
+    if root != Some(&b'{') {
+        // A non-object opening token alone is not a shape diagnosis: the
+        // document might instead be malformed or incomplete.
+        serde_json::from_slice::<serde_json::Value>(bytes).map_err(document_parse)?;
+        return Err(NormalizeError::NotAProviderMap);
+    }
     let doc: BTreeMap<String, RawProvider> =
-        serde_json::from_slice(bytes).map_err(|_| NormalizeError::NotAProviderMap)?;
+        serde_json::from_slice(bytes).map_err(document_parse)?;
 
     let mut findings = Vec::new();
     let mut providers = Vec::with_capacity(doc.len());
@@ -737,6 +757,18 @@ fn normalize_rates(
     output_audio_per_token: bool,
     findings: &mut Vec<NormalizeError>,
 ) -> Result<Vec<NormalizedRate>, NormalizeError> {
+    if !cost.unreadable_members.is_empty() {
+        findings.extend(cost.unreadable_members.iter().map(|member| {
+            NormalizeError::RefusedBaseSchedule {
+                model: label.to_string(),
+                member: member.clone(),
+            }
+        }));
+        // Serving the readable subset could understate the price. Named modes
+        // have independent schedules and are normalized separately.
+        return Ok(Vec::new());
+    }
+
     let mut rates = Vec::new();
 
     // Base rates: the token classes, always unconditional.
@@ -847,7 +879,16 @@ fn normalize_rates(
     // is a legacy label that stopped tracking the number it refers to. Matching
     // the name against the size would reject 162 correct documents.
     if let Some(legacy) = &cost.context_over_200k {
-        if !tier_rate_sets.contains(&legacy) {
+        if !tier_rate_sets.iter().any(|tier| {
+            tier.len() == legacy.len()
+                && legacy.iter().all(|(key, literal)| {
+                    tier.get(key).is_some_and(|candidate| {
+                        literal == candidate
+                            || exact_decimal_key(literal)
+                                .is_some_and(|value| Some(value) == exact_decimal_key(candidate))
+                    })
+                })
+        }) {
             return Err(NormalizeError::OrphanedLegacyTier {
                 model: label.to_string(),
                 legacy_rates: legacy.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
@@ -856,6 +897,25 @@ fn normalize_rates(
     }
 
     Ok(rates)
+}
+
+/// Canonical sign, significant digits and power of ten for a JSON number.
+/// Comparing rounded nanounits would equate distinct prices below that resolution.
+fn exact_decimal_key(literal: &str) -> Option<(bool, String, i128)> {
+    let (mantissa, exponent) = literal.split_once(['e', 'E']).unwrap_or((literal, "0"));
+    let (unsigned, negative) = mantissa
+        .strip_prefix('-')
+        .map_or((mantissa, false), |v| (v, true));
+    let (integer, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    let digits = format!("{integer}{fraction}");
+    let nonzero = digits.trim_start_matches('0');
+    if nonzero.is_empty() {
+        return Some((false, String::new(), 0));
+    }
+    let significant = nonzero.trim_end_matches('0');
+    let shift = (nonzero.len() - significant.len()) as i128 - fraction.len() as i128;
+    let power = exponent.parse::<i128>().ok()?.checked_add(shift)?;
+    Some((negative, significant.to_owned(), power))
 }
 
 /// Whether an upstream mode name may become part of a fact key.

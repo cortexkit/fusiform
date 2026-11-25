@@ -176,3 +176,58 @@ fn the_cli_answers_version_with_no_arguments_and_no_daemon() {
         }
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn probes_are_only_recognized_at_the_command_position() {
+    let binary = env!("CARGO_BIN_EXE_ck-models");
+    let domain = Command::new(binary).arg("--ck-domain").output().unwrap();
+    assert!(domain.status.success());
+    assert!(String::from_utf8_lossy(&domain.stdout).contains("AI model catalog"));
+    for probe in ["--version", "-V", "--ck-domain"] {
+        let cwd = tempfile::tempdir().unwrap();
+        let output = Command::new(binary)
+            .current_dir(cwd.path())
+            .args(["status", "--subc", probe])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{probe}: {output:?}");
+        assert!(output.stdout.is_empty(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("could not reach subc"));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_paths_reach_connection_handling_and_text_values_are_rejected() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let binary = env!("CARGO_BIN_EXE_ck-models");
+    let output = Command::new(binary)
+        .args([
+            OsStr::new("status"),
+            OsStr::new("--subc"),
+            OsStr::from_bytes(b"/dev/null/\xff"),
+        ])
+        .output()
+        .unwrap();
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{diagnostic}");
+    assert!(diagnostic.contains("could not reach subc"), "{diagnostic}");
+
+    let output = Command::new(binary)
+        .args([
+            OsStr::new("get"),
+            OsStr::new("--provider"),
+            OsStr::from_bytes(b"\xff"),
+        ])
+        .output()
+        .unwrap();
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{diagnostic}");
+    assert!(
+        diagnostic.contains("--provider") && diagnostic.contains("UTF-8"),
+        "{diagnostic}"
+    );
+}

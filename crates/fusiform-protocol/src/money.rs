@@ -24,8 +24,15 @@ use serde::{Deserialize, Serialize};
 
 /// An ISO 4217 alphabetic code. A code, never a symbol, and never defaulted:
 /// how a currency was established travels beside it in [`UnitProvenance`].
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct CurrencyCode(String);
+
+impl<'de> Deserialize<'de> for CurrencyCode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let code = String::deserialize(deserializer)?;
+        Self::new(&code).map_err(serde::de::Error::custom)
+    }
+}
 
 /// A currency code that is not three ASCII letters.
 ///
@@ -452,6 +459,25 @@ impl Floor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn currency_decoding_uses_constructor_validation() {
+        let amount = |currency| {
+            serde_json::json!({
+                "units": 42, "exponent": 9, "currency": currency,
+                "unit_provenance": {"kind": "stated"}
+            })
+        };
+        let canonical = serde_json::from_value::<Amount>(amount("USD")).unwrap();
+        assert!(CurrencyCode::new("$").is_err());
+        let invalid = amount("$");
+        assert!(serde_json::from_value::<Amount>(invalid.clone()).is_err());
+        let mut rate = invalid;
+        rate["state"] = "priced".into();
+        assert!(serde_json::from_value::<RateValue>(rate).is_err());
+        let normalized = serde_json::from_value::<Amount>(amount(" usd ")).unwrap();
+        assert_eq!(normalized, canonical);
+    }
 
     #[test]
     fn a_unit_billed_rate_round_trips_its_quantity_terms() {

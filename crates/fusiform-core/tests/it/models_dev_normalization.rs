@@ -18,6 +18,23 @@ use fusiform_testkit::mutate;
 
 const FIXTURE: &[u8] = include_bytes!("../../fixtures/models-dev-excerpt.json");
 
+#[test]
+fn extreme_valid_json_exponents_return_bad_rate() {
+    for literal in ["1e2147483647", "1.1e-2147483648"] {
+        let payload = format!(r#"{{"p":{{"models":{{"m":{{"cost":{{"input":{literal}}}}}}}}}}}"#);
+        assert!(serde_json::from_str::<serde_json::Value>(&payload).is_ok());
+        assert!(matches!(
+            normalize_models_dev(payload.as_bytes()),
+            Err(NormalizeError::BadRate { model, field, detail: fusiform_core::money::MoneyError::NotExact(_), .. })
+                if model == "p/m" && field == "input"
+        ));
+    }
+    assert_eq!(
+        fusiform_core::money::decimal_str_to_minor_units("1e1", 9),
+        Ok(10_000_000_000)
+    );
+}
+
 fn catalog() -> fusiform_core::NormalizeOutcome {
     normalize_models_dev(FIXTURE).expect("the measured document must normalize")
 }
@@ -49,6 +66,30 @@ fn the_measured_document_normalizes() {
         .providers
         .iter()
         .any(|p| p.provider_id == "cerebras" && p.models.is_empty()));
+}
+
+#[test]
+fn document_parse_errors_distinguish_nested_failures_from_root_shape() {
+    for payload in [
+        &b"{\n\"p\":{\"models\":{\"m\":{\"limit\":{\"context\":\"large\"}}}}}"[..],
+        &b"{\n\"p\":"[..],
+    ] {
+        let diagnostic = normalize_models_dev(payload).unwrap_err().to_string();
+        assert!(diagnostic.contains("line 2 column"), "{diagnostic}");
+        assert!(
+            diagnostic.contains("large") || diagnostic.contains("EOF"),
+            "{diagnostic}"
+        );
+        assert!(!diagnostic.contains("document root"), "{diagnostic}");
+    }
+    assert_eq!(
+        normalize_models_dev(b"[]").unwrap_err(),
+        NormalizeError::NotAProviderMap
+    );
+    assert!(!normalize_models_dev(b"[\n")
+        .unwrap_err()
+        .to_string()
+        .contains("document root"));
 }
 
 /// Ordinary rates scale exactly, with no float anywhere in the path.
@@ -242,6 +283,54 @@ fn a_malformed_tier_spec_is_refused_without_naming_a_cause_it_cannot_know() {
             );
         }
         other => panic!("a malformed tier spec must stop the parse, got {other:?}"),
+    }
+}
+
+#[test]
+fn malformed_cost_members_refuse_only_the_affected_base_schedule() {
+    for (cost, unreadable) in [
+        (r#"{"input":"1.25","output":2}"#, "cost.input"),
+        (r#"{"input":1,"tiers":false}"#, "cost.tiers"),
+        (
+            r#"{"input":1,"tiers":[{"tier":{"type":"context","size":200000},"input":9},false]}"#,
+            "cost.tiers[1]",
+        ),
+        (
+            r#"{"input":1,"tiers":[{"tier":{"type":"context","size":200000},"input":null}]}"#,
+            "cost.tiers[0].input",
+        ),
+        (
+            r#"{"input":1,"tiers":[{"tier":{"type":"context"},"input":9}]}"#,
+            "cost.tiers[0].tier.size",
+        ),
+        (
+            r#"{"input":1,"context_over_200k":{"output_audio":"9"}}"#,
+            "cost.context_over_200k.output_audio",
+        ),
+    ] {
+        let payload = serde_json::json!({"p":{"models":{
+            "m":{"cost":serde_json::from_str::<serde_json::Value>(cost).unwrap(),
+                 "experimental":{"modes":{"fast":{"cost":{"input":3}}}}},
+            "other":{"cost":{"input":4}},
+        }}});
+        let outcome = normalize_models_dev(payload.to_string().as_bytes()).unwrap();
+        assert!(
+            outcome.findings.iter().any(|finding| {
+                let diagnostic = finding.to_string();
+                diagnostic.contains("p/m") && diagnostic.contains(unreadable)
+            }),
+            "missing finding for {unreadable}: {:?}",
+            outcome.findings
+        );
+        let affected = model(&outcome, "p/m");
+        assert_eq!(affected.rates.len(), 1, "partial schedule for {cost}");
+        assert_eq!(
+            affected.rates[0].condition,
+            RateCondition::Mode {
+                name: "fast".into()
+            }
+        );
+        assert_eq!(model(&outcome, "p/other").rates.len(), 1);
     }
 }
 
@@ -1080,4 +1169,26 @@ fn wire_claims_preserve_values_precedence_provenance_and_absence() {
         }
     );
     assert_eq!(claims("unknown", "none"), &WireFacts::default());
+}
+
+#[test]
+fn legacy_tier_corroboration_uses_exact_decimal_values() {
+    let payload = |legacy: &str| {
+        format!(
+            r#"{{"p":{{"models":{{"m":{{"cost":{{"input":1,"tiers":[{{"tier":{{"type":"context","size":200000}},"input":2.0,"output":0.25}}],"context_over_200k":{legacy}}}}}}}}}}}"#
+        )
+    };
+    let equivalent = payload(r#"{"input":2,"output":250e-3}"#);
+    let outcome =
+        normalize_models_dev(equivalent.as_bytes()).expect("equivalent prices corroborate");
+    assert_eq!(model(&outcome, "p/m").rates.len(), 3);
+    for conflict in [
+        r#"{"input":2.000000000001,"output":0.25}"#,
+        r#"{"input":2}"#,
+    ] {
+        assert!(matches!(
+            normalize_models_dev(payload(conflict).as_bytes()),
+            Err(NormalizeError::OrphanedLegacyTier { .. })
+        ));
+    }
 }
