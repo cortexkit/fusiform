@@ -1278,53 +1278,73 @@
     },
     "response": {
       "catalog_version": 0,
-      "curated": [
-        {
-          "auth_methods": [
-            "apikey"
-          ],
-          "model": "elevenlabs/eleven_flash_v2_5",
-          "review_by_ms": 1799452800000,
-          "source_ref": "Read 2026-11-10. https://elevenlabs.io/pricing/api: \"API usage is billed in US dollars, not credits. Text to Speech $0.08 per 1,000 characters (multilingual models) or $0.04 (Flash/Turbo).\"; \"Text to Speech is billed per character.\" https://elevenlabs.io/docs/overview/models: \"eleven_flash_v2_5\", \"Eleven Flash v2.5\", \"40,000 characters per request\". This is a character request cap, not a token context limit, and is not served as limit.context. https://elevenlabs.io/docs/api-reference/text-to-speech/convert: \"POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}\"; header \"xi-api-key\". The endpoint converts text to audio. Served as $0.04 per 1,000 characters using the typed unit-billed shape; the page states no rounding or minimum, so increment and minimum_quantity are unknown, not none. No per-token or output rate is stated."
-        }
-      ],
       "models": {
         "elevenlabs/eleven_flash_v2_5": {
+          "capability.attachment": false,
           "capability.input_modalities": [
             "text"
           ],
           "capability.output_modalities": [
             "audio"
           ],
+          "capability.reasoning": false,
+          "capability.reasoning_options": null,
+          "capability.temperature": false,
+          "capability.tool_call": false,
           "existence": "present",
+          "limit.context": null,
+          "limit.output": null,
+          "model.canonical_id": "elevenlabs/eleven_flash_v2_5",
+          "model.family": "elevenlabs-flash",
           "model.name": "Eleven Flash v2.5",
+          "model.open_weights": false,
+          "model.status": null,
           "model.type": "speech",
           "provider.name": "ElevenLabs",
           "rate.input.per_character": {
             "currency": "USD",
-            "exponent": 2,
-            "increment": {
-              "kind": "unknown"
-            },
-            "minimum_quantity": {
-              "kind": "unknown"
-            },
-            "per": 1000,
+            "exponent": 9,
+            "per": 1000000,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
-            "units": 4
+            "units": 40000000000
           },
           "wire.api": {
             "from": "curated",
             "value": "https://api.elevenlabs.io/v1"
           },
-          "wire.family": "elevenlabs.text_to_speech"
+          "wire.family": "elevenlabs.text_to_speech",
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/elevenlabs"
+          },
+          "wire.shape": {
+            "from": "model",
+            "value": "speech"
+          }
         }
       },
       "resolved_at_ms": -1,
-      "source": "models.dev"
+      "source": "models.dev",
+      "wire_corrections": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "field": "wire.api",
+          "model": "eleven_flash_v2_5",
+          "provider": "elevenlabs",
+          "review_by_ms": 1800748800000,
+          "source_ref": {
+            "commit": "accessed 2026-11-25",
+            "file": "https://elevenlabs.io/docs/api-reference/text-to-speech/convert.md",
+            "repo": "https://elevenlabs.io"
+          },
+          "withheld": false
+        }
+      ]
     }
   },
   "catalog.get — GPT Image Flare": {
@@ -1337,18 +1357,9 @@
     },
     "response": {
       "catalog_version": 0,
-      "curated": [
-        {
-          "auth_methods": [
-            "apikey"
-          ],
-          "model": "openai/gpt-image-2.6-flare",
-          "review_by_ms": 1799452800000,
-          "source_ref": "Read 2026-11-10. https://platform.openai.com/docs/models/gpt-image-2.6-flare: \"gpt-image-2.6-flare\", \"GPT Image 2.6 Flare\". Text: \"Input | $5 | 1M tokens\", \"Cached input | $1.25 | 1M tokens\". Image: \"Input | $8 | 1M tokens\", \"Cached input | $2 | 1M tokens\", \"Output | $30 | 1M tokens\". Supported endpoints: \"/v1/images/generations\" and \"/v1/images/edits\"; Responses is not supported. https://platform.openai.com/docs/pricing: Flare text output \"-\", so no rate.output is served. Cached image input is unserved: there is no cached-image role, and the guide states cached pricing applies only through the Responses API, which this model does not support. The text cache-read price is retained as the model page states it; endpoint applicability must be checked by the caller. Text and image input produce image output."
-        }
-      ],
       "models": {
         "openai/gpt-image-2.6-flare": {
+          "capability.attachment": true,
           "capability.input_modalities": [
             "image",
             "text"
@@ -1356,55 +1367,233 @@
           "capability.output_modalities": [
             "image"
           ],
+          "capability.reasoning": false,
+          "capability.reasoning_options": null,
+          "capability.temperature": false,
+          "capability.tool_call": false,
           "existence": "present",
+          "limit.context": null,
           "limit.images_per_request": 1500,
-          "limit.temperature_max": 2,
-          "limit.temperature_min": 0,
+          "limit.output": null,
+          "model.canonical_id": "openai/gpt-image-2.6-flare",
+          "model.family": "gpt-image",
           "model.lineage": "gpt",
           "model.name": "GPT Image 2.6 Flare",
+          "model.open_weights": false,
+          "model.status": null,
           "model.type": "image",
           "provider.name": "OpenAI",
           "rate.cache_read": {
             "currency": "USD",
-            "exponent": 2,
+            "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
-            "units": 125
+            "units": 1250000000
           },
           "rate.input": {
             "currency": "USD",
-            "exponent": 0,
+            "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
-            "units": 5
+            "units": 5000000000
           },
           "rate.input_image": {
             "currency": "USD",
-            "exponent": 0,
+            "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
-            "units": 8
+            "units": 8000000000
           },
           "rate.output_image": {
             "currency": "USD",
-            "exponent": 0,
+            "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
-            "units": 30
+            "units": 30000000000
           },
           "wire.api": {
-            "from": "curated",
+            "from": "model",
             "value": "https://api.openai.com/v1"
           },
-          "wire.family": "openai.images"
+          "wire.family": "openai.images",
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/openai"
+          },
+          "wire.shape": {
+            "from": "model",
+            "value": "images"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — GPT-Realtime-2.1 audio rates": {
+    "request": {
+      "arguments": {
+        "model_id": "gpt-realtime-2.1",
+        "provider_id": "openai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "openai/gpt-realtime-2.1",
+          "model_id": "*",
+          "provider_id": "openai",
+          "quote": "While reasoning tokens are not visible via the API, they still occupy space in the model's context window and are billed as output tokens.",
+          "reason": "OpenAI bills generated reasoning tokens at the output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://developers.openai.com/api/docs/guides/reasoning (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
+      "models": {
+        "openai/gpt-realtime-2.1": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "audio",
+            "image",
+            "text"
+          ],
+          "capability.output_modalities": [
+            "audio",
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ]
+            }
+          ],
+          "capability.structured_output": false,
+          "capability.temperature": false,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.context": 128000,
+          "limit.images_per_request": 1500,
+          "limit.output": 32000,
+          "model.canonical_id": "openai/gpt-realtime-2.1",
+          "model.family": "gpt-realtime",
+          "model.lineage": "gpt",
+          "model.name": "GPT-Realtime-2.1",
+          "model.open_weights": false,
+          "model.status": null,
+          "model.type": "realtime",
+          "provider.name": "OpenAI",
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 400000000
+          },
+          "rate.cached_input_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 400000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4000000000
+          },
+          "rate.input_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 32000000000
+          },
+          "rate.input_image": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 5000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 24000000000
+          },
+          "rate.output_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 64000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
+          },
+          "wire.api": {
+            "from": "model",
+            "value": "https://api.openai.com/v1"
+          },
+          "wire.family": "openai.responses",
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/openai"
+          }
         }
       },
       "resolved_at_ms": -1,
@@ -1467,29 +1656,6 @@
       "catalog_version": 0,
       "fact_overrides": [
         {
-          "established_at_ms": 1794268800000,
-          "established_by": "fusiform",
-          "fact_key": "rate.output_image",
-          "model": "google/gemini-3.1-flash-image",
-          "model_id": "gemini-3.1-flash-image",
-          "notes": "Addition only while upstream records no image-output role. Projected through the existing Antigravity alias mechanism, not onto Vertex.",
-          "provider_id": "google",
-          "quote": "Gemini 3.1 Flash Image, Paid Tier, per 1M tokens in USD: output \"$3 (text and thinking)\", \"$60.00 (images)\". Image output token counts: 747 at 0.5K, 1120 at 1K, 1680 at 2K, 2520 at 4K.",
-          "reason": "The image output price needs its own role so it is not confused with text output.",
-          "replaces": null,
-          "review_by_ms": 1799452800000,
-          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)",
-          "value": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 60000000000
-          }
-        },
-        {
           "established_at_ms": 1795564800000,
           "established_by": "fusiform",
           "fact_key": "rate.reasoning",
@@ -1534,7 +1700,8 @@
             "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
             "units": 60000000000
           },
@@ -1558,57 +1725,149 @@
     },
     "response": {
       "catalog_version": 0,
-      "curated": [
+      "fact_overrides": [
         {
-          "auth_methods": [
-            "apikey"
-          ],
+          "established_at_ms": 1794268800000,
+          "established_by": "fusiform",
+          "fact_key": "limit.output_audio_tokens_per_second",
           "model": "google/gemini-3.8-flash-tts",
+          "model_id": "gemini-3.8-flash-tts",
+          "provider_id": "google",
+          "quote": "Audio tokens correspond to 25 tokens per second of audio.",
+          "reason": "models.dev does not publish the conversion from synthesized audio duration to output tokens.",
+          "replaces": null,
           "review_by_ms": 1799452800000,
-          "source_ref": "Read 2026-11-10. https://ai.google.dev/gemini-api/docs/pricing: \"Paid Tier, per 1M tokens in USD\"; input \"$0.50 (text) through December 31, 2026.\"; output \"$9.00 (audio) through December 31, 2026.\"; \"Audio tokens correspond to 25 tokens per second of audio.\" Both prices double on 2027-01-01 to $1.00 input and $18.00 audio output; those future prices are not served. https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash-tts: \"Gemini 3.8 Flash TTS\"; \"Input token limit 8,192\"; \"Output token limit 16,384\"; supported methods include \"GenerateContent\". https://ai.google.dev/gemini-api/docs/speech-generation: model id \"gemini-3.8-flash-tts\"; text input and audio output. No text-output rate is stated, so no rate.output is served."
+          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)",
+          "value": 25
         }
       ],
       "models": {
         "google/gemini-3.8-flash-tts": {
+          "capability.attachment": false,
           "capability.input_modalities": [
             "text"
           ],
           "capability.output_modalities": [
             "audio"
           ],
+          "capability.reasoning": false,
+          "capability.reasoning_options": null,
+          "capability.structured_output": false,
+          "capability.temperature": true,
+          "capability.tool_call": false,
           "existence": "present",
           "limit.context": 8192,
           "limit.output": 16384,
           "limit.output_audio_tokens_per_second": 25,
           "limit.temperature_max": 2.0,
           "limit.temperature_min": 0.0,
+          "model.canonical_id": "google/gemini-3.8-flash-tts",
+          "model.family": "gemini-tts-flash",
           "model.lineage": "gemini",
           "model.name": "Gemini 3.8 Flash TTS",
+          "model.open_weights": false,
+          "model.status": null,
           "model.type": "speech",
           "provider.name": "Google",
           "rate.input": {
             "currency": "USD",
-            "exponent": 2,
+            "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
-            "units": 50
+            "units": 500000000
+          },
+          "rate.input.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 250000000
+          },
+          "rate.input.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 900000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 9000000000
+          },
+          "rate.output.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4500000000
+          },
+          "rate.output.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 16200000000
           },
           "rate.output_audio": {
             "currency": "USD",
-            "exponent": 0,
+            "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
-            "units": 9
+            "units": 9000000000
+          },
+          "rate.output_audio.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4500000000
+          },
+          "rate.output_audio.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 16200000000
           },
           "wire.api": {
-            "from": "curated",
+            "from": "model",
             "value": "https://generativelanguage.googleapis.com/v1beta"
           },
-          "wire.family": "google.generate_content"
+          "wire.family": "google.generate_content",
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/google"
+          }
         }
       },
       "resolved_at_ms": -1,
@@ -1625,14 +1884,124 @@
     },
     "response": {
       "catalog_version": 0,
-      "curated": [
+      "fact_overrides": [
         {
-          "auth_methods": [
-            "apikey"
-          ],
+          "established_at_ms": 1794614400000,
+          "established_by": "fusiform",
+          "fact_key": "capability.aspect_ratios",
           "model": "google/gemini-omni-1.2-flash",
+          "model_id": "gemini-omni-1.2-flash",
+          "provider_id": "google",
+          "quote": "Supported values: \"9:16\", \"16:9\"",
+          "reason": "models.dev does not publish supported aspect ratios.",
+          "replaces": null,
+          "review_by_ms": 1799798400000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/omni (accessed 2026-11-14)",
+          "value": [
+            "9:16",
+            "16:9"
+          ]
+        },
+        {
+          "established_at_ms": 1794614400000,
+          "established_by": "fusiform",
+          "fact_key": "capability.output_audio",
+          "model": "google/gemini-omni-1.2-flash",
+          "model_id": "gemini-omni-1.2-flash",
+          "provider_id": "google",
+          "quote": "By default the model will try to generate an appropriate audio track for a video.",
+          "reason": "Audio accompanies the generated video; this is not a standalone audio output modality.",
+          "replaces": null,
+          "review_by_ms": 1799798400000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/omni; https://ai.google.dev/gemini-api/docs/models/gemini-omni-flash (accessed 2026-11-14)",
+          "value": true
+        },
+        {
+          "established_at_ms": 1794614400000,
+          "established_by": "fusiform",
+          "fact_key": "limit.output_duration_ms",
+          "model": "google/gemini-omni-1.2-flash",
+          "model_id": "gemini-omni-1.2-flash",
+          "provider_id": "google",
+          "quote": "Setting a duration over 15 seconds returns an invalid argument error.",
+          "reason": "The documented maximum is for one generated clip, not an extended video.",
+          "replaces": null,
+          "review_by_ms": 1799798400000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/omni (accessed 2026-11-14)",
+          "value": 15000
+        },
+        {
+          "established_at_ms": 1794268800000,
+          "established_by": "fusiform",
+          "fact_key": "limit.output_video_tokens_per_second.resolution.1080p",
+          "model": "google/gemini-omni-1.2-flash",
+          "model_id": "gemini-omni-1.2-flash",
+          "provider_id": "google",
+          "quote": "8,688 tokens/s",
+          "reason": "The 1080p token conversion includes upsampling.",
+          "replaces": null,
           "review_by_ms": 1799452800000,
-          "source_ref": "Read 2026-11-10. https://ai.google.dev/gemini-api/docs/pricing: per 1M tokens in USD, input \"$1.50 (text / image / video)\"; output \"$9.00 (text)\", \"$12.00 (video)\"; \"calculated at a rate of 5,792 tokens per second of 720p video\"; 360p \"1,931 tokens/s\", 1080p with upsampling \"8,688 tokens/s\", 4K with upsampling \"17,376 tokens/s\". https://ai.google.dev/gemini-api/docs/models/gemini-omni-flash: Stable \"gemini-omni-1.2-flash\", \"Gemini Omni 1.2 Flash\". https://ai.google.dev/gemini-api/docs/omni: \"Interactions API\", \"POST https://generativelanguage.googleapis.com/v1beta/interactions\". Image, text and video input; text and video output. Output conversions are resolution-selected token counts, not time-billed rates; 1080p and 4K include upsampling. No unstated context, output limit or audio conversion is served. Video facts read 2026-11-14. https://ai.google.dev/gemini-api/docs/omni: \"You can set the video `duration` in `response_format` to any whole second from 3 to 15 seconds (for example, `\"15s\"`).\" \"Setting a duration over 15 seconds returns an invalid argument error.\" The documented \"up to 30 seconds total for extended videos\" is extension, not one generated clip. Aspect ratios: \"Supported values: \"9:16\", \"16:9\"\"; \"Landscape (16:9) is the default.\" Audio: \"By default the model will try to generate an appropriate audio track for a video.\" https://ai.google.dev/gemini-api/docs/models/gemini-omni-flash: output video \"3s-15s\"; output \"Video with native Audio, Text\". Google documents no audio on/off switch and does not promise silent output."
+          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)",
+          "value": 8688
+        },
+        {
+          "established_at_ms": 1794268800000,
+          "established_by": "fusiform",
+          "fact_key": "limit.output_video_tokens_per_second.resolution.360p",
+          "model": "google/gemini-omni-1.2-flash",
+          "model_id": "gemini-omni-1.2-flash",
+          "provider_id": "google",
+          "quote": "1,931 tokens/s",
+          "reason": "This converts 360p output duration to video tokens, not to a time-billed price.",
+          "replaces": null,
+          "review_by_ms": 1799452800000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)",
+          "value": 1931
+        },
+        {
+          "established_at_ms": 1794268800000,
+          "established_by": "fusiform",
+          "fact_key": "limit.output_video_tokens_per_second.resolution.4k",
+          "model": "google/gemini-omni-1.2-flash",
+          "model_id": "gemini-omni-1.2-flash",
+          "provider_id": "google",
+          "quote": "17,376 tokens/s",
+          "reason": "The 4K token conversion includes upsampling.",
+          "replaces": null,
+          "review_by_ms": 1799452800000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)",
+          "value": 17376
+        },
+        {
+          "established_at_ms": 1794268800000,
+          "established_by": "fusiform",
+          "fact_key": "limit.output_video_tokens_per_second.resolution.720p",
+          "model": "google/gemini-omni-1.2-flash",
+          "model_id": "gemini-omni-1.2-flash",
+          "provider_id": "google",
+          "quote": "calculated at a rate of 5,792 tokens per second of 720p video",
+          "reason": "This converts 720p output duration to video tokens, not to a time-billed price.",
+          "replaces": null,
+          "review_by_ms": 1799452800000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-11-10)",
+          "value": 5792
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "google/gemini-omni-1.2-flash",
+          "model_id": "*",
+          "provider_id": "google",
+          "quote": "Gemini Developer API pricing: \"Output price (including thinking tokens)\". Gemini thinking: \"When thinking is turned on, response pricing is the sum of output tokens and thinking tokens.\"",
+          "reason": "Google includes thinking tokens in its Gemini output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing; https://ai.google.dev/gemini-api/docs/thinking#pricing (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
         }
       ],
       "models": {
@@ -1641,6 +2010,7 @@
             "9:16",
             "16:9"
           ],
+          "capability.attachment": true,
           "capability.input_modalities": [
             "image",
             "text",
@@ -1651,8 +2021,14 @@
             "text",
             "video"
           ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [],
+          "capability.temperature": true,
+          "capability.tool_call": false,
           "existence": "present",
+          "limit.context": 131072,
           "limit.images_per_request": 3600,
+          "limit.output": 65536,
           "limit.output_duration_ms": 15000,
           "limit.output_video_tokens_per_second.resolution.1080p": 8688,
           "limit.output_video_tokens_per_second.resolution.360p": 1931,
@@ -1660,42 +2036,61 @@
           "limit.output_video_tokens_per_second.resolution.720p": 5792,
           "limit.temperature_max": 2.0,
           "limit.temperature_min": 0.0,
+          "model.canonical_id": "google/gemini-omni-1.2-flash",
+          "model.family": "gemini-omni-flash",
           "model.lineage": "gemini",
           "model.name": "Gemini Omni 1.2 Flash",
+          "model.open_weights": false,
+          "model.status": null,
           "model.type": "video",
           "provider.name": "Google",
           "rate.input": {
             "currency": "USD",
-            "exponent": 2,
+            "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
-            "units": 150
+            "units": 1500000000
           },
           "rate.output": {
             "currency": "USD",
-            "exponent": 0,
+            "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
-            "units": 9
+            "units": 9000000000
           },
           "rate.output_video": {
             "currency": "USD",
-            "exponent": 0,
+            "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
-            "units": 12
+            "units": 12000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
           },
           "wire.api": {
-            "from": "curated",
+            "from": "model",
             "value": "https://generativelanguage.googleapis.com/v1beta"
           },
-          "wire.family": "google.interactions"
+          "wire.family": "google.interactions",
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/google"
+          },
+          "wire.shape": {
+            "from": "model",
+            "value": "interactions"
+          }
         }
       },
       "resolved_at_ms": -1,
@@ -1712,38 +2107,50 @@
     },
     "response": {
       "catalog_version": 0,
-      "curated": [
-        {
-          "auth_methods": [
-            "apikey"
-          ],
-          "model": "google/gemini-3.5-transcribe-live",
-          "review_by_ms": 1799712000000,
-          "source_ref": "Read 2026-11-13. https://ai.google.dev/gemini-api/docs/pricing#gemini-3.5-transcribe-live: \"Gemini 3.5 Transcribe Live\", \"Our low-latency, real-time speech-to-text model for bidirectional streaming audio transcription over WebSockets.\"; \"Paid Tier, per 1M tokens in USD\"; Input price \"$3.50 or $0.005/min* (audio)\"; \"Output price (including thinking tokens)\" \"$21.00 or $0.004/min* (text)\". \"Estimated pricing is based on 25 audio tokens per second for input and 175 text tokens per minute for output, for an effective blended rate of ~$0.009 per min for Live Transcribe.\" A Free Tier is listed as \"Free of charge\" for input and output. Served rates are the paid per-million-token prices; the per-minute figures are Google's estimates, not the billing unit. The audio conversion follows the pricing footnote, not Google's general 32-token audio default. https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe lists \"gemini-3.5-transcribe-live (Live API)\" and the pricing link \"Gemini 3.5 Transcribe Live\". The curated API base matches the Gemini API base served for google/gemini-3.8-flash; no unverified wire.family is served."
-        }
-      ],
       "models": {
         "google/gemini-3.5-transcribe-live": {
+          "capability.attachment": true,
           "capability.input_modalities": [
             "audio"
           ],
           "capability.output_modalities": [
             "text"
           ],
+          "capability.reasoning": false,
+          "capability.reasoning_options": null,
+          "capability.temperature": true,
+          "capability.tool_call": false,
           "existence": "present",
           "limit.audio_tokens_per_second": 25,
+          "limit.context": 131072,
+          "limit.output": 65536,
           "limit.temperature_max": 2.0,
           "limit.temperature_min": 0.0,
+          "model.canonical_id": "google/gemini-3.5-transcribe-live",
+          "model.family": "gemini-transcribe",
           "model.lineage": "gemini",
           "model.name": "Gemini 3.5 Transcribe Live",
+          "model.open_weights": false,
+          "model.status": null,
           "model.type": "transcription",
           "provider.name": "Google",
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3500000000
+          },
           "rate.input_audio": {
             "currency": "USD",
             "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
             "units": 3500000000
           },
@@ -1752,13 +2159,19 @@
             "exponent": 9,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
             "units": 21000000000
           },
           "wire.api": {
-            "from": "curated",
+            "from": "model",
             "value": "https://generativelanguage.googleapis.com/v1beta"
+          },
+          "wire.family": "google.generate_content",
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/google"
           }
         }
       },
@@ -1973,96 +2386,6 @@
       "source": "models.dev"
     }
   },
-  "catalog.get — a curated decision model": {
-    "request": {
-      "arguments": {
-        "model_id": "@cf/cloudflare/clef",
-        "provider_id": "cloudflare-workers-ai"
-      },
-      "name": "catalog.get"
-    },
-    "response": {
-      "catalog_version": 0,
-      "curated": [
-        {
-          "auth_methods": [
-            "apikey"
-          ],
-          "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
-          "review_by_ms": 1797724800000,
-          "source_ref": "Display name 'Clef' confirmed 2026-10-26 at https://developers.cloudflare.com/workers-ai/models/clef/. Read 2026-10-21. https://developers.cloudflare.com/workers-ai/models/clef/: \"Clef is a 27B multimodal decision model that turns a state and a schema of typed questions into decisions. It reads the state as text, JSON, images, or video, and returns a probability for every allowed option of every question.\"; context window \"65,536 tokens\"; \"Optional embedded PNG, JPEG, or WebP images placed before the state (max 4; 4 MiB and 16 megapixels each, 8 MiB total decoded; whole request body max 13 MiB). Remote URLs are not accepted.\"; \"Clef models convert media inputs to input tokens and bill them at the model's input token rate. Clef models do not charge for output tokens.\" https://developers.cloudflare.com/workers-ai/platform/pricing/: \"| @cf/cloudflare/clef | $0.240 per M input tokens | 21818 neurons per M input tokens |\". Not in https://models.dev/api.json (embedded seed fetched 2026-10-13)."
-        }
-      ],
-      "models": {
-        "cloudflare-workers-ai/@cf/cloudflare/clef": {
-          "capability.attachment": true,
-          "existence": "present",
-          "limit.context": 65536,
-          "model.kind": "decision",
-          "model.name": "Clef",
-          "rate.input": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 240000000
-          },
-          "rate.output": {
-            "state": "stated_zero"
-          }
-        }
-      },
-      "resolved_at_ms": -1,
-      "source": "models.dev"
-    }
-  },
-  "catalog.get — a curated extraction model": {
-    "request": {
-      "arguments": {
-        "model_id": "@cf/cloudflare/clairic",
-        "provider_id": "cloudflare-workers-ai"
-      },
-      "name": "catalog.get"
-    },
-    "response": {
-      "catalog_version": 0,
-      "curated": [
-        {
-          "auth_methods": [
-            "apikey"
-          ],
-          "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
-          "review_by_ms": 1797724800000,
-          "source_ref": "Display name 'Clairic' confirmed 2026-10-26 at https://developers.cloudflare.com/workers-ai/models/clairic/. Read 2026-10-21. https://developers.cloudflare.com/workers-ai/models/clairic/: \"Clairic is a System One-style model that can extract, compute, estimate, and forecast values from inputs. It is strongly typed and outputs confidence scores and probabilities against its outputs.\"; context window \"65,536 tokens\"; \"Vision | Yes\"; \"Optional embedded PNG, JPEG or WebP images placed before the state (max 4; 4 MiB each, 8 MiB total decoded; request body max 16 MiB). Remote URLs are not accepted.\" https://blog.cloudflare.com/clairic-extraction-model: \"Similar to a decision model, it only processes input tokens with a single forward pass, and thus has no charge for output tokens.\" https://developers.cloudflare.com/workers-ai/platform/pricing/: \"| @cf/cloudflare/clairic | $0.100 per M input tokens | 9091 neurons per M input tokens |\". Not in https://models.dev/api.json (embedded seed fetched 2026-10-13)."
-        }
-      ],
-      "models": {
-        "cloudflare-workers-ai/@cf/cloudflare/clairic": {
-          "capability.attachment": true,
-          "existence": "present",
-          "limit.context": 65536,
-          "model.kind": "extraction",
-          "model.name": "Clairic",
-          "rate.input": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 100000000
-          },
-          "rate.output": {
-            "state": "stated_zero"
-          }
-        }
-      },
-      "resolved_at_ms": -1,
-      "source": "models.dev"
-    }
-  },
   "catalog.get — a curated plane-only model": {
     "request": {
       "arguments": {
@@ -2168,7 +2491,7 @@
     "request": {
       "arguments": {
         "include_retired": true,
-        "provider_id": "typesafe"
+        "provider_id": "exa"
       },
       "name": "catalog.get"
     },
@@ -2179,54 +2502,31 @@
           "auth_methods": [
             "apikey"
           ],
-          "model": "typesafe/jev-1.13.0",
-          "review_by_ms": 1797724800000,
-          "source_ref": "Display names confirmed 2026-10-26 at https://docs.typesafe.ai/models: the table labels model id jev-1.13.0 as 'Jev 1.13'; 'Jev is TypeSafe's flagship model'. Read 2026-10-21. https://docs.typesafe.ai/models: \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\"; \"Price: You pay per input token. Output tokens are free. A Btok is a billion tokens and an Mtok is a million tokens.\"; \"| `jev-latest` | `jev-1.13.0` | The most recent stable, official release.\"; \"| Context length | 64k per-request / 32k per-question |\". https://docs.typesafe.ai/concepts/system-one: \"It returns typed decisions and probabilities rather than generated text.\"; \"System One models do not write replies, produce code, or generate explanations of their reasoning.\" No limit.context: the docs give only \"64k\", and neither https://docs.typesafe.ai/api/list-models nor https://api.typesafe.ai/openapi.json states an exact token count. No capability.attachment: the models page lists \"| Input | Text | Text |\" while https://docs.typesafe.ai/images says \"Jev 1.13 and Jev 1.14 both accept images.\" Provider typesafe is not in https://models.dev/api.json (embedded seed fetched 2026-10-13)."
-        },
-        {
-          "auth_methods": [
-            "apikey"
-          ],
-          "model": "typesafe/jev-1.14.0",
-          "review_by_ms": 1800662400000,
-          "source_ref": "Read 2026-11-24 at https://docs.typesafe.ai/models: the current-models table lists \"| Model ID | `jev-1.14.0` | `jev-1.13.0` |\", \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\", \"| Context length | 64k per-request / 32k per-question | 64k per-request / 32k per-question |\" and \"Jev 1.14 is the newest Jev release, available from October 14, 2026.\"; \"Price: You pay per input token. Output tokens are free.\" Both versions are served by the same endpoint, POST https://api.typesafe.ai/v1/systemone. No limit.context: the docs give only \"64k\", the same gap as the Jev 1.13 row. Provider typesafe is not in https://models.dev/api.json."
+          "model": "exa/search",
+          "review_by_ms": 1799884800000,
+          "source_ref": "Read 2026-11-15. https://exa.ai/pricing: \"Each endpoint has a base price per request that includes up to 10 results.\" The `/search` (`auto`, `fast`) row states \"$7 / 1k requests\" as its base price and \"$1 / 1k results\" for each result above 10. Results above 10 incur that additional charge, which is not served as a rate. https://docs.exa.ai/reference/search, `type`: \"The search mode to use. Defaults to `auto`, a balanced mode recommended for most applications.\" Text and highlights inside `/search` have no separate published charge. https://exa.ai/docs/search/quickstart sets `type=\"auto\"` and `contents={\"highlights\": True}`; its example response itemises `\"costDollars\": { \"total\": 0.007, \"search\": { \"neural\": 0.007 } }`, the base $0.007. AI page summaries are separately priced, not included in this rate. No increment or minimum is stated, so both are unknown."
         }
       ],
       "models": {
-        "typesafe/jev-1.13.0": {
+        "exa/search": {
           "existence": "present",
-          "model.kind": "decision",
-          "model.name": "Jev 1.13",
-          "provider.name": "TypeSafe",
-          "rate.input": {
+          "model.name": "Exa Search",
+          "model.type": "search",
+          "rate.request.per_request": {
             "currency": "USD",
-            "exponent": 9,
+            "exponent": 0,
+            "increment": {
+              "kind": "unknown"
+            },
+            "minimum_quantity": {
+              "kind": "unknown"
+            },
+            "per": 1000,
             "state": "priced",
             "unit_provenance": {
               "kind": "stated"
             },
-            "units": 42000000
-          },
-          "rate.output": {
-            "state": "stated_zero"
-          }
-        },
-        "typesafe/jev-1.14.0": {
-          "existence": "present",
-          "model.kind": "decision",
-          "model.name": "Jev 1.14",
-          "provider.name": "TypeSafe",
-          "rate.input": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 42000000
-          },
-          "rate.output": {
-            "state": "stated_zero"
+            "units": 7
           }
         }
       },
@@ -2646,7 +2946,7 @@
   "catalog.get — a provider served only through curated rows": {
     "request": {
       "arguments": {
-        "provider_id": "typesafe"
+        "provider_id": "exa"
       },
       "name": "catalog.get"
     },
@@ -2657,54 +2957,31 @@
           "auth_methods": [
             "apikey"
           ],
-          "model": "typesafe/jev-1.13.0",
-          "review_by_ms": 1797724800000,
-          "source_ref": "Display names confirmed 2026-10-26 at https://docs.typesafe.ai/models: the table labels model id jev-1.13.0 as 'Jev 1.13'; 'Jev is TypeSafe's flagship model'. Read 2026-10-21. https://docs.typesafe.ai/models: \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\"; \"Price: You pay per input token. Output tokens are free. A Btok is a billion tokens and an Mtok is a million tokens.\"; \"| `jev-latest` | `jev-1.13.0` | The most recent stable, official release.\"; \"| Context length | 64k per-request / 32k per-question |\". https://docs.typesafe.ai/concepts/system-one: \"It returns typed decisions and probabilities rather than generated text.\"; \"System One models do not write replies, produce code, or generate explanations of their reasoning.\" No limit.context: the docs give only \"64k\", and neither https://docs.typesafe.ai/api/list-models nor https://api.typesafe.ai/openapi.json states an exact token count. No capability.attachment: the models page lists \"| Input | Text | Text |\" while https://docs.typesafe.ai/images says \"Jev 1.13 and Jev 1.14 both accept images.\" Provider typesafe is not in https://models.dev/api.json (embedded seed fetched 2026-10-13)."
-        },
-        {
-          "auth_methods": [
-            "apikey"
-          ],
-          "model": "typesafe/jev-1.14.0",
-          "review_by_ms": 1800662400000,
-          "source_ref": "Read 2026-11-24 at https://docs.typesafe.ai/models: the current-models table lists \"| Model ID | `jev-1.14.0` | `jev-1.13.0` |\", \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\", \"| Context length | 64k per-request / 32k per-question | 64k per-request / 32k per-question |\" and \"Jev 1.14 is the newest Jev release, available from October 14, 2026.\"; \"Price: You pay per input token. Output tokens are free.\" Both versions are served by the same endpoint, POST https://api.typesafe.ai/v1/systemone. No limit.context: the docs give only \"64k\", the same gap as the Jev 1.13 row. Provider typesafe is not in https://models.dev/api.json."
+          "model": "exa/search",
+          "review_by_ms": 1799884800000,
+          "source_ref": "Read 2026-11-15. https://exa.ai/pricing: \"Each endpoint has a base price per request that includes up to 10 results.\" The `/search` (`auto`, `fast`) row states \"$7 / 1k requests\" as its base price and \"$1 / 1k results\" for each result above 10. Results above 10 incur that additional charge, which is not served as a rate. https://docs.exa.ai/reference/search, `type`: \"The search mode to use. Defaults to `auto`, a balanced mode recommended for most applications.\" Text and highlights inside `/search` have no separate published charge. https://exa.ai/docs/search/quickstart sets `type=\"auto\"` and `contents={\"highlights\": True}`; its example response itemises `\"costDollars\": { \"total\": 0.007, \"search\": { \"neural\": 0.007 } }`, the base $0.007. AI page summaries are separately priced, not included in this rate. No increment or minimum is stated, so both are unknown."
         }
       ],
       "models": {
-        "typesafe/jev-1.13.0": {
+        "exa/search": {
           "existence": "present",
-          "model.kind": "decision",
-          "model.name": "Jev 1.13",
-          "provider.name": "TypeSafe",
-          "rate.input": {
+          "model.name": "Exa Search",
+          "model.type": "search",
+          "rate.request.per_request": {
             "currency": "USD",
-            "exponent": 9,
+            "exponent": 0,
+            "increment": {
+              "kind": "unknown"
+            },
+            "minimum_quantity": {
+              "kind": "unknown"
+            },
+            "per": 1000,
             "state": "priced",
             "unit_provenance": {
               "kind": "stated"
             },
-            "units": 42000000
-          },
-          "rate.output": {
-            "state": "stated_zero"
-          }
-        },
-        "typesafe/jev-1.14.0": {
-          "existence": "present",
-          "model.kind": "decision",
-          "model.name": "Jev 1.14",
-          "provider.name": "TypeSafe",
-          "rate.input": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 42000000
-          },
-          "rate.output": {
-            "state": "stated_zero"
+            "units": 7
           }
         }
       },
@@ -3282,6 +3559,124 @@
           "superseded_by_ms": 1500
         }
       ]
+    }
+  },
+  "catalog.get — an upstream decision model": {
+    "request": {
+      "arguments": {
+        "model_id": "@cf/cloudflare/clef",
+        "provider_id": "cloudflare-workers-ai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "cloudflare-workers-ai/@cf/cloudflare/clef": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": false,
+          "capability.reasoning_options": null,
+          "capability.structured_output": true,
+          "capability.temperature": true,
+          "capability.tool_call": false,
+          "existence": "present",
+          "limit.context": 65536,
+          "limit.output": 65536,
+          "model.canonical_id": null,
+          "model.family": "clef",
+          "model.kind": "decision",
+          "model.name": "Clef",
+          "model.open_weights": true,
+          "model.status": null,
+          "model.type": "decision",
+          "provider.name": "Cloudflare Workers AI",
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 240000000
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          },
+          "wire.api": {
+            "from": "model",
+            "value": "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — an upstream extraction model": {
+    "request": {
+      "arguments": {
+        "model_id": "@cf/cloudflare/clairic",
+        "provider_id": "cloudflare-workers-ai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "cloudflare-workers-ai/@cf/cloudflare/clairic": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "text"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": false,
+          "capability.reasoning_options": null,
+          "capability.structured_output": true,
+          "capability.temperature": true,
+          "capability.tool_call": false,
+          "existence": "present",
+          "limit.context": 65536,
+          "limit.output": 65536,
+          "model.canonical_id": null,
+          "model.family": null,
+          "model.kind": "extraction",
+          "model.name": "Clairic",
+          "model.open_weights": true,
+          "model.status": null,
+          "model.type": "extraction",
+          "provider.name": "Cloudflare Workers AI",
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 100000000
+          },
+          "rate.output": {
+            "state": "stated_zero"
+          },
+          "wire.api": {
+            "from": "model",
+            "value": "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
     }
   },
   "catalog.get — cache lifetimes anthropic/claude-opus-5-5": {
@@ -4501,127 +4896,6 @@
       "source": "models.dev"
     }
   },
-  "catalog.get — curated GPT-Realtime-2.1": {
-    "request": {
-      "arguments": {
-        "model_id": "gpt-realtime-2.1",
-        "provider_id": "openai"
-      },
-      "name": "catalog.get"
-    },
-    "response": {
-      "catalog_version": 0,
-      "curated": [
-        {
-          "auth_methods": [
-            "apikey"
-          ],
-          "model": "openai/gpt-realtime-2.1",
-          "review_by_ms": 1800748800000,
-          "source_ref": "Read 2026-11-25. https://developers.openai.com/api/docs/models/gpt-realtime-2.1: \"Input modalities: text, audio, image\"; \"Output modalities: text, audio\"; \"128,000 context window\"; \"32,000 max output tokens\"; \"Reasoning token support\"; \"GPT-Realtime-2.1 supports configurable reasoning effort\"; Text tokens \"Input | $4\", \"Cached input | $0.4\", \"Output | $24\"; Audio tokens \"Input | $32\", \"Cached input | $0.4\", \"Output | $64\" (per 1M tokens). Curated because models.dev made its realtime models v2-only on 2026-11-23 (commit f52df4a220, \"make gpt-realtime-2.1 v2-only like the other realtime models\"), so the v1 catalog fusiform reads no longer lists it. Effort values and structured_output false are the last models.dev values, which its v2 file still states. Image-token rates ($5, cached $0.50) are not served: no image-token rate role exists. Same OpenAI v1 API base as the other curated OpenAI rows; no unverified wire.family is served."
-        }
-      ],
-      "models": {
-        "openai/gpt-realtime-2.1": {
-          "capability.attachment": true,
-          "capability.input_modalities": [
-            "audio",
-            "image",
-            "text"
-          ],
-          "capability.output_modalities": [
-            "audio",
-            "text"
-          ],
-          "capability.reasoning": true,
-          "capability.reasoning_options": [
-            {
-              "type": "effort",
-              "values": [
-                "minimal",
-                "low",
-                "medium",
-                "high",
-                "xhigh"
-              ]
-            }
-          ],
-          "capability.structured_output": false,
-          "capability.temperature": false,
-          "capability.tool_call": true,
-          "existence": "present",
-          "limit.context": 128000,
-          "limit.images_per_request": 1500,
-          "limit.output": 32000,
-          "model.canonical_id": "openai/gpt-realtime-2.1",
-          "model.lineage": "gpt",
-          "model.name": "GPT-Realtime-2.1",
-          "model.type": "realtime",
-          "provider.name": "OpenAI",
-          "rate.cache_read": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 400000000
-          },
-          "rate.cached_input_audio": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 400000000
-          },
-          "rate.input": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 4000000000
-          },
-          "rate.input_audio": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 32000000000
-          },
-          "rate.output": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 24000000000
-          },
-          "rate.output_audio": {
-            "currency": "USD",
-            "exponent": 9,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 64000000000
-          },
-          "wire.api": {
-            "from": "curated",
-            "value": "https://api.openai.com/v1"
-          }
-        }
-      },
-      "resolved_at_ms": -1,
-      "source": "models.dev"
-    }
-  },
   "catalog.get — curated search engines": {
     "request": [
       {
@@ -4868,68 +5142,6 @@
         "source": "models.dev"
       }
     ]
-  },
-  "catalog.get — curated unit-billed transcription rate": {
-    "request": {
-      "arguments": {
-        "model_id": "gpt-transcribe",
-        "provider_id": "openai"
-      },
-      "name": "catalog.get"
-    },
-    "response": {
-      "catalog_version": 0,
-      "curated": [
-        {
-          "auth_methods": [
-            "apikey"
-          ],
-          "model": "openai/gpt-transcribe",
-          "review_by_ms": 1799193600000,
-          "source_ref": "Read 2026-11-07 at https://developers.openai.com/api/docs/models/gpt-transcribe: \"GPT Transcribe\"; \"Input modalities: audio, text\"; \"Output modalities: text\"; the \"Transcription audio duration\" table states \"Price | $0.0045 | minute\". https://developers.openai.com/api/docs/pricing, transcription table: \"gpt-transcribe | Transcription | - | - | $0.0045 / minute\". Served as $0.0045 per 60 seconds, not a per-token price. The token-rate columns are '-' so no token rate is served. Neither page states a rounding rule, a minimum, or a prompt/keyword text billing rule; those omissions do not establish that no rounding, minimum or text charge applies. Read 2026-11-11 at https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create: \"https://api.openai.com/v1/audio/transcriptions\"; the base is served as https://api.openai.com/v1 and the caller appends audio/transcriptions. No wire.family is served: no request-format token is verified for the transcription endpoint."
-        }
-      ],
-      "models": {
-        "openai/gpt-transcribe": {
-          "capability.input_modalities": [
-            "audio",
-            "text"
-          ],
-          "capability.output_modalities": [
-            "text"
-          ],
-          "existence": "present",
-          "limit.temperature_max": 2,
-          "limit.temperature_min": 0,
-          "model.lineage": "gpt",
-          "model.name": "GPT Transcribe",
-          "model.type": "transcription",
-          "provider.name": "OpenAI",
-          "rate.input_audio.per_second": {
-            "currency": "USD",
-            "exponent": 9,
-            "increment": {
-              "kind": "unknown"
-            },
-            "minimum_quantity": {
-              "kind": "unknown"
-            },
-            "per": 60,
-            "state": "priced",
-            "unit_provenance": {
-              "kind": "stated"
-            },
-            "units": 4500000
-          },
-          "wire.api": {
-            "from": "curated",
-            "value": "https://api.openai.com/v1"
-          }
-        }
-      },
-      "resolved_at_ms": -1,
-      "source": "models.dev"
-    }
   },
   "catalog.get — dated Flash Image split rates": {
     "request": {
@@ -5181,18 +5393,9 @@
     },
     "response": {
       "catalog_version": 0,
-      "curated": [
-        {
-          "auth_methods": [
-            "apikey"
-          ],
-          "model": "openai/gpt-live-transcribe",
-          "review_by_ms": 1799712000000,
-          "source_ref": "Read 2026-11-13. https://platform.openai.com/docs/pricing#audio-tokens: \"gpt-live-transcribe | Live transcription | - | - | $0.017 / minute\". https://developers.openai.com/api/docs/models/gpt-live-transcribe: \"GPT-Live-Transcribe\"; \"Input modalities: audio, text\"; \"Output modalities: text\"; \"Realtime audio duration\", \"Price | $0.017 | minute\". Served as $0.017 per 60 seconds, not a token rate. No rounding rule or minimum is stated, so increment and minimum_quantity are unknown; GPT-Live-1's per-second rule is not applied. The model page lists \"Realtime transcription | v1/realtime/transcription_sessions | Supported\": used through Realtime transcription sessions at https://api.openai.com/v1/realtime/transcription_sessions. The curated API base is the same OpenAI v1 base; no unverified wire.family is served."
-        }
-      ],
       "models": {
         "openai/gpt-live-transcribe": {
+          "capability.attachment": true,
           "capability.input_modalities": [
             "audio",
             "text"
@@ -5200,31 +5403,34 @@
           "capability.output_modalities": [
             "text"
           ],
+          "capability.reasoning": false,
+          "capability.reasoning_options": null,
+          "capability.temperature": false,
+          "capability.tool_call": false,
           "existence": "present",
-          "limit.temperature_max": 2,
-          "limit.temperature_min": 0,
+          "limit.context": null,
+          "limit.output": null,
+          "model.canonical_id": "openai/gpt-live-transcribe",
+          "model.family": "gpt-transcribe",
           "model.lineage": "gpt",
           "model.name": "GPT-Live-Transcribe",
+          "model.open_weights": false,
+          "model.status": null,
           "model.type": "transcription",
           "provider.name": "OpenAI",
           "rate.input_audio.per_second": {
             "currency": "USD",
             "exponent": 9,
-            "increment": {
-              "kind": "unknown"
-            },
-            "minimum_quantity": {
-              "kind": "unknown"
-            },
             "per": 60,
             "state": "priced",
             "unit_provenance": {
-              "kind": "stated"
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
             },
             "units": 17000000
           },
           "wire.api": {
-            "from": "curated",
+            "from": "model",
             "value": "https://api.openai.com/v1"
           }
         }
@@ -8550,20 +8756,74 @@
     },
     "response": {
       "catalog_version": -1,
-      "curated": [
-        {
-          "auth_methods": [
-            "apikey"
-          ],
-          "model": "cloudflare-workers-ai/@cf/cloudflare/clef-flash",
-          "review_by_ms": 1797724800000,
-          "source_ref": "Display name 'Clef-flash' confirmed 2026-10-26 at https://developers.cloudflare.com/workers-ai/models/clef-flash/. Read 2026-10-21. https://developers.cloudflare.com/workers-ai/models/clef-flash/: \"Clef-flash is a fast 9B multimodal decision model that turns a state and a schema of typed questions into decisions. It reads the state as text, JSON, images, or video, and returns a probability for every allowed option of every question.\"; context window \"24,576 tokens\"; \"Optional embedded PNG, JPEG, or WebP images placed before the state (max 4; 4 MiB and 16 megapixels each, 8 MiB total decoded; whole request body max 13 MiB). Remote URLs are not accepted.\"; \"Clef models convert media inputs to input tokens and bill them at the model's input token rate. Clef models do not charge for output tokens.\" https://developers.cloudflare.com/workers-ai/platform/pricing/: \"| @cf/cloudflare/clef-flash | $0.038 per M input tokens | 3455 neurons per M input tokens |\". Not in https://models.dev/api.json (embedded seed fetched 2026-10-13)."
-        }
-      ],
       "models": {
         "cloudflare-workers-ai/@cf/cloudflare/clef-flash": {
           "limit.context": 24576,
+          "limit.output": 24576,
           "model.kind": "decision"
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — unit-billed transcription rate": {
+    "request": {
+      "arguments": {
+        "model_id": "gpt-transcribe",
+        "provider_id": "openai"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "openai/gpt-transcribe": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "audio",
+            "text"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": false,
+          "capability.reasoning_options": null,
+          "capability.temperature": true,
+          "capability.tool_call": false,
+          "existence": "present",
+          "limit.context": null,
+          "limit.output": null,
+          "limit.temperature_max": 2,
+          "limit.temperature_min": 0,
+          "model.canonical_id": "openai/gpt-transcribe",
+          "model.family": "gpt-transcribe",
+          "model.lineage": "gpt",
+          "model.name": "GPT-Transcribe",
+          "model.open_weights": false,
+          "model.status": null,
+          "model.type": "transcription",
+          "provider.name": "OpenAI",
+          "rate.input_audio.per_second": {
+            "currency": "USD",
+            "exponent": 9,
+            "per": 60,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 4500000
+          },
+          "wire.api": {
+            "from": "model",
+            "value": "https://api.openai.com/v1"
+          },
+          "wire.family": "openai.responses",
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/openai"
+          }
         }
       },
       "resolved_at_ms": -1,
@@ -9728,13 +9988,13 @@
       "bus_publish_failures": 0,
       "bus_published_version": null,
       "catalog_version": 1000,
-      "era_count": 13,
+      "era_count": 14,
       "history_begins_at_ms": 1000,
       "model_count": 1,
       "models_priced": 0,
       "normalization_findings": {
         "counts": {
-          "refused_base_schedule": 1
+          "refused_price": 1
         },
         "observation_id": 1
       },

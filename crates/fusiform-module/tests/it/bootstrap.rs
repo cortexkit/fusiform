@@ -299,17 +299,17 @@ fn a_disagreeing_first_fetch_gets_an_observed_boundary() {
     )
     .unwrap();
     let target = doc
-        .get_mut("anthropic")
-        .and_then(|p| p.get_mut("models"))
-        .and_then(|m| m.get_mut("claude-sonnet-4-5"))
-        .and_then(|m| m.get_mut("cost"))
-        .and_then(|c| c.as_object_mut())
+        .pointer_mut("/anthropic/models/claude-sonnet-4-5/cost/text/input/price")
         .expect("the snapshot must carry this model");
-    target.insert("input".to_string(), serde_json::json!(2.5));
+    *target = serde_json::json!(2.5);
 
-    let moved = fusiform_core::normalize::normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
-        .unwrap()
-        .catalog;
+    let moved = fusiform_core::normalize_models_dev_with(
+        &serde_json::to_vec(&doc).unwrap(),
+        &fusiform_module::input_audio::evidence(),
+        Timestamp(poll_at),
+    )
+    .unwrap()
+    .catalog;
 
     let observation_id = store
         .record_observation(&NewObservation {

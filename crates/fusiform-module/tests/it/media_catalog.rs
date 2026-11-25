@@ -136,7 +136,10 @@ fn realtime_audio_is_priced_on_a_fresh_v2_store() {
         &store,
         json!({"provider_id":"openai","model_id":"gpt-realtime-2.1"}),
     );
-    assert!(response.fact_overrides.is_empty());
+    assert!(response
+        .fact_overrides
+        .iter()
+        .all(|row| row.fact_key == "rate.reasoning"));
     assert!(response.curated.is_empty());
     let expected = json!({
         "existence":"present", "provider.name":"OpenAI", "model.name":"GPT-Realtime-2.1",
@@ -324,6 +327,19 @@ fn image_store(output: i64) -> (CatalogStore, tempfile::TempDir) {
     let (store, dir) = empty_store();
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
+    store
+        .append_eras(&[fusiform_store::NewEra {
+            source: fusiform_core::SourceId::ModelsDev,
+            provider_id: "google".into(),
+            model_id: "gemini-3.1-flash-image".into(),
+            fact_key: fusiform_store::FactKey::from_stored("rate.output_image".into()),
+            value_json: r#"{"state":"priced","units":60000000000,"exponent":9,"currency":"USD"}"#
+                .into(),
+            boundary_at: Timestamp(2000),
+            boundary_kind: BoundaryKind::Asserted,
+            observation_id: None,
+        }])
+        .unwrap();
     (store, dir)
 }
 
@@ -375,17 +391,10 @@ fn flash_image_split_is_guarded_inherited_and_current_only() {
             .iter()
             .filter(|row| row.fact_key.starts_with("rate.output"))
             .collect();
-        assert_eq!(
-            output_disclosures.len(),
-            1,
-            "{model}: only the image addition is curated; text is upstream"
+        assert!(
+            output_disclosures.is_empty(),
+            "{model}: both output rates are upstream"
         );
-        let row = output_disclosures[0];
-        assert_eq!(row.model, identity);
-        assert_eq!(row.model_id, TARGET_ID);
-        assert_eq!(row.fact_key, "rate.output_image");
-        assert_eq!(row.value, facts[&row.fact_key]);
-        assert!(row.replaces.is_null());
 
         let reasoning = response
             .fact_overrides

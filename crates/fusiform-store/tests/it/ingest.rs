@@ -1950,9 +1950,9 @@ fn streamed_digest_matches_the_original_tuple_sort_on_the_embedded_seed() {
         }
         hasher.finalize().to_hex().to_string()
     }
-    let mut catalog = fusiform_core::normalize::normalize_legacy_models_dev_for_tests(
-        include_bytes!("../../../fusiform-module/data/models-dev-seed.json"),
-    )
+    let mut catalog = fusiform_core::normalize_models_dev(include_bytes!(
+        "../../../fusiform-module/data/models-dev-seed.json"
+    ))
     .unwrap()
     .catalog;
     let with_refusals = catalog_digest(&catalog);

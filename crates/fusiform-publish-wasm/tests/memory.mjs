@@ -24,7 +24,7 @@ if (process.argv[2] === 'prepare') {
   assert.ok(index instanceof Uint8Array);
   process.stdout.write(index);
 } else {
-  test('a growth poll does not retain a second JSON tree for the diff', () => {
+  test('a growth poll does not retain a second JSON tree for the diff', (t) => {
     // Prepare in another process: a Wasm instance keeps the pages it allocated
     // on a prior poll, so reusing it would hide this call's memory high-water.
     const prepare = spawnSync(process.execPath, [fileURLToPath(import.meta.url), 'prepare'], {
@@ -40,6 +40,7 @@ if (process.argv[2] === 'prepare') {
     assert.equal(decoded.model_count, 2 * seedMeta.model_count);
     assert.equal(decoded.ops.length, 249_587);
     assert.equal(decoded.next_date_boundary_ms, 1_796_083_200_000);
+    t.diagnostic(`growth poll: ${memory.buffer.byteLength} bytes (${(memory.buffer.byteLength / 1024 ** 2).toFixed(2)} MiB), ${decoded.ops.length} ops`);
     // This threshold detects a regression toward the 316 MB full-tree encoder;
     // it does not claim the poll fits within a Worker's memory budget.
     assert.ok(memory.buffer.byteLength < 240 * 1024 * 1024,

@@ -235,12 +235,12 @@ fn flash_store() -> (CatalogStore, tempfile::TempDir) {
     (store, dir)
 }
 
-fn flash_overrides() -> fusiform_module::fact_overrides::FactOverrides {
-    fusiform_module::fact_overrides::overrides()
-        .iter()
-        .filter(|((provider, model, _), _)| provider == "google" && model == FLASH_MODEL)
-        .map(|(key, row)| (key.clone(), row.clone()))
-        .collect()
+pub(super) fn flash_overrides() -> fusiform_module::fact_overrides::FactOverrides {
+    let (rows, rejects) = fusiform_module::fact_overrides::load_reporting_rejects(include_str!(
+        "../../fixtures/retired-fact-overrides.json"
+    ));
+    assert!(rejects.is_empty());
+    rows
 }
 
 // Preserve the retired text claim as a fixture: historical reads must still
@@ -272,6 +272,36 @@ pub(super) fn historical_flash_store() -> (CatalogStore, tempfile::TempDir) {
     let boundary = rows.values().map(|r| r.established_at_ms).max().unwrap();
     fusiform_module::fact_overrides::apply_to_store(&store, &rows, boundary).unwrap();
     (store, dir)
+}
+
+#[test]
+fn removing_an_image_price_addition_leaves_direct_dated_billing_intact() {
+    let (store, _dir) = historical_flash_store();
+    let removed_at = 1_795_629_037_000;
+    assert_eq!(
+        fusiform_module::fact_overrides::apply_to_store(&store, &Default::default(), removed_at)
+            .unwrap(),
+        2
+    );
+    let read = |at| {
+        get(
+            &store,
+            json!({"provider_id":"google", "model_id":FLASH_MODEL, "at_ms":at}),
+        )
+    };
+    let before = read(1_794_440_193_000);
+    assert_eq!(
+        before.models[FLASH]["rate.output"]["units"],
+        3_000_000_000_i64
+    );
+    assert_eq!(
+        before.models[FLASH]["rate.output_image"]["units"],
+        60_000_000_000_i64
+    );
+    assert_eq!(disclosed_fact(&before, FLASH, "rate.output_image").len(), 1);
+    let after = read(removed_at);
+    assert!(disclosed_fact(&after, FLASH, "rate.output_image").is_empty());
+    assert!(!after.models[FLASH].contains_key("rate.output_image"));
 }
 
 #[test]
@@ -311,9 +341,12 @@ fn retired_flash_text_override_stays_historical_after_upstream_correction() {
         assert_eq!(disclosed(&response, FLASH).len(), disclosures);
     }
     ingest(&store, &flash_document(60), corrected_at + 100);
-    for args in [
-        json!({"provider_id":"google", "model_id":FLASH_MODEL}),
-        json!({"provider_id":"google", "model_id":FLASH_MODEL, "at_ms":corrected_at + 100}),
+    for (args, expected_image_disclosures) in [
+        (json!({"provider_id":"google", "model_id":FLASH_MODEL}), 0),
+        (
+            json!({"provider_id":"google", "model_id":FLASH_MODEL, "at_ms":corrected_at + 100}),
+            1,
+        ),
     ] {
         let response = get(&store, args);
         assert_eq!(
@@ -322,7 +355,7 @@ fn retired_flash_text_override_stays_historical_after_upstream_correction() {
         );
         assert_eq!(
             disclosed_fact(&response, FLASH, "rate.output_image").len(),
-            1
+            expected_image_disclosures
         );
         assert!(disclosed_fact(&response, FLASH, "rate.output").is_empty());
     }
@@ -465,10 +498,7 @@ fn dated_overrides_diff_claims_not_provenance_and_tombstone_removals() {
         current.models[FLASH]["rate.output"]["units"],
         60_000_000_000i64
     );
-    assert_eq!(
-        disclosed_fact(&current, FLASH, "rate.output_image").len(),
-        1
-    );
+    assert!(disclosed_fact(&current, FLASH, "rate.output_image").is_empty());
     assert!(disclosed_fact(&current, FLASH, "rate.output").is_empty());
 }
 

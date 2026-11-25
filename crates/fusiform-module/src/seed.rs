@@ -396,10 +396,12 @@ mod input_audio_tests {
                 .unwrap_or_else(|| panic!("{provider}/{model} is in the seed"))
                 .rates
                 .iter()
-                .any(|r| r.basis == audio)
+                .any(|r| {
+                    r.basis == audio && matches!(r.value, fusiform_core::RateValue::Priced { .. })
+                })
         };
         assert!(has_audio("google", "gemini-3.8-flash"));
-        // Control: a provider with no evidence publishes the key and gets none.
+        // A provider with no evidence cannot serve a priced audio rate.
         assert!(!has_audio("google-vertex", "gemini-3.8-flash"));
     }
 }

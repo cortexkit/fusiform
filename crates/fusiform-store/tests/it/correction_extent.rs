@@ -270,10 +270,9 @@ fn the_closed_vocabulary_matches_the_normalizer() {
         serde_json::json!({"shape": "responses"});
     fixture["anthropic"]["models"]["claude-sonnet-4-5"]["type"] =
         serde_json::json!("transcription");
-    let seed: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../fusiform-module/data/models-dev-seed.json"
-    ))
-    .unwrap();
+    let seed: serde_json::Value =
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     fixture["google"]["models"]["gemini-3.1-flash-live-preview"] =
         seed["google"]["models"]["gemini-3.1-flash-live-preview"].clone();
     let outcome = normalize_legacy_models_dev_for_tests_with(

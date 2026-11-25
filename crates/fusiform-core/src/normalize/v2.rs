@@ -511,31 +511,28 @@ fn normalize_capabilities(fields: &Object<'_>, read: &mut ModelFactRead<'_>) -> 
 }
 
 fn read_modalities(published: Option<Vec<String>>) -> Option<Vec<Modality>> {
-    // MIME subtypes describe the same catalog modality. Output classes that
-    // v1 grouped with text are still distinguished by the model's v2 type.
     let mut base = Vec::new();
     for value in published? {
-        let name = match value.as_str() {
-            "embedding" | "decision" | "reranking" => "text",
-            "application/pdf" => "pdf",
-            other => match other.split_once('/') {
-                Some((kind @ ("text" | "image" | "audio" | "video"), _)) => kind,
-                _ => other,
-            },
-        };
-        let modality = match name {
-            "text" => Modality::Text,
-            "image" => Modality::Image,
-            "audio" => Modality::Audio,
-            "video" => Modality::Video,
-            "pdf" => Modality::Pdf,
-            _ => Modality::Other(name.to_owned()),
-        };
+        let modality = Modality::parse(modality_label(&value));
         if !base.contains(&modality) {
             base.push(modality);
         }
     }
     Some(base)
+}
+
+/// The catalog modality for an upstream v2 output or input label.
+pub fn modality_label(value: &str) -> &str {
+    // MIME subtypes describe the same catalog modality. Output classes that
+    // v1 grouped with text are still distinguished by the model's v2 type.
+    match value {
+        "embedding" | "decision" | "reranking" => "text",
+        "application/pdf" => "pdf",
+        other => match other.split_once('/') {
+            Some((kind @ ("text" | "image" | "audio" | "video"), _)) => kind,
+            _ => other,
+        },
+    }
 }
 
 fn reasoning_options(reasoning: &Object<'_>, read: &mut ModelFactRead<'_>) -> Value {

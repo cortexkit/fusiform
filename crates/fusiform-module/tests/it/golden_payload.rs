@@ -926,6 +926,7 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
         ("openai", "gpt-transcribe"),
         ("openai", "gpt-live-transcribe"),
         ("google", "gemini-3.5-transcribe-live"),
+        ("google", "gemini-3.1-flash-image"),
     ];
     let (v2, _v2_dir) = super::media_catalog::v2_seed_store(&media);
     for (label, arguments) in [
@@ -1102,12 +1103,9 @@ fn render_curated_history() -> serde_json::Value {
 fn render_fact_override_history() -> serde_json::Value {
     let (store, _dir) = super::curated_wire::store();
     let at = 1_794_440_193_000i64;
-    fusiform_module::fact_overrides::apply_to_store(
-        &store,
-        fusiform_module::fact_overrides::overrides(),
-        at,
-    )
-    .unwrap();
+    let mut claims = fusiform_module::fact_overrides::overrides().clone();
+    claims.extend(super::fact_overrides::flash_overrides());
+    fusiform_module::fact_overrides::apply_to_store(&store, &claims, at).unwrap();
     let request = serde_json::json!({"name":"catalog.get", "arguments":{
         "provider_id":"google", "model_id":"gemini-3.1-flash-image",
         "fact_prefixes":["rate."], "at_ms":at,
@@ -1369,7 +1367,7 @@ fn render_status_case(case: StatusCase, poll_error: Option<&str>) -> serde_json:
             &signals,
             SourceId::ModelsDev,
             FetchOutcome::Body {
-                bytes: br#"{"p":{"models":{"m":{"cost":{"input":"unreadable","output":2}}}}}"#
+                bytes: br#"{"p":{"models":{"m":{"type":"chat","api":{},"capabilities":{},"cost":{"text":{"input":{"price":"unreadable"},"output":{"price":2}}}}}}}"#
                     .to_vec(),
                 etag: None,
                 duration: std::time::Duration::ZERO,
@@ -1702,7 +1700,7 @@ pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Valu
     }});
     let mut doc = doc;
     doc["cloudflare-workers-ai"]["models"]["@cf/cloudflare/clef-flash"] = serde_json::json!({
-        "type":"decision", "limit":{"output":24576}
+        "type":"decision", "limit":{"context":24576,"output":24576}
     });
     let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
         .unwrap()
@@ -1818,7 +1816,7 @@ pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Valu
     assert_eq!(
         cases["catalog.get — ungraded decision model"]["response"]["models"]
             ["cloudflare-workers-ai/@cf/cloudflare/clef-flash"],
-        serde_json::json!({"model.kind":"decision","limit.context":24576})
+        serde_json::json!({"model.kind":"decision","limit.context":24576,"limit.output":24576})
     );
     assert_eq!(
         cases["quality.grades — decision prefix"]["response"]["grades"][0]["kind"],

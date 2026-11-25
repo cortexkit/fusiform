@@ -3,7 +3,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::RawProvider;
 use fusiform_core::{BoundaryKind, Timestamp};
 use fusiform_store::CatalogStore;
 use serde::{Deserialize, Serialize};
@@ -43,6 +42,27 @@ struct HandKeptProvider {
 struct HandKeptDoc {
     schema: String,
     providers: Vec<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct RawProvider {
+    name: Option<String>,
+    doc: Option<String>,
+    #[serde(default)]
+    env: Vec<String>,
+    models: BTreeMap<String, RawModel>,
+}
+
+#[derive(Deserialize)]
+struct RawModel {
+    #[serde(rename = "type")]
+    model_type: Option<String>,
+    modalities: Option<RawModalities>,
+}
+
+#[derive(Deserialize)]
+struct RawModalities {
+    output: Vec<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -110,9 +130,7 @@ fn served_models() -> ServedModels {
         },
     })
     .unwrap();
-    let catalog = fusiform_core::normalize_models_dev(SEED.as_bytes())
-        .unwrap()
-        .catalog;
+    let catalog = fusiform_module::seed::catalog().unwrap();
     let plan = fusiform_store::ingest::plan_ingest(
         &store,
         &catalog,
@@ -206,21 +224,14 @@ fn vector(
         .map(|(id, raw)| {
             let mut outputs = BTreeSet::new();
             for model in raw.models.values() {
-                let provider_model = &model.value;
-                assert!(
-                    !model.unreadable
-                        && !provider_model.modalities.unreadable
-                        && !provider_model.model_type.unreadable,
-                    "{id}: seed model shape is needed to derive provider output types"
-                );
-                if let Some(modalities) = &provider_model.modalities.value {
-                    assert!(
-                        !modalities.output.unreadable,
-                        "{id}: seed output modalities must be readable"
-                    );
-                    outputs.extend(modalities.output.value.iter().cloned());
+                if let Some(modalities) = &model.modalities {
+                    // Keep general catalog modality names, not v2 MIME subtypes
+                    // or semantic output labels. Keep the separate embedding hint.
+                    outputs.extend(modalities.output.iter().map(|label| {
+                        fusiform_core::normalize::v2::modality_label(label).to_owned()
+                    }));
                 }
-                if provider_model.model_type.value.as_deref() == Some("embedding") {
+                if model.model_type.as_deref() == Some("embedding") {
                     outputs.insert("embedding".into());
                 }
             }

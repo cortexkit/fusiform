@@ -12,14 +12,6 @@
       "review_by_ms": 1799452800000
     },
     {
-      "id": "elevenlabs",
-      "name": "ElevenLabs",
-      "doc": "https://elevenlabs.io/docs/overview/intro",
-      "source_ref": "https://elevenlabs.io/docs/overview/intro.md",
-      "established_at_ms": 1794268800000,
-      "review_by_ms": 1799452800000
-    },
-    {
       "id": "exa",
       "name": "Exa",
       "doc": "https://exa.ai/docs/search/quickstart",
@@ -145,14 +137,6 @@
       "doc": "https://docs.tinyfish.ai/",
       "source_ref": "https://docs.tinyfish.ai/faq",
       "kind": "web_search",
-      "established_at_ms": 1794268800000,
-      "review_by_ms": 1799452800000
-    },
-    {
-      "id": "typesafe",
-      "name": "TypeSafe",
-      "doc": "https://docs.typesafe.ai/introduction",
-      "source_ref": "https://docs.typesafe.ai/introduction",
       "established_at_ms": 1794268800000,
       "review_by_ms": 1799452800000
     },

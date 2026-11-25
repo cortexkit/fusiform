@@ -41,7 +41,17 @@ Release numbers and millisecond timestamps passed as arguments are `bigint`.
 | `history_attestation_signing_bytes` | Bare history attestation body | Exact Ed25519 message bytes checked by Rust `verify_history_attestation` |
 
 The publish summary is canonical JSON. Success has `ops`, `base_upstream_hash`,
-`upstream_hash`, `model_count`, `conflicts` and `next_date_boundary_ms`.
+`upstream_hash`, `model_count`, `conflicts`, `findings`, `held_fact_count` and
+`next_date_boundary_ms`.
+
+An unreadable claim is reported in `findings` and is not a withdrawal.
+`held_fact_count` counts prior fact hashes retained under refusal scopes.
+Once any fact is held, build daily snapshots with `snapshot_bytes_from_state`
+from verified materialized release state, not with `snapshot_bytes` from raw
+models.dev bytes. The original value is not in the new document; the incremental
+index retains only its hash. `snapshot_bytes` checks the reconstructed state
+against the signed envelope and refuses on mismatch. Recovery from a verified
+snapshot and changes does not reparse models.dev.
 `base_upstream_hash` identifies the index the diff used; `upstream_hash`
 identifies the resulting index.
 `build_release` refuses a summary whose base does not match the parent

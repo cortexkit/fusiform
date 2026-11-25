@@ -163,6 +163,10 @@ mod tests {
         serde_json::from_str(DOCUMENT).unwrap()
     }
 
+    fn archived_image_document() -> serde_json::Value {
+        serde_json::from_str(include_str!("../fixtures/retired-fact-overrides.json")).unwrap()
+    }
+
     fn seed() -> serde_json::Value {
         serde_json::from_str(include_str!("../data/models-dev-seed.json")).unwrap()
     }
@@ -198,7 +202,7 @@ mod tests {
     fn shipped_overrides_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 109);
+        assert_eq!(rows.len(), 116);
         let row = argon();
         assert_eq!(row.value, json!(65_536));
         assert_eq!(row.replaces, json!(32_768));
@@ -234,26 +238,16 @@ mod tests {
 
     #[test]
     fn image_rate_rows_validate_shape_and_yield_to_upstream_or_withholding() {
-        let rows = overrides();
-        assert!(!rows.contains_key(&(
+        assert!(!overrides().contains_key(&(
             "google".into(),
             "gemini-3.1-flash-image".into(),
             "rate.output".into(),
         )));
-        let image = &rows[&(
-            "google".into(),
-            "gemini-3.1-flash-image".into(),
-            "rate.output_image".into(),
-        )];
+        let archived = archived_image_document();
+        let (rows, rejects) = load_reporting_rejects(&archived.to_string());
+        assert!(rejects.is_empty());
         {
-            let row = image;
-            let mut raw = document()["overrides"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|raw| raw["fact_key"] == row.fact_key && raw["model_id"] == row.model_id)
-                .unwrap()
-                .clone();
+            let mut raw = archived["overrides"][0].clone();
             raw["value"]["per"] = json!(1000);
             assert_eq!(
                 load_reporting_rejects(&json!({"overrides":[raw]}).to_string())
@@ -272,7 +266,7 @@ mod tests {
         ]);
         let output = vec!["rate.output".to_string()];
         let applied = apply_rows(
-            rows,
+            &rows,
             "google",
             "gemini-3.1-flash-image",
             &mut facts,
@@ -284,7 +278,7 @@ mod tests {
         assert!(facts["rate.output_image"].is_null());
         facts.remove("rate.output_image");
         let applied = apply_rows(
-            rows,
+            &rows,
             "google",
             "gemini-3.1-flash-image",
             &mut facts,
@@ -508,7 +502,11 @@ mod tests {
 
     #[test]
     fn malformed_addition_rows_are_rejected() {
-        let doc = document();
+        let mut doc = document();
+        doc["overrides"]
+            .as_array_mut()
+            .unwrap()
+            .push(archived_image_document()["overrides"][0].clone());
         for key in ADDED_FACTS {
             let example_key = if key == "rate.cached_input_audio" {
                 "rate.output_image"
@@ -540,6 +538,8 @@ mod tests {
                 // value there; a blank id is the malformed string instead.
                 let value = if key.starts_with("route.") && value.is_string() {
                     json!(" ")
+                } else if key.starts_with("limit.") && field == "value" && value.is_number() {
+                    json!(-1)
                 } else {
                     value
                 };
@@ -558,6 +558,11 @@ mod tests {
                     "must be a list of distinct nonempty model ids"
                 } else if key.starts_with("route.") && field == "value" {
                     "must name one nonempty model id"
+                } else if key == "capability.aspect_ratios" && matches!(field, "value" | "replaces")
+                {
+                    "aspect ratios must add a nonempty list"
+                } else if key.starts_with("limit.") && matches!(field, "value" | "replaces") {
+                    "media limits must add a positive integer"
                 } else {
                     reason
                 };
@@ -814,8 +819,8 @@ mod tests {
         // Through the real gate, a seed whose options drop the effort names
         // the row.
         let mut seed = seed();
-        seed["openai"]["models"]["gpt-5.5"]["reasoning_options"] =
-            json!([{"type":"effort","values":["low","high"]}]);
+        seed["openai"]["models"]["gpt-5.5"]["capabilities"]["reasoning"]["effort"] =
+            json!(["low", "high"]);
         let stale = stale_against_seed(overrides(), &seed);
         assert_eq!(stale.len(), 1, "{stale:?}");
         assert!(stale[0].contains("openai/gpt-5.5 capability.reasoning_default"));

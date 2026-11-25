@@ -77,6 +77,7 @@ struct Explained {
     normalized: Vec<ExplainedRow>,
     held_rates: Vec<HeldRow>,
     served_wire: Vec<ExplainedRow>,
+    served_reasoning_additions: BTreeSet<Identity>,
     v1_provider_defaults: Vec<(String, bool, bool)>,
 }
 
@@ -715,10 +716,13 @@ fn v2_fact_admitted(key: &str) -> bool {
 #[test]
 fn models_dev_v2_only_witnesses_and_unit_vocabulary() {
     let old = fixture();
-    let v2 = parse_v2(&saved_gzip("api-v2-20261125.json.gz"));
+    let bytes = saved_gzip("api-v2-20261125.json.gz");
+    let raw: Value = serde_json::from_slice(&bytes).unwrap();
+    let v2 = parse_v2(&bytes);
     let mut expected = witnesses();
     let mut new_models = 0;
     let mut unit_witnesses = BTreeSet::new();
+    let mut shapes = BTreeMap::new();
     for model in v2.catalog.models() {
         let provider = &model.key.provider_id;
         let id = &model.key.model_id;
@@ -727,6 +731,21 @@ fn models_dev_v2_only_witnesses_and_unit_vocabulary() {
             .get(provider)
             .is_none_or(|p| !p.models.contains_key(id));
         let (facts, conflicts) = projected(model);
+        if let Some(api) = &model.wire.api {
+            let apis = raw[provider]["models"][id]["api"].as_object().unwrap();
+            assert!(
+                apis.values()
+                    .any(|api_claim| api_claim["base_url"] == api.value),
+                "{provider}/{id} must preserve a published base URL including its path"
+            );
+        }
+        if let Some(shape) =
+            model.wire.shape.as_ref().filter(|claim| {
+                matches!(claim.value.as_str(), "images" | "interactions" | "speech")
+            })
+        {
+            *shapes.entry(shape.value.as_str()).or_insert(0) += 1;
+        }
         if only_in_v2 {
             new_models += 1;
             for key in facts.keys() {
@@ -758,6 +777,10 @@ fn models_dev_v2_only_witnesses_and_unit_vocabulary() {
             }
         }
     }
+    assert_eq!(
+        shapes,
+        BTreeMap::from([("images", 217), ("interactions", 6), ("speech", 9)])
+    );
     assert_eq!(new_models, 861);
     assert!(
         expected.is_empty(),
@@ -987,6 +1010,22 @@ fn models_dev_v2_guarded_switch_keeps_history_and_served_wire_continuity() {
     for (id, kind) in expected_kinds {
         assert_eq!(kinds[&id]["model.kind"], kind, "{id}");
     }
+    let reasoning = served(&store, &["rate.reasoning"]);
+    let billed_as_output = json!({"state":"billed_as","key":"rate.output"});
+    let actual_reasoning_additions = arrivals
+        .iter()
+        .filter(|(provider, model)| {
+            reasoning
+                .get(&format!("{provider}/{model}"))
+                .and_then(|row| row.get("rate.reasoning"))
+                == Some(&billed_as_output)
+        })
+        .cloned()
+        .collect();
+    assert_eq!(
+        explained.served_reasoning_additions,
+        actual_reasoning_additions
+    );
 
     let current = recorded(&store, &CatalogQuery::current(SOURCE));
     let current_ids: BTreeSet<_> = current.keys().cloned().collect();

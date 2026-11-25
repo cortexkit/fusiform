@@ -592,7 +592,7 @@ mod tests {
             .unwrap()
             .extend([duplicate, serde_json::json!({})]);
         let (rows, rejects) = load_reporting_rejects(&doc.to_string());
-        assert_eq!(rows.len(), test_models().len());
+        assert_eq!(rows.len(), SHIPPED.len());
         assert_eq!(rejects.len(), 2);
         assert!(rejects[0].contains("duplicate"));
         assert!(rejects[1].contains("did not parse"));

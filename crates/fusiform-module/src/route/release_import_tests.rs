@@ -232,6 +232,103 @@ fn load_and_compare(
 }
 
 #[test]
+fn removed_image_addition_still_prices_a_dated_store_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("source.db");
+    let source = open(&path);
+    let historical: Value =
+        serde_json::from_str(include_str!("../../fixtures/retired-fact-overrides.json")).unwrap();
+    let (claims, rejects) = crate::fact_overrides::load_reporting_rejects(&historical.to_string());
+    assert!(rejects.is_empty());
+    let established = claims.values().next().unwrap().established_at_ms;
+    const MODEL: &str = "gemini-3.1-flash-image";
+    const ID: &str = "google/gemini-3.1-flash-image";
+    observe(
+        &source,
+        &wire(json!({"google":{"models":{MODEL: {
+            "type":"image", "api":{}, "capabilities":{}, "cost":{"text":{"output":{"price":3}}}
+        }}}})),
+        established - 1,
+        true,
+    );
+    crate::fact_overrides::apply_to_store(&source, &claims, established).unwrap();
+    let initial = 1_795_700_000_000;
+    let removed = initial + 1;
+    let copy = dir.path().join("backup.db");
+    backup(&path, &copy);
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+    let out = dir.path().join("import");
+    build::import(&copy, &data, &out, initial).unwrap();
+    let base: Value =
+        serde_json::from_slice(&fs::read(out.join("history/base.json")).unwrap()).unwrap();
+    let base: ImportedTables = serde_json::from_value(base["tables"].clone()).unwrap();
+    let before = BTreeMap::from([("fact-overrides".into(), historical)]);
+    let after = BTreeMap::from([("fact-overrides".into(), json!({"overrides":[]}))]);
+    let mut removal = ImportedTables::new();
+    crate::curation::document_rows(&mut removal, Some(&before), &after, removed).unwrap();
+    assert_eq!(removal["fact_override_era"].len(), 1);
+    assert!(removal["fact_override_era"][0]["value_json"].is_null());
+
+    let consumer = CatalogStore::open_for_store(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "consumer".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir
+                .path()
+                .join("consumer.db")
+                .to_string_lossy()
+                .into_owned(),
+        },
+    })
+    .unwrap();
+    let arrival = |number, at, rows| ReleaseArrival {
+        published_at_ms: at,
+        release: StoreRelease {
+            release: number,
+            state_hash: format!("{number:064x}"),
+            curation_hash: format!("{number:064x}"),
+            applied_at_ms: at,
+        },
+        rows,
+        upstream: None,
+    };
+    consumer
+        .apply_store_releases(
+            Some(&base),
+            &[
+                arrival(1, initial, ImportedTables::new()),
+                arrival(2, removed, removal),
+            ],
+        )
+        .unwrap();
+    let read = |at| {
+        serve_catalog_get_with_limits(
+            &consumer,
+            &wire(json!({
+                "at_ms":at, "provider_id":"google", "model_id":MODEL
+            })),
+            usize::MAX,
+            usize::MAX,
+        )
+        .unwrap()
+    };
+    let dated = read(1_794_440_193_000_i64);
+    assert_eq!(dated.models[ID]["rate.output"]["units"], 3_000_000_000_i64);
+    assert_eq!(
+        dated.models[ID]["rate.output_image"]["units"],
+        60_000_000_000_i64
+    );
+    assert!(dated
+        .fact_overrides
+        .iter()
+        .any(|row| row.model == ID && row.fact_key == "rate.output_image"));
+    let latest = read(removed);
+    assert!(latest.fact_overrides.is_empty());
+    assert!(!latest.models[ID].contains_key("rate.output_image"));
+}
+
+#[test]
 fn dated_store_release_keeps_era_facts_but_not_current_layers() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("source.db");

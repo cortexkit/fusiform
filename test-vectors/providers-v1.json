@@ -1,6 +1,6 @@
 {
   "format": "providers-v1",
-  "snapshot_fetched_at": "2026-11-25T17:51:30Z",
+  "snapshot_fetched_at": "2026-11-25T17:50:37Z",
   "providers": [
     {
       "id": "302ai",
@@ -256,7 +256,10 @@
       ],
       "output_modalities": [
         "audio",
-        "text"
+        "embedding",
+        "image",
+        "text",
+        "video"
       ]
     },
     {
@@ -269,7 +272,10 @@
       ],
       "output_modalities": [
         "audio",
-        "text"
+        "embedding",
+        "image",
+        "text",
+        "video"
       ]
     },
     {
@@ -336,7 +342,10 @@
         "AWS_BEARER_TOKEN_BEDROCK"
       ],
       "output_modalities": [
-        "text"
+        "audio",
+        "embedding",
+        "text",
+        "video"
       ]
     },
     {
@@ -360,6 +369,7 @@
         "AMD_API_KEY"
       ],
       "output_modalities": [
+        "audio",
         "text"
       ]
     },
@@ -487,21 +497,6 @@
       ]
     },
     {
-      "id": "azure-cognitive-services",
-      "name": "Azure Cognitive Services",
-      "doc": "https://learn.microsoft.com/en-us/azure/ai-services/openai/concepts/models",
-      "source": "models.dev",
-      "env": [
-        "AZURE_COGNITIVE_SERVICES_RESOURCE_NAME",
-        "AZURE_COGNITIVE_SERVICES_API_KEY"
-      ],
-      "output_modalities": [
-        "embedding",
-        "image",
-        "text"
-      ]
-    },
-    {
       "id": "bailing",
       "name": "Bailing",
       "doc": "https://developer.ant-ling.com/zh-CN/docs",
@@ -510,6 +505,7 @@
         "BAILING_API_TOKEN"
       ],
       "output_modalities": [
+        "image",
         "text"
       ]
     },
@@ -607,6 +603,18 @@
       ]
     },
     {
+      "id": "butler",
+      "name": "Butler",
+      "doc": "https://butlercompute.com/platform/",
+      "source": "models.dev",
+      "env": [
+        "BUTLER_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "byteplus",
       "name": "BytePlus ModelArk",
       "doc": "https://docs.byteplus.com/en/docs/ModelArk/1529329",
@@ -615,7 +623,9 @@
         "BYTEPLUS_API_KEY"
       ],
       "output_modalities": [
-        "text"
+        "audio",
+        "text",
+        "video"
       ]
     },
     {
@@ -761,7 +771,10 @@
         "CLOUDFLARE_GATEWAY_ID"
       ],
       "output_modalities": [
-        "text"
+        "audio",
+        "image",
+        "text",
+        "video"
       ]
     },
     {
@@ -774,6 +787,8 @@
         "CLOUDFLARE_API_KEY"
       ],
       "output_modalities": [
+        "embedding",
+        "image",
         "text"
       ]
     },
@@ -786,6 +801,7 @@
         "COHERE_API_KEY"
       ],
       "output_modalities": [
+        "embedding",
         "text"
       ]
     },
@@ -895,6 +911,19 @@
         "DATABRICKS_TOKEN"
       ],
       "output_modalities": [
+        "embedding",
+        "text"
+      ]
+    },
+    {
+      "id": "decisionmodels",
+      "name": "Decision Models",
+      "doc": "https://decisionmodels.io/models",
+      "source": "models.dev",
+      "env": [
+        "DECISIONMODELS_API_KEY"
+      ],
+      "output_modalities": [
         "text"
       ]
     },
@@ -907,6 +936,7 @@
         "DEEPINFRA_API_KEY"
       ],
       "output_modalities": [
+        "embedding",
         "text"
       ]
     },
@@ -1027,11 +1057,14 @@
     {
       "id": "elevenlabs",
       "name": "ElevenLabs",
-      "doc": "https://elevenlabs.io/docs/overview/intro",
-      "source": "hand_kept",
-      "env": [],
+      "doc": "https://elevenlabs.io/docs/overview/models",
+      "source": "models.dev",
+      "env": [
+        "ELEVENLABS_API_KEY"
+      ],
       "output_modalities": [
-        "audio"
+        "audio",
+        "text"
       ]
     },
     {
@@ -1067,6 +1100,7 @@
         "ENTRIM_API_KEY"
       ],
       "output_modalities": [
+        "embedding",
         "text"
       ]
     },
@@ -1113,6 +1147,7 @@
         "FASTROUTER_API_KEY"
       ],
       "output_modalities": [
+        "audio",
         "image",
         "text",
         "video"
@@ -1148,6 +1183,7 @@
         "FIREWORKS_API_KEY"
       ],
       "output_modalities": [
+        "embedding",
         "text"
       ]
     },
@@ -1281,7 +1317,8 @@
         "audio",
         "embedding",
         "image",
-        "text"
+        "text",
+        "video"
       ]
     },
     {
@@ -1298,21 +1335,8 @@
         "audio",
         "embedding",
         "image",
-        "text"
-      ]
-    },
-    {
-      "id": "google-vertex-anthropic",
-      "name": "Vertex (Anthropic)",
-      "doc": "https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude",
-      "source": "models.dev",
-      "env": [
-        "GOOGLE_VERTEX_PROJECT",
-        "GOOGLE_VERTEX_LOCATION",
-        "GOOGLE_APPLICATION_CREDENTIALS"
-      ],
-      "output_modalities": [
-        "text"
+        "text",
+        "video"
       ]
     },
     {
@@ -1567,6 +1591,7 @@
         "INFERENCE_COOP_API_KEY"
       ],
       "output_modalities": [
+        "image",
         "text"
       ]
     },
@@ -1770,7 +1795,8 @@
       "output_modalities": [
         "audio",
         "image",
-        "text"
+        "text",
+        "video"
       ]
     },
     {
@@ -1851,6 +1877,19 @@
       ],
       "output_modalities": [
         "text"
+      ]
+    },
+    {
+      "id": "klingai",
+      "name": "Kling AI",
+      "doc": "https://kling.ai/document-api/guides/get-started/overview",
+      "source": "models.dev",
+      "env": [
+        "KLINGAI_API_KEY"
+      ],
+      "output_modalities": [
+        "image",
+        "video"
       ]
     },
     {
@@ -2054,6 +2093,7 @@
         "LYCEUM_API_KEY"
       ],
       "output_modalities": [
+        "embedding",
         "text"
       ]
     },
@@ -2126,6 +2166,7 @@
         "MERGE_GATEWAY_API_KEY"
       ],
       "output_modalities": [
+        "audio",
         "embedding",
         "image",
         "text"
@@ -2140,6 +2181,7 @@
         "META_MODEL_API_KEY"
       ],
       "output_modalities": [
+        "image",
         "text"
       ]
     },
@@ -2152,7 +2194,10 @@
         "MINIMAX_API_KEY"
       ],
       "output_modalities": [
-        "text"
+        "audio",
+        "image",
+        "text",
+        "video"
       ]
     },
     {
@@ -2164,7 +2209,10 @@
         "MINIMAX_API_KEY"
       ],
       "output_modalities": [
-        "text"
+        "audio",
+        "image",
+        "text",
+        "video"
       ]
     },
     {
@@ -2202,6 +2250,7 @@
       "output_modalities": [
         "audio",
         "embedding",
+        "image",
         "text"
       ]
     },
@@ -2422,6 +2471,7 @@
         "NEON_AI_GATEWAY_TOKEN"
       ],
       "output_modalities": [
+        "embedding",
         "text"
       ]
     },
@@ -2583,6 +2633,7 @@
         "OPENAI_API_KEY"
       ],
       "output_modalities": [
+        "audio",
         "embedding",
         "image",
         "text"
@@ -2597,7 +2648,11 @@
         "OPENCODE_API_KEY"
       ],
       "output_modalities": [
-        "text"
+        "audio",
+        "embedding",
+        "image",
+        "text",
+        "video"
       ]
     },
     {
@@ -2609,6 +2664,7 @@
         "OPENCODE_API_KEY"
       ],
       "output_modalities": [
+        "embedding",
         "text"
       ]
     },
@@ -2634,6 +2690,7 @@
       ],
       "output_modalities": [
         "audio",
+        "embedding",
         "image",
         "text",
         "video"
@@ -2753,6 +2810,7 @@
         "PERPLEXITY_API_KEY"
       ],
       "output_modalities": [
+        "embedding",
         "text"
       ]
     },
@@ -3338,6 +3396,7 @@
         "STEPFUN_API_KEY"
       ],
       "output_modalities": [
+        "audio",
         "text"
       ]
     },
@@ -3350,6 +3409,7 @@
         "STEPFUN_API_KEY"
       ],
       "output_modalities": [
+        "audio",
         "text"
       ]
     },
@@ -3492,6 +3552,7 @@
         "TENCENT_TOKENHUB_API_KEY"
       ],
       "output_modalities": [
+        "embedding",
         "text"
       ]
     },
@@ -3685,12 +3746,29 @@
       ]
     },
     {
+      "id": "turion",
+      "name": "Turion",
+      "doc": "https://turion.ai/docs",
+      "source": "models.dev",
+      "env": [
+        "TURION_API_TOKEN"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
       "id": "typesafe",
       "name": "TypeSafe",
-      "doc": "https://docs.typesafe.ai/introduction",
-      "source": "hand_kept",
-      "env": [],
-      "output_modalities": []
+      "doc": "https://docs.typesafe.ai/models",
+      "source": "models.dev",
+      "env": [
+        "TYPESAFE_API_KEY",
+        "TYPESAFE_AI_API_KEY"
+      ],
+      "output_modalities": [
+        "text"
+      ]
     },
     {
       "id": "umans-ai",
@@ -3873,7 +3951,9 @@
         "ARK_API_KEY"
       ],
       "output_modalities": [
-        "text"
+        "audio",
+        "text",
+        "video"
       ]
     },
     {
@@ -3982,6 +4062,7 @@
         "XAI_API_KEY"
       ],
       "output_modalities": [
+        "audio",
         "image",
         "text",
         "video"
@@ -3996,6 +4077,7 @@
         "XIAOMI_API_KEY"
       ],
       "output_modalities": [
+        "audio",
         "text"
       ]
     },
@@ -4008,6 +4090,7 @@
         "XIAOMI_API_KEY"
       ],
       "output_modalities": [
+        "audio",
         "text"
       ]
     },
@@ -4020,6 +4103,7 @@
         "XIAOMI_API_KEY"
       ],
       "output_modalities": [
+        "audio",
         "text"
       ]
     },
@@ -4032,6 +4116,7 @@
         "XIAOMI_API_KEY"
       ],
       "output_modalities": [
+        "audio",
         "text"
       ]
     },
@@ -4076,7 +4161,9 @@
         "ZHIPU_API_KEY"
       ],
       "output_modalities": [
-        "text"
+        "image",
+        "text",
+        "video"
       ]
     },
     {
@@ -4139,6 +4226,8 @@
         "ZEROGPU_API_KEY"
       ],
       "output_modalities": [
+        "audio",
+        "embedding",
         "text"
       ]
     },
@@ -4151,7 +4240,10 @@
         "ZHIPU_API_KEY"
       ],
       "output_modalities": [
-        "text"
+        "embedding",
+        "image",
+        "text",
+        "video"
       ]
     },
     {

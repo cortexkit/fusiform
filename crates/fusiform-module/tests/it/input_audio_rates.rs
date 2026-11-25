@@ -35,7 +35,9 @@ const SEEDED_AT: i64 = 1_000;
 const POLLED_AT: i64 = 5_000;
 
 fn doc() -> String {
-    let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
+    let seed: serde_json::Value =
+        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
+            .unwrap();
     let mut out = serde_json::Map::new();
     for (provider, model) in ROWS {
         let row = seed[provider]["models"][model].clone();
@@ -91,7 +93,9 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
     .unwrap();
     let doc = doc();
     observe(&store, SEEDED_AT, ObservationOutcome::Seeded);
-    let before = normalize_models_dev(doc.as_bytes()).unwrap().catalog;
+    let before = fusiform_core::normalize_legacy_models_dev_for_tests(doc.as_bytes())
+        .unwrap()
+        .catalog;
     let plan = plan_ingest(
         &store,
         &before,
@@ -109,9 +113,10 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
     );
     let evidence = fusiform_module::input_audio::evidence()
         .with_input_audio_model("openai", "gpt-realtime-2.1");
-    let after = normalize_models_dev_with(doc.as_bytes(), &evidence, Timestamp(POLLED_AT))
-        .unwrap()
-        .catalog;
+    let after =
+        fusiform_core::normalize_legacy_models_dev_for_tests_with(doc.as_bytes(), &evidence)
+            .unwrap()
+            .catalog;
     let plan = plan_ingest(
         &store,
         &after,
@@ -449,9 +454,22 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
 
     let seed: serde_json::Value = serde_json::from_str(SEED).unwrap();
     let mut expected = BTreeMap::new();
-    for (cost_key, sources) in [
-        ("input_audio", fusiform_module::input_audio::sources()),
-        ("output_audio", fusiform_module::output_audio::sources()),
+    for (pointer, fact, sources) in [
+        (
+            "/cost/audio/input/price",
+            "rate.input_audio",
+            fusiform_module::input_audio::sources(),
+        ),
+        (
+            "/cost/audio/input/cache/read",
+            "rate.cached_input_audio",
+            fusiform_module::input_audio::sources(),
+        ),
+        (
+            "/cost/audio/output/price",
+            "rate.output_audio",
+            fusiform_module::output_audio::sources(),
+        ),
     ] {
         for (provider, row) in sources {
             for (model, published) in seed[provider]["models"].as_object().unwrap() {
@@ -460,11 +478,8 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
                     .included_models
                     .as_ref()
                     .is_none_or(|ids| ids.contains(model));
-                if published["cost"].get(cost_key).is_some() && !excluded && included {
-                    expected.insert(
-                        (provider.clone(), model.clone(), format!("rate.{cost_key}")),
-                        (),
-                    );
+                if published.pointer(pointer).is_some() && !excluded && included {
+                    expected.insert((provider.clone(), model.clone(), fact.to_owned()), ());
                 }
             }
         }
@@ -474,7 +489,12 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
         .iter()
         .map(|era| {
             assert!(
-                ["rate.input_audio", "rate.output_audio"].contains(&era.fact_key.as_str()),
+                [
+                    "rate.input_audio",
+                    "rate.output_audio",
+                    "rate.cached_input_audio"
+                ]
+                .contains(&era.fact_key.as_str().split(".mode.").next().unwrap()),
                 "{}/{}: only the evidenced audio rates may open eras",
                 era.provider_id,
                 era.model_id
@@ -494,19 +514,38 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
         plan.eras.len(),
         "one era per model and audio direction"
     );
-    assert_eq!(written, expected);
+    let mut modes = BTreeMap::new();
+    let mut flat = BTreeMap::new();
+    for ((provider, model, key), ()) in &written {
+        if let Some((base, _)) = key.split_once(".mode.") {
+            assert!(expected.contains_key(&(provider.clone(), model.clone(), base.to_owned())));
+            *modes.entry(key.as_str()).or_insert(0) += 1;
+        } else {
+            flat.insert((provider.clone(), model.clone(), key.clone()), ());
+        }
+    }
+    assert_eq!(flat, expected);
+    assert_eq!(
+        modes,
+        BTreeMap::from([
+            ("rate.cached_input_audio.mode.flex", 10),
+            ("rate.cached_input_audio.mode.priority", 13),
+            ("rate.input_audio.mode.flex", 13),
+            ("rate.input_audio.mode.priority", 13),
+            ("rate.output_audio.mode.flex", 2),
+            ("rate.output_audio.mode.priority", 2),
+        ])
+    );
     assert_eq!(plan.new_models, 0);
     assert_eq!(plan.disappeared_models, 0);
-    // The count a deploy should expect, pinned so a reviewer sees it move:
-    // Google has 18 eligible input rows and two output rows. Realtime 2.1
-    // is no longer an upstream row and contributes no upstream audio eras.
-    assert_eq!(plan.eras.len(), 20, "{:?}", written.keys());
+    // The saved v2 seed has 49 evidenced base rates and 53 named-mode rates.
+    assert_eq!(plan.eras.len(), 102, "{:?}", written.keys());
     assert_eq!(
         written
             .keys()
             .filter(|(_, _, key)| key == "rate.input_audio")
             .count(),
-        18
+        26
     );
     for model in [
         "gemini-4-hydrogen",
@@ -521,7 +560,7 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
             .keys()
             .filter(|(_, _, key)| key == "rate.output_audio")
             .count(),
-        2
+        8
     );
     for key in ["rate.input_audio", "rate.output_audio"] {
         assert!(written.contains_key(&(
@@ -530,5 +569,8 @@ fn the_first_poll_with_evidence_writes_only_the_new_audio_eras() {
             key.into()
         )));
     }
-    assert!(written.keys().all(|(provider, _, _)| provider == "google"));
+    assert!(written
+        .keys()
+        .all(|(provider, model, _)| provider == "google"
+            || (provider == "openai" && model == "gpt-realtime-2.1")));
 }

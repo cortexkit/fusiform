@@ -145,7 +145,7 @@ fn every_curated_creator_publishes_a_price_in_the_family_it_claims() {
 fn the_fence_convicts_a_creator_that_does_not_sell_its_own_weights() {
     let seed = serde_json::json!({"creator":{"models":{
         "unpriced":{"family":"unpriced"},
-        "priced":{"family":"priced","cost":{"input":1}}
+        "priced":{"family":"priced","cost":{"text":{"input":{"price":1}}}}
     }}});
     let doc: Doc = serde_json::from_value(serde_json::json!({"creators":[
         {"family":"unpriced","creator_provider_id":"creator"},

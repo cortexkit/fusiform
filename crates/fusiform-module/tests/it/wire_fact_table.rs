@@ -352,20 +352,9 @@ fn the_wire_fact_table_matches_what_the_producer_emits() {
 /// Served facts that only fusiform's curated rows state.
 ///
 /// models.dev publishes no such field, so the normalizer must never produce
-/// one: a value inferred for an upstream row would be fusiform's guess served
-/// as a statement. `model.kind` is absent on every upstream row, which means
-/// "not stated", never "chat".
+/// one. `model.kind` can also be derived from a recorded decision or extraction
+/// type when serving, but is never part of the stored upstream projection.
 pub(crate) const CURATED_ONLY: &[&str] = &[
-    "rate.input_image",
-    "rate.output_video",
-    "limit.output_video_tokens_per_second.resolution.360p",
-    "limit.output_video_tokens_per_second.resolution.720p",
-    "limit.output_video_tokens_per_second.resolution.1080p",
-    "limit.output_video_tokens_per_second.resolution.4k",
-    "limit.output_audio_tokens_per_second",
-    "limit.output_duration_ms",
-    "capability.aspect_ratios",
-    "capability.output_audio",
     "model.kind",
     "route.reasoning_wire_ids",
     "route.reasoning_default",
@@ -381,8 +370,14 @@ pub(crate) const CURATED_ONLY: &[&str] = &[
 /// normalizer must never produce one. Unlike it, these are served on upstream
 /// rows, so the golden fixture must always carry them.
 pub(crate) const ADDITION_ONLY: &[&str] = &[
-    "rate.output_image",
-    "rate.cached_input_audio",
+    "limit.output_video_tokens_per_second.resolution.360p",
+    "limit.output_video_tokens_per_second.resolution.720p",
+    "limit.output_video_tokens_per_second.resolution.1080p",
+    "limit.output_video_tokens_per_second.resolution.4k",
+    "limit.output_audio_tokens_per_second",
+    "limit.output_duration_ms",
+    "capability.aspect_ratios",
+    "capability.output_audio",
     "capability.server_side_fallback",
     "capability.mid_conversation_system",
     "capability.allowed_fallback_models",
