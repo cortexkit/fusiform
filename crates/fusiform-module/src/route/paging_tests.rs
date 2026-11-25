@@ -505,6 +505,26 @@ fn fitting_catalogs_and_other_read_forms_are_never_cached_as_refusals() {
 }
 
 #[test]
+fn oversized_refusals_do_not_cross_requested_projections() {
+    let (store, _dir) = fixture();
+    let cache = Mutex::new(None);
+    let narrow = json!({"fact_prefixes": ["quality.elo"]});
+    let wide =
+        json!({"fact_prefixes": ["quality.elo", "model.canonical_id", "model.type", "existence"]});
+    let read = |args, limit| cached_get(&store, &cache, args, limit);
+    let limit = compact_size(&read(narrow.clone(), usize::MAX).unwrap()).unwrap();
+    assert!(compact_size(&read(wide.clone(), usize::MAX).unwrap()).unwrap() > limit);
+    assert!(read(narrow.clone(), limit).is_ok(), "narrow control");
+    let error = read(wide, limit).unwrap_err();
+    assert_eq!(error.code, "bad_request");
+    assert!(error.message.contains("reply limit"));
+    assert!(
+        read(narrow, limit).is_ok(),
+        "the small response must still fit after the broad projection exceeds the limit"
+    );
+}
+
+#[test]
 fn oversized_refusals_do_not_cross_store_instances() {
     let (store, _dir) = fixture();
     let cache = Mutex::new(None);

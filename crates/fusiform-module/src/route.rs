@@ -1004,6 +1004,8 @@ fn serve_catalog_get_snapshot(
     };
     let range = page.map(|page| page.range);
     let plane = select_billing_plane(&request, tables.billing_planes)?;
+    // Refusal size describes the served projection, not the support facts fetched below.
+    let whole_key = WholeCatalogKey::new(store, &request, source, frame_limit)?;
     let requested_prefixes = request.fact_prefixes.clone();
     request.fact_prefixes = request.fact_prefixes.as_ref().map(|prefixes| {
         let mut wide = prefixes.clone();
@@ -1148,8 +1150,6 @@ fn serve_catalog_get_snapshot(
         _ => None,
     };
     let prepared = prepared.or(owned.as_ref());
-
-    let whole_key = WholeCatalogKey::new(store, &request, source, frame_limit)?;
 
     // Checked ONCE, before the branch, so both read paths inherit it.
     // Keep this ahead of cache lookup: the first observation can establish a
