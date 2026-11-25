@@ -56,6 +56,7 @@ impl<'a> Replay<'a> {
         if cursor.is_none() {
             let first = translate::arrival(
                 None,
+                None,
                 &replay.current,
                 &[],
                 true,
@@ -82,15 +83,17 @@ impl<'a> Replay<'a> {
     }
 
     fn advance(&mut self, release: Release, keys: &ReleaseKeys) -> Result<(), String> {
-        let next = Verified::advance(&self.current, &release, keys)?;
-        Self::check_cursor(self.cursor, &next)?;
+        let previous_observed_at_ms = self.current.envelope.upstream_observed_at_ms;
+        let before = self.current.advance(&release, keys)?;
+        Self::check_cursor(self.cursor, &self.current)?;
         if self
             .cursor
-            .is_none_or(|cursor| next.envelope.release > cursor.release)
+            .is_none_or(|cursor| self.current.envelope.release > cursor.release)
         {
             let arrival = translate::arrival(
-                Some(&self.current),
-                &next,
+                Some(previous_observed_at_ms),
+                before.as_ref(),
+                &self.current,
                 &release.change.upstream,
                 release.change.curation_set.is_some(),
                 &mut self.last_observation,
@@ -100,7 +103,6 @@ impl<'a> Replay<'a> {
                 arrival.spool(&mut self.arrivals),
             )?;
         }
-        self.current = next;
         Ok(())
     }
 }
@@ -231,7 +233,12 @@ impl StorePoller {
         Ok(head)
     }
 
-    async fn suffix(&self, replay: &mut Replay<'_>, head: &HeadBody) -> Result<bool, String> {
+    async fn suffix(
+        &self,
+        replay: &mut Replay<'_>,
+        head: &HeadBody,
+        progress: &impl Fn(),
+    ) -> Result<bool, String> {
         for number in replay.current.envelope.release + 1..=head.release.get() {
             let file = format!("v1/releases/{number}");
             let url = step(&file, self.url.join(&file))?;
@@ -255,6 +262,7 @@ impl StorePoller {
                 return Err(format!("{file}: wrong release number"));
             }
             replay.advance(release, &self.keys)?;
+            progress();
         }
         Ok(true)
     }
@@ -264,12 +272,10 @@ impl StorePoller {
         snapshot_number: u64,
         store: &CatalogStore,
         cursor: Option<&'a StoreRelease>,
+        progress: &impl Fn(),
     ) -> Result<(Replay<'a>, Option<BufReader<File>>), String> {
         let path = format!("v1/snapshots/{snapshot_number}");
-        let snapshot: Snapshot = self.json(&path).await?;
-        if snapshot.envelope.release != snapshot_number {
-            return Err(format!("{path}: envelope names a different release"));
-        }
+        let snapshot = self.snapshot(snapshot_number).await?;
         state::verify_snapshot(&snapshot, &self.keys)?;
         let Snapshot {
             envelope,
@@ -293,6 +299,7 @@ impl StorePoller {
             return Err("v1/releases/1: wrong release number".into());
         }
         let first = Verified::first(first, &self.keys)?;
+        progress();
         let (base, days) = validate_history_files(&attestation.body.history)?;
         let mut tables = if cursor.is_none() {
             Some(self.attested_file(HISTORY_BASE_PATH, base).await?)
@@ -318,7 +325,11 @@ impl StorePoller {
             let input = self.attested_file(&path, file).await?;
             step(
                 &path,
-                history_day::read(input, day, |release| replay.advance(release, &self.keys)),
+                history_day::read(input, day, |release| {
+                    replay.advance(release, &self.keys)?;
+                    progress();
+                    Ok(())
+                }),
             )?;
         }
         if replay.current.envelope.release != snapshot_number {
@@ -330,8 +341,25 @@ impl StorePoller {
         Ok((replay, tables))
     }
 
+    async fn snapshot(&self, number: u64) -> Result<Snapshot, String> {
+        let path = format!("v1/snapshots/{number}");
+        let snapshot: Snapshot = self.json(&path).await?;
+        if snapshot.envelope.release != number {
+            return Err(format!("{path}: envelope names a different release"));
+        }
+        Ok(snapshot)
+    }
+
     /// Verify the store head and return the release now held locally.
     pub async fn poll(&mut self, store: &CatalogStore) -> Result<u64, String> {
+        self.poll_with_progress(store, || {}).await
+    }
+
+    async fn poll_with_progress(
+        &mut self,
+        store: &CatalogStore,
+        progress: impl Fn(),
+    ) -> Result<u64, String> {
         let head = self.head().await?;
         let cursor = step("read store cursor", store.latest_store_release())?;
         let applied = cursor.as_ref().map_or(0, |cursor| cursor.release);
@@ -359,19 +387,37 @@ impl StorePoller {
                 store.latest_observation_id(),
             )?;
             let mut replay = Replay::new(cursor.as_ref(), retained.decode()?, last_observation)?;
-            self.suffix(&mut replay, &head).await?.then_some(replay)
+            self.suffix(&mut replay, &head, &progress)
+                .await?
+                .then_some(replay)
         } else {
             None
         };
         let (replay, base) = match warm {
             Some(replay) => (replay, None),
             None => {
-                // A missing individual object covered by the snapshot makes
-                // the warm spool unusable. Replay the signed history files instead.
-                let (mut replay, base) = self
-                    .history(head.latest_snapshot, store, cursor.as_ref())
-                    .await?;
-                if !self.suffix(&mut replay, &head).await? {
+                let (mut replay, base) = if let Some(cursor) = cursor
+                    .as_ref()
+                    .filter(|cursor| cursor.release >= head.latest_snapshot)
+                {
+                    let snapshot = self.snapshot(head.latest_snapshot).await?;
+                    let current = Verified::from_snapshot(snapshot, &self.keys)?;
+                    let last_observation = step(
+                        "read upstream observation watermark",
+                        store.latest_observation_id(),
+                    )?;
+                    // Releases through the cursor rebuild the state and check
+                    // its hashes; only newer releases enter the SQLite spool.
+                    let replay = Replay::new(Some(cursor), current, last_observation)?;
+                    progress();
+                    (replay, None)
+                } else {
+                    // With no usable anchor, reproduce the signed archive so
+                    // releases newer than the cursor still add their historical rows.
+                    self.history(head.latest_snapshot, store, cursor.as_ref(), &progress)
+                        .await?
+                };
+                if !self.suffix(&mut replay, &head, &progress).await? {
                     return Err("release beyond the snapshot is missing".into());
                 }
                 (replay, base)
@@ -408,7 +454,10 @@ impl StorePoller {
         loop {
             ticks.tick().await;
             signals.attempted(crate::route::now_ms());
-            match self.poll(&store).await {
+            match self
+                .poll_with_progress(&store, || signals.store_replay_progress(crate::route::now_ms()))
+                .await
+            {
                 Ok(release) => {
                     if signals.store_applied_release() != Some(release) {
                         signals.record_store_applied_release(release);

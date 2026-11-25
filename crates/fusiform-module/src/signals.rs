@@ -76,6 +76,7 @@ pub struct Signals {
     store_poll_error: arc_swap::ArcSwapOption<String>,
     /// When the poller last verified the published head, even if it wrote nothing.
     last_store_head_check_ms: AtomicI64,
+    last_store_replay_progress_ms: AtomicI64,
     /// Zero until a release is known. Adopted from the store at startup, so
     /// the metric describes the catalog rather than resetting per process.
     store_applied_release: AtomicU64,
@@ -199,6 +200,7 @@ impl Signals {
             store_url: None,
             store_poll_error: arc_swap::ArcSwapOption::empty(),
             last_store_head_check_ms: AtomicI64::new(NEVER),
+            last_store_replay_progress_ms: AtomicI64::new(NEVER),
             store_applied_release: AtomicU64::new(0),
             polls_recorded: AtomicU64::new(0),
             consecutive_unpersisted_polls: AtomicU64::new(0),
@@ -249,6 +251,16 @@ impl Signals {
 
     pub(crate) fn store_head_check_age_ms(&self, now_ms: i64) -> Option<i64> {
         let at = self.last_store_head_check_ms.load(Ordering::Relaxed);
+        (at != NEVER).then(|| now_ms.saturating_sub(at))
+    }
+
+    pub(crate) fn store_replay_progress(&self, at_ms: i64) {
+        self.last_store_replay_progress_ms
+            .store(at_ms, Ordering::Relaxed);
+    }
+
+    pub(crate) fn store_replay_progress_age_ms(&self, now_ms: i64) -> Option<i64> {
+        let at = self.last_store_replay_progress_ms.load(Ordering::Relaxed);
         (at != NEVER).then(|| now_ms.saturating_sub(at))
     }
 

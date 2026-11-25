@@ -52,29 +52,31 @@ impl Verified {
     }
 
     pub(super) fn advance(
-        previous: &Self,
+        &mut self,
         release: &Release,
         keys: &ReleaseKeys,
-    ) -> Result<Self, String> {
-        let verify = || {
-            verify_change(Some(previous), release, keys)?;
-            let curation_set = match &release.change.curation_set {
-                Some(set) if set.version <= previous.state.curation_set.version => {
+    ) -> Result<Option<CurationSet>, String> {
+        // The caller discards the replay on error, so there is no need to
+        // clone the complete upstream just to verify the next state.
+        let mut verify = || -> Result<_, String> {
+            verify_change(Some(self), release, keys)?;
+            let previous_curation = match &release.change.curation_set {
+                Some(set) if set.version <= self.state.curation_set.version => {
                     return Err("curation version does not advance".into());
                 }
-                Some(set) => set.clone(),
-                None => previous.state.curation_set.clone(),
+                Some(set) => Some(std::mem::replace(&mut self.state.curation_set, set.clone())),
+                None => None,
             };
-            let mut upstream = previous.state.upstream.clone();
-            apply_ops(&mut upstream, release.change.upstream.iter().cloned())?;
-            Self::build(
-                release.envelope.clone(),
-                State {
-                    upstream,
-                    curation_set,
-                },
-                release.change.curation_set.is_some(),
-            )
+            apply_ops(
+                &mut self.state.upstream,
+                release.change.upstream.iter().cloned(),
+            )?;
+            check_state(&release.envelope, &self.state)?;
+            if previous_curation.is_some() {
+                validate_curation(&self.state)?;
+            }
+            self.envelope = release.envelope.clone();
+            Ok(previous_curation)
         };
         step(
             &format!("verify release {}", release.envelope.release),
@@ -89,11 +91,15 @@ impl Verified {
     ) -> Result<Self, String> {
         check_state(&envelope, &state)?;
         if curation_changed {
-            validate_judgments(&state.curation_set)?;
-            crate::curation::validate_received(&state.curation_set.vendor_facts, &state.upstream)?;
+            validate_curation(&state)?;
         }
         Ok(Self { envelope, state })
     }
+}
+
+fn validate_curation(state: &State) -> Result<(), String> {
+    validate_judgments(&state.curation_set)?;
+    crate::curation::validate_received(&state.curation_set.vendor_facts, &state.upstream)
 }
 
 fn verify_change(

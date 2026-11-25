@@ -142,12 +142,13 @@ fn serving_report(signals: &Signals, now_ms: i64) -> HealthReport {
 
     if signals.store_url().is_some() {
         let checked_age = signals.store_head_check_age_ms(now_ms);
-        // A long catch-up that just finished is not a silent loop. Bound the
-        // gap from the start of an in-flight attempt, or from a later success.
+        // A long catch-up can be active before the head is verified. Measure
+        // silence since the most recent attempt, verified release or head.
         let activity_age = signals
             .attempt_age_ms(now_ms)
             .into_iter()
             .chain(checked_age)
+            .chain(signals.store_replay_progress_age_ms(now_ms))
             .min();
         let (status, detail) = match activity_age {
             Some(age) if age > STORE_LOOP_SILENT_AFTER_MS => (
@@ -479,6 +480,19 @@ mod tests {
         signals.record_store_applied_release(7);
         signals.store_poll_result(Some("published head unavailable".into()));
         assert_eq!(metrics(&signals, 0)["store_applied_release"], 7);
+    }
+
+    #[test]
+    fn a_store_catchup_verifying_releases_is_not_a_silent_loop() {
+        let signals = Signals::for_store("https://example.test/".into());
+        signals.store_opened();
+        signals.attempted(0);
+        let now = STORE_LOOP_SILENT_AFTER_MS + 1;
+        let detail = |now| report(&signals, now).detail.unwrap();
+        assert!(detail(now).contains("no activity"));
+        signals.store_replay_progress(now);
+        assert_eq!(detail(now), "waiting for verified store head");
+        assert!(detail(now + STORE_LOOP_SILENT_AFTER_MS + 1).contains("no activity"));
     }
 
     #[test]

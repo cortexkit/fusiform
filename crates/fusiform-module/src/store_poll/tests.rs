@@ -116,6 +116,91 @@ fn next_named_release(snapshot: &mut Snapshot, key: &SigningKey) -> Release {
     }
 }
 
+#[tokio::test]
+async fn store_poll_restart_uses_snapshot_instead_of_full_history() {
+    use std::{cell::Cell, time::Instant};
+
+    let key = SigningKey::from_bytes(&[42; 32]);
+    let mut snapshot: Snapshot = serde_json::from_slice(SNAPSHOT).unwrap();
+    let mut files = BTreeMap::from([
+        ("/v1/head".into(), signed_head(&snapshot, 2, &key)),
+        ("/v1/snapshots/2".into(), SNAPSHOT.to_vec()),
+        ("/v1/releases/1".into(), FIRST.to_vec()),
+        ("/v1/history/base.json".into(), BASE.to_vec()),
+        ("/v1/history/days/2026-11-19.json".into(), DAY.to_vec()),
+    ]);
+    for day in ["2026-11-21", "2026-11-23", "2026-11-25"] {
+        publish_snapshot_day(&mut files, &mut snapshot, &key, day);
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open_for_store(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into_owned(),
+        },
+    })
+    .unwrap();
+    let files = Arc::new(Mutex::new(files));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let url = server_with_requests(files.clone(), requests.clone());
+    let poller = || {
+        StorePoller::new(
+            url.clone(),
+            BTreeMap::from([(KID.into(), key.verifying_key())]),
+        )
+        .unwrap()
+    };
+    assert_eq!(poller().poll(&store).await.unwrap(), 5);
+
+    let mut restarts = Vec::new();
+    for number in 6..=7 {
+        let release = next_named_release(&mut snapshot, &key);
+        {
+            let mut files = files.lock().unwrap();
+            files.insert(
+                format!("/v1/releases/{number}"),
+                serde_json::to_vec(&release).unwrap(),
+            );
+            files.insert("/v1/head".into(), signed_head(&snapshot, 5, &key));
+        }
+        requests.lock().unwrap().clear();
+        let mut restarted = poller();
+        let started = Instant::now();
+        let progress = Cell::new(0);
+        assert_eq!(
+            restarted
+                .poll_with_progress(&store, || progress.set(progress.get() + 1))
+                .await
+                .unwrap(),
+            number
+        );
+        let seen = requests.lock().unwrap().clone();
+        println!(
+            "restart at cursor {} applied {number} in {:?}: {} requests {seen:?}",
+            number - 1,
+            started.elapsed(),
+            seen.len()
+        );
+        assert_eq!(progress.get(), 1 + number - 5);
+        restarts.push(seen);
+    }
+    assert_eq!(
+        restarts,
+        [
+            vec!["/v1/head", "/v1/snapshots/5", "/v1/releases/6"],
+            vec![
+                "/v1/head",
+                "/v1/snapshots/5",
+                "/v1/releases/6",
+                "/v1/releases/7",
+            ],
+        ],
+        "cold replay must start at the signed snapshot, not release 1"
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::test]
 #[ignore = "measures peak RSS; run alone so other tests do not affect it"]
@@ -514,13 +599,18 @@ fn store_poll_writes_the_same_model_eras_as_direct_ingest() {
             envelope,
             change,
         };
-        let next = if let Some(previous) = &previous {
-            Verified::advance(previous, &release, &keys).unwrap()
+        let previous_at = previous
+            .as_ref()
+            .map(|previous| previous.envelope.upstream_observed_at_ms);
+        let (next, before) = if let Some(mut previous) = previous.take() {
+            let before = previous.advance(&release, &keys).unwrap();
+            (previous, before)
         } else {
-            Verified::first(release.clone(), &keys).unwrap()
+            (Verified::first(release.clone(), &keys).unwrap(), None)
         };
         let arrival = translate::arrival(
-            previous.as_ref(),
+            previous_at,
+            before.as_ref(),
             &next,
             &release.change.upstream,
             i == 0,
