@@ -401,13 +401,11 @@ fn upstream_history(
     // consumer taking the newest boundary reads the whole catalog as freshly
     // maintained.
     //
-    // A store read failure renders no field rather than a wrong instant. An
-    // absent value says "not established"; a wrong one is an assertion about
-    // when a price last moved, which is the kind of claim a caller acts on.
+    // Missing history and a failed lookup are different answers: only the
+    // former can omit the field without hiding a store problem.
     let last_changed_at_ms = store
         .last_changed_at(source, &request.provider_id, &request.model_id, &fact)
-        .ok()
-        .flatten()
+        .map_err(|e| store_error(&e))?
         .map(|t| t.0);
 
     // Why an empty history can be the RIGHT answer for a fact that is served.

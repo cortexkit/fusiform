@@ -525,6 +525,45 @@ fn history_returns_eras_with_their_windows() {
     assert_eq!(units(2), 11_000_000_000);
 }
 
+#[test]
+fn history_propagates_failure_to_establish_last_change() {
+    use fusiform_module::route::serve_history;
+    use fusiform_store::FactKey;
+
+    let f = fixture();
+    let request =
+        br#"{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","fact_key":"rate.input"}"#;
+    assert_eq!(
+        serve_history(&f.store, request).unwrap().last_changed_at_ms,
+        Some(1_000)
+    );
+    // Break the freshness query in this disposable store without removing the
+    // raw era that the rest of the route reads.
+    rusqlite::Connection::open(f.store.path())
+        .unwrap()
+        .execute_batch("DROP TABLE observation_artifact_event")
+        .unwrap();
+    assert_eq!(
+        f.store
+            .fact_history(
+                SourceId::ModelsDev,
+                "anthropic",
+                "claude-sonnet-4-5",
+                &FactKey::rate(TokenClass::Input)
+            )
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let error = serve_history(&f.store, request).unwrap_err();
+    assert_eq!(error.code, "unavailable");
+    assert!(
+        error.message.contains("observation_artifact_event"),
+        "{error:?}"
+    );
+}
+
 /// `catalog.status` reports polls that changed nothing, not only changes.
 ///
 /// The distinction an operator needs: a source returning 304 for a week and a
