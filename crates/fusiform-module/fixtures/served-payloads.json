@@ -9039,6 +9039,19 @@
             ],
             "reason": "normalizer scaled tiered rates by 1000x"
           },
+          "corrections": [
+            {
+              "affected_from_ms": 3000,
+              "affected_until_ms": 9000,
+              "fields": [
+                {
+                  "class": "input",
+                  "field": "rate"
+                }
+              ],
+              "reason": "normalizer scaled tiered rates by 1000x"
+            }
+          ],
           "from_ms": 3000,
           "reason": "correction",
           "state": "refused",

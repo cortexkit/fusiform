@@ -787,6 +787,7 @@ fn assert_parity(
                     withheld.corrections.first(),
                     "{label}"
                 );
+                assert_eq!(segment.corrections, withheld.corrections, "{label}");
                 assert!(segment.value.is_none(), "{label}");
             } else {
                 let value = read
@@ -809,6 +810,70 @@ fn assert_parity(
                 );
             }
         }
+    }
+}
+
+#[test]
+fn history_retains_both_applicable_correction_disclosures() {
+    use fusiform_core::{BoundaryKind, Correction, FieldId, Timestamp, TokenClass};
+    use fusiform_store::{FactKey, NewEra};
+
+    let (store, _dir) = super::golden_payload::store();
+    let provider = "anthropic";
+    let model = "claude-sonnet-4-5";
+    let key = FactKey::rate(TokenClass::Input);
+    let source = SourceId::ModelsDev;
+    let now = Timestamp(10_000);
+    let current = store
+        .recorded_value_at(source, provider, model, &key, now)
+        .unwrap()
+        .unwrap();
+    store
+        .append_eras(&[NewEra {
+            source,
+            provider_id: provider.into(),
+            model_id: model.into(),
+            fact_key: key.clone(),
+            value_json: current.value_json,
+            boundary_at: now,
+            observation_id: None,
+            boundary_kind: BoundaryKind::Corrected(Correction {
+                fields: vec![FieldId::Rate {
+                    class: TokenClass::Input,
+                }],
+                affected_from: Timestamp(5000),
+                affected_until: Timestamp(6000),
+                reason: "independent defect".into(),
+            }),
+        }])
+        .unwrap();
+    let exact = serve_history(&store, br#"{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","fact_key":"rate.input","served":true}"#).unwrap();
+    let prefix = serve_history(&store, br#"{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","fact_prefix":"rate.","served":true}"#).unwrap();
+    let exact = exact.served.unwrap();
+    assert_eq!(exact, prefix.served_by_key.unwrap()[key.as_str()]);
+    let refused: Vec<_> = exact
+        .iter()
+        .filter(|s| s.reason == Some(HistoryRefusalReason::Correction))
+        .collect();
+    let windows: Vec<_> = refused.iter().map(|s| (s.from_ms, s.until_ms)).collect();
+    assert_eq!(
+        windows,
+        [(3000, Some(5000)), (5000, Some(6001)), (6001, Some(9001))]
+    );
+    let overlap = serde_json::to_value(refused[1]).unwrap();
+    let corrections = overlap["corrections"].as_array().unwrap();
+    assert_eq!(corrections.len(), 2);
+    assert_eq!(corrections[0], overlap["correction"]);
+    assert_eq!(corrections[1]["reason"], "independent defect");
+    for segment in refused {
+        assert_parity(
+            &store,
+            provider,
+            model,
+            key.as_str(),
+            segment,
+            segment.from_ms,
+        );
     }
 }
 

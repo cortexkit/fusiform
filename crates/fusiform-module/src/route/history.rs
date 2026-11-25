@@ -223,6 +223,7 @@ fn default_segment(at: i64, covered: bool) -> HistorySegment {
         override_detail: None,
         reason: (!covered).then_some(HistoryRefusalReason::NoCoverage),
         correction: None,
+        corrections: Vec::new(),
     }
 }
 
@@ -246,6 +247,7 @@ fn segment_at(
         segment.state = HistoryState::Refused;
         segment.reason = Some(HistoryRefusalReason::Correction);
         segment.correction = withheld.corrections.first().cloned();
+        segment.corrections.clone_from(&withheld.corrections);
     } else if let Some(value) = read.models.get(identity).and_then(|facts| facts.get(key)) {
         segment.state = HistoryState::Value;
         segment.value = Some(value.clone());

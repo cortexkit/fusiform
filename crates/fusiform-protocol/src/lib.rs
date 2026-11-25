@@ -2322,8 +2322,12 @@ pub struct HistorySegment {
     pub override_detail: Option<HistoryOverride>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<HistoryRefusalReason>,
+    /// The first applicable correction, retained for older readers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub correction: Option<CorrectionDetail>,
+    /// All applicable corrections in recording order, as in dated get.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub corrections: Vec<CorrectionDetail>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
