@@ -325,7 +325,17 @@ fn dated_store_release_keeps_era_facts_but_not_current_layers() {
         serve_catalog_get_with_limits(store, &wire(args), usize::MAX, usize::MAX).unwrap()
     };
     let current = read(&consumer, json!({}));
-    assert!(current.models.contains_key(ALIAS));
+    assert_eq!(current.models[ALIAS]["limit.output"], 65_536);
+    let alias_output: Vec<_> = current
+        .fact_overrides
+        .iter()
+        .filter(|row| row.model == ALIAS && row.fact_key == "limit.output")
+        .collect();
+    assert_eq!(alias_output.len(), 1);
+    assert_eq!(alias_output[0].provider_id, "google");
+    assert_eq!(alias_output[0].model_id, "gemini-4-carbon");
+    assert_eq!(alias_output[0].replaces, 32_768);
+    assert_eq!(alias_output[0].value, 65_536);
     assert_eq!(current.models[CARBON]["model.lineage"], "gemini");
     assert_eq!(
         current.models[CARBON]["wire.family"],

@@ -924,9 +924,10 @@ Absence means the vendor documents no default, as for `openai/gpt-6.2-sol`.
    (`fact_overrides::a_current_read_serves_the_override_and_discloses_it`,
    `fact_overrides::a_current_read_serves_the_documented_server_side_fallback`).
    Paging keeps each entry with the provider of its `model`.
-4. **Current aliases carry it.** Aliases remain current-only. An alias entry is built from its target's served
-   facts, so it serves the overridden value too, and its disclosure has the
-   alias id in `model` and the target in `provider_id`/`model_id`
+4. **Current aliases inherit target overrides.** An alias entry is
+   built from its target's served facts, including `limit.output` after any
+   override applied to the target. An inherited disclosure has the alias id in
+   `model` and the target in `provider_id`/`model_id`
    (`fact_overrides::the_antigravity_alias_serves_the_overridden_value`).
    `capability.server_side_fallback`, `capability.mid_conversation_system`,
    `capability.allowed_fallback_models`, the `route.refusal_fallback.*` keys,

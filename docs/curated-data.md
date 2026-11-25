@@ -151,7 +151,6 @@ published row:
 | `established_at_ms`, `review_by_ms` | when it was read; when it must be read again |
 | `reasoning_wire_ids`, `reasoning_default` | optional effort → backend model id map and default effort used when no tier is specified, read from the pinned plugin |
 | `wire_family` | optional verified route protocol, from the alias's pinned plugin source, never its target's package |
-| `limit_output` | optional route-specific output token limit: a positive integer `value`, nonempty `source_ref` and `quote` |
 
 How to add a row: read the routing code at a pinned revision. Include the
 alias only if every tier of the id resolves to the target's own backend model
@@ -173,6 +172,8 @@ Gates (`aliases.rs`):
   target is another
   alias is rejected (`a_duplicate_alias_id_is_reported_rather_than_resolved`,
   `a_chained_alias_is_refused`);
+- alias rows with unknown fields are rejected, including the former output
+  limit field (`a_removed_alias_output_limit_is_rejected_and_counted`);
 - no alias is past its review date (`no_alias_is_past_its_review_date`).
 
 The live 3.8 Flash and Argon aliases carry tier maps for `low`, `medium` and
@@ -197,19 +198,11 @@ defaulting to `low`, rather than the Anthropic targets' additional `xhigh` and
 `max`. Both cite plugin revision `d17ca2e8`: each model's three native routes
 share one `vertexModelId`, and the resolver selects `-low` for a bare id.
 
-An alias can carry `limit_output` when its route has a sourced output limit
-different from the target's API. Current reads apply it after the target's
-facts and fact overrides. The existing `fact_overrides` list then discloses
-exactly one `limit.output` replacement for the alias identity, with the value
-the target would otherwise serve in `replaces`, the field's source and quote,
-and the alias row's review dates. The target's disclosure for that fact is not
-also copied to the alias. Target rows and point-in-time reads are unchanged;
-point-in-time reads do not serve aliases.
-
-Antigravity Carbon serves 262,144 output tokens, citing the captured
-Antigravity CLI (agy) 1.5.5 request's `"maxOutputTokens": 262144` for `gemini-4-carbon-low` and the plugin
-registry's `limit: { context: 1048576, output: 262144 }` at `cb40633d`.
-The public Carbon API target and the Argon alias still serve 65,536.
+Aliases serve the target's `limit.output` after any sourced correction on the
+target row. Antigravity Carbon, Hydrogen and Neon each serve 65,536. Carbon's
+disclosure identifies the public target as the source of the correction to the
+upstream value of 32,768. Hydrogen and Neon have no `limit.output` disclosure
+because their targets already publish 65,536.
 
 Retiring an alias moves its identity to `retired`; never delete a served id.
 An optional `successor` is a full `provider/model` identity, accompanied by

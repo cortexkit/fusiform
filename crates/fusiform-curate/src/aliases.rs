@@ -40,16 +40,6 @@ struct AliasRow {
     #[serde(default)]
     reasoning_wire_ids: BTreeMap<String, String>,
     reasoning_default: Option<String>,
-    limit_output: Option<LimitOutput>,
-}
-
-/// A route-specific output limit and the evidence for replacing the target's limit.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LimitOutput {
-    pub value: u64,
-    pub source_ref: String,
-    pub quote: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -76,7 +66,6 @@ pub struct Alias {
     pub review_by_ms: i64,
     pub reasoning_wire_ids: BTreeMap<String, String>,
     pub reasoning_default: Option<String>,
-    pub limit_output: Option<LimitOutput>,
 }
 
 /// `(alias provider_id, alias model_id)` -> what it resolves to.
@@ -132,15 +121,6 @@ pub fn load_reporting_rejects(doc: &str) -> (Aliases, Vec<String>) {
             continue;
         }
         let key = (row.provider_id.clone(), row.model_id.clone());
-        if row.limit_output.as_ref().is_some_and(|limit| {
-            limit.value == 0 || limit.source_ref.trim().is_empty() || limit.quote.trim().is_empty()
-        }) {
-            rejects.push(format!(
-                "alias {}/{} has invalid limit_output",
-                key.0, key.1
-            ));
-            continue;
-        }
         if row
             .wire_family
             .as_deref()
@@ -176,7 +156,6 @@ pub fn load_reporting_rejects(doc: &str) -> (Aliases, Vec<String>) {
             review_by_ms: row.review_by_ms,
             reasoning_wire_ids: row.reasoning_wire_ids,
             reasoning_default: row.reasoning_default,
-            limit_output: row.limit_output,
         };
         if let Some(existing) = out.get(&key) {
             // Two rows for one alias id is a curation mistake, not a

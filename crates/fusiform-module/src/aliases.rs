@@ -203,29 +203,17 @@ mod tests {
     }
 
     #[test]
-    fn malformed_output_limits_are_rejected_and_counted() {
-        let valid = serde_json::json!({"value":262144,"source_ref":"pinned capture","quote":"maxOutputTokens: 262144"});
+    fn a_removed_alias_output_limit_is_rejected_and_counted() {
         let mut doc: serde_json::Value = serde_json::from_str(ALIASES).unwrap();
         let count = doc["aliases"].as_array().unwrap().len();
-        doc["aliases"][0]["limit_output"] = valid.clone();
+        doc["aliases"][0]["limit_output"] = serde_json::json!({
+            "value": 100_000, "source_ref": "source", "quote": "quote"
+        });
         let (rows, rejects) = load_reporting_rejects(&doc.to_string());
-        assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), count);
-        for malformed in [
-            serde_json::json!({"value":0,"source_ref":"source","quote":"quote"}),
-            serde_json::json!({"value":-1,"source_ref":"source","quote":"quote"}),
-            serde_json::json!({"value":1.5,"source_ref":"source","quote":"quote"}),
-            serde_json::json!({"value":1,"source_ref":" ","quote":"quote"}),
-            serde_json::json!({"value":1,"source_ref":"source","quote":""}),
-            serde_json::json!({"value":1,"source_ref":"source"}),
-            serde_json::json!({"value":1,"source_ref":"source","quote":"quote","unknown":true}),
-        ] {
-            doc["aliases"][0]["limit_output"] = malformed.clone();
-            let (rows, rejects) = load_reporting_rejects(&doc.to_string());
-            assert_eq!(rows.len(), count - 1, "{malformed}");
-            assert_eq!(rejects.len(), 1, "{malformed}: {rejects:?}");
-            assert!(!rows.contains_key(&("google".into(), "antigravity-claude-sonnet-5-5".into())));
-        }
+        assert_eq!(rows.len(), count - 1);
+        assert_eq!(rejects.len(), 1, "{rejects:?}");
+        assert!(rejects[0].contains("unknown field `limit_output`"));
+        assert!(!rows.contains_key(&("google".into(), "antigravity-claude-sonnet-5-5".into())));
     }
 
     #[test]

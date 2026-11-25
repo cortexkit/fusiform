@@ -1387,10 +1387,8 @@ fn a_status_models_dev_publishes_wins_over_the_deprecation_row() {
     }
 }
 
-/// Code Assist's captured Carbon limit differs from the public API limit;
-/// each route must disclose only the evidence for the value it serves.
 #[test]
-fn carbon_and_its_antigravity_alias_serve_the_sourced_output_limit() {
+fn carbon_and_neon_antigravity_aliases_serve_target_output_limits() {
     let seed: Value =
         serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
     let carbon = seed["google"]["models"]["gemini-4-carbon"].clone();
@@ -1402,7 +1400,8 @@ fn carbon_and_its_antigravity_alias_serve_the_sourced_output_limit() {
     let mut google = seed["google"].clone();
     google["models"] = json!({
         "gemini-4-carbon": carbon,
-        "gemini-4-argon": seed["google"]["models"]["gemini-4-argon"].clone()
+        "gemini-4-argon": seed["google"]["models"]["gemini-4-argon"],
+        "gemini-4-neon": seed["google"]["models"]["gemini-4-neon"]
     });
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
@@ -1420,19 +1419,20 @@ fn carbon_and_its_antigravity_alias_serve_the_sourced_output_limit() {
         1_000,
     );
 
-    let alias = &fusiform_module::aliases::aliases()
-        [&("google".into(), "antigravity-gemini-4-carbon".into())];
-    for (model, output) in [
-        ("gemini-4-carbon", 65_536),
-        ("antigravity-gemini-4-carbon", 262_144),
-        ("antigravity-gemini-4-argon", 65_536),
+    let get_named = |model| get(&store, json!({"provider_id":"google","model_id":model}));
+    let outputs = ["antigravity-gemini-4-carbon", "antigravity-gemini-4-neon"]
+        .map(|model| get_named(model).models[&format!("google/{model}")]["limit.output"].clone());
+    assert_eq!(outputs, [json!(65_536), json!(65_536)]);
+
+    for (model, source_model) in [
+        ("gemini-4-carbon", Some("gemini-4-carbon")),
+        ("antigravity-gemini-4-carbon", Some("gemini-4-carbon")),
+        ("antigravity-gemini-4-argon", Some("gemini-4-argon")),
+        ("antigravity-gemini-4-neon", None),
     ] {
         let identity = format!("google/{model}");
         for (label, response) in [
-            (
-                "named",
-                get(&store, json!({"provider_id":"google","model_id":model})),
-            ),
+            ("named", get_named(model)),
             ("provider", get(&store, json!({"provider_id":"google"}))),
             ("paged", paged(&store, json!({}))),
             (
@@ -1445,33 +1445,27 @@ fn carbon_and_its_antigravity_alias_serve_the_sourced_output_limit() {
         ] {
             assert_eq!(
                 response.models[&identity]["limit.output"],
-                json!(output),
+                json!(65_536),
                 "{identity}: {label}"
             );
             let rows = disclosed_fact(&response, &identity, "limit.output");
             assert_eq!(
                 rows.len(),
-                1,
+                usize::from(source_model.is_some()),
                 "{identity}: {label}: {:?}",
                 response.fact_overrides
             );
-            let row = rows[0];
-            assert_eq!(row.provider_id, "google");
-            assert_eq!(row.value, json!(output));
-            if model == "antigravity-gemini-4-carbon" {
-                let limit = alias.limit_output.as_ref().unwrap();
-                assert_eq!(row.model_id, model);
-                assert_eq!(row.replaces, json!(65_536));
-                assert_eq!(row.source_ref, limit.source_ref);
-                assert_eq!(row.quote, limit.quote);
-                assert_eq!(row.established_at_ms, alias.established_at_ms);
-                assert_eq!(row.review_by_ms, alias.review_by_ms);
-            } else if model == "gemini-4-carbon" {
-                assert_eq!(row.model_id, model);
-                assert_eq!(row.replaces, json!(32_768));
-                assert!(row
-                    .source_ref
-                    .contains("https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon"));
+            if let Some(source_model) = source_model {
+                let row = rows[0];
+                assert_eq!(row.provider_id, "google");
+                assert_eq!(row.model_id, source_model);
+                assert_eq!(row.value, json!(65_536));
+                if source_model == "gemini-4-carbon" {
+                    assert_eq!(row.replaces, json!(32_768));
+                    assert!(row
+                        .source_ref
+                        .contains("https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon"));
+                }
             }
         }
     }
@@ -1486,9 +1480,6 @@ fn carbon_and_its_antigravity_alias_serve_the_sourced_output_limit() {
     assert!(historical.fact_overrides.is_empty());
 }
 
-/// A live Code Assist request for this route asking for 200,000 output tokens
-/// stopped at exactly 65,536, so the route serves its target's limit rather
-/// than the 262,144 the native client puts in its requests.
 #[test]
 fn hydrogen_antigravity_alias_serves_the_targets_output_limit() {
     let seed: Value =

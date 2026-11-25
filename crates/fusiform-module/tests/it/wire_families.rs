@@ -175,13 +175,13 @@ fn code_assist_is_the_alias_own_protocol_and_retired_aliases_have_none() {
 }
 
 #[test]
-fn neon_alias_serves_code_assist_with_borrowed_prices_and_its_own_limits() {
+fn neon_alias_serves_code_assist_with_borrowed_prices_and_target_limits() {
     let (store, _dir) = store();
-    let response = get(
+    let alias_response = get(
         &store,
         json!({"provider_id":"google","model_id":"antigravity-gemini-4-neon"}),
     );
-    let alias = response
+    let alias = alias_response
         .models
         .get("google/antigravity-gemini-4-neon")
         .expect("Neon must be served through its seeded target");
@@ -193,8 +193,12 @@ fn neon_alias_serves_code_assist_with_borrowed_prices_and_its_own_limits() {
 
     assert_eq!(alias["limit.context"], target["limit.context"]);
     assert_eq!(alias["limit.context"], 1_048_576);
-    assert_eq!(alias["limit.output"], 262_144);
+    assert_eq!(alias["limit.output"], target["limit.output"]);
     assert_eq!(target["limit.output"], 65_536);
+    assert!(alias_response
+        .fact_overrides
+        .iter()
+        .all(|row| row.fact_key != "limit.output"));
     assert_eq!(alias["wire.family"], "google.code_assist");
     assert_eq!(alias["route.reasoning_default"], "high");
     assert_eq!(

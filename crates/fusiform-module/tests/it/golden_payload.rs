@@ -468,7 +468,7 @@ fn render_all() -> String {
         .unwrap()
         .extend(render_speed_twins());
     ordinary.as_object_mut().unwrap().insert(
-        "catalog.get — Hydrogen alias with its own output limit".into(),
+        "catalog.get — Hydrogen alias with its target output limit".into(),
         render_hydrogen_alias(),
     );
     let planes: serde_json::Value = serde_json::from_str(&render_planes()).unwrap();
@@ -2991,9 +2991,9 @@ fn cases() -> Vec<(&'static str, String)> {
             r#"{"name":"catalog.get","arguments":{"provider_id":"google","model_id":"antigravity-gemini-3.8-flash"}}"#.to_string(),
         ),
         (
-            // Pin the route-specific limit and its alias-owned disclosure,
-            // rather than inheriting the public API target's lower limit.
-            "catalog.get — an alias with its own output limit",
+            // Pin the inherited Carbon limit and its disclosure, which points
+            // to the public API target as the source of the override.
+            "catalog.get — an alias with its target output limit",
             r#"{"name":"catalog.get","arguments":{"provider_id":"google","model_id":"antigravity-gemini-4-carbon","fact_prefixes":["limit."]}}"#.to_string(),
         ),
         (

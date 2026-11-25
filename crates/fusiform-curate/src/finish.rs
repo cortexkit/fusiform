@@ -757,7 +757,6 @@ mod tests {
             review_by_ms: i64::MAX,
             reasoning_wire_ids: BTreeMap::new(),
             reasoning_default: None,
-            limit_output: None,
         };
         let mut facts = BTreeMap::from([
             ("rate.input".into(), priced(100)),

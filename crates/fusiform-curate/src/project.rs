@@ -28,35 +28,9 @@ pub fn project_alias(
     }
 
     let alias_key = format!("{provider_id}/{model_id}");
-    let output_override = alias.limit_output.as_ref().filter(|_| {
-        prefixes.is_none_or(|p| p.iter().any(|p| "limit.output".starts_with(p.as_str())))
-    }).map(|limit| {
-        let value = serde_json::json!(limit.value);
-        let replaces = facts.insert("limit.output".into(), value.clone())
-            .unwrap_or(serde_json::Value::Null);
-        fusiform_protocol::FactOverrideWire {
-            model: alias_key.clone(),
-            provider_id: provider_id.into(),
-            model_id: model_id.into(),
-            fact_key: "limit.output".into(),
-            value,
-            replaces,
-            reason: "The alias route has its own sourced output limit, independent of the target's API limit.".into(),
-            source_ref: limit.source_ref.clone(),
-            quote: limit.quote.clone(),
-            notes: None,
-            established_by: "fusiform".into(),
-            established_at_ms: alias.established_at_ms,
-            review_by_ms: alias.review_by_ms,
-        }
-    });
-    // Inherited disclosures keep the target identity where the target's value
-    // survives. A route-specific output limit replaces that disclosure even
-    // if both limits happen to agree, so one fact has exactly one source.
+    // Inherited disclosures keep the target as their source when its value
+    // survives projection onto the alias.
     response.fact_overrides.retain_mut(|row| {
-        if output_override.is_some() && row.fact_key == "limit.output" {
-            return false;
-        }
         let Some(served) = facts.get(&row.fact_key) else {
             return false;
         };
@@ -81,7 +55,6 @@ pub fn project_alias(
     for row in &mut response.fact_overrides {
         row.model = alias_key.clone();
     }
-    response.fact_overrides.extend(output_override);
     response.models.insert(alias_key.clone(), facts);
     response.aliased.push(fusiform_protocol::AliasedModelWire {
         model: alias_key,
@@ -486,7 +459,6 @@ mod tests {
             review_by_ms: 2,
             reasoning_wire_ids: BTreeMap::new(),
             reasoning_default: None,
-            limit_output: None,
         };
         let original =
             serde_json::json!({"provider_id":"zai","family":"glm","basis":"open_weights"});
