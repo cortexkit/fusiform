@@ -2583,12 +2583,11 @@ fn single_model_snapshot(
 
     let uncertain = if let Some(uncertain) = prepared_uncertain {
         uncertain
-    } else {
+    } else if let Some(at) = at {
         store
-            .uncertain_facts_at(source, resolved_at)
+            .uncertain_model_facts_at(source, at, provider_id, model_id)
             .map_err(|e| store_error(&e))?
             .into_iter()
-            .filter(|((p, m, _), _)| p == provider_id && m == model_id)
             .map(|((provider_id, model_id, fact_key), (prior, boundary))| {
                 fusiform_store::serve::UncertainFact {
                     provider_id,
@@ -2599,6 +2598,8 @@ fn single_model_snapshot(
                 }
             })
             .collect()
+    } else {
+        Vec::new()
     };
 
     Ok((

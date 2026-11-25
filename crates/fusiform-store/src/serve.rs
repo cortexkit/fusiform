@@ -392,6 +392,19 @@ impl CatalogStore {
         self.uncertain_facts_in_range(source, at, None, None)
     }
 
+    /// Uncertainty for one offering. The identity bounds let the era index
+    /// seek directly to its facts instead of scanning the source's history.
+    pub fn uncertain_model_facts_at(
+        &self,
+        source: SourceId,
+        at: Timestamp,
+        provider: &str,
+        model: &str,
+    ) -> Result<UncertaintyByFact, CatalogError> {
+        let sql = format!("{UNCERTAIN_FACTS_SQL} AND provider_id = ?3 AND model_id = ?4");
+        self.query_uncertainty(&sql, &[&source.as_str(), &at.0, &provider, &model])
+    }
+
     fn uncertain_facts_in_range(
         &self,
         source: SourceId,
@@ -399,18 +412,26 @@ impl CatalogStore {
         after: Option<&str>,
         through: Option<&str>,
     ) -> Result<UncertaintyByFact, CatalogError> {
-        let rows = self.raw_conn(|conn| {
-            let source = source.as_str();
-            let mut sql = UNCERTAIN_FACTS_SQL.to_string();
-            let mut args: Vec<&dyn rusqlite::ToSql> = vec![&source, &at.0];
-            for (value, operator) in [(&after, ">"), (&through, "<=")] {
-                if let Some(value) = value {
-                    args.push(value);
-                    sql.push_str(&format!(" AND provider_id {operator} ?{}", args.len()));
-                }
+        let source = source.as_str();
+        let mut sql = UNCERTAIN_FACTS_SQL.to_string();
+        let mut args: Vec<&dyn rusqlite::ToSql> = vec![&source, &at.0];
+        for (value, operator) in [(&after, ">"), (&through, "<=")] {
+            if let Some(value) = value {
+                args.push(value);
+                sql.push_str(&format!(" AND provider_id {operator} ?{}", args.len()));
             }
-            let mut stmt = conn.prepare(&sql)?;
-            let mapped = stmt.query_map(args.as_slice(), |r| {
+        }
+        self.query_uncertainty(&sql, &args)
+    }
+
+    fn query_uncertainty(
+        &self,
+        sql: &str,
+        args: &[&dyn rusqlite::ToSql],
+    ) -> Result<UncertaintyByFact, CatalogError> {
+        let rows = self.raw_conn(|conn| {
+            let mut stmt = conn.prepare(sql)?;
+            let mapped = stmt.query_map(args, |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
