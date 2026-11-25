@@ -134,6 +134,73 @@ fn served_history_refuses_typos_but_covers_removed_curated_models() {
 
 const BOOT: i64 = 1_800_000_000_000;
 
+#[test]
+fn served_history_excludes_judgments_but_dated_get_replays_them() {
+    use fusiform_core::{BoundaryKind, Timestamp};
+    use fusiform_store::{FactKey, NewEra};
+
+    let (store, _dir) = provider_label_fixture();
+    let provider = "fixture-label";
+    let model = "upstream";
+    let identity = format!("{provider}/{model}");
+    for (key, value, at) in [
+        ("model.canonical_id", json!(identity), BOOT),
+        ("limit.context", json!(100), BOOT + 40),
+    ] {
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: provider.into(),
+                model_id: model.into(),
+                fact_key: FactKey::from_stored(key.into()),
+                value_json: value.to_string(),
+                boundary_at: Timestamp(at),
+                boundary_kind: BoundaryKind::Asserted,
+                observation_id: None,
+            }])
+            .unwrap();
+    }
+    store
+        .append_model_mark(&identity, true, "operator", "fixture", BOOT + 20)
+        .unwrap();
+    store
+        .append_model_mark(&identity, false, "operator", "fixture", BOOT + 60)
+        .unwrap();
+    let args = |mut request: Value| {
+        request["provider_id"] = json!(provider);
+        request["model_id"] = json!(model);
+        serde_json::to_vec(&request).unwrap()
+    };
+    for (at, expected) in [(19, None), (20, Some(json!(true))), (60, None)] {
+        let read = serve_catalog_get(&store, &args(json!({"at_ms": BOOT + at}))).unwrap();
+        assert_eq!(
+            read.models[&identity].get("quality.decommissioned"),
+            expected.as_ref()
+        );
+    }
+    for selector in [
+        json!({"fact_key":"quality.decommissioned","served":true}),
+        json!({"fact_key":"quality.elo.effort.high"}),
+        json!({"fact_prefix":"quality.","served":true}),
+        json!({"fact_prefix":"workload.code."}),
+    ] {
+        let error = serve_history(&store, &args(selector)).unwrap_err();
+        assert_eq!(error.code, "bad_request");
+        assert!(error.message.contains("quality.grades"), "{error:?}");
+    }
+
+    let history = serve_history(&store, &args(json!({"fact_prefix":"","served":true}))).unwrap();
+    let keys = history.fact_keys.unwrap();
+    assert!(keys.iter().any(|key| key == "limit.context"));
+    assert!(keys
+        .iter()
+        .all(|key| !key.starts_with("quality.") && !key.starts_with("workload.")));
+    assert!(!history
+        .served_by_key
+        .unwrap()
+        .contains_key("quality.decommissioned"));
+}
+
 // Use the shipped catalog as background load: a tiny store hides queries that
 // scan other models once for every boundary of the requested model.
 fn oscillating_store() -> (CatalogStore, tempfile::TempDir) {

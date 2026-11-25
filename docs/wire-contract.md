@@ -1160,10 +1160,15 @@ and `correction` with the same extent and reason as a dated read, or
 `reason: "no_coverage"` without a correction when the dated read refuses because
 the model has no record at that instant. `absent` means the dated read succeeds
 but does not include the fact. Adjacent identical results are merged.
-The timeline uses the same resolver as `catalog.get` with `at_ms`, not the
-current-read overlays: aliases, inheritance, billing planes, wire corrections
-and quality are not historical. For an alias, `served` is empty and
-`inherited_from.mapping: "current"` identifies the target as today's mapping.
+The timeline uses the dated `catalog.get` resolver. It does not apply aliases,
+rate inheritance, login-specific billing planes, or wire protocol corrections
+from the current catalog.
+Judgments (quality grades, marks, effort grades, workload efforts, and local
+judgment overrides) may appear in dated `catalog.get`, but `catalog.history`
+omits their keys and timelines. An exact key or prefix naming only judgment
+facts returns `bad_request`; use `quality.grades --model` to read their history.
+For an alias, `served` is empty and `inherited_from.mapping: "current"`
+identifies the target as today's mapping.
 
 For `fact_prefix`, `fact_keys` lists, in sorted order, all matching keys ever
 recorded in upstream eras, overrides or curated rows for the model, or derived
