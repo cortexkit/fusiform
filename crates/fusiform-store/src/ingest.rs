@@ -287,13 +287,9 @@ fn plan_model_eras(
 
 /// A digest over exactly the facts this module would store.
 ///
-/// This is the hash consumers are notified on, and computing it from
-/// `facts_of` rather than from the document is the point: the change SIGNAL
-/// and the era SET are then derived from one function, so they cannot disagree.
-/// A digest computed independently — over the raw bytes, or over a
-/// re-serialization of the catalog — would drift from the diff the moment
-/// either changed, and the failure mode is silent: a consumer told "nothing
-/// changed" while eras were written, or woken for a change that produced none.
+/// The poll loop compares this digest to skip diffing a matching document.
+/// The digest and the diff both use `facts_of` for the incoming projection.
+/// If a diff runs, only written fact changes advance the catalog version.
 ///
 /// It also inherits every normalization decision for free. Sorted modalities,
 /// zero limits as absence, the three rate states kept distinct: each is already
@@ -495,19 +491,9 @@ pub fn states_the_same_upstream_claim(held: &str, incoming: &str) -> bool {
 
 /// A stored value with everything fusiform added to it removed.
 ///
-/// ONE definition, used by both the diff and the digest, because those two
-/// must agree about what counts as a change. `catalog_digest` already says
-/// that in its own doc — the signal and the era set are derived from one
-/// function so they cannot disagree — and stripping annotations in the
-/// comparison alone would have broken it conditionally: a future annotation
-/// would move the digest, waking every consumer, while the diff correctly
-/// wrote no eras. The consumer would refetch and find nothing changed.
-///
-/// Empty today, in the sense that nothing fusiform adds survives into storage
-/// after `98a7e35`. It is kept because the invariant is about the RULE rather
-/// than the current field list: the next annotation someone stores has to be
-/// named here or it moves the digest, and this function is where that decision
-/// gets made rather than discovered.
+/// The diff uses this so historical producer annotations do not make unchanged
+/// upstream values look changed. The digest hashes the incoming projected
+/// strings directly; producer annotations must stay out of that projection.
 pub fn upstream_claim_of(mut value: serde_json::Value) -> serde_json::Value {
     if let Some(obj) = value.as_object_mut() {
         for annotation in PRODUCER_ANNOTATIONS {
@@ -518,7 +504,7 @@ pub fn upstream_claim_of(mut value: serde_json::Value) -> serde_json::Value {
 }
 
 /// Fields fusiform attaches to a stored value that are NOT the upstream's
-/// claim, and so must never move a digest or open an era.
+/// claim, and so must not count as changes when comparing stored values.
 ///
 /// `unit_provenance` is here from the incident of 2026-08-16: it was written
 /// into storage for one day, and because the diff compared serialized strings

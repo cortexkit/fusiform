@@ -182,6 +182,48 @@ fn a_clock_rewind_must_not_acknowledge_an_unapplied_document() {
     assert!(matches!(retry.outcome, TickOutcome::Changed { .. }));
 }
 
+#[test]
+fn a_different_saved_digest_with_no_era_changes_does_not_advance_version() {
+    use fusiform_core::ObservationOutcome;
+    use fusiform_store::NewObservation;
+
+    let f = fixture();
+    let source = SourceId::ModelsDev;
+    run(&f, body(FIXTURE, Some("first")), 1_000);
+    let version = f.store.catalog_version().unwrap();
+    let digest = f.store.last_normalized_hash(source).unwrap().unwrap();
+    f.store
+        .record_observation(&NewObservation {
+            source,
+            observed_at: Timestamp(1_500),
+            outcome: ObservationOutcome::Unchanged,
+            normalized_hash: Some("previous-projection-digest".into()),
+            raw_hash: None,
+            etag: None,
+            duration_ms: None,
+            detail: None,
+        })
+        .unwrap();
+    assert_ne!(
+        f.store.last_normalized_hash(source).unwrap().as_deref(),
+        Some(digest.as_str())
+    );
+
+    let report = run(&f, body(FIXTURE, Some("refreshed")), 2_000);
+    assert!(
+        matches!(report.outcome, TickOutcome::Unchanged),
+        "{:?}",
+        report.outcome
+    );
+    assert_eq!(report.eras_written, 0);
+    assert_eq!(f.store.catalog_version().unwrap(), version);
+    assert_eq!(f.store.last_normalized_hash(source).unwrap(), Some(digest));
+    assert_eq!(
+        f.store.last_etag(source).unwrap().as_deref(),
+        Some("refreshed")
+    );
+}
+
 /// The first tick against an empty store writes a SEED, not an observed
 /// boundary.
 ///

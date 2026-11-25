@@ -385,7 +385,6 @@ fn apply_with_count_reader(
                     detail: None,
                 },
                 &catalog,
-                matching_hash,
             ) {
                 Ok(written) => written,
                 Err(error @ fusiform_store::CatalogError::PollBoundaryNotIncreasing { .. }) => {

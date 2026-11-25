@@ -197,7 +197,6 @@ enum PollWrite<'a> {
     Document {
         observation: &'a NewObservation,
         catalog: &'a fusiform_core::NormalizedCatalog,
-        matching_hash: bool,
     },
 }
 
@@ -489,14 +488,12 @@ impl CatalogStore {
         &self,
         observation: &NewObservation,
         catalog: &fusiform_core::NormalizedCatalog,
-        matching_hash: bool,
     ) -> Result<(i64, ingest::IngestPlan, Option<i64>), CatalogError> {
         let written = self.append_eras_inner(
             &[],
             Some(PollWrite::Document {
                 observation,
                 catalog,
-                matching_hash,
             }),
         )?;
         let plan = written.plan.expect("a polled document is diffed");
@@ -699,7 +696,6 @@ impl CatalogStore {
                 Some(PollWrite::Document {
                     observation,
                     catalog,
-                    matching_hash,
                 }) => {
                     let at = observation.observed_at;
                     let prior = last_confirming_before_in(tx, observation.source, at)?;
@@ -709,7 +705,8 @@ impl CatalogStore {
                         BoundaryKind::Seed
                     };
                     let mut plan = ingest::plan_ingest_in(tx, catalog, at, boundary, None)?;
-                    if !plan.is_empty() {
+                    let changed = !plan.is_empty();
+                    if changed {
                         let latest: Option<i64> = tx.query_row(
                             "SELECT MAX(boundary_at_ms) FROM era WHERE source = ?1",
                             [observation.source.as_str()],
@@ -722,11 +719,10 @@ impl CatalogStore {
                             }));
                         }
                     }
-                    let unchanged = matching_hash && plan.is_empty();
-                    let outcome = if unchanged {
-                        ObservationOutcome::Unchanged
-                    } else {
+                    let outcome = if changed {
                         ObservationOutcome::Changed { snapshot_seq: 0 }
+                    } else {
+                        ObservationOutcome::Unchanged
                     };
                     let id = insert_observation(observation, &outcome)?;
                     if prior.is_some() {
@@ -735,7 +731,7 @@ impl CatalogStore {
                         }
                     }
                     document = Some((plan, prior));
-                    (Some(id), (!unchanged).then_some(at))
+                    (Some(id), changed.then_some(at))
                 }
             };
             let eras = document.as_ref().map_or(eras, |(plan, _)| &plan.eras);
