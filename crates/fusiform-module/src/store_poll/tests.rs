@@ -493,6 +493,80 @@ fn store_poll_writes_the_same_model_eras_as_direct_ingest() {
 }
 
 #[tokio::test]
+async fn store_poll_reports_silence_after_a_successful_head_check() {
+    use subc_protocol::session::HealthStatus;
+
+    let key = SigningKey::from_bytes(&[42; 32]);
+    let snapshot: Snapshot = serde_json::from_slice(SNAPSHOT).unwrap();
+    let url = server(Arc::new(Mutex::new(BTreeMap::from([
+        ("/v1/head".into(), signed_head(&snapshot, 2, &key)),
+        ("/v1/snapshots/2".into(), SNAPSHOT.to_vec()),
+        ("/v1/releases/1".into(), FIRST.to_vec()),
+        ("/v1/history/base.json".into(), BASE.to_vec()),
+        ("/v1/history/days/2026-11-19.json".into(), DAY.to_vec()),
+    ]))));
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        CatalogStore::open_for_store(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_string_lossy().into_owned(),
+            },
+        })
+        .unwrap(),
+    );
+    let signals = Arc::new(Signals::for_store(url.to_string()));
+    signals.store_opened();
+
+    for expected_attempts in [1, 2] {
+        let poller = StorePoller::new(
+            url.clone(),
+            BTreeMap::from([(KID.into(), key.verifying_key())]),
+        )
+        .unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(poller.run(
+            Arc::clone(&store),
+            Arc::clone(&signals),
+            move || tx.send(()).unwrap(),
+            false,
+        ));
+        tokio::time::timeout(Duration::from_secs(5), rx)
+            .await
+            .expect("poll did not verify the head")
+            .unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+
+        assert_eq!(store.latest_store_release().unwrap().unwrap().release, 2);
+        assert_eq!(signals.store_applied_release(), Some(2));
+        let now = crate::route::now_ms();
+        assert_eq!(
+            crate::health::report(&signals, now).status,
+            HealthStatus::Ok
+        );
+        let silent = crate::health::report(&signals, now + 13 * 60_000);
+        assert_eq!(silent.status, HealthStatus::Degraded, "{:?}", silent.detail);
+        assert!(silent.detail.unwrap().contains("poll loop"));
+
+        let metrics = silent.metrics.unwrap();
+        assert_eq!(metrics["process_poll_attempts"], expected_attempts);
+        assert_eq!(metrics["process_polls_recorded"], 1);
+        let observed_at = store
+            .last_confirming_observation(fusiform_core::SourceId::ModelsDev)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            metrics["observation_age_ms"],
+            now + 13 * 60_000 - observed_at.0
+        );
+        assert!(metrics["model_count"].is_number());
+    }
+}
+
+#[tokio::test]
 async fn store_poll_verifies_attested_history_and_keeps_last_good_release() {
     let key = SigningKey::from_bytes(&[42; 32]);
     let mut snapshot: Snapshot = serde_json::from_slice(SNAPSHOT).unwrap();

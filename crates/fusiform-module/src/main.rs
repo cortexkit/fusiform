@@ -232,6 +232,8 @@ impl ModuleHandler for Fusiform {
                     return;
                 }
             };
+            self.signals
+                .adopt_from_store(&store, fusiform_core::SourceId::ModelsDev);
             let floor = (store.rates_version() as i64).saturating_add(1);
             let fallback = match SeedFallback::prepare(&descriptor, bootstrap, floor) {
                 Ok(fallback) => fallback,

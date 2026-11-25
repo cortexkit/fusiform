@@ -29,7 +29,8 @@ use state::Verified;
 
 const HEAD_PATH: &str = "v1/head";
 const HISTORY_BASE_PATH: &str = "v1/history/base.json";
-const INTERVAL: Duration = Duration::from_secs(60);
+pub(crate) const POLL_INTERVAL_MS: i64 = 60_000;
+const INTERVAL: Duration = Duration::from_millis(POLL_INTERVAL_MS as u64);
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -425,14 +426,20 @@ impl StorePoller {
         ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             ticks.tick().await;
+            signals.attempted(crate::route::now_ms());
             match self.poll(&store).await {
                 Ok(release) => {
+                    if signals.store_applied_release() != Some(release) {
+                        signals.record_store_applied_release(release);
+                        signals.poll_recorded();
+                        signals.adopt_from_store(&store, fusiform_core::SourceId::ModelsDev);
+                    }
+                    signals.store_head_checked(crate::route::now_ms());
+                    signals.store_poll_result(None);
                     if let Some(installed) = install.take() {
                         installed();
                     }
                     uses_seed = false;
-                    signals.record_store_applied_release(release);
-                    signals.store_poll_result(None);
                 }
                 Err(error) if uses_seed => signals.store_poll_result(Some(format!(
                     "serving the built-in snapshot; the store was not reached: {error}"

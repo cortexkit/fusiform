@@ -56,6 +56,10 @@ pub const FAILURE_STREAK_DEGRADED: u64 = 4;
 /// not running" restarts the module.
 pub const LOOP_SILENT_AFTER_MS: i64 = 70 * 60 * 1_000;
 
+// A signed-store poll can verify many releases in one attempt, so allow ten
+// minutes of catch-up work in addition to two regular polling intervals.
+const STORE_LOOP_SILENT_AFTER_MS: i64 = 2 * crate::store_poll::POLL_INTERVAL_MS + 10 * 60_000;
+
 /// Tolerate one transient persistence failure, but alert on a streak.
 /// In-flight polls have not reached a verdict and do not affect this threshold.
 pub const UNRECORDED_TICKS_DEGRADED: u64 = 2;
@@ -132,6 +136,43 @@ fn serving_report(signals: &Signals, now_ms: i64) -> HealthReport {
         return HealthReport {
             status: HealthStatus::Failing,
             detail: Some("store is not open; no read can be answered".to_string()),
+            metrics: Some(metrics(signals, now_ms)),
+        };
+    }
+
+    if signals.store_url().is_some() {
+        let checked_age = signals.store_head_check_age_ms(now_ms);
+        // A long catch-up that just finished is not a silent loop. Bound the
+        // gap from the start of an in-flight attempt, or from a later success.
+        let activity_age = signals
+            .attempt_age_ms(now_ms)
+            .into_iter()
+            .chain(checked_age)
+            .min();
+        let (status, detail) = match activity_age {
+            Some(age) if age > STORE_LOOP_SILENT_AFTER_MS => (
+                HealthStatus::Degraded,
+                format!(
+                    "the published store poll loop has had no activity in {} minutes \
+                     (cadence is {} minute); check for a stuck catch-up or restart the module",
+                    age / 60_000,
+                    crate::store_poll::POLL_INTERVAL_MS / 60_000,
+                ),
+            ),
+            _ => match checked_age {
+                Some(age) => (
+                    HealthStatus::Ok,
+                    format!("published head verified {} minutes ago", age / 60_000),
+                ),
+                None => (
+                    HealthStatus::Degraded,
+                    "waiting for verified store head".to_string(),
+                ),
+            },
+        };
+        return HealthReport {
+            status,
+            detail: Some(detail),
             metrics: Some(metrics(signals, now_ms)),
         };
     }
@@ -344,10 +385,11 @@ fn metrics(signals: &Signals, now_ms: i64) -> serde_json::Value {
     let mut metrics = serde_json::json!({
         // Both halves of the conservation identity, so an operator can see the
         // divergence rather than take health's word for it. Named for what
-        // they count: ticks that started, and ticks that reached a verdict.
+        // they count: ticks that started, and ticks that committed to SQLite.
         "process_poll_attempts": attempts,
         "process_polls_recorded": recorded,
-        // Lifetime difference, including a tick that may still be in flight.
+        // Lifetime difference, including in-flight ticks and store-mode
+        // checks that verified the same head and had nothing to persist.
         "process_polls_unrecorded": attempts.saturating_sub(recorded),
         "process_consecutive_unpersisted_polls": signals.consecutive_unpersisted_polls(),
         // Deliberately process-scoped and deliberately NOT adopted: a restart
