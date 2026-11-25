@@ -2862,6 +2862,12 @@ fn unknown_model(provider_id: &str, model_id: &str) -> RouteError {
     ))
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static AFTER_PLAN_PRICE_READ: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// Serve the curated subscription prices.
 ///
 fn serve_plan_prices(store: &CatalogStore, args: &[u8]) -> Result<PlanPricesResponse, RouteError> {
@@ -2875,8 +2881,14 @@ fn serve_plan_prices(store: &CatalogStore, args: &[u8]) -> Result<PlanPricesResp
     }
     let now = request.at_ms.unwrap_or_else(now_ms);
     let rows = store
-        .plan_prices_at(now, request.provider_id.as_deref())
+        .plan_prices_with_metadata_at(now, request.provider_id.as_deref())
         .map_err(|e| store_error(&e))?;
+    #[cfg(test)]
+    AFTER_PLAN_PRICE_READ.with(|slot| {
+        if let Some(write) = slot.take() {
+            write();
+        }
+    });
 
     // A named provider with no rows is a REFUSAL, not an empty list.
     //
@@ -2898,11 +2910,8 @@ fn serve_plan_prices(store: &CatalogStore, args: &[u8]) -> Result<PlanPricesResp
     Ok(PlanPricesResponse {
         prices: rows
             .into_iter()
-            .map(|r| {
+            .map(|(r, (quota, tiers, caps))| {
                 let (quota_value, service_tiers, concurrency) = if store.is_store_mode() {
-                    let (quota, tiers, caps) = store
-                        .published_plan_metadata(&r.provider_id, &r.tier, now)
-                        .map_err(|e| store_error(&e))?;
                     (
                         parse_plan_meta(quota)?,
                         parse_plan_meta(tiers)?,

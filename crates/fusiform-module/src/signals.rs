@@ -74,11 +74,13 @@ const fn decode_class(value: u64) -> Option<FailureClass> {
 pub struct Signals {
     store_url: Option<String>,
     store_poll_error: arc_swap::ArcSwapOption<String>,
+    /// When the poller last verified the published head, even if it wrote nothing.
+    last_store_head_check_ms: AtomicI64,
     /// Zero until a release is known. Adopted from the store at startup, so
     /// the metric describes the catalog rather than resetting per process.
     store_applied_release: AtomicU64,
-    /// Advances once per poll that reached a VERDICT — an observation row, or
-    /// a recorded failure.
+    /// Advances once per poll that committed to SQLite: a direct observation
+    /// or failure, or a store release batch.
     ///
     /// Not attempts, despite what this was called for most of its life. A tick
     /// that fails inside the store increments nothing here, and a probe caught
@@ -196,6 +198,7 @@ impl Signals {
         Self {
             store_url: None,
             store_poll_error: arc_swap::ArcSwapOption::empty(),
+            last_store_head_check_ms: AtomicI64::new(NEVER),
             store_applied_release: AtomicU64::new(0),
             polls_recorded: AtomicU64::new(0),
             consecutive_unpersisted_polls: AtomicU64::new(0),
@@ -237,6 +240,16 @@ impl Signals {
 
     pub fn store_poll_error(&self) -> Option<std::sync::Arc<String>> {
         self.store_poll_error.load_full()
+    }
+
+    pub(crate) fn store_head_checked(&self, at_ms: i64) {
+        self.last_store_head_check_ms
+            .store(at_ms, Ordering::Relaxed);
+    }
+
+    pub(crate) fn store_head_check_age_ms(&self, now_ms: i64) -> Option<i64> {
+        let at = self.last_store_head_check_ms.load(Ordering::Relaxed);
+        (at != NEVER).then(|| now_ms.saturating_sub(at))
     }
 
     pub fn record_store_applied_release(&self, release: u64) {
@@ -332,7 +345,7 @@ impl Signals {
 
     /// Adopt everything the store knows that a restart would otherwise erase.
     ///
-    /// Called once when the store opens, before the poll loop starts. It lives
+    /// Called when the store opens, and after applying a new signed store head. It lives
     /// here rather than in `main` so a test can drive the real startup path:
     /// when this logic sat in the binary, a test could only reproduce it, and a
     /// mutation deleting the call from `main` reddened nothing. A signal whose

@@ -63,12 +63,12 @@ pub struct PlanPrice {
 /// A price is money and must not become a float here for the same reason it
 /// must not there: 20.00 is not representable in binary floating point, and a
 /// figure that feeds a ratio is exactly where that bites.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Amount {
     pub minor_units: i64,
     pub exponent: i32,
-    pub currency: &'static str,
-    pub period: &'static str,
+    pub currency: String,
+    pub period: String,
 }
 
 const PLAN_PRICES: &str = include_str!("../data/plan-prices.json");
@@ -240,14 +240,13 @@ pub fn load_reporting_rejects(doc: &str) -> (Vec<PlanPrice>, Vec<String>) {
                 ));
                 continue;
             };
-            // Leaked rather than allocated: these are a closed vocabulary from a
-            // compiled-in file, so the alternative is an owned String on a type
-            // that is otherwise Copy, for no benefit.
+            // Published documents are reparsed during verification and replay.
+            // Keep these strings owned so discarding the rows frees them.
             Some(Amount {
                 minor_units,
                 exponent: exponent as i32,
-                currency: Box::leak(currency.to_string().into_boxed_str()),
-                period: Box::leak(period.to_string().into_boxed_str()),
+                currency: currency.to_owned(),
+                period: period.to_owned(),
             })
         };
 
@@ -470,12 +469,12 @@ pub fn store_rows(rows: &[PlanPrice]) -> Vec<fusiform_store::NewPlanPrice> {
         .map(|r| fusiform_store::NewPlanPrice {
             provider_id: r.provider_id.clone(),
             tier: r.tier.clone(),
-            minor_units: r.price.map(|a| a.minor_units),
-            exponent: r.price.map(|a| a.exponent),
-            currency: r.price.map(|a| a.currency.to_string()),
+            minor_units: r.price.as_ref().map(|a| a.minor_units),
+            exponent: r.price.as_ref().map(|a| a.exponent),
+            currency: r.price.as_ref().map(|a| a.currency.clone()),
             // Absent for a refusal, with the rest of the money group. A
             // defaulted period would be indistinguishable from a stated one.
-            period: r.price.map(|a| a.period.to_string()),
+            period: r.price.as_ref().map(|a| a.period.clone()),
             boundary_at_ms: r.boundary_at_ms,
             established_by: r.established_by.clone(),
             established_at_ms: r.established_at_ms,
@@ -744,7 +743,7 @@ mod tests {
                 "{case}: {rejects:?}"
             );
             assert_eq!(rows.len(), 1, "{case}: the price must survive");
-            assert_eq!(rows[0].price.unwrap().minor_units, 2000, "{case}");
+            assert_eq!(rows[0].price.as_ref().unwrap().minor_units, 2000, "{case}");
             assert!(rows[0].concurrency.is_none(), "{case}");
         }
     }
@@ -932,7 +931,7 @@ mod tests {
                 "{case}: {rejects:?}"
             );
             assert_eq!(rows.len(), 1, "{case}: the price must survive");
-            assert_eq!(rows[0].price.unwrap().minor_units, 2000, "{case}");
+            assert_eq!(rows[0].price.as_ref().unwrap().minor_units, 2000, "{case}");
             assert!(rows[0].service_tiers.is_none(), "{case}");
         }
     }
@@ -1086,7 +1085,7 @@ mod tests {
                 "{case}: {rejects:?}"
             );
             assert_eq!(rows.len(), 1, "{case}: the price must survive");
-            assert_eq!(rows[0].price.unwrap().minor_units, 2000, "{case}");
+            assert_eq!(rows[0].price.as_ref().unwrap().minor_units, 2000, "{case}");
             assert!(
                 rows[0].quota_value.is_none(),
                 "{case}: invalid quota must not load"
@@ -1321,7 +1320,7 @@ mod tests {
         let (rows, rejects) = load_reporting_rejects(good);
         assert!(rejects.is_empty(), "control: {rejects:?}");
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].price.expect("priced").minor_units, 2000);
+        assert_eq!(rows[0].price.as_ref().expect("priced").minor_units, 2000);
     }
 
     /// No curated price, quota value or service-tier entitlement is overdue.
@@ -1586,5 +1585,23 @@ mod tests {
                 r.tier
             );
         }
+    }
+    #[test]
+    fn parsed_amount_owns_the_currency_and_period() {
+        fn owns_allocation<T>(_: &T) -> bool {
+            std::mem::needs_drop::<T>()
+        }
+        let document = concurrency_document(concurrency_value()).to_string();
+        let (rows, rejected) = load_reporting_rejects(&document);
+        assert!(rejected.is_empty(), "{rejected:?}");
+        let amount = rows[0].price.as_ref().unwrap();
+        assert!(
+            owns_allocation(&amount.currency),
+            "the currency must be freed when the parsed row is dropped"
+        );
+        assert!(
+            owns_allocation(&amount.period),
+            "the period must be freed when the parsed row is dropped"
+        );
     }
 }

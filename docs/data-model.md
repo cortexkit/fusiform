@@ -311,13 +311,21 @@ are:
    constraints (`schema_doc::the_plan_price_table_arrives_on_a_populated_store`).
 4. There is no unique key on `(provider_id, tier, boundary_at_ms)`. A
    correction of a mistyped price is a new row at the same boundary, and the
-   row in force at T is the newest `id` among rows with `boundary_at_ms <= T`.
+   row in force at T is the one with the greatest `boundary_at_ms <= T`.
+   If several rows share that boundary, the newest `id` wins.
 5. The curated file is applied on every start. Re-applying an unchanged file
    writes nothing, and a change of provenance alone is not a change
    (`schema_doc::re_applying_the_curated_file_is_a_no_op`).
 6. A key that disappears from the file is tombstoned with a refusal row whose
    reason says the key is no longer carried, rather than left serving its old
    price (`schema_doc::a_key_dropped_from_the_file_is_tombstoned`).
+
+Published plan-price documents can add backfilled boundaries. If a document
+removes its latest boundary but retains an earlier one for the same tier, the
+retained claim takes effect again at publication; statements about earlier
+instants are unchanged. Removing only a non-latest boundary does not change the
+current claim. A metadata-only edit of the current claim takes effect at
+publication without restating the vendor's effective price date.
 
 ## 7a. Curated model rows
 

@@ -254,6 +254,10 @@ at startup and after each changed poll; they remain unchanged on unchanged polls
 Before the first successful count, `model_count` and `models_priced` are `null`.
 An age that has never been set is `null`, not zero.
 
+In store mode, health checks that the poll loop is active and the published
+head was verified. A check that finds the same head counts as an attempt but
+does not record a poll in SQLite or refresh the catalog's observation age.
+
 `store_quick_check.result` is `ok` or the first row returned by SQLite; if the
 check itself errors, it holds the error text instead. `checked_at_ms` is the
 Unix-epoch time when the check started and `duration_ms` is its elapsed time.

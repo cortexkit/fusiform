@@ -1018,24 +1018,26 @@ impl CatalogStore {
         Ok(self.readers.with_snapshot(read)?)
     }
 
-    /// The ETag from the most recent observation that received one.
+    /// The validator from the last committed full body, if it had one.
     ///
     /// Read from the store rather than held in memory, so it survives a
     /// restart. The poll loop still sends no validator on a process's first
     /// poll, until that process has read a full document, because a 304 means
     /// the bytes are unchanged, not that the running binary has read them.
+    /// A 304 has no body to replace the validator; a newly committed body
+    /// without a validator clears it. Order by commit, not by the poll clock.
     pub fn last_etag(&self, source: SourceId) -> Result<Option<String>, CatalogError> {
         let etag = self.raw_conn(|conn| {
             conn.query_row(
                 "SELECT etag FROM observation \
-                 WHERE source = ?1 AND etag IS NOT NULL \
-                 ORDER BY observed_at_ms DESC LIMIT 1",
+                 WHERE source = ?1 AND outcome IN ('changed', 'unchanged') \
+                 ORDER BY id DESC LIMIT 1",
                 params![source.as_str()],
-                |r| r.get::<_, String>(0),
+                |r| r.get::<_, Option<String>>(0),
             )
             .optional()
         })?;
-        Ok(etag)
+        Ok(etag.flatten())
     }
 
     /// The normalized digest from the most recent observation that computed one.
@@ -2172,36 +2174,54 @@ pub const CURATED_FILE: &str = "crates/fusiform-module/data/plan-prices.json";
 impl CatalogStore {
     /// The plan price in force for every `(provider, tier)` at `at_ms`.
     ///
-    /// Supersession is by insertion order, matching the ingest's diff: the row
-    /// in force is the newest id among those at or before the instant. A
-    /// correction shares its predecessor's boundary, so ordering by boundary
-    /// alone would be free to serve either one.
+    /// Later effective boundaries supersede earlier ones, even when an earlier
+    /// claim is backfilled after a later claim. At one boundary the latest id
+    /// wins, so a same-boundary correction supersedes the original.
     ///
     /// The returned price boundary is the first eligible era in the unbroken
     /// run of equal claims. Metadata-only revisions can change which row is
     /// eligible without changing when the price claim took effect.
+    /// A metadata-only row stores the previous price at its publication time.
+    /// If a later release asserts a different price effective before that time,
+    /// the metadata row still wins once eligible: it cannot be distinguished
+    /// from a reinstated price in the stored history.
     pub fn plan_prices_at(
         &self,
         at_ms: i64,
         provider_id: Option<&str>,
     ) -> Result<Vec<NewPlanPrice>, CatalogError> {
+        Ok(self
+            .plan_prices_with_metadata_at(at_ms, provider_id)?
+            .into_iter()
+            .map(|(price, _)| price)
+            .collect())
+    }
+
+    /// The price and metadata from the same row, even during a release commit.
+    pub fn plan_prices_with_metadata_at(
+        &self,
+        at_ms: i64,
+        provider_id: Option<&str>,
+    ) -> Result<Vec<(NewPlanPrice, store_consumer::PlanMetadata)>, CatalogError> {
         let rows = self.raw_conn(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT provider_id, tier, minor_units, exponent, currency, period, \
                         (SELECT origin.boundary_at_ms FROM plan_price_era origin \
                          WHERE origin.provider_id = p.provider_id AND origin.tier = p.tier \
-                           AND origin.id <= p.id AND origin.boundary_at_ms <= ?1 \
-                           AND origin.id > COALESCE(( \
-                               SELECT MAX(previous.id) FROM plan_price_era previous \
-                               WHERE previous.provider_id = p.provider_id AND previous.tier = p.tier \
-                                 AND previous.id < p.id AND previous.boundary_at_ms <= ?1 \
+                            AND (origin.boundary_at_ms, origin.id) <= (p.boundary_at_ms, p.id) \
+                            AND NOT EXISTS ( \
+                                SELECT 1 FROM plan_price_era previous \
+                                WHERE previous.provider_id = p.provider_id AND previous.tier = p.tier \
+                                  AND (previous.boundary_at_ms, previous.id) < (p.boundary_at_ms, p.id) \
+                                  AND (previous.boundary_at_ms, previous.id) >= (origin.boundary_at_ms, origin.id) \
                                  AND NOT (previous.minor_units IS p.minor_units \
                                      AND previous.exponent IS p.exponent \
                                      AND previous.currency IS p.currency AND previous.period IS p.period \
                                      AND previous.refusal_reason IS p.refusal_reason) \
-                           ), 0) \
-                         ORDER BY origin.id LIMIT 1), established_by, established_at_ms, \
-                        review_by_ms, source_ref, refusal_reason \
+                            ) \
+                          ORDER BY origin.boundary_at_ms, origin.id LIMIT 1), established_by, established_at_ms, \
+                         review_by_ms, source_ref, refusal_reason, \
+                         quota_value_json, service_tiers_json, concurrency_json \
                  FROM plan_price_era p \
                  WHERE boundary_at_ms <= ?1 \
                    AND (?2 IS NULL OR provider_id = ?2) \
@@ -2209,13 +2229,13 @@ impl CatalogStore {
                        SELECT id FROM plan_price_era q \
                        WHERE q.provider_id = p.provider_id AND q.tier = p.tier \
                          AND q.boundary_at_ms <= ?1 \
-                       ORDER BY q.id DESC LIMIT 1 \
+                        ORDER BY q.boundary_at_ms DESC, q.id DESC LIMIT 1 \
                    ) \
                  ORDER BY provider_id, tier",
             )?;
             let rows = stmt
                 .query_map(params![at_ms, provider_id], |r| {
-                    Ok(NewPlanPrice {
+                     let price = NewPlanPrice {
                         provider_id: r.get(0)?,
                         tier: r.get(1)?,
                         minor_units: r.get(2)?,
@@ -2228,7 +2248,8 @@ impl CatalogStore {
                         review_by_ms: r.get(9)?,
                         source_ref: r.get(10)?,
                         refusal_reason: r.get(11)?,
-                    })
+                     };
+                     Ok((price, (r.get(12)?, r.get(13)?, r.get(14)?)))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(rows)

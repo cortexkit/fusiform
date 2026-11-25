@@ -41,7 +41,7 @@ pub fn validate_history_files(
     }
     let mut previous_day = "";
     for file in days {
-        previous_day = day_name(&file.file)
+        previous_day = history_day_name(&file.file)
             .filter(|day| *day > previous_day)
             .ok_or_else(|| {
                 format!(
@@ -53,7 +53,8 @@ pub fn validate_history_files(
     Ok((base, days))
 }
 
-fn day_name(path: &str) -> Option<&str> {
+/// The `YYYY-MM-DD` day named by a `days/<day>.json` history path, if well formed.
+pub fn history_day_name(path: &str) -> Option<&str> {
     let day = path.strip_prefix("days/")?.strip_suffix(".json")?;
     (day.len() == 10
         && day.bytes().enumerate().all(|(i, byte)| {
@@ -83,7 +84,7 @@ pub struct HistoryAttestation {
 /// Build one canonical day file from consecutive signed releases stored as
 /// JSON Lines. The import is recorded separately in `history/base.json`.
 pub fn history_day_bytes(day: &str, releases_jsonl: &[u8]) -> Result<Vec<u8>, ArtifactRefusal> {
-    let start = day_start_ms(day).ok_or_else(|| {
+    let start = history_day_start_ms(day).ok_or_else(|| {
         ArtifactRefusal::new("invalid_day", "expected a UTC day in YYYY-MM-DD form")
     })?;
     let releases = str::from_utf8(releases_jsonl)
@@ -130,7 +131,8 @@ pub fn history_day_bytes(day: &str, releases_jsonl: &[u8]) -> Result<Vec<u8>, Ar
     Ok(out)
 }
 
-fn day_start_ms(day: &str) -> Option<i64> {
+/// Start of a history day in Unix milliseconds. Invalid UTC dates have no start.
+pub fn history_day_start_ms(day: &str) -> Option<i64> {
     let [y0, y1, y2, y3, b'-', m0, m1, b'-', d0, d1] = *day.as_bytes() else {
         return None;
     };
