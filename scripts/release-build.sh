@@ -27,7 +27,8 @@ REV="$(git rev-parse HEAD)"
 # This is the same rule as the unset case: an unstamped binary is honest about
 # being unidentifiable, and a wrongly-stamped one sends an incident responder to
 # read code that was never built.
-if [ -n "$(git status --porcelain)" ]; then
+dirty=$(git status --porcelain)
+if [ -n "$dirty" ]; then
   echo "refusing to stamp a dirty tree: the built bytes would not match $REV" >&2
   echo "commit or stash first, or use a plain cargo build for a dev binary" >&2
   exit 1
@@ -36,6 +37,13 @@ fi
 echo "building at $REV"
 CK_BUILD_REV="$REV" cargo build --locked --release \
   -p fusiform-module -p fusiform-cli
+
+after_rev=$(git rev-parse HEAD)
+dirty=$(git status --porcelain)
+if [[ "$after_rev" != "$REV" || -n "$dirty" ]]; then
+  echo "refusing to report provenance: the checkout changed during the build (expected clean $REV; HEAD is $after_rev)" >&2
+  exit 1
+fi
 
 echo
 # Probed through a `ckdev-` hard link: on the fleet's Mac a running `ck-`
@@ -58,10 +66,19 @@ on_exit() {
   exit "$rc"
 }
 trap on_exit EXIT
+revision_pattern='\(([0-9a-f]{40})\)'
 for bin in ck-fusiform ck-models; do
   link="$probe_dir/ckdev-${bin#ck-}"
   ln "./target/release/$bin" "$link" 2>/dev/null || cp "./target/release/$bin" "$link"
-  printf '%-12s %s\n' "$bin" "$("$link" --version)"
+  if ! version=$("$link" --version); then
+    echo "release-build.sh: $bin version probe failed" >&2
+    exit 1
+  fi
+  if [[ ! "$version" =~ $revision_pattern || "${BASH_REMATCH[1]}" != "$REV" ]]; then
+    echo "release-build.sh: $bin does not report revision $REV: ${version:-<no version output>}" >&2
+    exit 1
+  fi
+  printf '%-12s %s\n' "$bin" "$version"
 done
 
 echo
