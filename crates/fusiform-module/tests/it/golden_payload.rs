@@ -545,6 +545,10 @@ fn render_all() -> String {
             Some("published head unavailable"),
         ),
     );
+    ordinary.as_object_mut().unwrap().insert(
+        "catalog.status — normalization findings".into(),
+        render_status_case(StatusCase::NormalizationFindings, None),
+    );
     let mut text = serde_json::to_string_pretty(&ordinary).unwrap();
     text.push('\n');
     text
@@ -1278,9 +1282,12 @@ enum StatusCase {
     AppliedRelease,
     SeedFallback,
     ModelsDev,
+    NormalizationFindings,
 }
 
 fn render_status_case(case: StatusCase, poll_error: Option<&str>) -> serde_json::Value {
+    use fusiform_module::fetch::FetchOutcome;
+    use fusiform_module::loop_::{apply, TickOutcome};
     use fusiform_module::signals::Signals;
     use fusiform_store::{ImportedTables, ReleaseArrival, StoreRelease};
     use serde_json::json;
@@ -1321,10 +1328,26 @@ fn render_status_case(case: StatusCase, poll_error: Option<&str>) -> serde_json:
         CatalogStore::open(&descriptor).unwrap()
     };
     let signals = Arc::new(match case {
-        StatusCase::ModelsDev => Signals::new(),
+        StatusCase::ModelsDev | StatusCase::NormalizationFindings => Signals::new(),
         _ => Signals::for_store(STORE_STATUS_URL.into()),
     });
     signals.store_poll_result(poll_error.map(str::to_owned));
+    if matches!(case, StatusCase::NormalizationFindings) {
+        let poll = apply(
+            &store,
+            &signals,
+            SourceId::ModelsDev,
+            FetchOutcome::Body {
+                bytes: br#"{"p":{"models":{"m":{"cost":{"input":"unreadable","output":2}}}}}"#
+                    .to_vec(),
+                etag: None,
+                duration: std::time::Duration::ZERO,
+            },
+            1_000,
+        )
+        .unwrap();
+        assert!(matches!(poll.outcome, TickOutcome::Changed { .. }));
+    }
     let request = json!({"name":"catalog.status","arguments":{"polls":0}});
     let outcome = tokio::runtime::Builder::new_current_thread()
         .build()
@@ -1950,17 +1973,15 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         .values()
         .filter(|case| case["request"]["arguments"].get("auth_method").is_none())
         .count();
-    // The ten cases rendered outside `cases()`: the first provider page,
-    // the seed and synthetic identities, synthetic grades, curated history,
-    // dated fact overrides, Realtime audio input, synthetic plan concurrency,
-    // the Hydrogen alias output limit, the grouped search-engine reads, and a
-    // store-mode local override.
+    // Count the cases that `render_all` inserts individually, apart from the
+    // collections it appends, so a missing scan cannot look like a clean run.
+    let individually_inserted_cases = 13;
     for (text, expected) in [
         (
             GOLDEN.to_string(),
             cases().len()
                 + plain_plane_cases
-                + 12
+                + individually_inserted_cases
                 + curated_wire.len()
                 + quality_tools.len()
                 + media_quality.len()
@@ -2044,6 +2065,11 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
         ),
         (
             serde_json::json!({"store_status":render_status_case(StatusCase::AppliedRelease, None)})
+                .to_string(),
+            1,
+        ),
+        (
+            serde_json::json!({"normalization_status":render_status_case(StatusCase::NormalizationFindings, None)})
                 .to_string(),
             1,
         ),
