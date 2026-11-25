@@ -180,8 +180,9 @@ fn unaccounted_fields(bytes: &[u8], raw: &str) -> Vec<String> {
 }
 
 #[test]
-fn every_seed_key_is_read_or_declared_unread() {
-    let keys = payload_keys(SEED);
+fn every_frozen_v1_key_is_read_or_declared_unread() {
+    let legacy = saved_catalog("v1");
+    let keys = payload_keys(&legacy);
     assert!(
         keys.len() >= 40,
         "seed inventory read only {} keys",
@@ -202,10 +203,21 @@ fn every_seed_key_is_read_or_declared_unread() {
     ] {
         assert!(keys.contains_key(path), "seed must exercise {path}");
     }
-    let violations = unaccounted_fields(SEED, RAW);
+    let violations = unaccounted_fields(&legacy, RAW);
     assert!(
         violations.is_empty(),
         "seed keys neither parsed nor declared unread: {violations:?}"
+    );
+}
+
+#[test]
+fn every_seed_key_is_read_or_declared_unread() {
+    let outcome = fusiform_core::normalize_models_dev(SEED).expect("the embedded seed uses v2");
+    assert!(outcome.catalog.model_count() > 1_000);
+    let violations = v2_unaccounted(&outcome);
+    assert!(
+        violations.is_empty(),
+        "v2 seed keys neither read nor declared unread: {violations:?}"
     );
 }
 

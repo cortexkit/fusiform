@@ -228,11 +228,10 @@ pub struct RetiredAlias {
 /// Each reasoning tier exposed by an alias must also be supported by its target model.
 pub fn reasoning_option_drift(rows: &Aliases, seed: &serde_json::Value) -> Vec<String> {
     rows.iter().filter_map(|((provider, model), alias)| {
-        let options = &seed[&alias.target_provider_id]["models"][&alias.target_model_id]["reasoning_options"];
+        let reasoning = &seed[&alias.target_provider_id]["models"][&alias.target_model_id]["capabilities"]["reasoning"];
         let missing: Vec<_> = alias.reasoning_wire_ids.keys().filter(|effort| {
-            !options.as_array().is_some_and(|options| options.iter().any(|option| {
-                option["type"] == "effort" && option["values"].as_array().is_some_and(|values| values.iter().any(|value| value.as_str() == Some(effort.as_str())))
-            }))
+            reasoning["supported"].as_bool() != Some(true)
+                || !reasoning["effort"].as_array().is_some_and(|values| values.iter().any(|value| value.as_str() == Some(effort.as_str())))
         }).cloned().collect();
         (!missing.is_empty()).then(|| format!("{provider}/{model}: reasoning wire efforts absent from capability.reasoning_options: {missing:?}"))
     }).collect()

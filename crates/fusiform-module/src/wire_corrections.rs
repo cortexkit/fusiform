@@ -21,7 +21,7 @@ mod tests {
     fn shipped_corrections_load_without_rejects() {
         let (rows, rejects) = load_reporting_rejects(DOCUMENT);
         assert!(rejects.is_empty(), "{rejects:?}");
-        assert_eq!(rows.len(), 34);
+        assert_eq!(rows.len(), 35);
         // OpenCode Go's unrouted models are withheld by completeness rather
         // than listed one by one, so no per-model withholding ships.
         assert_eq!(rows.values().filter(|row| row.withheld).count(), 0);

@@ -626,9 +626,16 @@ fn overlays(store: &CatalogStore) {
         BOOT,
     )
     .unwrap();
-    let (mut table, rejects) = fusiform_module::curated_models::load_table_reporting_rejects(
-        include_str!("../../data/curated-models.json"),
-    );
+    let mut doc: Value =
+        serde_json::from_str(include_str!("../../data/curated-models.json")).unwrap();
+    let mut archived: Value =
+        serde_json::from_str(include_str!("../../fixtures/retired-curated-models.json")).unwrap();
+    doc["models"]
+        .as_array_mut()
+        .unwrap()
+        .append(archived["models"].as_array_mut().unwrap());
+    let (mut table, rejects) =
+        fusiform_module::curated_models::load_table_reporting_rejects(&doc.to_string());
     assert!(rejects.is_empty(), "{rejects:?}");
     table.held.clear();
     fusiform_module::curated_models::apply_to_store(store, &table, BOOT).unwrap();

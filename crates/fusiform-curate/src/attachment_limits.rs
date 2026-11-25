@@ -279,9 +279,10 @@ pub fn unused_rows(rows: &Sources, seed: &Value) -> Vec<String> {
                         model["modalities"]["input"]
                             .as_array()
                             .is_some_and(|modalities| {
-                                modalities
-                                    .iter()
-                                    .any(|m| m.as_str() == Some(limit.fact.modality()))
+                                modalities.iter().any(|m| {
+                                    m.as_str().map(fusiform_core::normalize::v2::modality_label)
+                                        == Some(limit.fact.modality())
+                                })
                             })
                             && limit
                                 .rule

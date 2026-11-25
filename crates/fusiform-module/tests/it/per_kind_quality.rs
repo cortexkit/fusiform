@@ -571,11 +571,15 @@ fn decision_kind_rejects_chat_and_search_and_supports_local_keys() {
         "test/type-only",
         vec![("model.type", json!("decision"))],
     );
+    seed(
+        &store,
+        "cloudflare-workers-ai/@cf/cloudflare/clairic",
+        vec![("model.type", json!("extraction"))],
+    );
     for model in [
         "test/chat",
         "exa/search",
         "cloudflare-workers-ai/@cf/cloudflare/clairic",
-        "test/type-only",
     ] {
         let error = call(
             &store,
@@ -586,6 +590,8 @@ fn decision_kind_rejects_chat_and_search_and_supports_local_keys() {
         assert_eq!(error.code, "bad_request");
         assert!(error.message.contains("model.kind=decision"), "{error:?}");
     }
+    let derived = grade(&store, "test/type-only", "decision", 78);
+    assert_eq!(derived["affected_count"], 1);
     let accepted = grade(&store, "local:test/decision", "decision", 82);
     assert_eq!(accepted["affected_count"], 0);
     let local = call(&store, "quality.grades", json!({"prefix":"local:test/"})).unwrap();
@@ -594,14 +600,9 @@ fn decision_kind_rejects_chat_and_search_and_supports_local_keys() {
 }
 
 #[test]
-fn every_curated_task_row_passes_guard_over_the_embedded_catalog() {
+fn current_and_formerly_curated_task_rows_pass_the_v2_seed_guard() {
     let (store, _dir) = fixture();
-    let catalog = fusiform_core::normalize_legacy_models_dev_for_tests_with(
-        fusiform_core::normalize::legacy_models_dev_snapshot_for_tests().as_bytes(),
-        &fusiform_module::input_audio::evidence(),
-    )
-    .unwrap()
-    .catalog;
+    let catalog = fusiform_module::seed::catalog().unwrap();
     let plan = fusiform_store::ingest::plan_ingest(
         &store,
         &catalog,
@@ -613,9 +614,16 @@ fn every_curated_task_row_passes_guard_over_the_embedded_catalog() {
     store.append_eras(&plan.eras).unwrap();
     let curated: Value =
         serde_json::from_str(include_str!("../../data/curated-models.json")).unwrap();
+    let retired: Value =
+        serde_json::from_str(include_str!("../../fixtures/retired-curated-models.json")).unwrap();
     let mut task_rows = 0;
     let mut decision_rows = 0;
-    for row in curated["models"].as_array().unwrap() {
+    for row in curated["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(retired["models"].as_array().unwrap())
+    {
         let kind = if row["facts"]["model.kind"] == "decision" {
             Some("decision")
         } else {

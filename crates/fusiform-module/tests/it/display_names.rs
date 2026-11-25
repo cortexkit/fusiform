@@ -140,8 +140,14 @@ fn renames_and_withdrawals_preserve_point_in_time_names() {
 }
 
 #[test]
-fn curated_names_and_typesafe_provider_are_sourced_labels() {
-    let (store, _dir) = store();
+fn upstream_system_one_and_curated_names_are_sourced_labels() {
+    let (store, _dir) = super::media_catalog::v2_seed_store(&[
+        ("cloudflare-workers-ai", "@cf/cloudflare/clef"),
+        ("cloudflare-workers-ai", "@cf/cloudflare/clef-flash"),
+        ("cloudflare-workers-ai", "@cf/cloudflare/clairic"),
+        ("typesafe", "jev-1.13.0"),
+        ("meta", "muse-spark-1.3"),
+    ]);
     let got = get(&store, json!({}));
     for (id, name, provider) in [
         ("meta/muse-wonder-full-1.0", "Muse Wonder Full", "Meta"),
@@ -152,7 +158,7 @@ fn curated_names_and_typesafe_provider_are_sourced_labels() {
         ),
         (
             "cloudflare-workers-ai/@cf/cloudflare/clef-flash",
-            "Clef-flash",
+            "Clef Flash",
             "Cloudflare Workers AI",
         ),
         (

@@ -189,6 +189,8 @@ fn jev_input_units(response: &CatalogGetResponse) -> i64 {
 
 #[test]
 fn live_transcribe_serves_sourced_duration_pricing() {
+    let _legacy_claims =
+        crate::curated_models::plant(&crate::curated_models::document_without_held());
     let (store, _dir) = store();
     let first = 1_794_528_000_000i64;
     apply_to_store(&store, &shipped(), first + DAY_MS).unwrap();
@@ -230,6 +232,8 @@ fn live_transcribe_serves_sourced_duration_pricing() {
 
 #[test]
 fn gemini_transcribe_live_serves_sourced_token_pricing_and_conversion() {
+    let _legacy_claims =
+        crate::curated_models::plant(&crate::curated_models::document_without_held());
     let (store, _dir) = store();
     let first = 1_794_528_000_000i64;
     apply_to_store(&store, &shipped(), first + DAY_MS).unwrap();
@@ -275,6 +279,8 @@ fn gemini_transcribe_live_serves_sourced_token_pricing_and_conversion() {
 
 #[test]
 fn transcribe_serves_a_unit_rate_and_records_its_denominator_only_in_curated_history() {
+    let _legacy_claims =
+        crate::curated_models::plant(&crate::curated_models::document_without_held());
     const MODEL: &str = "gpt-transcribe";
     const ID: &str = "openai/gpt-transcribe";
     const KEY: &str = "rate.input_audio.per_second";
@@ -402,6 +408,8 @@ fn a_read_after_the_first_era_serves_jevs_recorded_rates_and_disclosure() {
 
 #[test]
 fn a_read_before_the_first_era_is_refused_with_the_reason() {
+    let _legacy_claims =
+        crate::curated_models::plant(&crate::curated_models::document_without_held());
     let (store, _dir) = store();
     apply_to_store(&store, &shipped(), jev_established_at() + DAY_MS).unwrap();
     let before = jev_established_at() - 1;
@@ -527,6 +535,8 @@ fn re_applying_an_unchanged_or_only_redated_file_writes_nothing() {
 
 #[test]
 fn a_removed_row_is_tombstoned_and_a_read_after_it_is_refused() {
+    let _legacy_claims =
+        crate::curated_models::plant(&crate::curated_models::document_without_held());
     let (store, _dir) = store();
     let first_boot = jev_established_at() + DAY_MS;
     apply_to_store(&store, &shipped(), first_boot).unwrap();
