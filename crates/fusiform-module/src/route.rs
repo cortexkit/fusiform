@@ -2405,6 +2405,14 @@ fn single_model_snapshot(
         None => store.catalog_version().map_err(|e| store_error(&e))?,
     };
 
+    // Qualify only values in force that no correction withheld. Use the
+    // facts before the caller's filter so narrowing the card does not hide
+    // their uncertainty disclosures.
+    let prepared_uncertain = prepared.map(|prepared| {
+        found
+            .as_ref()
+            .map_or_else(Vec::new, |model| prepared.uncertain_at(model, resolved_at))
+    });
     let mut models = Vec::new();
     let mut retired: Vec<fusiform_protocol::RetiredModelWire> = Vec::new();
     if let Some(model) = found {
@@ -2510,15 +2518,8 @@ fn single_model_snapshot(
         }
     }
 
-    // The same uncertainty the bulk read reports, scoped to this model.
-    //
-    // Resolved from the store rather than carried through `read_model`, so the
-    // two surfaces cannot disagree: a consumer asking for one model and a
-    // consumer asking for the catalog must get the same qualification on the
-    // same fact. The single-model path is the one that silently lacked
-    // correction handling for hours, and this is the same seam.
-    let uncertain = if let Some(prepared) = prepared {
-        prepared.uncertain_at(provider_id, model_id, resolved_at)
+    let uncertain = if let Some(uncertain) = prepared_uncertain {
+        uncertain
     } else {
         store
             .uncertain_facts_at(source, resolved_at)

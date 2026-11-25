@@ -1602,6 +1602,77 @@ fn a_historical_read_reports_uncertainty_on_the_wire() {
     }
 }
 
+#[test]
+fn named_dated_get_only_discloses_uncertainty_for_in_force_unwithheld_facts() {
+    use fusiform_core::{Correction, FieldId};
+    use fusiform_store::{FactKey, NewEra};
+
+    let f = fixture();
+    let source = SourceId::ModelsDev;
+    f.store
+        .record_observation(&NewObservation {
+            source,
+            observed_at: Timestamp(1_000),
+            outcome: ObservationOutcome::Seeded,
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: None,
+            detail: None,
+        })
+        .unwrap();
+    let model = "first-limit";
+    let row = |key: &str, value: &str, at, kind| NewEra {
+        source,
+        provider_id: "anthropic".into(),
+        model_id: model.into(),
+        fact_key: FactKey::from_stored(key.into()),
+        value_json: value.into(),
+        boundary_at: Timestamp(at),
+        boundary_kind: kind,
+        observation_id: None,
+    };
+    f.store
+        .append_eras(&[
+            row("existence", r#""present""#, 1_000, BoundaryKind::Seed),
+            row("limit.context", "100", 1_000, BoundaryKind::Seed),
+            row("rate.input", r#"{"units":1000}"#, 1_000, BoundaryKind::Seed),
+            row("limit.context", "200", 2_000, BoundaryKind::Observed),
+            row("limit.output", "50", 2_000, BoundaryKind::Observed),
+            row(
+                "rate.input",
+                r#"{"units":2000}"#,
+                2_000,
+                BoundaryKind::Observed,
+            ),
+            row(
+                "rate.input",
+                r#"{"units":2000}"#,
+                3_000,
+                BoundaryKind::Corrected(Correction {
+                    fields: vec![FieldId::Rate {
+                        class: TokenClass::Input,
+                    }],
+                    affected_from: Timestamp(1_100),
+                    affected_until: Timestamp(1_900),
+                    reason: "fixture defect".into(),
+                }),
+            ),
+        ])
+        .unwrap();
+
+    let bulk = get(&f, r#"{"at_ms":1500,"fact_prefixes":["limit.output"]}"#);
+    let named = get(
+        &f,
+        r#"{"at_ms":1500,"provider_id":"anthropic","model_id":"first-limit","fact_prefixes":["limit.output"]}"#,
+    );
+    assert_eq!(bulk.uncertain.len(), 1);
+    assert_eq!(bulk.uncertain[0].fact_key, "limit.context");
+    assert!(!named.models["anthropic/first-limit"].contains_key("limit.output"));
+    assert_eq!(named.withheld, bulk.withheld);
+    assert_eq!(named.uncertain, bulk.uncertain);
+}
+
 /// An unknown provider is refused, not answered with zero models.
 ///
 /// Found by driving the CLI along paths I did not design: `ck models get
