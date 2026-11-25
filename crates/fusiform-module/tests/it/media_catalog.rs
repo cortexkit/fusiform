@@ -355,17 +355,37 @@ fn flash_image_split_is_guarded_inherited_and_current_only() {
                 assert!(facts[rate].get("inherited_from").is_none());
             }
         }
+        let output_disclosures: Vec<_> = response
+            .fact_overrides
+            .iter()
+            .filter(|row| row.fact_key.starts_with("rate.output"))
+            .collect();
         assert_eq!(
-            response.fact_overrides.len(),
+            output_disclosures.len(),
             1,
             "{model}: only the image addition is curated; text is upstream"
         );
-        let row = &response.fact_overrides[0];
+        let row = output_disclosures[0];
         assert_eq!(row.model, identity);
         assert_eq!(row.model_id, TARGET_ID);
         assert_eq!(row.fact_key, "rate.output_image");
         assert_eq!(row.value, facts[&row.fact_key]);
         assert!(row.replaces.is_null());
+
+        let reasoning = response
+            .fact_overrides
+            .iter()
+            .find(|row| row.fact_key == "rate.reasoning")
+            .expect("the sourced reasoning rule has its own disclosure");
+        assert_eq!(reasoning.model, identity);
+        assert_eq!(reasoning.provider_id, "google");
+        assert_eq!(reasoning.model_id, "*");
+        assert_eq!(
+            reasoning.value,
+            json!({"state":"billed_as", "key":"rate.output"})
+        );
+        assert_eq!(reasoning.value, facts["rate.reasoning"]);
+        assert!(reasoning.replaces.is_null());
     }
     let historical = super::curated_wire::get(
         &store,
