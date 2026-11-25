@@ -354,6 +354,7 @@ fn snapshot_builder_refuses_signed_invalid_history_lists() {
         &[][..],
         &["days/2026-11-19.json"][..],
         &["base.json", "days/2026-11-19.txt"][..],
+        &["base.json", "days/2026-02-30.json"][..],
         &["base.json", "days/2026-11-20.json", "days/2026-11-19.json"][..],
         &["base.json", "days/2026-11-19.json", "days/2026-11-19.json"][..],
     ] {
@@ -372,6 +373,21 @@ fn snapshot_builder_refuses_signed_invalid_history_lists() {
             "accepted signed history list {names:?}"
         );
     }
+}
+
+#[test]
+fn history_day_builder_refuses_a_change_that_does_not_match_its_envelope() {
+    let (_, mut release, _) = two_releases();
+    let fusiform_release::ChangeOp::Set { value, .. } = &mut release.change.upstream[0] else {
+        panic!("the release must set the new model name");
+    };
+    *value = json!("Different name");
+    let result = history_day_bytes(DAY, &jsonl(&[&release]));
+    assert_eq!(
+        result.err().map(|err| err.class),
+        Some("history_change_mismatch"),
+        "accepted a release whose change did not match its envelope"
+    );
 }
 
 #[test]

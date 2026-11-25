@@ -56,15 +56,7 @@ pub fn validate_history_files(
 /// The `YYYY-MM-DD` day named by a `days/<day>.json` history path, if well formed.
 pub fn history_day_name(path: &str) -> Option<&str> {
     let day = path.strip_prefix("days/")?.strip_suffix(".json")?;
-    (day.len() == 10
-        && day.bytes().enumerate().all(|(i, byte)| {
-            if matches!(i, 4 | 7) {
-                byte == b'-'
-            } else {
-                byte.is_ascii_digit()
-            }
-        }))
-    .then_some(day)
+    history_day_start_ms(day).map(|_| day)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,7 +84,9 @@ pub fn history_day_bytes(day: &str, releases_jsonl: &[u8]) -> Result<Vec<u8>, Ar
     let mut out = format!("{{\"day\":\"{day}\",\"releases\":[").into_bytes();
     let mut previous: Option<u64> = None;
     for line in releases.lines() {
-        let Release { envelope, .. } = serde_json::from_str(line)
+        let Release {
+            envelope, change, ..
+        } = serde_json::from_str(line)
             .map_err(|err| ArtifactRefusal::new("invalid_history_release", err))?;
         if envelope.release == 1 {
             return Err(ArtifactRefusal::new(
@@ -112,6 +106,13 @@ pub fn history_day_bytes(day: &str, releases_jsonl: &[u8]) -> Result<Vec<u8>, Ar
                 "release publication time is outside the requested UTC day",
             ));
         }
+        if change.change_hash() != envelope.change_hash {
+            return Err(ArtifactRefusal::new(
+                "history_change_mismatch",
+                "change_hash does not match the release's change",
+            ));
+        }
+        drop(change);
         if previous.is_some() {
             out.push(b',');
         }
