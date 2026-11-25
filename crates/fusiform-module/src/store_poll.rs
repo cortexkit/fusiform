@@ -25,7 +25,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{fetch::Fetcher, settings::ReleaseKeys, signals::Signals};
 pub use current::VerifiedStoreHead;
-pub use state::validate_judgments;
+pub use fusiform_release::validate_judgments;
 use state::Verified;
 
 const HEAD_PATH: &str = "v1/head";

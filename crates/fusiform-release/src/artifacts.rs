@@ -5,7 +5,8 @@ use serde_json::Value;
 
 use crate::{
     Change, ChangeOp, CurationSet, Hash, ReleaseEnvelope, ReleaseFormat, fact_hash, state_hash,
-    upstream_hash_sorted, validate_upstream_key, write_canonical_json,
+    upstream_hash_sorted, validate_judgments, validate_received, validate_upstream_key,
+    write_canonical_json,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -45,6 +46,9 @@ pub fn decode_curation(raw: &[u8]) -> Result<(CurationSet, Hash), ArtifactRefusa
             "stored curation does not round-trip in the release schema",
         ));
     }
+    validate_judgments(&curation)
+        .and_then(|()| validate_received(&curation.vendor_facts))
+        .map_err(|err| ArtifactRefusal::new("invalid_curation", err))?;
     Ok((curation, hash))
 }
 

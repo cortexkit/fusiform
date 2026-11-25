@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fusiform_curate as curate;
-use fusiform_release::{Upstream, VendorDocument};
+use fusiform_release::VendorDocument;
 use fusiform_store::ImportedTables;
 use serde_json::{json, Value};
 
@@ -225,110 +225,6 @@ impl PublishedCuration {
             wire_families: &self.wire_families,
         }
     }
-}
-
-/// Check all vendor documents before writing them to the store.
-///
-/// Strict: every login allowlist must name a row upstream publishes now, so a
-/// writer cannot publish a typo, and a row upstream has since withdrawn must be
-/// removed by the next write that touches the store.
-pub fn validate_published(documents: &Documents, upstream: &Upstream) -> Result<(), String> {
-    validate(documents, upstream, false)
-}
-
-/// Check all vendor documents as a consumer receiving a new curation set.
-///
-/// A consumer replays every release in order, so refusing one would stop it
-/// for good. Upstream withdrawing a model that a login allowlist names is not
-/// a defect of the curation set: the allowlist then restricts a row that is no
-/// longer served. So identities are checked against upstream plus the
-/// document's own rows, the same leniency [`PublishedCuration::load`] applies
-/// on reload. The writer's [`validate_published`] stays strict.
-pub fn validate_received(documents: &Documents, upstream: &Upstream) -> Result<(), String> {
-    validate(documents, upstream, true)
-}
-
-fn validate(
-    documents: &Documents,
-    upstream: &Upstream,
-    tolerate_withdrawn: bool,
-) -> Result<(), String> {
-    use VendorDocument::*;
-
-    let mut models = Value::Object(
-        upstream
-            .iter()
-            .map(|(provider, facts)| (provider.clone(), json!({"models": facts.models})))
-            .collect(),
-    );
-    if tolerate_withdrawn {
-        for row in documents
-            .get("login-methods")
-            .and_then(|doc| doc["models"].as_array())
-            .into_iter()
-            .flatten()
-        {
-            if let (Some(provider), Some(model)) =
-                (row["provider_id"].as_str(), row["model_id"].as_str())
-            {
-                if !models[provider]["models"][model].is_object() {
-                    models[provider]["models"][model] = json!({});
-                }
-            }
-        }
-    }
-    let curated = documents
-        .get("curated-models")
-        .map(curated)
-        .transpose()?
-        .unwrap_or_default();
-    for (name, raw) in documents {
-        let doc = raw.to_string();
-        let rejects = match document_kind(name)? {
-            ModelAliases => curate::aliases::load_reporting_rejects(&doc).1,
-            AttachmentLimits => curate::attachment_limits::load(&doc).1,
-            BillingPlanes => curate::billing_planes::load_reporting_rejects(&doc).1,
-            CacheLifetimes => curate::cache_lifetimes::load_reporting_rejects(&doc).1,
-            CanonicalLinks => curate::canonical_links::load_reporting_rejects(&doc).1,
-            ModelCreators => curate::creators::parse_document(&doc).1,
-            CuratedModels => continue,
-            CuratedProviders => {
-                // The provider vector uses this document; no serve route does.
-                // Retain it intact in the signed curation history.
-                if raw["schema"] != "curated-providers/v1" || !raw["providers"].is_array() {
-                    return Err(format!(
-                        "{name}: expected curated-providers/v1 and a providers array"
-                    ));
-                }
-                continue;
-            }
-            FactOverrides => curate::fact_overrides::load_reporting_rejects(&doc).1,
-            InputAudioPerToken => curate::input_audio::load_reporting_rejects(&doc).1,
-            OutputAudioPerToken => {
-                curate::input_audio::load_for_schema(&doc, "output-audio-per-token/v1").1
-            }
-            LoginMethods => curate::login_methods::load_with(&doc, &models, &curated.models).1,
-            ModelLineage => curate::model_lineage::load_reporting_rejects(&doc).1,
-            SpeedTwins => curate::speed_twins::load_reporting_rejects(&doc).1,
-            TemperatureRanges => curate::temperature_ranges::load_reporting_rejects(&doc).1,
-            WireCorrections => {
-                let (corrections, mut rejects) =
-                    curate::wire_corrections::load_reporting_rejects(&doc);
-                rejects.extend(
-                    curate::wire_corrections::load_complete_providers_reporting_rejects(
-                        &doc,
-                        &corrections,
-                    )
-                    .1,
-                );
-                rejects
-            }
-            WireFamilies => curate::wire_families::load_reporting_rejects(&doc).1,
-            PlanPrices => crate::plan_prices::load_reporting_rejects(&doc).1,
-        };
-        accepted(name, ((), rejects))?;
-    }
-    Ok(())
 }
 
 fn document_kind(name: &str) -> Result<VendorDocument, String> {
@@ -582,6 +478,7 @@ fn tombstone(table: &str, previous: &Value) -> Value {
 mod tests {
     use super::*;
     use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+    use fusiform_release::{validate_published, validate_received, Upstream};
     use fusiform_store::{CatalogStore, ReleaseArrival, StoreRelease};
 
     #[test]
@@ -784,7 +681,7 @@ mod tests {
         );
         // A release that only changes something else still carries this
         // allowlist, so refusing it would stop the consumer for good.
-        validate_received(&documents, &upstream).unwrap();
+        validate_received(&documents).unwrap();
         // The writer still has to remove the withdrawn row before it publishes.
         assert!(validate_published(&documents, &upstream)
             .unwrap_err()
@@ -794,7 +691,7 @@ mod tests {
             "login-methods".into(),
             json!({"models": [row("served"), {"provider_id": "openai"}]}),
         )]);
-        assert!(validate_received(&typo, &upstream).is_err());
+        assert!(validate_received(&typo).is_err());
     }
 
     #[test]
@@ -1031,7 +928,7 @@ mod tests {
         let apply = |release, old, docs, at| {
             let mut rows = ImportedTables::new();
             validate_published(docs, &Upstream::default()).unwrap();
-            validate_received(docs, &Upstream::default()).unwrap();
+            validate_received(docs).unwrap();
             document_rows(&mut rows, old, docs, at).unwrap();
             let base = ImportedTables::new();
             store

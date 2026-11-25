@@ -1,6 +1,6 @@
 use fusiform_release::{
-    state_hash, upstream_state_hash, validate_upstream_key, verify_envelope, ChangeOp, CurationSet,
-    ProviderFacts, Release, ReleaseEnvelope, Snapshot, State, Upstream,
+    state_hash, upstream_state_hash, validate_judgments, validate_received, validate_upstream_key,
+    verify_envelope, ChangeOp, ProviderFacts, Release, ReleaseEnvelope, Snapshot, State, Upstream,
 };
 
 use super::{step, ReleaseKeys};
@@ -90,7 +90,7 @@ impl Verified {
         check_state(&envelope, &state)?;
         if curation_changed {
             validate_judgments(&state.curation_set)?;
-            crate::curation::validate_received(&state.curation_set.vendor_facts, &state.upstream)?;
+            validate_received(&state.curation_set.vendor_facts)?;
         }
         Ok(Self { envelope, state })
     }
@@ -199,72 +199,6 @@ fn apply_ops(
                     upstream.remove(provider);
                 }
             }
-        }
-    }
-    Ok(())
-}
-
-/// Check the keys, grade values and workload names in a curation set.
-pub fn validate_judgments(set: &CurationSet) -> Result<(), String> {
-    let model_keys = set
-        .grades
-        .keys()
-        .chain(set.effort_grades.keys())
-        .chain(set.workload_efforts.keys())
-        .chain(set.decommissioned.keys())
-        .map(|model| (model, false))
-        .chain(set.kind_grades.keys().map(|model| (model, true)));
-    for (model, task) in model_keys {
-        if model.is_empty()
-            || !task && model.starts_with("local:")
-            || model.chars().any(|c| c.is_control() || c.is_whitespace())
-        {
-            return Err(format!("invalid published model key {model:?}"));
-        }
-    }
-    let valid_number =
-        |number: &serde_json::Number| number.as_f64().is_some_and(|n| n > 0.0 && n.is_finite());
-    for (model, grade) in &set.grades {
-        if grade
-            .graded_effort
-            .as_deref()
-            .is_some_and(|effort| effort.trim().is_empty())
-            || !valid_number(&grade.elo)
-            || !valid_number(&grade.eq)
-        {
-            return Err(format!("invalid chat grade for {model}"));
-        }
-    }
-    for (model, efforts) in &set.effort_grades {
-        if efforts.iter().any(|(effort, grade)| {
-            effort.trim().is_empty() || !valid_number(&grade.elo) || !valid_number(&grade.eq)
-        }) {
-            return Err(format!("invalid effort grade for {model}"));
-        }
-    }
-    for (model, kinds) in &set.kind_grades {
-        if kinds.iter().any(|(kind, grade)| {
-            !matches!(
-                kind.as_str(),
-                "transcription" | "speech" | "image" | "video" | "search" | "decision"
-            ) || !valid_number(grade)
-        }) {
-            return Err(format!("invalid task grade for {model}"));
-        }
-    }
-    for (model, workloads) in &set.workload_efforts {
-        if workloads.iter().any(|(name, effort)| {
-            !fusiform_protocol::WORKLOADS.contains(&name.as_str())
-                || effort
-                    .default
-                    .as_deref()
-                    .is_some_and(|effort| effort.trim().is_empty())
-                || effort
-                    .minimum
-                    .as_deref()
-                    .is_some_and(|effort| effort.trim().is_empty())
-        }) {
-            return Err(format!("invalid workload effort for {model}"));
         }
     }
     Ok(())

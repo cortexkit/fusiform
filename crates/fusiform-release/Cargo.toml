@@ -7,6 +7,8 @@ license = "MIT"
 description = "Wire types and hashes for curated model store releases"
 
 [dependencies]
+fusiform-curate = { path = "../fusiform-curate" }
+fusiform-protocol = { path = "../fusiform-protocol" }
 time = { version = "0.3", default-features = false }
 base64 = "0.22"
 ed25519-dalek = { version = "2.2", default-features = false, features = ["zeroize"] }

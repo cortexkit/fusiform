@@ -408,6 +408,49 @@ fn history_day_builder_refuses_a_change_that_does_not_match_its_envelope() {
 }
 
 #[test]
+fn snapshot_builders_refuse_semantically_invalid_curation() {
+    let fixtures = fixtures();
+    let mut snapshot: Snapshot = serde_json::from_slice(&fixtures["chain/snapshot.json"]).unwrap();
+    snapshot
+        .state
+        .curation_set
+        .vendor_facts
+        .insert("plan-prices".into(), json!({"cells": [{}]}));
+    let envelope = &mut snapshot.envelope;
+    envelope.curation_hash = snapshot.state.curation_set.curation_hash();
+    envelope.state_hash =
+        fusiform_release::state_hash(envelope.curation_hash, envelope.upstream_hash);
+    let attestation = snapshot.history_attestation.unwrap();
+    let mut release: Release = serde_json::from_slice(&fixtures["chain/release-2.json"]).unwrap();
+    release.envelope = envelope.clone();
+    release.signatures = sign_envelope(envelope, KID, &key()).unwrap();
+    let docs = SnapshotDocs::new(&release, attestation.body.history);
+    let curation = wire(&snapshot.state.curation_set);
+    let evidence = ChargeUnitEvidence::default();
+    let models = models_with_rename();
+    let refused = [
+        snapshot_bytes(SnapshotInputs {
+            curation_set_raw: &curation,
+            ..docs.inputs(&models, &evidence)
+        }),
+        fusiform_publish::snapshot_bytes_from_state(
+            &wire(snapshot.state),
+            &docs.envelope,
+            &docs.signatures,
+            &docs.history,
+            &docs.history_signatures,
+            PUBLIC_KEY,
+        ),
+    ]
+    .map(|result| result.err().map(|failure| failure.class));
+    assert_eq!(
+        refused,
+        [Some("invalid_curation"); 2],
+        "snapshot builders accepted a rejected plan-prices row"
+    );
+}
+
+#[test]
 fn snapshot_builder_refuses_mismatching_inputs() {
     let (_, r2, _) = two_releases();
     let models = models_with_rename();
