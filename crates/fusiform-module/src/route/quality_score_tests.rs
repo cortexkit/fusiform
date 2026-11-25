@@ -5,6 +5,45 @@ use fusiform_store::NewEra;
 use serde_json::{json, Value};
 
 #[test]
+fn store_mode_effort_write_reports_the_recorded_grader() {
+    let (store, dir) = fixture_in_mode(false, true);
+    store
+        .append_eras(&[NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "reseller".into(),
+            model_id: "own".into(),
+            fact_key: FactKey::from_stored("capability.reasoning_options".into()),
+            value_json: r#"[{"type":"effort","values":["high"]}]"#.into(),
+            boundary_at: Timestamp(1000),
+            boundary_kind: BoundaryKind::Seed,
+            observation_id: None,
+        }])
+        .unwrap();
+    let ToolResponse::QualityWrite(write) = serve_tool_call(
+        &store,
+        br#"{
+        "name":"quality.grade","arguments":{"model":"reseller/own","effort_grade":"high",
+        "elo":1200,"eq":1000,"reason":"measured","dry_run":false}
+    }"#,
+    )
+    .unwrap() else {
+        panic!("expected grade response")
+    };
+    let db = rusqlite::Connection::open(dir.path().join("quality.db")).unwrap();
+    let grader: String = db
+        .query_row(
+            "SELECT graded_by FROM override_effort_grade_era WHERE model='reseller/own'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        write.new.graded_by, grader,
+        "effort write misreports the stored grader"
+    );
+}
+
+#[test]
 fn effort_curation_is_row_gated_and_dated() {
     let (store, _dir) = fixture(true);
     for (provider, model, efforts) in [

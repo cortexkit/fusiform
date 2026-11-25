@@ -56,7 +56,7 @@ fn missing() -> RouteError {
     }
 }
 
-fn grade_wire(row: EffortGradeEra) -> QualityGradeWire {
+fn grade_wire(row: EffortGradeEra, graded_by: &str) -> QualityGradeWire {
     QualityGradeWire {
         model: row.model,
         kind: None,
@@ -66,7 +66,7 @@ fn grade_wire(row: EffortGradeEra) -> QualityGradeWire {
         elo: row.elo,
         eq: row.eq,
         grade: None,
-        graded_by: "operator".into(),
+        graded_by: graded_by.into(),
         reason: row.reason,
         recorded_at_ms: row.recorded_at_ms,
     }
@@ -88,14 +88,14 @@ pub(super) fn grade(
         .into_iter()
         .find(|row| row.model == model && row.effort == effort);
     let current = if local.is_some() || store.is_store_mode() && pair.is_none() {
-        local.map(grade_wire)
+        local.map(|row| grade_wire(row, "user"))
     } else {
         store
             .effort_grades_at(None)
             .map_err(|e| store_error(&e))?
             .into_iter()
             .find(|row| row.model == model && row.effort == effort)
-            .map(grade_wire)
+            .map(|row| grade_wire(row, "operator"))
     };
     if pair.is_some() {
         require_effort(&catalog, &affected, &effort)?;
@@ -122,7 +122,14 @@ pub(super) fn grade(
         dry_run,
         model,
         current,
-        new: grade_wire(row),
+        new: grade_wire(
+            row,
+            if store.is_store_mode() {
+                "user"
+            } else {
+                "operator"
+            },
+        ),
         affected_count: affected.len(),
         affected_ids: affected.into_iter().take(10).collect(),
     })
