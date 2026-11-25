@@ -1155,15 +1155,22 @@ the same `history_begins_at_ms` reported by `catalog.status`. Each segment has
 `upstream`, `override`, `curated`, `cache_lifetime`, or `speed_twin`. A
 `speed_twin` segment derives from the paired twin's stored rate in force at
 that instant. Override segments carry
-`override: {source_ref, replaces}`. Refused segments have `reason: "correction"`
-and `correction` with the same extent and reason as a dated read, or
-`reason: "no_coverage"` without a correction when the dated read refuses because
-the model has no record at that instant. `absent` means the dated read succeeds
-but does not include the fact. Adjacent identical results are merged.
-The timeline uses the same resolver as `catalog.get` with `at_ms`, not the
-current-read overlays: aliases, inheritance, billing planes, wire corrections
-and quality are not historical. For an alias, `served` is empty and
-`inherited_from.mapping: "current"` identifies the target as today's mapping.
+`override: {source_ref, replaces}`. Refused segments with `reason: "correction"`
+list every applicable correction in `corrections`, in the same recording order
+as a dated read. The singular `correction` still carries the first entry for
+older readers. Segments with `reason: "no_coverage"` carry neither field: the
+model has no record at that instant. `absent` means the dated read succeeds but
+does not include the fact. Adjacent results merge only if all fields, including
+the full correction list, match apart from the segment times.
+The timeline uses the dated `catalog.get` resolver. It does not apply aliases,
+rate inheritance, login-specific billing planes, or wire protocol corrections
+from the current catalog.
+Judgments (quality grades, marks, effort grades, workload efforts, and local
+judgment overrides) may appear in dated `catalog.get`, but `catalog.history`
+omits their keys and timelines. An exact key or prefix naming only judgment
+facts returns `bad_request`; use `quality.grades --model` to read their history.
+For an alias, `served` is empty and `inherited_from.mapping: "current"`
+identifies the target as today's mapping.
 
 For `fact_prefix`, `fact_keys` lists, in sorted order, all matching keys ever
 recorded in upstream eras, overrides or curated rows for the model, or derived
@@ -1181,9 +1188,10 @@ only, and `correction` (`affected_from_ms`, `affected_until_ms`, `reason`,
 `route::history_carries_the_correction_extent`).
 
 1. `last_changed_at_ms` is when the value last genuinely changed. It ignores
-   eras from polls marked as artifacts, so it can be older than the newest
-   boundary (`route::the_served_last_change_ignores_an_artifact_poll`). It is
-   absent when the fact has no era.
+   correction eras and unchanged claims from polls marked as artifacts, so it
+   can be older than the newest boundary
+   (`route::the_served_last_change_ignores_an_artifact_poll`). It is absent when
+   the fact has no non-correction era.
 2. An empty `eras` list says which of its causes applies: an unknown provider
    or model is `no_coverage`; a known model with nothing recorded for the key
    returns an empty list (`route::an_empty_history_names_which_cause_applies`).

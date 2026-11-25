@@ -141,23 +141,20 @@ impl DatedModel {
         (found.then_some(model), withheld)
     }
 
-    pub(super) fn uncertain_at(
-        &self,
-        provider: &str,
-        model: &str,
-        at: Timestamp,
-    ) -> Vec<UncertainFact> {
-        self.facts
-            .iter()
-            .filter_map(|(key, history)| {
+    pub(super) fn uncertain_at(&self, model: &ModelFacts, at: Timestamp) -> Vec<UncertainFact> {
+        model
+            .facts
+            .keys()
+            .filter_map(|key| {
+                let history = self.facts.get(key)?;
                 let mut first = usize::MAX;
                 history
                     .uncertainty
                     .visit(at.0, |row| first = first.min(row));
                 let era = history.eras.get(first)?;
                 Some(UncertainFact {
-                    provider_id: provider.into(),
-                    model_id: model.into(),
+                    provider_id: model.provider_id.clone(),
+                    model_id: model.model_id.clone(),
                     fact_key: key.clone(),
                     superseded_after: era.prior_observation_at.unwrap(),
                     superseded_by: era.boundary_at,

@@ -401,13 +401,11 @@ fn upstream_history(
     // consumer taking the newest boundary reads the whole catalog as freshly
     // maintained.
     //
-    // A store read failure renders no field rather than a wrong instant. An
-    // absent value says "not established"; a wrong one is an assertion about
-    // when a price last moved, which is the kind of claim a caller acts on.
+    // Missing history and a failed lookup are different answers: only the
+    // former can omit the field without hiding a store problem.
     let last_changed_at_ms = store
         .last_changed_at(source, &request.provider_id, &request.model_id, &fact)
-        .ok()
-        .flatten()
+        .map_err(|e| store_error(&e))?
         .map(|t| t.0);
 
     // Why an empty history can be the RIGHT answer for a fact that is served.
@@ -989,10 +987,28 @@ fn serve_catalog_get_snapshot(
     // Select the plane before reading rows. A subscription with no declared
     // billing claim must never receive the API card, even if its provider or
     // model would otherwise produce a different no-coverage refusal.
+    let history_sample = prepared.is_some();
+    let scoped;
     let published;
     let owned_tables;
     let tables = if let Some(page) = page {
         page.inputs.tables
+    } else if let Some(prepared) = prepared {
+        let alias_candidate = (!prepared.model_known()).then(|| {
+            request
+                .provider_id
+                .clone()
+                .zip(request.model_id.clone())
+                .expect("history names a model")
+        });
+        scoped = crate::curation::PublishedCuration::for_history(
+            store,
+            request.at_ms.expect("history samples a dated read"),
+            alias_candidate,
+        )
+        .map_err(RouteError::unavailable)?;
+        owned_tables = scoped.tables();
+        &owned_tables
     } else {
         published = crate::curation::PublishedCuration::load(store, request.at_ms)
             .map_err(RouteError::unavailable)?;
@@ -1307,6 +1323,7 @@ fn serve_catalog_get_snapshot(
                 prepared,
                 tables,
                 None,
+                history_sample,
             );
         }
     }
@@ -1485,6 +1502,7 @@ fn serve_catalog_get_snapshot(
         prepared,
         tables,
         page.map(|page| page.inputs.judgments),
+        history_sample,
     )?;
     // Observed plane rows keep their envelope when billing rules remove all
     // selected rates. Curated rows and plain bulk rows require a selected fact.
@@ -2104,6 +2122,7 @@ fn finish_plane_view(
     prepared: Option<&dated_model::DatedModel>,
     tables: &curate::CurationSet<'_>,
     judgments: Option<&CatalogJudgments>,
+    history_sample: bool,
 ) -> Result<CatalogGetResponse, RouteError> {
     let historical_rules = at
         .map(|at| match prepared {
@@ -2115,7 +2134,12 @@ fn finish_plane_view(
     let lifetimes = historical_rules.as_ref().unwrap_or(tables.cache_lifetimes);
     let current = at.is_none().then_some(tables);
     let owned_judgments;
-    let judgments = if let Some(judgments) = judgments {
+    // A served-history sample never carries judgments: their history is read
+    // through quality.grades, not catalog.history.
+    let judgments = if history_sample {
+        owned_judgments = CatalogJudgments::default();
+        &owned_judgments
+    } else if let Some(judgments) = judgments {
         judgments
     } else {
         owned_judgments = CatalogJudgments::load(
@@ -2442,6 +2466,14 @@ fn single_model_snapshot(
         None => store.catalog_version().map_err(|e| store_error(&e))?,
     };
 
+    // Qualify only values in force that no correction withheld. Use the
+    // facts before the caller's filter so narrowing the card does not hide
+    // their uncertainty disclosures.
+    let prepared_uncertain = prepared.map(|prepared| {
+        found
+            .as_ref()
+            .map_or_else(Vec::new, |model| prepared.uncertain_at(model, resolved_at))
+    });
     let mut models = Vec::new();
     let mut retired: Vec<fusiform_protocol::RetiredModelWire> = Vec::new();
     if let Some(model) = found {
@@ -2547,15 +2579,8 @@ fn single_model_snapshot(
         }
     }
 
-    // The same uncertainty the bulk read reports, scoped to this model.
-    //
-    // Resolved from the store rather than carried through `read_model`, so the
-    // two surfaces cannot disagree: a consumer asking for one model and a
-    // consumer asking for the catalog must get the same qualification on the
-    // same fact. The single-model path is the one that silently lacked
-    // correction handling for hours, and this is the same seam.
-    let uncertain = if let Some(prepared) = prepared {
-        prepared.uncertain_at(provider_id, model_id, resolved_at)
+    let uncertain = if let Some(uncertain) = prepared_uncertain {
+        uncertain
     } else {
         store
             .uncertain_facts_at(source, resolved_at)

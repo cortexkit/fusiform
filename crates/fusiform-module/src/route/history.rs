@@ -5,12 +5,25 @@ use fusiform_protocol::{
     HistoryOverride, HistoryRefusalReason, HistorySegment, HistorySource, HistoryState,
 };
 
+fn is_judgment_key(key: &str) -> bool {
+    key.starts_with("quality.") || key.starts_with("workload.")
+}
+
 pub(super) fn serve(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse, RouteError> {
     let request: HistoryRequest = serde_json::from_slice(body)
         .map_err(|e| RouteError::bad_request(format!("request did not parse: {e}")))?;
     if request.fact_key.is_some() == request.fact_prefix.is_some() {
         return Err(RouteError::bad_request(
             "exactly one of fact_key and fact_prefix is required",
+        ));
+    }
+    if request.fact_key.as_deref().is_some_and(is_judgment_key)
+        || request.fact_prefix.as_deref().is_some_and(|prefix| {
+            is_judgment_key(prefix) || matches!(prefix, "quality" | "workload")
+        })
+    {
+        return Err(RouteError::bad_request(
+            "catalog.history does not include judgment facts; use quality.grades with a model to read judgment history",
         ));
     }
     if request.fact_key.is_some() && request.served != Some(true) {
@@ -25,6 +38,7 @@ pub(super) fn serve(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse
     let mut keys = store
         .model_history_keys(source, provider, model)
         .map_err(|e| store_error(&e))?;
+    keys.retain(|key| !is_judgment_key(key));
     let mut response = if request.fact_key.is_some() {
         match upstream_history(store, request.clone()) {
             Ok(response) => response,
@@ -101,10 +115,13 @@ pub(super) fn serve(store: &CatalogStore, body: &[u8]) -> Result<HistoryResponse
     boundaries.insert(begin.0);
     let mut reads = Vec::new();
     let identity = format!("{provider}/{model}");
-    let selected = |key: &str| match (&request.fact_key, &request.fact_prefix) {
-        (Some(exact), _) => key == exact,
-        (_, Some(prefix)) => key.starts_with(prefix),
-        _ => false,
+    let selected = |key: &str| {
+        !is_judgment_key(key)
+            && match (&request.fact_key, &request.fact_prefix) {
+                (Some(exact), _) => key == exact,
+                (_, Some(prefix)) => key.starts_with(prefix),
+                _ => false,
+            }
     };
     let with_timeline = request.fact_key.is_some() || request.served == Some(true);
     for at in boundaries {
@@ -206,6 +223,7 @@ fn default_segment(at: i64, covered: bool) -> HistorySegment {
         override_detail: None,
         reason: (!covered).then_some(HistoryRefusalReason::NoCoverage),
         correction: None,
+        corrections: Vec::new(),
     }
 }
 
@@ -229,6 +247,7 @@ fn segment_at(
         segment.state = HistoryState::Refused;
         segment.reason = Some(HistoryRefusalReason::Correction);
         segment.correction = withheld.corrections.first().cloned();
+        segment.corrections.clone_from(&withheld.corrections);
     } else if let Some(value) = read.models.get(identity).and_then(|facts| facts.get(key)) {
         segment.state = HistoryState::Value;
         segment.value = Some(value.clone());

@@ -373,23 +373,32 @@ fn apply_with_count_reader(
                 );
             }
 
-            let (observation_id, plan, next_version) = ctx
-                .store
-                .commit_polled_document(
-                    &NewObservation {
-                        source: ctx.source,
-                        observed_at: Timestamp(now_ms),
-                        outcome: ObservationOutcome::Changed { snapshot_seq: 0 },
-                        normalized_hash: Some(digest),
-                        raw_hash: Some(raw_hash),
-                        etag,
-                        duration_ms: Some(duration.as_millis() as i64),
-                        detail: None,
-                    },
-                    &catalog,
-                    matching_hash,
-                )
-                .map_err(TickError::Store)?;
+            let (observation_id, plan, next_version) = match ctx.store.commit_polled_document(
+                &NewObservation {
+                    source: ctx.source,
+                    observed_at: Timestamp(now_ms),
+                    outcome: ObservationOutcome::Changed { snapshot_seq: 0 },
+                    normalized_hash: Some(digest),
+                    raw_hash: Some(raw_hash.clone()),
+                    etag,
+                    duration_ms: Some(duration.as_millis() as i64),
+                    detail: None,
+                },
+                &catalog,
+            ) {
+                Ok(written) => written,
+                Err(error @ fusiform_store::CatalogError::PollBoundaryNotIncreasing { .. }) => {
+                    return record_failure(
+                        ctx,
+                        FailureClass::Implausible,
+                        error.to_string(),
+                        now_ms,
+                        duration,
+                        Some(raw_hash),
+                    );
+                }
+                Err(error) => return Err(TickError::Store(error)),
+            };
             ctx.signals.observed(now_ms);
 
             let Some(next_version) = next_version else {

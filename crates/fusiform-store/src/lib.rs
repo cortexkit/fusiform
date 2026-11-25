@@ -81,6 +81,12 @@ pub enum CatalogError {
     /// Distinct from a generic backend error because it has a specific correct
     /// response: this process is superseded and must stop writing, not retry.
     Fenced,
+    /// The poll has fact changes, but its timestamp is not after the newest
+    /// era already recorded for that source.
+    PollBoundaryNotIncreasing {
+        observed_at: Timestamp,
+        latest: Timestamp,
+    },
     /// A read or write violated a domain invariant the schema could not express.
     Invariant(String),
     /// A value in the database did not round-trip back to the domain.
@@ -100,6 +106,14 @@ impl std::fmt::Display for CatalogError {
             CatalogError::Fenced => {
                 write!(f, "write rejected: a newer writer owns this database")
             }
+            CatalogError::PollBoundaryNotIncreasing {
+                observed_at,
+                latest,
+            } => write!(
+                f,
+                "poll clock is at {} ms, not after the newest written boundary at {} ms",
+                observed_at.0, latest.0
+            ),
             CatalogError::Invariant(msg) => write!(f, "invariant violated: {msg}"),
             CatalogError::Decode { column, value } => {
                 write!(f, "column {column} holds unreadable value {value:?}")
@@ -175,10 +189,14 @@ enum PollWrite<'a> {
         observation_id: Option<i64>,
         now: Timestamp,
     },
+    Correction {
+        source: SourceId,
+        expected: &'a [correct::PlannedCorrection],
+        now: Timestamp,
+    },
     Document {
         observation: &'a NewObservation,
         catalog: &'a fusiform_core::NormalizedCatalog,
-        matching_hash: bool,
     },
 }
 
@@ -470,14 +488,12 @@ impl CatalogStore {
         &self,
         observation: &NewObservation,
         catalog: &fusiform_core::NormalizedCatalog,
-        matching_hash: bool,
     ) -> Result<(i64, ingest::IngestPlan, Option<i64>), CatalogError> {
         let written = self.append_eras_inner(
             &[],
             Some(PollWrite::Document {
                 observation,
                 catalog,
-                matching_hash,
             }),
         )?;
         let plan = written.plan.expect("a polled document is diffed");
@@ -505,7 +521,9 @@ impl CatalogStore {
     /// unchanged. Invalidate page tokens in the same transaction as the eras.
     pub(crate) fn append_correction_eras(
         &self,
+        source: SourceId,
         eras: &[NewEra],
+        expected: &[correct::PlannedCorrection],
         now: Timestamp,
     ) -> Result<usize, CatalogError> {
         if eras.is_empty() {
@@ -513,8 +531,9 @@ impl CatalogStore {
         }
         let written = self.append_eras_inner(
             eras,
-            Some(PollWrite::Existing {
-                observation_id: None,
+            Some(PollWrite::Correction {
+                source,
+                expected,
                 now,
             }),
         )?;
@@ -663,10 +682,20 @@ impl CatalogStore {
                     observation_id,
                     now,
                 }) => (observation_id, Some(now)),
+                Some(PollWrite::Correction {
+                    source,
+                    expected,
+                    now,
+                }) => {
+                    if let Err(error) = correct::check_expected_eras_in(tx, source, expected, now)?
+                    {
+                        return Ok(Err(error));
+                    }
+                    (None, Some(now))
+                }
                 Some(PollWrite::Document {
                     observation,
                     catalog,
-                    matching_hash,
                 }) => {
                     let at = observation.observed_at;
                     let prior = last_confirming_before_in(tx, observation.source, at)?;
@@ -676,11 +705,24 @@ impl CatalogStore {
                         BoundaryKind::Seed
                     };
                     let mut plan = ingest::plan_ingest_in(tx, catalog, at, boundary, None)?;
-                    let unchanged = matching_hash && plan.is_empty();
-                    let outcome = if unchanged {
-                        ObservationOutcome::Unchanged
-                    } else {
+                    let changed = !plan.is_empty();
+                    if changed {
+                        let latest: Option<i64> = tx.query_row(
+                            "SELECT MAX(boundary_at_ms) FROM era WHERE source = ?1",
+                            [observation.source.as_str()],
+                            |r| r.get(0),
+                        )?;
+                        if let Some(latest) = latest.filter(|&latest| latest >= at.0) {
+                            return Ok(Err(CatalogError::PollBoundaryNotIncreasing {
+                                observed_at: at,
+                                latest: Timestamp(latest),
+                            }));
+                        }
+                    }
+                    let outcome = if changed {
                         ObservationOutcome::Changed { snapshot_seq: 0 }
+                    } else {
+                        ObservationOutcome::Unchanged
                     };
                     let id = insert_observation(observation, &outcome)?;
                     if prior.is_some() {
@@ -689,7 +731,7 @@ impl CatalogStore {
                         }
                     }
                     document = Some((plan, prior));
-                    (Some(id), (!unchanged).then_some(at))
+                    (Some(id), changed.then_some(at))
                 }
             };
             let eras = document.as_ref().map_or(eras, |(plan, _)| &plan.eras);
@@ -1217,7 +1259,8 @@ impl CatalogStore {
     /// whoever inherits the caller, and the resulting number does not look
     /// wrong — it makes every abandoned row appear freshly maintained.
     ///
-    /// Returns `None` when the fact has no era at all. A fact whose only era is
+    /// Corrections only restate the value in force. Returns `None` when the
+    /// fact has no non-correction era. A fact whose only era is
     /// the seed returns the seed instant, which is honest: the value has been
     /// true since at least then and has never been seen to move.
     pub fn last_changed_at(
@@ -1266,8 +1309,8 @@ impl CatalogStore {
                                          WHERE observation_id = ev.observation_id) \
                             AND ev.action = 'marked')) \
                  FROM era e \
-                 WHERE e.source = ?1 AND e.provider_id = ?2 AND e.model_id = ?3 \
-                   AND e.fact_key = ?4 AND e.boundary_at_ms <= ?5 \
+                  WHERE e.source = ?1 AND e.provider_id = ?2 AND e.model_id = ?3 \
+                    AND e.fact_key = ?4 AND e.boundary_at_ms <= ?5 AND e.boundary_kind <> 'corrected' \
                  ORDER BY e.boundary_at_ms DESC",
             )?;
             let mut rows = stmt.query(params![

@@ -525,6 +525,45 @@ fn history_returns_eras_with_their_windows() {
     assert_eq!(units(2), 11_000_000_000);
 }
 
+#[test]
+fn history_propagates_failure_to_establish_last_change() {
+    use fusiform_module::route::serve_history;
+    use fusiform_store::FactKey;
+
+    let f = fixture();
+    let request =
+        br#"{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","fact_key":"rate.input"}"#;
+    assert_eq!(
+        serve_history(&f.store, request).unwrap().last_changed_at_ms,
+        Some(1_000)
+    );
+    // Break the freshness query in this disposable store without removing the
+    // raw era that the rest of the route reads.
+    rusqlite::Connection::open(f.store.path())
+        .unwrap()
+        .execute_batch("DROP TABLE observation_artifact_event")
+        .unwrap();
+    assert_eq!(
+        f.store
+            .fact_history(
+                SourceId::ModelsDev,
+                "anthropic",
+                "claude-sonnet-4-5",
+                &FactKey::rate(TokenClass::Input)
+            )
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let error = serve_history(&f.store, request).unwrap_err();
+    assert_eq!(error.code, "unavailable");
+    assert!(
+        error.message.contains("observation_artifact_event"),
+        "{error:?}"
+    );
+}
+
 /// `catalog.status` reports polls that changed nothing, not only changes.
 ///
 /// The distinction an operator needs: a source returning 304 for a week and a
@@ -1600,6 +1639,77 @@ fn a_historical_read_reports_uncertainty_on_the_wire() {
             edge.uncertain
         );
     }
+}
+
+#[test]
+fn named_dated_get_only_discloses_uncertainty_for_in_force_unwithheld_facts() {
+    use fusiform_core::{Correction, FieldId};
+    use fusiform_store::{FactKey, NewEra};
+
+    let f = fixture();
+    let source = SourceId::ModelsDev;
+    f.store
+        .record_observation(&NewObservation {
+            source,
+            observed_at: Timestamp(1_000),
+            outcome: ObservationOutcome::Seeded,
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: None,
+            detail: None,
+        })
+        .unwrap();
+    let model = "first-limit";
+    let row = |key: &str, value: &str, at, kind| NewEra {
+        source,
+        provider_id: "anthropic".into(),
+        model_id: model.into(),
+        fact_key: FactKey::from_stored(key.into()),
+        value_json: value.into(),
+        boundary_at: Timestamp(at),
+        boundary_kind: kind,
+        observation_id: None,
+    };
+    f.store
+        .append_eras(&[
+            row("existence", r#""present""#, 1_000, BoundaryKind::Seed),
+            row("limit.context", "100", 1_000, BoundaryKind::Seed),
+            row("rate.input", r#"{"units":1000}"#, 1_000, BoundaryKind::Seed),
+            row("limit.context", "200", 2_000, BoundaryKind::Observed),
+            row("limit.output", "50", 2_000, BoundaryKind::Observed),
+            row(
+                "rate.input",
+                r#"{"units":2000}"#,
+                2_000,
+                BoundaryKind::Observed,
+            ),
+            row(
+                "rate.input",
+                r#"{"units":2000}"#,
+                3_000,
+                BoundaryKind::Corrected(Correction {
+                    fields: vec![FieldId::Rate {
+                        class: TokenClass::Input,
+                    }],
+                    affected_from: Timestamp(1_100),
+                    affected_until: Timestamp(1_900),
+                    reason: "fixture defect".into(),
+                }),
+            ),
+        ])
+        .unwrap();
+
+    let bulk = get(&f, r#"{"at_ms":1500,"fact_prefixes":["limit.output"]}"#);
+    let named = get(
+        &f,
+        r#"{"at_ms":1500,"provider_id":"anthropic","model_id":"first-limit","fact_prefixes":["limit.output"]}"#,
+    );
+    assert_eq!(bulk.uncertain.len(), 1);
+    assert_eq!(bulk.uncertain[0].fact_key, "limit.context");
+    assert!(!named.models["anthropic/first-limit"].contains_key("limit.output"));
+    assert_eq!(named.withheld, bulk.withheld);
+    assert_eq!(named.uncertain, bulk.uncertain);
 }
 
 /// An unknown provider is refused, not answered with zero models.

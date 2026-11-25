@@ -618,6 +618,56 @@ fn a_poll_between_plan_and_apply_is_refused() {
     );
 }
 
+#[test]
+fn the_fenced_correction_write_checks_every_fact_against_the_writer_view() {
+    let f = fixture();
+    let plan = plan(&f, &rates(), BAD_FROM, FIXED_AT);
+    let source = SourceId::ModelsDev;
+    let provider = "anthropic";
+    let model = "claude-sonnet-4-5";
+    let input = FactKey::rate(TokenClass::Input);
+    let output = FactKey::rate(TokenClass::Output);
+    let read = |fact| {
+        f.store
+            .recorded_value_at(source, provider, model, fact, Timestamp(NOW))
+            .unwrap()
+            .unwrap()
+    };
+    let result = f
+        .store
+        .with_read_snapshot(|| {
+            // Pin the old view, then commit a later price from another thread.
+            assert_eq!(read(&output).boundary_at, Timestamp(FIXED_AT));
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    f.store
+                        .append_eras(&[NewEra {
+                            source,
+                            provider_id: provider.into(),
+                            model_id: model.into(),
+                            fact_key: output.clone(),
+                            value_json: r#"{"units":16000000000}"#.into(),
+                            boundary_at: Timestamp(NOW - 1),
+                            boundary_kind: BoundaryKind::Observed,
+                            observation_id: None,
+                        }])
+                        .unwrap();
+                })
+                .join()
+                .unwrap();
+            });
+            apply_correction(&f.store, source, &plan, Timestamp(NOW))
+        })
+        .unwrap();
+
+    let error = result.expect_err("a correction cannot overwrite the writer's newer era");
+    assert!(error
+        .to_string()
+        .contains("changed after this correction was planned"));
+    assert_eq!(read(&output).value_json, r#"{"units":16000000000}"#);
+    assert_eq!(read(&input).boundary_at, Timestamp(FIXED_AT));
+}
+
 /// A plan applied against an unchanged store still works.
 ///
 /// The compare-and-swap above is worthless if it also refuses the ordinary
@@ -630,6 +680,43 @@ fn an_unchanged_store_still_accepts_its_plan() {
     let written = apply_correction(&f.store, SourceId::ModelsDev, &plan, Timestamp(NOW))
         .expect("an unchanged store must accept the plan");
     assert_eq!(written, 2);
+}
+
+#[test]
+fn correction_does_not_fabricate_a_new_last_change() {
+    let f = fixture();
+    let plan = plan(&f, &rates(), BAD_FROM, FIXED_AT);
+    let source = SourceId::ModelsDev;
+    let provider = "anthropic";
+    let model = "claude-sonnet-4-5";
+    let key = FactKey::rate(TokenClass::Input);
+    assert_eq!(
+        apply_correction(&f.store, source, &plan, Timestamp(NOW)).unwrap(),
+        2
+    );
+    let history = f.store.fact_history(source, provider, model, &key).unwrap();
+    assert_eq!(history.last().unwrap().boundary_kind, "corrected");
+    assert_eq!(history.last().unwrap().boundary_at, Timestamp(NOW));
+    assert_eq!(
+        f.store
+            .last_changed_at(source, provider, model, &key)
+            .unwrap(),
+        Some(Timestamp(FIXED_AT))
+    );
+}
+
+#[test]
+fn a_window_ending_before_the_first_era_has_nothing_to_correct() {
+    let f = fixture();
+    let fields = [FieldId::Rate {
+        class: TokenClass::Input,
+    }];
+    let refused = refusals(&f, &fields, 100, 800);
+    assert_eq!(refused.len(), 1);
+    assert!(refused[0]
+        .to_string()
+        .contains("no value was recorded at or before"));
+    assert_eq!(plan(&f, &fields, 100, 1_000).rows.len(), 1);
 }
 
 /// A second correction landing between plan and apply is also refused.

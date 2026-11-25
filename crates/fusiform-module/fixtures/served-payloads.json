@@ -8725,7 +8725,7 @@
         }
       ],
       "fact_key": "rate.input",
-      "last_changed_at_ms": 9000,
+      "last_changed_at_ms": 1000,
       "model_id": "claude-sonnet-4-5",
       "provider_id": "anthropic",
       "source": "models.dev"
@@ -9007,7 +9007,7 @@
         }
       ],
       "fact_key": "rate.input",
-      "last_changed_at_ms": 9000,
+      "last_changed_at_ms": 1000,
       "model_id": "claude-sonnet-4-5",
       "provider_id": "anthropic",
       "served": [
@@ -9039,6 +9039,19 @@
             ],
             "reason": "normalizer scaled tiered rates by 1000x"
           },
+          "corrections": [
+            {
+              "affected_from_ms": 3000,
+              "affected_until_ms": 9000,
+              "fields": [
+                {
+                  "class": "input",
+                  "field": "rate"
+                }
+              ],
+              "reason": "normalizer scaled tiered rates by 1000x"
+            }
+          ],
           "from_ms": 3000,
           "reason": "correction",
           "state": "refused",

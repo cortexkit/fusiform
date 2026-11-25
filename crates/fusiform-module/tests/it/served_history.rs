@@ -45,6 +45,101 @@ fn label_card() -> fusiform_store::NewCuratedModel {
 }
 
 #[test]
+fn served_history_respects_a_dated_alias_before_a_curated_model() {
+    use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+    use fusiform_core::{ObservationOutcome, Timestamp};
+    use fusiform_store::{ImportedTables, NewObservation, ReleaseArrival, StoreRelease};
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open_for_store(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_str().unwrap().into(),
+        },
+    })
+    .unwrap();
+    let aliases = json!({"aliases":[{
+        "provider_id":"fixture-label", "model_id":"curated",
+        "target":{"provider_id":"fixture-label", "model_id":"upstream"},
+        "basis":"the fixture originally forwarded the request", "source_ref":"https://example.test/alias",
+        "established_at_ms":BOOT, "review_by_ms":BOOT + 1000
+    }]}).to_string();
+    let release = |seq, at, doc: Option<String>| {
+        let row = json!({"document":"model-aliases", "document_json":doc, "recorded_at_ms":at});
+        ReleaseArrival {
+            published_at_ms: at,
+            release: StoreRelease {
+                release: seq,
+                state_hash: "a".repeat(64),
+                curation_hash: "b".repeat(64),
+                applied_at_ms: at,
+            },
+            rows: ImportedTables::from([(
+                "store_document_era".into(),
+                vec![row.as_object().unwrap().clone()],
+            )]),
+            upstream: None,
+        }
+    };
+    store
+        .apply_store_releases(
+            Some(&ImportedTables::new()),
+            &[
+                release(1, BOOT, Some(aliases)),
+                release(2, BOOT + 100, None),
+            ],
+        )
+        .unwrap();
+    store
+        .record_observation(&NewObservation {
+            source: SourceId::ModelsDev,
+            observed_at: Timestamp(BOOT),
+            outcome: ObservationOutcome::Seeded,
+            normalized_hash: None,
+            raw_hash: None,
+            etag: None,
+            duration_ms: None,
+            detail: None,
+        })
+        .unwrap();
+    let mut card = label_card();
+    // Write a new card at the transition so history samples the instant
+    // when the alias ends and the curated card becomes the dated answer.
+    store
+        .append_curated_models(&[card.clone()], &[], BOOT)
+        .unwrap();
+    card.facts.insert("limit.context".into(), json!(200));
+    store
+        .append_curated_models(&[card], &[], BOOT + 100)
+        .unwrap();
+    let read = |at| {
+        serve_catalog_get(
+            &store,
+            &serde_json::to_vec(&json!({
+                "provider_id":"fixture-label", "model_id":"curated", "at_ms":at
+            }))
+            .unwrap(),
+        )
+    };
+    assert!(read(BOOT)
+        .unwrap_err()
+        .message
+        .contains("aliases apply to current reads only"));
+    assert_eq!(
+        read(BOOT + 100).unwrap().models["fixture-label/curated"]["limit.context"],
+        200
+    );
+    let history = serve_history(&store, br#"{"provider_id":"fixture-label","model_id":"curated","fact_key":"limit.context","served":true}"#).unwrap();
+    let segments = history.served.unwrap();
+    assert_eq!(segments.len(), 2);
+    assert_eq!(segments[0].reason, Some(HistoryRefusalReason::NoCoverage));
+    assert_eq!(segments[0].until_ms, Some(BOOT + 100));
+    assert_eq!(segments[1].value, Some(json!(200)));
+}
+
+#[test]
 fn served_history_ends_provider_label_when_donor_disappears() {
     let (store, _dir) = provider_label_fixture();
     store
@@ -133,6 +228,73 @@ fn served_history_refuses_typos_but_covers_removed_curated_models() {
 }
 
 const BOOT: i64 = 1_800_000_000_000;
+
+#[test]
+fn served_history_excludes_judgments_but_dated_get_replays_them() {
+    use fusiform_core::{BoundaryKind, Timestamp};
+    use fusiform_store::{FactKey, NewEra};
+
+    let (store, _dir) = provider_label_fixture();
+    let provider = "fixture-label";
+    let model = "upstream";
+    let identity = format!("{provider}/{model}");
+    for (key, value, at) in [
+        ("model.canonical_id", json!(identity), BOOT),
+        ("limit.context", json!(100), BOOT + 40),
+    ] {
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: provider.into(),
+                model_id: model.into(),
+                fact_key: FactKey::from_stored(key.into()),
+                value_json: value.to_string(),
+                boundary_at: Timestamp(at),
+                boundary_kind: BoundaryKind::Asserted,
+                observation_id: None,
+            }])
+            .unwrap();
+    }
+    store
+        .append_model_mark(&identity, true, "operator", "fixture", BOOT + 20)
+        .unwrap();
+    store
+        .append_model_mark(&identity, false, "operator", "fixture", BOOT + 60)
+        .unwrap();
+    let args = |mut request: Value| {
+        request["provider_id"] = json!(provider);
+        request["model_id"] = json!(model);
+        serde_json::to_vec(&request).unwrap()
+    };
+    for (at, expected) in [(19, None), (20, Some(json!(true))), (60, None)] {
+        let read = serve_catalog_get(&store, &args(json!({"at_ms": BOOT + at}))).unwrap();
+        assert_eq!(
+            read.models[&identity].get("quality.decommissioned"),
+            expected.as_ref()
+        );
+    }
+    for selector in [
+        json!({"fact_key":"quality.decommissioned","served":true}),
+        json!({"fact_key":"quality.elo.effort.high"}),
+        json!({"fact_prefix":"quality.","served":true}),
+        json!({"fact_prefix":"workload.code."}),
+    ] {
+        let error = serve_history(&store, &args(selector)).unwrap_err();
+        assert_eq!(error.code, "bad_request");
+        assert!(error.message.contains("quality.grades"), "{error:?}");
+    }
+
+    let history = serve_history(&store, &args(json!({"fact_prefix":"","served":true}))).unwrap();
+    let keys = history.fact_keys.unwrap();
+    assert!(keys.iter().any(|key| key == "limit.context"));
+    assert!(keys
+        .iter()
+        .all(|key| !key.starts_with("quality.") && !key.starts_with("workload.")));
+    assert!(!history
+        .served_by_key
+        .unwrap()
+        .contains_key("quality.decommissioned"));
+}
 
 // Use the shipped catalog as background load: a tiny store hides queries that
 // scan other models once for every boundary of the requested model.
@@ -625,6 +787,7 @@ fn assert_parity(
                     withheld.corrections.first(),
                     "{label}"
                 );
+                assert_eq!(segment.corrections, withheld.corrections, "{label}");
                 assert!(segment.value.is_none(), "{label}");
             } else {
                 let value = read
@@ -647,6 +810,70 @@ fn assert_parity(
                 );
             }
         }
+    }
+}
+
+#[test]
+fn history_retains_both_applicable_correction_disclosures() {
+    use fusiform_core::{BoundaryKind, Correction, FieldId, Timestamp, TokenClass};
+    use fusiform_store::{FactKey, NewEra};
+
+    let (store, _dir) = super::golden_payload::store();
+    let provider = "anthropic";
+    let model = "claude-sonnet-4-5";
+    let key = FactKey::rate(TokenClass::Input);
+    let source = SourceId::ModelsDev;
+    let now = Timestamp(10_000);
+    let current = store
+        .recorded_value_at(source, provider, model, &key, now)
+        .unwrap()
+        .unwrap();
+    store
+        .append_eras(&[NewEra {
+            source,
+            provider_id: provider.into(),
+            model_id: model.into(),
+            fact_key: key.clone(),
+            value_json: current.value_json,
+            boundary_at: now,
+            observation_id: None,
+            boundary_kind: BoundaryKind::Corrected(Correction {
+                fields: vec![FieldId::Rate {
+                    class: TokenClass::Input,
+                }],
+                affected_from: Timestamp(5000),
+                affected_until: Timestamp(6000),
+                reason: "independent defect".into(),
+            }),
+        }])
+        .unwrap();
+    let exact = serve_history(&store, br#"{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","fact_key":"rate.input","served":true}"#).unwrap();
+    let prefix = serve_history(&store, br#"{"provider_id":"anthropic","model_id":"claude-sonnet-4-5","fact_prefix":"rate.","served":true}"#).unwrap();
+    let exact = exact.served.unwrap();
+    assert_eq!(exact, prefix.served_by_key.unwrap()[key.as_str()]);
+    let refused: Vec<_> = exact
+        .iter()
+        .filter(|s| s.reason == Some(HistoryRefusalReason::Correction))
+        .collect();
+    let windows: Vec<_> = refused.iter().map(|s| (s.from_ms, s.until_ms)).collect();
+    assert_eq!(
+        windows,
+        [(3000, Some(5000)), (5000, Some(6001)), (6001, Some(9001))]
+    );
+    let overlap = serde_json::to_value(refused[1]).unwrap();
+    let corrections = overlap["corrections"].as_array().unwrap();
+    assert_eq!(corrections.len(), 2);
+    assert_eq!(corrections[0], overlap["correction"]);
+    assert_eq!(corrections[1]["reason"], "independent defect");
+    for segment in refused {
+        assert_parity(
+            &store,
+            provider,
+            model,
+            key.as_str(),
+            segment,
+            segment.from_ms,
+        );
     }
 }
 
