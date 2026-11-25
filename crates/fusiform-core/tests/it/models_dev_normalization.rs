@@ -1146,3 +1146,25 @@ fn wire_claims_preserve_values_precedence_provenance_and_absence() {
     );
     assert_eq!(claims("unknown", "none"), &WireFacts::default());
 }
+
+#[test]
+fn legacy_tier_corroboration_uses_exact_decimal_values() {
+    let payload = |legacy: &str| {
+        format!(
+            r#"{{"p":{{"models":{{"m":{{"cost":{{"input":1,"tiers":[{{"tier":{{"type":"context","size":200000}},"input":2.0,"output":0.25}}],"context_over_200k":{legacy}}}}}}}}}}}"#
+        )
+    };
+    let equivalent = payload(r#"{"input":2,"output":250e-3}"#);
+    let outcome =
+        normalize_models_dev(equivalent.as_bytes()).expect("equivalent prices corroborate");
+    assert_eq!(model(&outcome, "p/m").rates.len(), 3);
+    for conflict in [
+        r#"{"input":2.000000000001,"output":0.25}"#,
+        r#"{"input":2}"#,
+    ] {
+        assert!(matches!(
+            normalize_models_dev(payload(conflict).as_bytes()),
+            Err(NormalizeError::OrphanedLegacyTier { .. })
+        ));
+    }
+}

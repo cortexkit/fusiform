@@ -864,7 +864,16 @@ fn normalize_rates(
     // is a legacy label that stopped tracking the number it refers to. Matching
     // the name against the size would reject 162 correct documents.
     if let Some(legacy) = &cost.context_over_200k {
-        if !tier_rate_sets.contains(&legacy) {
+        if !tier_rate_sets.iter().any(|tier| {
+            tier.len() == legacy.len()
+                && legacy.iter().all(|(key, literal)| {
+                    tier.get(key).is_some_and(|candidate| {
+                        literal == candidate
+                            || exact_decimal_key(literal)
+                                .is_some_and(|value| Some(value) == exact_decimal_key(candidate))
+                    })
+                })
+        }) {
             return Err(NormalizeError::OrphanedLegacyTier {
                 model: label.to_string(),
                 legacy_rates: legacy.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
@@ -873,6 +882,25 @@ fn normalize_rates(
     }
 
     Ok(rates)
+}
+
+/// Canonical sign, significant digits and power of ten for a JSON number.
+/// Comparing rounded nanounits would equate distinct prices below that resolution.
+fn exact_decimal_key(literal: &str) -> Option<(bool, String, i128)> {
+    let (mantissa, exponent) = literal.split_once(['e', 'E']).unwrap_or((literal, "0"));
+    let (unsigned, negative) = mantissa
+        .strip_prefix('-')
+        .map_or((mantissa, false), |v| (v, true));
+    let (integer, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    let digits = format!("{integer}{fraction}");
+    let nonzero = digits.trim_start_matches('0');
+    if nonzero.is_empty() {
+        return Some((false, String::new(), 0));
+    }
+    let significant = nonzero.trim_end_matches('0');
+    let shift = (nonzero.len() - significant.len()) as i128 - fraction.len() as i128;
+    let power = exponent.parse::<i128>().ok()?.checked_add(shift)?;
+    Some((negative, significant.to_owned(), power))
 }
 
 /// Whether an upstream mode name may become part of a fact key.
