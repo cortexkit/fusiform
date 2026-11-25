@@ -651,9 +651,10 @@ A read without `auth_method` carries no plane fields
 
 #### Whole-catalog paging
 
-Send `{"paged":true}` for page one. Repeat the same filters (including `at_ms`
-if supplied) with `page_token` set to the previous `next_page_token` until that
-field is absent. Providers are ordered by ascending provider id (the model map
+Send `{"paged":true}` for page one. Repeat the same filters with `page_token`
+set to the previous `next_page_token` until that field is absent. Repeat page
+one's exact `at_ms` for a dated read and leave it absent for a current read.
+Changing its presence or value is `bad_request`. Providers are ordered by ascending provider id (the model map
 is a `BTreeMap` keyed by `provider/model`); a provider is never split. Pages
 greedily include whole providers while the **actual compact serialized response**,
 including disclosures and the token, fits 3 MiB (3 × 1024 × 1024 bytes). This
@@ -668,8 +669,9 @@ and paging cannot select a billing plane, so `plane`/`billing_rules` are absent.
 `source`, `catalog_version`, and **page one's `resolved_at_ms`** repeat on every
 page. Merge the model maps and concatenate disclosures to reconstruct the read.
 
-The opaque token's current versioned encoding is
-`v1:<catalog_version>:<resolved_at_ms>:<last_provider_id>`. The two numbers are
+The opaque token's versioned encoding is
+`v1:<catalog_version>:<resolved_at_ms>:<last_provider_id>` for a current read
+and `v1-at:<catalog_version>:<resolved_at_ms>:<last_provider_id>` for a dated read. The two numbers are
 canonical decimal i64 values; only the first three colons are separators.
 Consumers must forward the token unchanged, not construct it. A malformed token,
 a token without `paged: true`, or paging combined with `provider_id`, `model_id`,

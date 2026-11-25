@@ -246,9 +246,11 @@ fn pages_cover_whole_providers_in_order_and_scope_disclosures() {
                 expanded.resolved_at_ms = page.resolved_at_ms;
                 scope_page(&mut expanded, &expanded_providers);
                 expanded.next_page_token = all.iter().any(|p| p > next).then(|| {
-                    format!(
-                        "v1:{}:{}:{}",
-                        page.catalog_version, page.resolved_at_ms, next
+                    page_token(
+                        cursor.dated,
+                        page.catalog_version,
+                        page.resolved_at_ms,
+                        next,
                     )
                 });
                 assert!(
@@ -351,6 +353,46 @@ fn disclosure_only_providers_survive_and_oversized_providers_are_not_split() {
     }
     assert!(pages >= 6);
     assert_eq!(withheld, full.withheld);
+}
+
+#[test]
+fn continuation_must_repeat_the_first_pages_at_ms() {
+    let (store, _dir) = fixture();
+    let budget = 2600;
+    let at = 5000;
+    let first = get(&store, json!({"paged":true,"at_ms":at}), budget);
+    let token = first.next_page_token.unwrap();
+    let second = get(
+        &store,
+        json!({"paged":true,"page_token":token,"at_ms":at}),
+        budget,
+    );
+    assert_eq!(second.resolved_at_ms, at);
+    let assert_refused = |args: Value| {
+        let error =
+            serve_catalog_get_with_budget(&store, &serde_json::to_vec(&args).unwrap(), budget)
+                .expect_err("continuation silently switched the first page's read mode or instant");
+        assert_eq!(error.code, "bad_request");
+        assert!(
+            error.message.contains("repeat page one's at_ms"),
+            "{}",
+            error.message
+        );
+    };
+    assert_refused(json!({"paged":true,"page_token":token}));
+    assert_refused(json!({"paged":true,"page_token":token,"at_ms":at + 1}));
+
+    let current = get(&store, json!({"paged":true}), budget);
+    let token = current.next_page_token.unwrap();
+    assert!(token.starts_with(&format!(
+        "v1:{}:{}:",
+        current.catalog_version, current.resolved_at_ms
+    )));
+    assert_eq!(
+        get(&store, json!({"paged":true,"page_token":token}), budget).resolved_at_ms,
+        current.resolved_at_ms
+    );
+    assert_refused(json!({"paged":true,"page_token":token,"at_ms":current.resolved_at_ms}));
 }
 
 #[test]
@@ -768,6 +810,7 @@ fn candidate_reference_page(
     response: CatalogGetResponse,
     cursor: Option<&PageCursor>,
     budget: usize,
+    dated: bool,
 ) -> CatalogGetResponse {
     let mut providers: BTreeSet<String> = response
         .models
@@ -800,9 +843,11 @@ fn candidate_reference_page(
         let mut candidate = response.clone();
         scope_page(&mut candidate, &selected);
         candidate.next_page_token = (index + 1 < providers.len()).then(|| {
-            format!(
-                "v1:{}:{}:{}",
-                response.catalog_version, response.resolved_at_ms, provider
+            page_token(
+                dated,
+                response.catalog_version,
+                response.resolved_at_ms,
+                provider,
             )
         });
         let size = serde_json::to_vec(&candidate).unwrap().len();
@@ -825,6 +870,7 @@ fn linear_packing_matches_candidate_reference_boundaries() {
         json!({"at_ms":5000}),
         json!({"at_ms":5000,"fact_prefixes":["rate.input"]}),
     ] {
+        let dated = args.get("at_ms").is_some();
         let mut full = get(&store, args, usize::MAX);
         // JSON escaping changes byte counts in both entry keys and page tokens.
         full.models.insert(
@@ -922,12 +968,8 @@ fn linear_packing_matches_candidate_reference_boundaries() {
             selected.insert(provider.clone());
             let mut candidate = full.clone();
             scope_page(&mut candidate, &selected);
-            candidate.next_page_token = (index + 1 < all.len()).then(|| {
-                format!(
-                    "v1:{}:{}:{}",
-                    full.catalog_version, full.resolved_at_ms, provider
-                )
-            });
+            candidate.next_page_token = (index + 1 < all.len())
+                .then(|| page_token(dated, full.catalog_version, full.resolved_at_ms, provider));
             let size = serde_json::to_vec(&candidate).unwrap().len();
             budgets.extend([size - 1, size, size + 1]);
         }
@@ -936,8 +978,9 @@ fn linear_packing_matches_candidate_reference_boundaries() {
             let mut cursor = None;
             let mut page_count = 0;
             loop {
-                let expected = candidate_reference_page(full.clone(), cursor.as_ref(), budget);
-                let actual = page_catalog(full.clone(), cursor.as_ref(), budget).unwrap();
+                let expected =
+                    candidate_reference_page(full.clone(), cursor.as_ref(), budget, dated);
+                let actual = page_catalog(full.clone(), cursor.as_ref(), budget, dated).unwrap();
                 assert_eq!(
                     actual.models.keys().collect::<Vec<_>>(),
                     expected.models.keys().collect::<Vec<_>>(),

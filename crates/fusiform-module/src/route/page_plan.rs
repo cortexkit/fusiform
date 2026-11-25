@@ -63,12 +63,12 @@ impl PagePlan {
         for (index, (provider, contribution)) in remaining.iter().enumerate() {
             let candidate = estimate.with_provider(contribution)?;
             let token_bytes = if index + 1 < remaining.len() {
-                let token = format!(
-                    "v1:{}:{}:{}",
+                let token = page_token(
+                    self.key.at_ms.is_some(),
                     self.key.catalog_version,
                     // Only the width affects packing. No request instant is cached.
                     "0".repeat(self.key.timestamp_width),
-                    provider
+                    provider,
                 );
                 compact_size(&token)? + r#","next_page_token":"#.len()
             } else {
@@ -147,6 +147,7 @@ pub(super) fn serve_planned_page(
                         catalog_version: key.catalog_version,
                         resolved_at_ms: 0,
                         provider: String::new(),
+                        dated: request.at_ms.is_some(),
                     },
                 )?;
                 let latest = store.latest_era_id().map_err(|e| store_error(&e))?;
@@ -177,6 +178,7 @@ pub(super) fn serve_planned_page(
         catalog_version: response.catalog_version,
         resolved_at_ms: response.resolved_at_ms,
         provider: String::new(),
+        dated: request.at_ms.is_some(),
     };
     check_page_version(
         store.catalog_version().map_err(|e| store_error(&e))?,
@@ -191,7 +193,7 @@ pub(super) fn serve_planned_page(
     )?;
     if let Some(cursor) = cursor {
         check_page_version(response.catalog_version, cursor)?;
-        // Keep current derivations, but report the instant resolved by page one.
+        // Current reads keep their derivations but report page one's instant.
         response.resolved_at_ms = cursor.resolved_at_ms;
     }
     retain_range(&mut response, &range);
@@ -201,9 +203,11 @@ pub(super) fn serve_planned_page(
         .is_some_and(|last| plan.providers.last().is_some_and(|(p, _)| p > last));
     response.next_page_token = if has_more {
         range.through.map(|provider| {
-            format!(
-                "v1:{}:{}:{provider}",
-                response.catalog_version, response.resolved_at_ms
+            page_token(
+                request.at_ms.is_some(),
+                response.catalog_version,
+                response.resolved_at_ms,
+                &provider,
             )
         })
     } else {
@@ -240,9 +244,11 @@ pub(super) fn serve_planned_page(
         if let Some(cursor) = cursor {
             response.resolved_at_ms = cursor.resolved_at_ms;
         }
-        response.next_page_token = Some(format!(
-            "v1:{}:{}:{last}",
-            response.catalog_version, response.resolved_at_ms
+        response.next_page_token = Some(page_token(
+            request.at_ms.is_some(),
+            response.catalog_version,
+            response.resolved_at_ms,
+            &last,
         ));
     }
     Ok(response)
@@ -471,7 +477,7 @@ mod tests {
         assert_eq!(expected.models.len(), 2);
         expected.quality_scores.as_mut().unwrap().graded_at_ms = 9;
         expected.next_page_token = Some(format!(
-            "v1:{}:{}:p00",
+            "v1-at:{}:{}:p00",
             expected.catalog_version, expected.resolved_at_ms
         ));
         let expected = serde_json::to_vec(&expected).unwrap();
@@ -547,7 +553,7 @@ mod tests {
                 let mut reference = whole.clone();
                 reference.resolved_at_ms = page.resolved_at_ms;
                 let reference =
-                    page_catalog(reference, cursor.as_ref(), CATALOG_PAGE_BYTES).unwrap();
+                    page_catalog(reference, cursor.as_ref(), CATALOG_PAGE_BYTES, false).unwrap();
                 assert_eq!(
                     serde_json::to_vec(&page).unwrap(),
                     serde_json::to_vec(&reference).unwrap()
@@ -653,7 +659,7 @@ mod correction_tests {
             None,
         )
         .unwrap();
-        let expected = page_catalog(whole, None, 1_000).unwrap();
+        let expected = page_catalog(whole, None, 1_000, true).unwrap();
         assert_eq!(
             serde_json::to_vec(&after).unwrap(),
             serde_json::to_vec(&expected).unwrap()

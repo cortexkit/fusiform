@@ -1290,11 +1290,11 @@ fn quality_scores_pages_without_graded_rows_omit_disclosure() {
         &mut response,
         &BTreeSet::from(["google".into(), "reseller".into()]),
     );
-    let first = page_catalog(response.clone(), None, 1).unwrap();
+    let first = page_catalog(response.clone(), None, 1, false).unwrap();
     assert!(first.models.keys().all(|key| key.starts_with("google/")));
     assert!(first.quality_scores.is_none());
     let cursor = parse_page_token(first.next_page_token.as_deref().unwrap()).unwrap();
-    let second = page_catalog(response.clone(), Some(&cursor), 1).unwrap();
+    let second = page_catalog(response.clone(), Some(&cursor), 1, false).unwrap();
     assert!(second.models.contains_key("reseller/own"));
     assert!(second.quality_scores.is_some());
     scope_page(&mut response, &BTreeSet::from(["missing".into()]));

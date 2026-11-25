@@ -961,15 +961,15 @@ fn serve_catalog_get_snapshot(
         .map(parse_page_token)
         .transpose()?;
     if let Some(cursor) = &cursor {
+        if request.at_ms != cursor.dated.then_some(cursor.resolved_at_ms) {
+            return Err(RouteError::bad_request(
+                "repeat page one's at_ms, or omit it if page one omitted it",
+            ));
+        }
         check_page_version(
             store.catalog_version().map_err(|e| store_error(&e))?,
             cursor,
         )?;
-        if request.at_ms.is_some_and(|at| at != cursor.resolved_at_ms) {
-            return Err(RouteError::bad_request(
-                "at_ms must match the first page's instant",
-            ));
-        }
     }
 
     if request.paged && page.is_none() {
@@ -1565,16 +1565,28 @@ struct PageCursor {
     catalog_version: i64,
     resolved_at_ms: i64,
     provider: String,
+    dated: bool,
+}
+
+fn page_token(
+    dated: bool,
+    version: i64,
+    resolved_at: impl std::fmt::Display,
+    provider: &str,
+) -> String {
+    let prefix = if dated { "v1-at" } else { "v1" };
+    format!("{prefix}:{version}:{resolved_at}:{provider}")
 }
 
 fn parse_page_token(token: &str) -> Result<PageCursor, RouteError> {
-    // v1:<catalog_version>:<resolved_at_ms>:<last_provider>; split only the
-    // first three separators so future provider ids may themselves contain ':'.
+    // Split only the first three separators so provider ids may contain ':'.
     let invalid = || RouteError::bad_request("malformed page_token: expected v1 snapshot token");
     let mut parts = token.splitn(4, ':');
-    if parts.next() != Some("v1") {
-        return Err(invalid());
-    }
+    let dated = match parts.next() {
+        Some("v1") => false,
+        Some("v1-at") => true,
+        _ => return Err(invalid()),
+    };
     let number = |text: Option<&str>| -> Result<i64, RouteError> {
         let text = text.ok_or_else(invalid)?;
         let value: i64 = text.parse().map_err(|_| invalid())?;
@@ -1590,6 +1602,7 @@ fn parse_page_token(token: &str) -> Result<PageCursor, RouteError> {
         catalog_version,
         resolved_at_ms,
         provider: provider.to_string(),
+        dated,
     })
 }
 
@@ -1656,6 +1669,7 @@ fn page_catalog(
     mut response: CatalogGetResponse,
     cursor: Option<&PageCursor>,
     budget: usize,
+    dated: bool,
 ) -> Result<CatalogGetResponse, RouteError> {
     let mut providers = partition_providers(&mut response);
     if let Some(cursor) = cursor {
@@ -1670,9 +1684,11 @@ fn page_catalog(
     let quality = QualityContribution::measure(response.quality_scores.as_ref())?;
     for (provider, rows) in providers {
         let contribution = rows.contribution(quality)?;
-        let token = format!(
-            "v1:{}:{}:{}",
-            response.catalog_version, response.resolved_at_ms, provider
+        let token = page_token(
+            dated,
+            response.catalog_version,
+            response.resolved_at_ms,
+            &provider,
         );
         let token_bytes = compact_size(&token)? + r#","next_page_token":"#.len();
         token_reserve = token_reserve.max(token_bytes);

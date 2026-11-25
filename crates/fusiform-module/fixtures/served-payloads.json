@@ -4819,7 +4819,7 @@
           "provider.name": "Synthetic first provider"
         }
       },
-      "next_page_token": "v1:0:1000:000-page",
+      "next_page_token": "v1-at:0:1000:000-page",
       "resolved_at_ms": 1000,
       "source": "models.dev"
     }
