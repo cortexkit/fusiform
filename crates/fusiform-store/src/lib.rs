@@ -81,6 +81,12 @@ pub enum CatalogError {
     /// Distinct from a generic backend error because it has a specific correct
     /// response: this process is superseded and must stop writing, not retry.
     Fenced,
+    /// The poll has fact changes, but its timestamp is not after the newest
+    /// era already recorded for that source.
+    PollBoundaryNotIncreasing {
+        observed_at: Timestamp,
+        latest: Timestamp,
+    },
     /// A read or write violated a domain invariant the schema could not express.
     Invariant(String),
     /// A value in the database did not round-trip back to the domain.
@@ -100,6 +106,14 @@ impl std::fmt::Display for CatalogError {
             CatalogError::Fenced => {
                 write!(f, "write rejected: a newer writer owns this database")
             }
+            CatalogError::PollBoundaryNotIncreasing {
+                observed_at,
+                latest,
+            } => write!(
+                f,
+                "poll clock is at {} ms, not after the newest written boundary at {} ms",
+                observed_at.0, latest.0
+            ),
             CatalogError::Invariant(msg) => write!(f, "invariant violated: {msg}"),
             CatalogError::Decode { column, value } => {
                 write!(f, "column {column} holds unreadable value {value:?}")
@@ -695,6 +709,19 @@ impl CatalogStore {
                         BoundaryKind::Seed
                     };
                     let mut plan = ingest::plan_ingest_in(tx, catalog, at, boundary, None)?;
+                    if !plan.is_empty() {
+                        let latest: Option<i64> = tx.query_row(
+                            "SELECT MAX(boundary_at_ms) FROM era WHERE source = ?1",
+                            [observation.source.as_str()],
+                            |r| r.get(0),
+                        )?;
+                        if let Some(latest) = latest.filter(|&latest| latest >= at.0) {
+                            return Ok(Err(CatalogError::PollBoundaryNotIncreasing {
+                                observed_at: at,
+                                latest: Timestamp(latest),
+                            }));
+                        }
+                    }
                     let unchanged = matching_hash && plan.is_empty();
                     let outcome = if unchanged {
                         ObservationOutcome::Unchanged

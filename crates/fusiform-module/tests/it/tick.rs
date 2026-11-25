@@ -116,6 +116,72 @@ fn changed_poll_rolls_back_observation_and_retries() {
     assert_eq!(era.observation_id, Some(retry.observation_id));
 }
 
+#[test]
+fn a_clock_rewind_must_not_acknowledge_an_unapplied_document() {
+    let f = fixture();
+    let source = SourceId::ModelsDev;
+    run(&f, body(FIXTURE, Some("first")), 1_000);
+    let second = body_with_extra_model(true);
+    assert!(matches!(
+        run(&f, body(&second, Some("second")), 3_000).outcome,
+        TickOutcome::Changed { .. }
+    ));
+    let version = f.store.catalog_version().unwrap();
+    let key = fusiform_store::FactKey::existence();
+
+    for at in [2_000, 3_000] {
+        let report = run(&f, body(FIXTURE, Some("refused")), at);
+        assert!(
+            matches!(
+                report.outcome,
+                TickOutcome::Failed {
+                    class: FailureClass::Implausible
+                }
+            ),
+            "unexpected outcome at {at}: {:?}",
+            report.outcome
+        );
+        assert_eq!(report.eras_written, 0);
+        assert_eq!(f.store.catalog_version().unwrap(), version);
+        assert_eq!(
+            f.store.last_etag(source).unwrap().as_deref(),
+            Some("second")
+        );
+        let observation = f
+            .store
+            .recent_observations(source, 5)
+            .unwrap()
+            .into_iter()
+            .find(|o| o.id == report.observation_id)
+            .unwrap();
+        assert_eq!(observation.outcome, "failed");
+        let detail = observation.detail.unwrap();
+        assert!(
+            detail.contains("clock") && detail.contains(&at.to_string()) && detail.contains("3000"),
+            "{detail}"
+        );
+    }
+    assert_eq!(
+        health::report(&f.signals, 3_000).metrics.unwrap()["last_failure_class"],
+        "implausible"
+    );
+    let current = f
+        .store
+        .recorded_value_at(
+            source,
+            "anthropic",
+            "health-count-model",
+            &key,
+            Timestamp(3_000),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.value_json, r#""present""#);
+
+    let retry = run(&f, body(FIXTURE, Some("retry")), 4_000);
+    assert!(matches!(retry.outcome, TickOutcome::Changed { .. }));
+}
+
 /// The first tick against an empty store writes a SEED, not an observed
 /// boundary.
 ///
