@@ -83,30 +83,27 @@ The importer writes canonical unsigned `release-1.json`, `state.json` and
 `history/base.json`. Imported legacy grades omit `graded_effort`, which was not
 recorded in the SQLite store.
 
-Set `IMPORT_BASE_URL` to the store's HTTPS import base. Have your secret proxy
-inject `MODELS_IMPORT_TOKEN` into the upload process's environment when it runs
-the command below. Do not pass the token as an argument or type it into a shell.
+Set `IMPORT_BASE_URL` to the store's HTTPS base and provide the store's trusted
+release key ID and unpadded base64url public key. Have your secret proxy inject
+`MODELS_IMPORT_TOKEN` into the upload process's environment. Do not pass the
+token as an argument or type it into a shell.
 
 ```sh
 cargo run --locked -p fusiform-publish --example import-upload -- \
-    new-output-dir "$IMPORT_BASE_URL"
+    new-output-dir "$IMPORT_BASE_URL" --key-id "$RELEASE_KEY_ID" \
+    --public-key "$RELEASE_PUBLIC_KEY"
 ```
 
 The uploader checks the store's receipt for each raw file before committing.
 The store signs the release envelope and the history attestation over the hash
 of the exact `history/base.json` bytes, and passes the unmodified `state.json`
 to `snapshot_bytes_from_state` to build snapshot 1. Neither example takes a
-signing key. A successful upload prints the store's commit reply, including the
-signed head.
-
-Set `STORE_BASE_URL` to the published store base URL and fetch the head:
-
-```sh
-curl --fail --silent --show-error "${STORE_BASE_URL%/}/head.json"
-```
-
-Check that `head.release` and `head.latest_snapshot` are both `1` and that the
-published signed head matches the commit reply.
+signing key. The uploader requires a commit receipt of `{"release":1}` and then
+fetches `/v1/head` without the import token. It verifies the head against the
+pinned public key and checks that the release and latest snapshot are both `1`
+and the state hash matches `release-1.json`. Only then does it print the commit
+receipt and exit successfully. Store refusals report the HTTP status and error
+code, when the store supplies one.
 
 ## History attestation
 

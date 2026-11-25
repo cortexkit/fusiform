@@ -3,20 +3,25 @@ use std::{
     fs,
     io::{self, BufRead, BufReader, Read, Write},
     net::{Shutdown, TcpListener, TcpStream},
+    num::NonZeroU64,
     thread,
     time::Duration,
 };
 
 use flate2::read::GzDecoder;
-use fusiform_release::sha256;
+use fusiform_release::{Head, HeadBody, Release, SigningKey, sha256, sign_head};
 use serde_json::{Value, json};
 
 use super::{VarError, redact, run};
 
 const TOKEN: &str = "fake-store-import-token";
-const COMMIT_REPLY: &str = r#"{"release":{"signatures":[]},"head":{"release":1}}"#;
+const KEY_ID: &str = "release-format-v1-test-key";
+const PUBLIC_KEY: &str = "GX9rI-FshTLGq8g4-s1ep4m-DHaykgM0A5v6iz02jWE";
+const COMMIT_REPLY: &str = r#"{"release":1}"#;
+const GENESIS: &[u8] =
+    include_bytes!("../../../fusiform-release/fixtures/release-format-v1/chain/release-1.json");
 const ARTIFACTS: [(&str, &str, &[u8]); 3] = [
-    ("release-1.json", "release-1.json", b"{\"release\":1}\n"),
+    ("release-1.json", "release-1.json", GENESIS),
     ("state.json", "state.json", b"{\"upstream\":{}}\r\n"),
     ("base.json", "history/base.json", b"{\"tables\":{}}"),
 ];
@@ -26,6 +31,7 @@ const UPLOADS: [&str; 3] = [
     "/store/v1/import/files/base.json",
 ];
 const COMMIT: &str = "/store/v1/import/commit";
+const HEAD: &str = "/store/v1/head";
 
 #[derive(Clone, Copy)]
 enum Reply {
@@ -34,7 +40,12 @@ enum Reply {
     WrongSize,
     RefuseUpload,
     RefuseCommit,
-    EchoSuccess,
+    CommitBody(&'static str),
+    DifferentRelease,
+    DifferentSnapshot,
+    DifferentState,
+    BadHeadSignature,
+    EchoInvalidReceipt,
     EchoRefusal,
 }
 
@@ -83,6 +94,10 @@ fn against_stub(
                 [
                     out_dir.path().as_os_str().into(),
                     format!("http://{address}/store/").into(),
+                    "--key-id".into(),
+                    KEY_ID.into(),
+                    "--public-key".into(),
+                    PUBLIC_KEY.into(),
                 ]
                 .into_iter(),
                 token,
@@ -118,7 +133,12 @@ fn serve(mut stream: TcpStream, reply: Reply) -> Option<String> {
         let (field, value) = line.split_once(':').unwrap();
         headers.insert(field.to_ascii_lowercase(), value.trim().to_owned());
     }
-    assert_eq!(headers["authorization"], format!("Bearer {TOKEN}"));
+    if path == HEAD {
+        assert_eq!(method, "GET");
+        assert!(!headers.contains_key("authorization"));
+    } else {
+        assert_eq!(headers["authorization"], format!("Bearer {TOKEN}"));
+    }
     if matches!(reply, Reply::RefuseUpload) {
         assert_eq!(method, "PUT");
         let mut stream = reader.into_inner();
@@ -129,9 +149,10 @@ fn serve(mut stream: TcpStream, reply: Reply) -> Option<String> {
         let _ = io::copy(&mut stream, &mut io::sink());
         return Some(path);
     }
-    let body = read_body(&mut reader, &headers);
-
-    let (status, text) = if path == COMMIT {
+    let (status, text) = if path == HEAD {
+        ("200 OK", signed_head(reply))
+    } else if path == COMMIT {
+        let body = read_body(&mut reader, &headers);
         assert_eq!(method, "POST");
         assert_eq!(headers["content-type"], "application/json");
         let hashes: BTreeMap<_, _> = ARTIFACTS
@@ -143,11 +164,13 @@ fn serve(mut stream: TcpStream, reply: Reply) -> Option<String> {
             json!(hashes)
         );
         match reply {
-            Reply::RefuseCommit => ("409 Conflict", "already imported".into()),
-            Reply::EchoSuccess => ("200 OK", format!(r#"{{"debug":"Bearer {TOKEN}"}}"#)),
+            Reply::RefuseCommit => ("409 Conflict", r#"{"error":"already_imported"}"#.into()),
+            Reply::CommitBody(text) => ("200 OK", text.into()),
+            Reply::EchoInvalidReceipt => ("200 OK", format!(r#"{{"debug":"Bearer {TOKEN}"}}"#)),
             _ => ("200 OK", COMMIT_REPLY.into()),
         }
     } else {
+        let body = read_body(&mut reader, &headers);
         assert_eq!(method, "PUT");
         assert_eq!(headers["content-encoding"], "gzip");
         let name = path.strip_prefix("/store/v1/import/files/").unwrap();
@@ -182,6 +205,37 @@ fn serve(mut stream: TcpStream, reply: Reply) -> Option<String> {
     Some(path)
 }
 
+fn signed_head(reply: Reply) -> String {
+    let genesis: Release = serde_json::from_slice(GENESIS).unwrap();
+    let head = HeadBody {
+        release: if matches!(reply, Reply::DifferentRelease) {
+            NonZeroU64::new(2).unwrap()
+        } else {
+            NonZeroU64::MIN
+        },
+        latest_snapshot: 1,
+        state_hash: if matches!(reply, Reply::DifferentState) {
+            sha256(b"different state")
+        } else {
+            genesis.envelope.state_hash
+        },
+        published_at_ms: genesis.envelope.published_at_ms,
+    };
+    let signing = SigningKey::from_bytes(
+        &[if matches!(reply, Reply::BadHeadSignature) {
+            43
+        } else {
+            42
+        }; 32],
+    );
+    let signatures = sign_head(&head, KEY_ID, &signing).unwrap();
+    let mut wire = json!(Head { head, signatures });
+    if matches!(reply, Reply::DifferentSnapshot) {
+        wire["head"]["latest_snapshot"] = json!(0);
+    }
+    wire.to_string()
+}
+
 fn read_body(reader: &mut impl BufRead, headers: &BTreeMap<String, String>) -> Vec<u8> {
     if let Some(length) = headers.get("content-length") {
         let mut body = vec![0; length.parse().unwrap()];
@@ -210,7 +264,42 @@ fn read_body(reader: &mut impl BufRead, headers: &BTreeMap<String, String>) -> V
 fn uploads_three_gzip_files_and_commits_the_raw_hashes() {
     let (result, paths) = against_stub(Reply::Normal, Ok(TOKEN.into()));
     assert_eq!(result.unwrap(), COMMIT_REPLY);
-    assert_eq!(paths, [UPLOADS.as_slice(), &[COMMIT]].concat());
+    assert_eq!(paths, [UPLOADS.as_slice(), &[COMMIT, HEAD]].concat());
+}
+
+#[test]
+fn http_200_without_the_exact_commit_receipt_is_not_success() {
+    for body in [
+        "<html>Maintenance</html>",
+        r#"{"release":2}"#,
+        r#"{"release":1,"extra":true}"#,
+    ] {
+        let (result, paths) = against_stub(Reply::CommitBody(body), Ok(TOKEN.into()));
+        let error = result.expect_err("HTTP 200 alone is not a successful commit receipt");
+        assert!(error.contains(body), "{error}");
+        assert_eq!(paths, [UPLOADS.as_slice(), &[COMMIT]].concat());
+    }
+}
+
+#[test]
+fn receipt_requires_a_matching_pinned_signed_head() {
+    for (reply, expected) in [
+        (
+            Reply::DifferentRelease,
+            "store head does not confirm release 1",
+        ),
+        (
+            Reply::DifferentState,
+            "store head does not confirm release 1",
+        ),
+        (Reply::DifferentSnapshot, "invalid store head"),
+        (Reply::BadHeadSignature, "verify store head after commit"),
+    ] {
+        let (result, paths) = against_stub(reply, Ok(TOKEN.into()));
+        let error = result.expect_err("commit receipt must be confirmed by the signed head");
+        assert!(error.contains(expected), "{error}");
+        assert_eq!(paths, [UPLOADS.as_slice(), &[COMMIT, HEAD]].concat());
+    }
 }
 
 #[test]
@@ -245,7 +334,10 @@ fn reports_the_stores_already_imported_refusal_on_either_route() {
     assert_eq!(paths, &UPLOADS[..1]);
 
     let (result, paths) = against_stub(Reply::RefuseCommit, Ok(TOKEN.into()));
-    assert_eq!(result.unwrap_err(), "409 Conflict: already imported");
+    assert_eq!(
+        result.unwrap_err(),
+        "commit: 409 Conflict: already_imported"
+    );
     assert_eq!(paths, [UPLOADS.as_slice(), &[COMMIT]].concat());
 }
 
@@ -257,9 +349,12 @@ fn missing_token_is_refused_without_a_request() {
 }
 
 #[test]
-fn redacts_the_token_in_success_and_refusal_output() {
-    let (result, _) = against_stub(Reply::EchoSuccess, Ok(TOKEN.into()));
-    assert_eq!(result.unwrap(), r#"{"debug":"Bearer [redacted]"}"#);
+fn redacts_the_token_in_malformed_receipts_and_refusal_output() {
+    let (result, _) = against_stub(Reply::EchoInvalidReceipt, Ok(TOKEN.into()));
+    assert_eq!(
+        result.unwrap_err(),
+        r#"commit: expected {"release":1}, got {"debug":"Bearer [redacted]"}"#
+    );
     let (result, _) = against_stub(Reply::EchoRefusal, Ok(TOKEN.into()));
     assert_eq!(
         result.unwrap_err(),
@@ -275,7 +370,13 @@ fn redaction_marker_cannot_echo_a_short_token() {
 #[tokio::test]
 async fn refuses_plaintext_bases_outside_the_loopback_allowlist() {
     for base in ["http://example.com", "http://127.0.0.2", "http://[::1]"] {
-        let result = run(["out".into(), base.into()].into_iter(), Ok(TOKEN.into())).await;
+        let result = run(
+            ["out", base, "--key-id", KEY_ID, "--public-key", PUBLIC_KEY]
+                .into_iter()
+                .map(Into::into),
+            Ok(TOKEN.into()),
+        )
+        .await;
         assert!(
             result
                 .unwrap_err()

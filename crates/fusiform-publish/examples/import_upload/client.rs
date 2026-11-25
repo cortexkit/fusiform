@@ -10,9 +10,10 @@ use std::{
 };
 
 use async_compression::tokio::bufread::GzipEncoder;
+use fusiform_release::{Hash, Head, decode_release_public_key, verify_head};
 use reqwest::{
     Body, Client, Response, StatusCode, Url,
-    header::{AUTHORIZATION, CONTENT_ENCODING, HeaderMap, HeaderValue},
+    header::{AUTHORIZATION, CONTENT_ENCODING, HeaderValue},
     redirect::Policy,
 };
 use serde::Deserialize;
@@ -31,6 +32,12 @@ struct Receipt {
     file: String,
     raw_bytes: u64,
     sha256: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommitReceipt {
+    release: u64,
 }
 
 pub async fn run(
@@ -65,9 +72,25 @@ async fn run_authenticated(
     mut args: impl Iterator<Item = OsString>,
     token: &str,
 ) -> Result<String, Box<dyn Error>> {
-    let (Some(out_dir), Some(base), None) = (args.next(), args.next(), args.next()) else {
-        return Err("usage: import-upload <out-dir> <base-url>".into());
+    let (Some(out_dir), Some(base), Some(kid_flag), Some(kid), Some(key_flag), Some(key), None) = (
+        args.next(),
+        args.next(),
+        args.next(),
+        args.next(),
+        args.next(),
+        args.next(),
+        args.next(),
+    ) else {
+        return Err(USAGE.into());
     };
+    if kid_flag != "--key-id" || key_flag != "--public-key" {
+        return Err(USAGE.into());
+    }
+    let kid = kid.into_string().map_err(|_| "invalid key id")?;
+    if kid.trim().is_empty() {
+        return Err("--key-id is required".into());
+    }
+    let key = decode_release_public_key(key.to_str().ok_or("invalid public key")?)?;
     let mut base = Url::parse(base.to_str().ok_or("invalid base URL")?)?;
     let loopback_http =
         base.scheme() == "http" && matches!(base.host_str(), Some("127.0.0.1" | "localhost"));
@@ -92,10 +115,7 @@ async fn run_authenticated(
     let mut auth = HeaderValue::from_str(&format!("Bearer {token}"))
         .map_err(|_| "invalid MODELS_IMPORT_TOKEN")?;
     auth.set_sensitive(true);
-    let mut headers = HeaderMap::new();
-    headers.insert(AUTHORIZATION, auth);
     let mut builder = Client::builder()
-        .default_headers(headers)
         .redirect(Policy::none())
         .timeout(Duration::from_secs(10 * 60));
     if loopback_http {
@@ -105,23 +125,82 @@ async fn run_authenticated(
 
     let mut hashes = BTreeMap::new();
     for (name, local_path) in FILES {
-        let hash = upload(&client, &base, &Path::new(&out_dir).join(local_path), name)
-            .await
-            .map_err(|error| format!("{name}: {error}"))?;
+        let hash = upload(
+            &client,
+            &base,
+            &auth,
+            &Path::new(&out_dir).join(local_path),
+            name,
+        )
+        .await
+        .map_err(|error| format!("{name}: {error}"))?;
         hashes.insert(name, hash);
     }
+    let expected = release_state_hash(&Path::new(&out_dir).join("release-1.json"))
+        .map_err(|error| format!("release-1.json: {error}"))?;
     let response = client
         .post(base.join("commit")?)
+        .header(AUTHORIZATION, auth)
         .json(&hashes)
         .send()
         .await
         .map_err(reqwest::Error::without_url)?;
-    checked_reply(response).await
+    let receipt = checked_reply(response)
+        .await
+        .map_err(|error| format!("commit: {error}"))?;
+    match serde_json::from_str(&receipt) {
+        Ok(CommitReceipt { release: 1 }) => {}
+        _ => return Err(format!("commit: expected {{\"release\":1}}, got {receipt}").into()),
+    }
+
+    let response = client
+        .get(base.join("../head")?)
+        .send()
+        .await
+        .map_err(reqwest::Error::without_url)?;
+    let head: Head = serde_json::from_str(
+        &checked_reply(response)
+            .await
+            .map_err(|error| format!("head: {error}"))?,
+    )
+    .map_err(|error| format!("invalid store head: {error}"))?;
+    verify_head(&head.head, &head.signatures, &BTreeMap::from([(kid, key)]))
+        .map_err(|error| format!("verify store head after commit: {error}"))?;
+    if head.head.release.get() != 1
+        || head.head.latest_snapshot != 1
+        || head.head.state_hash != expected
+    {
+        return Err("store head does not confirm release 1, snapshot 1, and the state hash in release-1.json".into());
+    }
+    Ok(receipt)
+}
+
+const USAGE: &str =
+    "usage: import-upload <out-dir> <base-url> --key-id <kid> --public-key <base64url>";
+
+fn release_state_hash(path: &Path) -> Result<Hash, Box<dyn Error>> {
+    #[derive(Deserialize)]
+    struct Genesis {
+        envelope: GenesisEnvelope,
+    }
+
+    #[derive(Deserialize)]
+    struct GenesisEnvelope {
+        release: u64,
+        state_hash: Hash,
+    }
+
+    let release: Genesis = serde_json::from_reader(io::BufReader::new(File::open(path)?))?;
+    if release.envelope.release != 1 {
+        return Err("expected the envelope for release 1".into());
+    }
+    Ok(release.envelope.state_hash)
 }
 
 async fn upload(
     client: &Client,
     base: &Url,
+    auth: &HeaderValue,
     path: &Path,
     name: &str,
 ) -> Result<String, Box<dyn Error>> {
@@ -138,6 +217,7 @@ async fn upload(
     // report a broken upload instead of the store's refusal.
     let response = client
         .put(base.join(&format!("files/{name}"))?)
+        .header(AUTHORIZATION, auth.clone())
         .header(CONTENT_ENCODING, "gzip")
         .body(Body::wrap_stream(ReaderStream::new(gzip)))
         .send()
@@ -153,9 +233,16 @@ async fn upload(
 }
 
 async fn checked_reply(response: Response) -> Result<String, Box<dyn Error>> {
+    #[derive(Deserialize)]
+    struct Refusal {
+        error: String,
+    }
     let status = response.status();
     let text = response.text().await.map_err(reqwest::Error::without_url)?;
     if status != StatusCode::OK {
+        if let Ok(Refusal { error }) = serde_json::from_str(&text) {
+            return Err(format!("{status}: {error}").into());
+        }
         return Err(format!("{status}: {text}").into());
     }
     Ok(text)
