@@ -554,6 +554,7 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
         catalog_version,
         rates_version,
         failures,
+        normalization_findings: None,
         // Read from the contract table rather than collected from the snapshot.
         //
         // Collecting the keys models happen to carry answers "what did the
@@ -577,6 +578,7 @@ pub fn serve_status(store: &CatalogStore, body: &[u8]) -> Result<StatusResponse,
         recent_polls: polls
             .into_iter()
             .map(|p| StatusPoll {
+                observation_id: Some(p.id),
                 observed_at_ms: p.observed_at.0,
                 outcome: p.outcome,
                 failure_class: p.failure_class,

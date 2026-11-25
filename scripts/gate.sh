@@ -6,8 +6,8 @@
 #
 # Phase 1 runs on this machine in seconds and compiles nothing: lock parity,
 # formatting, lock resolution, the path-dependency check, the shell-script
-# exit guard, the wire-crate version check and the importer's Python tests.
-# Phase 2 runs the CI builds, clippy and the full test suite. On
+# exit guard and the wire-crate version check.
+# Phase 2 runs the CI builds, publisher checks, clippy and the full test suite. On
 # a Mac it sends them as one job to the remote Linux build server (`ck motor
 # run`), never compiling here. Anywhere else it runs them in place, which is
 # how a worker gates: it runs this whole script as one remote Linux job.
@@ -101,16 +101,19 @@ if [ "$fast_only" -eq 0 ]; then
     # Print each exit code so a later success cannot mask a failed check.
     compile_steps='
         (rustup target add wasm32-unknown-unknown && cargo build --locked -p fusiform-curate -p fusiform-release -p fusiform-publish --target wasm32-unknown-unknown); w=$?
+        (tools=$(mktemp -d) || exit; trap "rm -rf -- \"\$tools\"" EXIT
+         bash scripts/install-publish-wasm-tools.sh "$tools" &&
+            PATH="$tools:$PATH" RUSTUP_TOOLCHAIN=1.100.0 bash scripts/check-publish-wasm.sh); p=$?
         cargo clippy --locked --workspace --all-targets -- -D warnings; c=$?
         cargo test --locked --workspace --all-targets; t=$?
-        echo "wasm=$w clippy=$c test=$t"
-        [ "$w" -eq 0 ] && [ "$c" -eq 0 ] && [ "$t" -eq 0 ]'
+        echo "wasm=$w publisher=$p clippy=$c test=$t"
+        [ "$w" -eq 0 ] && [ "$p" -eq 0 ] && [ "$c" -eq 0 ] && [ "$t" -eq 0 ]'
     if [ "$(uname -s)" = Darwin ]; then
         echo "phase 2 (remote Linux build server)"
-        # One job, so both steps share one snapshot and one warm build folder.
+        # One job, so the steps share a snapshot and a warm build folder.
         # 8 CPUs: a full workspace build and test keeps that many busy, and a
         # job holds every CPU it requests for its whole run.
-        step clippy-and-tests ck motor run --vcpus 8 --timeout 3600 -- "$compile_steps"
+        step clippy-and-tests ck motor run --net --vcpus 8 --timeout 3600 -- "$compile_steps"
     else
         echo "phase 2 (in place)"
         step clippy-and-tests bash -c "$compile_steps"

@@ -84,34 +84,81 @@ if ! git diff HEAD --quiet -- "$src" "$manifest" 2>/dev/null; then
   echo "        It compares $BASE...HEAD. Commit first for a complete answer." >&2
 fi
 
-changed=$(git diff "$BASE"...HEAD -- "$src" \
-  | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' || true)
+diff=$(git diff --no-ext-diff --no-textconv "$BASE"...HEAD -- "$src") || exit 2
+merge_base=$(git merge-base "$BASE" HEAD) || exit 2
+before=$(git show "$merge_base:$manifest") || exit 2
+after=$(git show "HEAD:$manifest") || exit 2
+changed=$(printf '%s\n' "$diff" | grep -E '^[+-]' | grep -vE '^(\+\+\+ |--- )' || true)
 
-if [ -z "$changed" ]; then
+manifest_tables() {
+  awk '
+    /^[[:space:]]*\[/ {
+      in_table = ($0 ~ /^[[:space:]]*\[(dependencies|features)(\]|\.)/)
+    }
+    in_table && !/^[[:space:]]*(#|$)/ { print }
+  '
+}
+before_tables=$(manifest_tables <<< "$before") || exit 2
+after_tables=$(manifest_tables <<< "$after") || exit 2
+
+if [ -z "$changed" ] && [ "$before_tables" = "$after_tables" ]; then
   echo "  $CRATE unchanged against $BASE"
   exit 0
 fi
 
-# Strip comment and blank lines. Doc comments, line comments and block-comment
-# bodies are prose: they cannot change what a consumer compiles.
+# A leading `*` could be multiplication or dereferencing, and a block
+# comment can end on the same line as code. Ignore only line comments.
 substantive=$(printf '%s\n' "$changed" \
   | sed -E 's/^[+-][[:space:]]*//' \
-  | grep -vE '^(///|//!|//|/\*|\*|\*/)' \
+  | grep -vE '^//' \
   | grep -vE '^[[:space:]]*$' || true)
 
-if [ -z "$substantive" ]; then
+if [ -z "$substantive" ] && [ "$before_tables" = "$after_tables" ]; then
   echo "  $CRATE changed in comments only against $BASE"
   exit 0
 fi
 
-if git diff "$BASE"...HEAD -- "$manifest" | grep -qE '^\+version[[:space:]]*='; then
-  new=$(grep -m1 -E '^version[[:space:]]*=' "$manifest" | sed -E 's/.*"(.*)".*/\1/')
+package_version() {
+  awk '
+    /^[[:space:]]*\[/ { in_package = ($0 ~ /^[[:space:]]*\[package\]/) }
+    in_package && /^[[:space:]]*version[[:space:]]*=/ {
+      split($0, fields, "\""); print fields[2]; exit
+    }
+  '
+}
+
+# Protocol releases use plain numeric versions. Compare each component as
+# decimal, so 0.10.0 sorts after 0.9.0, independent of the host sort command.
+version_increased() {
+  local pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+  local -a a b
+  local i x y LC_ALL=C
+  [[ "$1" =~ $pattern ]] || return 1
+  a=("${BASH_REMATCH[@]}")
+  [[ "$2" =~ $pattern ]] || return 1
+  b=("${BASH_REMATCH[@]}")
+  for i in 1 2 3; do
+    x=${a[$i]} y=${b[$i]}
+    if [ "${#x}" -ne "${#y}" ]; then
+      [ "${#x}" -gt "${#y}" ] && return 0
+      return 1
+    fi
+    if [ "$x" != "$y" ]; then
+      [[ "$x" > "$y" ]] && return 0
+      return 1
+    fi
+  done
+  return 1
+}
+
+old=$(package_version <<< "$before") || exit 2
+new=$(package_version <<< "$after") || exit 2
+if version_increased "$new" "$old"; then
   echo "  $CRATE changed and version moved to $new"
   exit 0
 fi
 
-cur=$(grep -m1 -E '^version[[:space:]]*=' "$manifest" | sed -E 's/.*"(.*)".*/\1/')
-echo "  $CRATE: served schema changed, version still $cur" >&2
+echo "  $CRATE: served schema changed, version did not increase ($old -> $new)" >&2
 echo "      A consumer path-depending on this cannot see the change: Cargo.lock" >&2
 echo "      records a path dep with no source and no checksum, so --locked" >&2
 echo "      passes over moved code." >&2

@@ -1904,13 +1904,23 @@ fn streamed_digest_matches_the_original_tuple_sort_on_the_embedded_seed() {
     ))
     .unwrap()
     .catalog;
-    let expected = original(&catalog);
-    assert_eq!(catalog_digest(&catalog), expected);
+    let with_refusals = catalog_digest(&catalog);
     catalog.providers.reverse();
     for provider in &mut catalog.providers {
         provider.models.reverse();
     }
-    assert_eq!(catalog_digest(&catalog), expected);
+    assert_eq!(catalog_digest(&catalog), with_refusals);
+
+    // The original tuple sort knew only about facts. Compare it in that
+    // domain; the poll digest also carries the scopes that could not be read.
+    for model in catalog
+        .providers
+        .iter_mut()
+        .flat_map(|provider| &mut provider.models)
+    {
+        model.refused.clear();
+    }
+    assert_eq!(catalog_digest(&catalog), original(&catalog));
     let duplicate = catalog.providers[0].models[0].clone();
     catalog.providers[0].models.push(duplicate);
     assert_eq!(catalog_digest(&catalog), original(&catalog));

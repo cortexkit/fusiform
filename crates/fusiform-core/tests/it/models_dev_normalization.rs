@@ -18,16 +18,106 @@ use fusiform_testkit::mutate;
 
 const FIXTURE: &[u8] = include_bytes!("../../fixtures/models-dev-excerpt.json");
 
+fn normalize_with_bad_neighbor(bad: &str) -> fusiform_core::NormalizeOutcome {
+    let document = format!(
+        r#"{{"p":{{"models":{{"good":{{"cost":{{"input":1,"output":2}}}},"bad":{bad}}}}}}}"#
+    );
+    let outcome = normalize_models_dev(document.as_bytes())
+        .unwrap_or_else(|error| panic!("{bad} must not refuse its healthy neighbor: {error}"));
+    assert_eq!(model(&outcome, "p/good").rates.len(), 2);
+    outcome
+}
+
 #[test]
-fn extreme_valid_json_exponents_return_bad_rate() {
-    for literal in ["1e2147483647", "1.1e-2147483648"] {
+fn string_tier_size_and_unparseable_tier_only_refuse_the_affected_schedule() {
+    for tier in [r#"{"type":"context","size":"200000"}"#, r#""not a tier""#] {
+        let outcome = normalize_with_bad_neighbor(&format!(
+            r#"{{"name":"still readable","cost":{{"input":1,"tiers":[{{"tier":{tier},"input":2}}]}}}}"#
+        ));
+        let bad = model(&outcome, "p/bad");
+        assert_eq!(bad.display_name.as_deref(), Some("still readable"));
+        assert!(bad.rates.is_empty());
+        assert!(
+            outcome.findings.iter().any(|finding| {
+                let message = finding.to_string();
+                message.contains("p/bad") && message.contains("cost.tiers[0].tier")
+            }),
+            "{:?}",
+            outcome.findings
+        );
+    }
+}
+
+#[test]
+fn negative_rate_only_refuses_the_affected_schedule() {
+    let outcome = normalize_with_bad_neighbor(
+        r#"{"cost":{"input":-1,"output":2},"experimental":{"modes":{"fast":{"cost":{"input":3}}}}}"#,
+    );
+    let bad = model(&outcome, "p/bad");
+    assert_eq!(bad.rates.len(), 1, "readable mode pricing is independent");
+    assert!(matches!(&bad.rates[0].condition, RateCondition::Mode { name } if name == "fast"));
+    assert!(
+        matches!(outcome.findings.as_slice(), [NormalizeError::BadRate { model, field, .. }] if model == "p/bad" && field == "input")
+    );
+}
+
+#[test]
+fn float_limit_and_wrong_typed_flag_only_refuse_the_affected_members() {
+    let outcome = normalize_with_bad_neighbor(
+        r#"{"limit":{"context":200000.0,"output":100},"temperature":"yes","reasoning":true,"cost":{"input":1}}"#,
+    );
+    let bad = model(&outcome, "p/bad");
+    assert_eq!(bad.limits.context_tokens, None);
+    assert_eq!(bad.limits.output_tokens, Some(100));
+    assert_eq!(bad.capabilities.temperature, None);
+    assert_eq!(bad.capabilities.reasoning, Some(true));
+    assert_eq!(bad.rates.len(), 1);
+    for member in ["limit.context", "temperature"] {
+        assert!(
+            outcome.findings.iter().any(|finding| {
+                let message = finding.to_string();
+                message.contains("p/bad") && message.contains(member)
+            }),
+            "missing {member}: {:?}",
+            outcome.findings
+        );
+    }
+}
+
+#[test]
+fn extreme_zero_and_underflow_are_classified_by_value() {
+    use fusiform_core::money::{decimal_str_to_minor_units, MoneyError};
+    assert_eq!(decimal_str_to_minor_units("0e-50", 9), Ok(0));
+    assert_eq!(decimal_str_to_minor_units("0e500", 9), Ok(0));
+    assert_eq!(
+        decimal_str_to_minor_units("1e-50", 9),
+        Err(MoneyError::RoundsToZero("1e-50".into()))
+    );
+}
+
+#[test]
+fn extreme_valid_json_exponents_report_bad_rate_without_refusing_the_document() {
+    use fusiform_core::money::MoneyError;
+    for (literal, expected) in [
+        (
+            "1e+2147483647",
+            MoneyError::NotExact("1e+2147483647".into()),
+        ),
+        (
+            "1.1e-2147483648",
+            MoneyError::RoundsToZero("1.1e-2147483648".into()),
+        ),
+    ] {
         let payload = format!(r#"{{"p":{{"models":{{"m":{{"cost":{{"input":{literal}}}}}}}}}}}"#);
         assert!(serde_json::from_str::<serde_json::Value>(&payload).is_ok());
-        assert!(matches!(
-            normalize_models_dev(payload.as_bytes()),
-            Err(NormalizeError::BadRate { model, field, detail: fusiform_core::money::MoneyError::NotExact(_), .. })
-                if model == "p/m" && field == "input"
-        ));
+        let outcome = normalize_models_dev(payload.as_bytes()).unwrap();
+        assert!(model(&outcome, "p/m").rates.is_empty());
+        assert!(
+            matches!(outcome.findings.as_slice(), [NormalizeError::BadRate { model, field, detail, .. }]
+            if model == "p/m" && field == "input" && detail == &expected),
+            "{:?}",
+            outcome.findings
+        );
     }
     assert_eq!(
         fusiform_core::money::decimal_str_to_minor_units("1e1", 9),
@@ -70,10 +160,7 @@ fn the_measured_document_normalizes() {
 
 #[test]
 fn document_parse_errors_distinguish_nested_failures_from_root_shape() {
-    for payload in [
-        &b"{\n\"p\":{\"models\":{\"m\":{\"limit\":{\"context\":\"large\"}}}}}"[..],
-        &b"{\n\"p\":"[..],
-    ] {
+    for payload in [&b"{\n\"p\":{\"models\":\"large\"}}"[..], &b"{\n\"p\":"[..]] {
         let diagnostic = normalize_models_dev(payload).unwrap_err().to_string();
         assert!(diagnostic.contains("line 2 column"), "{diagnostic}");
         assert!(
@@ -210,7 +297,7 @@ fn context_tiers_produce_conditional_rates() {
     assert_eq!(amount.units, 1_800_000_000);
 }
 
-/// A tier whose type is not `context` stops the parse.
+/// A tier whose type is not `context` refuses the model's schedule.
 ///
 /// This is the defect that shipped in the shared catalog crate: `tier.size` was
 /// read as a context threshold with no check on `tier.type`, so any future tier
@@ -223,15 +310,14 @@ fn an_unknown_tier_type_is_refused_not_guessed() {
     let text = String::from_utf8(FIXTURE.to_vec()).unwrap();
     let mutated = mutate(&text, "\"type\": \"context\"", "\"type\": \"volume\"");
 
-    match normalize_models_dev(mutated.as_bytes()) {
-        Err(NormalizeError::UnknownTierType { tier_type, .. }) => {
-            assert_eq!(tier_type, "volume");
-        }
-        other => panic!("an unknown tier type must stop the parse, got {other:?}"),
-    }
+    let outcome = normalize_models_dev(mutated.as_bytes()).unwrap();
+    let Some(NormalizeError::UnknownTierType { model: affected, .. }) = outcome.findings.iter().find(|finding| {
+        matches!(finding, NormalizeError::UnknownTierType { tier_type, .. } if tier_type == "volume")
+    }) else { panic!("missing unknown tier finding: {:?}", outcome.findings) };
+    assert!(model(&outcome, affected).rates.is_empty());
 }
 
-/// A tier carrying a size with no type stops the parse too.
+/// A tier carrying a size with no type also refuses the schedule.
 ///
 /// The type key is renamed rather than deleted, so the mutation does not depend
 /// on the fixture's whitespace. An earlier version of this test replaced a
@@ -243,24 +329,19 @@ fn a_tier_without_a_type_is_refused() {
     let text = String::from_utf8(FIXTURE.to_vec()).unwrap();
     let mutated = mutate(&text, "\"type\": \"context\"", "\"kind\": \"context\"");
 
-    match normalize_models_dev(mutated.as_bytes()) {
-        Err(NormalizeError::TierMissingType { .. }) => {}
-        other => panic!("a typeless tier must stop the parse, got {other:?}"),
-    }
+    let outcome = normalize_models_dev(mutated.as_bytes()).unwrap();
+    let Some(NormalizeError::TierMissingType { model: affected }) = outcome
+        .findings
+        .iter()
+        .find(|finding| matches!(finding, NormalizeError::TierMissingType { .. }))
+    else {
+        panic!("missing typeless tier finding: {:?}", outcome.findings)
+    };
+    assert!(model(&outcome, affected).rates.is_empty());
 }
 
-/// A tier spec that is MALFORMED rather than absent is refused too, and the
-/// message must not name a cause it cannot know.
-///
-/// `RawTier`'s conversion drops the parse error (`.ok()`), so a malformed spec
-/// and an absent one both arrive as `None`. Both fields of `RawTierSpec` are
-/// optional, so the reachable failure is a wrong TYPE — `"size": "200000"` as a
-/// string is the ordinary way an upstream drifts, and it is the case the old
-/// message described as "carries a size with no type" while the type was
-/// present and the size was what broke.
-///
-/// Fail-closed is the right direction and was already correct. What is asserted
-/// here is that the refusal does not send a reader after the wrong field.
+/// An unreadable tier spec is distinct from a missing type, and the refusal
+/// identifies the spec rather than claiming which of its fields was malformed.
 #[test]
 fn a_malformed_tier_spec_is_refused_without_naming_a_cause_it_cannot_know() {
     let text = String::from_utf8(FIXTURE.to_vec()).unwrap();
@@ -268,22 +349,12 @@ fn a_malformed_tier_spec_is_refused_without_naming_a_cause_it_cannot_know() {
     // key beside it is untouched and still correct.
     let mutated = mutate(&text, "\"size\": 200000", "\"size\": \"200000\"");
 
-    match normalize_models_dev(mutated.as_bytes()) {
-        Err(e @ NormalizeError::TierMissingType { .. }) => {
-            let text = e.to_string();
-            assert!(
-                !text.contains("carries a size"),
-                "the message must not assert the tier carries a size: the spec \
-                 did not parse, so nothing about its contents is known: {text}"
-            );
-            assert!(
-                text.contains("no readable type"),
-                "the message must say what is known \u{2014} that no type could be \
-                 read \u{2014} rather than why: {text}"
-            );
-        }
-        other => panic!("a malformed tier spec must stop the parse, got {other:?}"),
-    }
+    let outcome = normalize_models_dev(mutated.as_bytes()).unwrap();
+    let Some(finding @ NormalizeError::RefusedBaseSchedule { model: affected, .. }) = outcome.findings.iter().find(|finding| {
+        matches!(finding, NormalizeError::RefusedBaseSchedule { member, .. } if member.starts_with("cost.tiers[") && member.ends_with("].tier"))
+    }) else { panic!("missing unreadable tier spec finding: {:?}", outcome.findings) };
+    assert!(model(&outcome, affected).rates.is_empty());
+    assert!(!finding.to_string().contains("no readable type"));
 }
 
 #[test]
@@ -365,12 +436,21 @@ fn a_legacy_tier_whose_rates_no_row_reproduces_is_refused() {
     );
 
     let mutated = serde_json::to_vec(&doc).unwrap();
-    match normalize_models_dev(&mutated) {
-        Err(NormalizeError::OrphanedLegacyTier { model, .. }) => {
-            assert!(model.contains("gemini-3.1-pro-preview"), "got {model}");
-        }
-        other => panic!("a disagreeing legacy tier must stop the parse, got {other:?}"),
-    }
+    let outcome = normalize_models_dev(&mutated).unwrap();
+    let Some(NormalizeError::OrphanedLegacyTier {
+        model: affected, ..
+    }) = outcome
+        .findings
+        .iter()
+        .find(|finding| matches!(finding, NormalizeError::OrphanedLegacyTier { .. }))
+    else {
+        panic!("missing disagreeing legacy tier: {:?}", outcome.findings)
+    };
+    assert!(
+        affected.contains("gemini-3.1-pro-preview"),
+        "got {affected}"
+    );
+    assert!(model(&outcome, affected).rates.is_empty());
 
     // And the unmutated fixture normalizes, so the failure above is the
     // mutation's doing rather than a fixture that was already broken.
@@ -970,13 +1050,16 @@ fn a_tier_that_is_not_a_context_tier_is_refused() {
       }
     }"#;
 
-    let err = fusiform_core::normalize::normalize_models_dev(payload.as_bytes())
-        .expect_err("a non-context tier must be refused, not keyed as a context tier");
-    let msg = format!("{err:?}");
+    let outcome = normalize_models_dev(payload.as_bytes()).unwrap();
     assert!(
-        msg.contains("context") || msg.contains("tier"),
-        "the refusal must name the tier type it rejected, or an operator \
-         cannot tell which row to look at: {msg}"
+        model(&outcome, "acme/m1").rates.is_empty(),
+        "a non-context tier must not be keyed as a context tier"
+    );
+    assert!(
+        matches!(outcome.findings.as_slice(), [NormalizeError::UnknownTierType { model, tier_type }]
+        if model == "acme/m1" && tier_type == "output"),
+        "{:?}",
+        outcome.findings
     );
 
     // CONTROL: the same payload with a context tier normalizes, or the refusal
@@ -1186,9 +1269,11 @@ fn legacy_tier_corroboration_uses_exact_decimal_values() {
         r#"{"input":2.000000000001,"output":0.25}"#,
         r#"{"input":2}"#,
     ] {
+        let outcome = normalize_models_dev(payload(conflict).as_bytes()).unwrap();
+        assert!(model(&outcome, "p/m").rates.is_empty());
         assert!(matches!(
-            normalize_models_dev(payload(conflict).as_bytes()),
-            Err(NormalizeError::OrphanedLegacyTier { .. })
+            outcome.findings.as_slice(),
+            [NormalizeError::OrphanedLegacyTier { .. }]
         ));
     }
 }

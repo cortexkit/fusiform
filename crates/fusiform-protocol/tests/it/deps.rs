@@ -389,6 +389,10 @@ fn every_response_type_round_trips() {
             last_class: Some("network".into()),
             polls_back: Some(196),
         }),
+        normalization_findings: Some(fusiform_protocol::NormalizationFindingsWire {
+            observation_id: 7,
+            counts: [("refused_base_schedule".to_owned(), 1)].into(),
+        }),
         source: "models.dev".into(),
         store: None,
         catalog_version: 7,
@@ -398,6 +402,7 @@ fn every_response_type_round_trips() {
         history_begins_at_ms: Some(1_786_529_249_396),
         era_count: 67_914,
         recent_polls: vec![StatusPoll {
+            observation_id: Some(7),
             observed_at_ms: 5_000,
             outcome: "changed".into(),
             failure_class: None,
@@ -419,6 +424,7 @@ fn every_response_type_round_trips() {
         "bus_published_version",
         "bus_publish_failures",
         "bus_last_error",
+        "normalization_findings",
     ] {
         older.as_object_mut().unwrap().remove(field);
     }
@@ -426,6 +432,7 @@ fn every_response_type_round_trips() {
     assert_eq!(older.bus_published_version, None);
     assert_eq!(older.bus_publish_failures, 0);
     assert_eq!(older.bus_last_error, None);
+    assert_eq!(older.normalization_findings, None);
 }
 
 /// A status response from an older module still parses.

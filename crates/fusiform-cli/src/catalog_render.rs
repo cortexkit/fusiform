@@ -4,7 +4,10 @@ use std::{collections::BTreeMap, fmt::Write as _};
 
 use super::{count, format_instant};
 
-pub(super) fn print_catalog(response: &serde_json::Value) {
+pub(super) fn print_catalog(
+    out: &mut impl std::io::Write,
+    response: &serde_json::Value,
+) -> std::io::Result<()> {
     let resolved = response
         .get("resolved_at_ms")
         .and_then(|v| v.as_i64())
@@ -15,7 +18,8 @@ pub(super) fn print_catalog(response: &serde_json::Value) {
         .and_then(|v| v.as_object())
         .unwrap_or(&empty);
 
-    println!(
+    writeln!(
+        out,
         "{} at {}  (catalog version {})",
         count(models.len(), "model"),
         format_instant(resolved),
@@ -23,9 +27,9 @@ pub(super) fn print_catalog(response: &serde_json::Value) {
             .get("catalog_version")
             .and_then(|v| v.as_i64())
             .unwrap_or(-1)
-    );
+    )?;
 
-    print!("{}", render_catalog_models(response, models));
+    write!(out, "{}", render_catalog_models(response, models))
 }
 
 pub(super) fn render_catalog_models(
@@ -59,9 +63,82 @@ fn render_disclosures(response: &serde_json::Value) -> String {
     out.push_str(&render_quality_scores(response));
     out.push_str(&render_aliased(response));
     out.push_str(&render_fact_overrides(response));
+    render_catalog_provenance(&mut out, response);
     out.push_str(&render_withheld(response));
     out.push_str(&render_uncertain(response));
     out
+}
+
+fn render_catalog_provenance(out: &mut String, response: &serde_json::Value) {
+    let rows = |key: &str| response[key].as_array().into_iter().flatten();
+    let value = |v: &serde_json::Value| {
+        if v.is_null() {
+            "absent".into()
+        } else {
+            render_fact_value(v)
+        }
+    };
+    for row in rows("overrides") {
+        let _ = writeln!(
+            out,
+            "\nlocal override: {} {}: {} -> {} (set {}); {}",
+            text(&row["key"]),
+            text(&row["fact"]),
+            value(&row["published"]),
+            value(&row["local"]),
+            format_instant(row["set_at_ms"].as_i64().unwrap_or(0)),
+            text(&row["reason"])
+        );
+    }
+    for row in rows("wire_corrections") {
+        let source = &row["source_ref"];
+        let action = if row["withheld"] == true {
+            "withheld"
+        } else {
+            "corrected"
+        };
+        let _ = write!(
+            out,
+            "\nwire correction: {}/{} {} {action}; source: {}@{}:{}",
+            text(&row["provider"]),
+            text(&row["model"]),
+            text(&row["field"]),
+            text(&source["repo"]),
+            text(&source["commit"]),
+            text(&source["file"])
+        );
+        if let Some(notes) = row["notes"].as_str() {
+            let _ = write!(out, "; {notes}");
+        }
+        out.push('\n');
+    }
+    for row in rows("canonical_links") {
+        let _ = writeln!(
+            out,
+            "\ncanonical link: {} -> {} (curated); sources: {}, {}; review by {}",
+            text(&row["model"]),
+            text(&row["canonical_id"]),
+            text(&row["source_ref"]),
+            text(&row["lab_source_ref"]),
+            format_instant(row["review_by_ms"].as_i64().unwrap_or(0))
+        );
+    }
+    for row in rows("speed_twins") {
+        let _ = writeln!(
+            out,
+            "\nspeed twin: {} -> {} ({}; {}); source: {}; review by {}",
+            text(&row["model"]),
+            text(&row["twin"]),
+            text(&row["mode"]),
+            text(&row["label"]),
+            text(&row["source_ref"]),
+            format_instant(row["review_by_ms"].as_i64().unwrap_or(0))
+        );
+    }
+}
+
+fn text(value: &serde_json::Value) -> &str {
+    value.as_str().unwrap_or("?")
 }
 
 pub(super) fn render_quality_scores(response: &serde_json::Value) -> String {
@@ -422,6 +499,71 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn get_text_discloses_replaced_withheld_and_linked_facts() {
+        let reply = json!({
+            "source":"models.dev", "catalog_version":3, "resolved_at_ms":2000,
+            "models":{"p/m":{"limit.context":2}},
+            "overrides":[{"key":"p/m","fact":"limit.context","published":1,"local":2,
+                          "reason":"local judgment","set_at_ms":1000}],
+            "wire_corrections":[
+                {"provider":"p","model":"m","field":"wire.api","withheld":true,
+                 "source_ref":{"repo":"r","commit":"c","file":"f"},"notes":"not routed",
+                 "established_by":"e","established_at_ms":1000,"review_by_ms":2000},
+                {"provider":"p","model":"m","field":"wire.model","withheld":false,
+                 "source_ref":{"repo":"r","commit":"c","file":"f"},
+                 "established_by":"e","established_at_ms":1000,"review_by_ms":2000}],
+            "canonical_links":[{"model":"p/m","canonical_id":"lab/m","source_ref":"provider-docs",
+                "quote":"q","lab_source_ref":"lab-docs","lab_quote":"lq","review_by_ms":2000}],
+            "speed_twins":[{"model":"p/m","twin":"p/m-fast","mode":"fast","label":"Highspeed",
+                "source_ref":"speed-docs","review_by_ms":2000}]
+        });
+        // A new response field must be classified here before it can ship.
+        let fusiform_protocol::CatalogGetResponse {
+            source: _,
+            next_page_token: _,
+            resolved_at_ms: _,
+            catalog_version: _,
+            models: _,
+            curated: _,
+            login_methods: _,
+            quality_scores: _,
+            overrides,
+            withheld: _,
+            retired: _,
+            uncertain: _,
+            aliased: _,
+            canonical_links,
+            speed_twins,
+            wire_corrections,
+            fact_overrides: _,
+            plane: _,
+            billing_rules: _,
+        } = serde_json::from_value(reply.clone()).unwrap();
+        assert_eq!(overrides.len(), 1);
+        assert_eq!(wire_corrections.len(), 2);
+        assert_eq!(canonical_links.len(), 1);
+        assert_eq!(speed_twins.len(), 1);
+        let text = render_catalog_models(&reply, reply["models"].as_object().unwrap());
+        for part in [
+            "local override: p/m limit.context: 1 -> 2",
+            "local judgment",
+            "1970-01-01 00:00:01Z",
+            "wire.api withheld",
+            "wire.model corrected",
+            "not routed",
+            "r@c:f",
+            "canonical link: p/m -> lab/m",
+            "provider-docs",
+            "lab-docs",
+            "speed twin: p/m -> p/m-fast",
+            "Highspeed",
+            "speed-docs",
+        ] {
+            assert!(text.contains(part), "missing {part:?}: {text}");
+        }
+    }
+
+    #[test]
     fn login_allowlists_and_retirements_are_disclosed_for_every_model_count() {
         for models in [json!({"p/m":{}}), json!({"p/m":{},"p/other":{}}), json!({})] {
             let mut reply = json!({
@@ -447,12 +589,15 @@ mod tests {
                 }
             }
             assert!(
-                text.contains("retired: p/old (observed 1970-01-01 00:00:01Z); successor: p/new"),
+                text.contains(
+                    "retired: p/old (observed 1970-01-01 00:00:01Z [1000 ms]); successor: p/new"
+                ),
                 "{text}"
             );
             assert!(
-                text.lines()
-                    .any(|line| line == "retired: p/older (observed 1970-01-01 00:00:02Z)"),
+                text.lines().any(
+                    |line| line == "retired: p/older (observed 1970-01-01 00:00:02Z [2000 ms])"
+                ),
                 "{text}"
             );
         }

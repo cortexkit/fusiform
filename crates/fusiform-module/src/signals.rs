@@ -176,6 +176,7 @@ pub struct Signals {
     bus_published_version: AtomicI64,
     bus_publish_failures: AtomicU64,
     bus_last_error: arc_swap::ArcSwapOption<String>,
+    normalization_findings: arc_swap::ArcSwapOption<fusiform_protocol::NormalizationFindingsWire>,
 }
 
 /// The startup check's observation, not a claim about later writes.
@@ -229,6 +230,7 @@ impl Signals {
             bus_published_version: AtomicI64::new(NEVER),
             bus_publish_failures: AtomicU64::new(0),
             bus_last_error: arc_swap::ArcSwapOption::empty(),
+            normalization_findings: arc_swap::ArcSwapOption::empty(),
         }
     }
 
@@ -330,6 +332,20 @@ impl Signals {
     /// Keep the last observed error even after recovery, like the failure count.
     pub fn bus_last_error(&self) -> Option<String> {
         self.bus_last_error.load().as_deref().cloned()
+    }
+
+    pub(crate) fn set_normalization_findings(
+        &self,
+        report: fusiform_protocol::NormalizationFindingsWire,
+    ) {
+        self.normalization_findings
+            .store(Some(std::sync::Arc::new(report)));
+    }
+
+    pub(crate) fn normalization_findings(
+        &self,
+    ) -> Option<fusiform_protocol::NormalizationFindingsWire> {
+        self.normalization_findings.load().as_deref().cloned()
     }
 
     /// Stamp a completed poll that observed something.

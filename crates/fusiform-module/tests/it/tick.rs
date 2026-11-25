@@ -70,6 +70,182 @@ fn run(f: &Fixture, outcome: FetchOutcome, at: i64) -> fusiform_module::loop_::T
 }
 
 #[test]
+fn a_refused_schedule_keeps_its_eras_and_a_true_omission_withdraws_it() {
+    use fusiform_store::FactKey;
+    let f = fixture();
+    let good = br#"{"p":{"models":{"m":{"cost":{"input":1,"output":2,"tiers":[{"tier":{"type":"context","size":200000},"input":3}]}}}}}"#;
+    let refused = br#"{"p":{"models":{"m":{"cost":{"input":"unreadable","output":40}}}}}"#;
+    let omitted = br#"{"p":{"models":{"m":{}}}}"#;
+    let histories = || {
+        [
+            FactKey::rate(fusiform_core::TokenClass::Input),
+            FactKey::rate(fusiform_core::TokenClass::Output),
+            FactKey::rate_above_context(fusiform_core::TokenClass::Input, 200_000),
+        ]
+        .map(|key| {
+            f.store
+                .fact_history(SourceId::ModelsDev, "p", "m", &key)
+                .unwrap()
+        })
+    };
+
+    run(&f, body(good, None), 1_000);
+    let initial = histories();
+    assert!(initial.iter().all(|history| history.len() == 1));
+    let partial = run(&f, body(refused, None), 2_000);
+    assert_eq!(
+        histories(),
+        initial,
+        "an unreadable schedule must not withdraw or restate the held rates"
+    );
+    assert_eq!(partial.eras_written, 0);
+    let refused_hash = f
+        .store
+        .last_normalized_hash(SourceId::ModelsDev)
+        .unwrap()
+        .unwrap();
+
+    let missing = run(&f, body(omitted, None), 3_000);
+    assert_eq!(missing.eras_written, 3);
+    for (new, old) in histories().iter().zip(initial.iter()) {
+        assert_eq!(new.len(), 2);
+        assert_eq!(&new[0], &old[0]);
+        assert_eq!(new[1].boundary_at, Timestamp(3_000));
+        assert!(new[1].value_json.contains("missing_rate"), "{:?}", new[1]);
+    }
+    assert_ne!(
+        f.store
+            .last_normalized_hash(SourceId::ModelsDev)
+            .unwrap()
+            .unwrap(),
+        refused_hash,
+        "a genuine withdrawal cannot reuse the digest of an unreadable schedule"
+    );
+}
+
+#[test]
+fn unreadable_facts_keep_their_boundaries_while_readable_siblings_land() {
+    use fusiform_store::FactKey;
+    let f = fixture();
+    let document = |input, output, context, temperature, fast| {
+        format!(
+            r#"
+        {{"p":{{"models":{{"m":{{"limit":{{"context":{context},"output":{output}}},
+            "temperature":{temperature},"cost":{{"input":{input}}},
+            "experimental":{{"modes":{{"fast":{{"cost":{fast}}}}}}}
+        }}}}}}}}
+    "#
+        )
+    };
+    let history = |key| {
+        f.store
+            .fact_history(SourceId::ModelsDev, "p", "m", &key)
+            .unwrap()
+    };
+
+    let first = document("1", 100, "200000", "true", r#"{"input":3}"#);
+    run(&f, body(first.as_bytes(), None), 1_000);
+    let rate = FactKey::rate(fusiform_core::TokenClass::Input);
+    let mode = FactKey::rate_in_mode(fusiform_core::TokenClass::Input, "fast");
+    let held = [
+        rate.clone(),
+        mode,
+        FactKey::limit("context"),
+        FactKey::capability("temperature"),
+    ];
+    let initial = held.clone().map(&history);
+
+    let bad = document("-1", 200, "200000.0", r#""yes""#, r#""unreadable""#);
+    let partial = run(&f, body(bad.as_bytes(), None), 2_000);
+    assert!(
+        matches!(partial.outcome, TickOutcome::Changed { .. }),
+        "healthy limit.output still changes; got {:?}",
+        partial.outcome
+    );
+    assert_eq!(partial.eras_written, 1);
+    assert_eq!(
+        held.clone().map(&history),
+        initial,
+        "no refused fact gets a new era"
+    );
+    assert_eq!(history(FactKey::limit("output"))[1].value_json, "200");
+
+    let same = document("1", 200, "200000", "true", r#"{"input":3}"#);
+    assert_eq!(run(&f, body(same.as_bytes(), None), 3_000).eras_written, 0);
+    assert_eq!(held.clone().map(&history), initial);
+    let changed = document("2", 200, "200000", "true", r#"{"input":3}"#);
+    assert_eq!(
+        run(&f, body(changed.as_bytes(), None), 4_000).eras_written,
+        1
+    );
+    assert_eq!(history(rate)[1].boundary_at, Timestamp(4_000));
+}
+
+#[tokio::test]
+async fn status_counts_normalization_findings_for_the_latest_parsed_body() {
+    use serde_json::{json, Value};
+    use subc_client_rs::HandlerOutcome;
+
+    async fn status(f: &Fixture, signals: Arc<Signals>) -> Value {
+        match fusiform_module::serve_catalog_request(
+            f.store.clone(),
+            signals,
+            br#"{"name":"catalog.status","arguments":{"polls":0}}"#.to_vec(),
+            false,
+        )
+        .await
+        {
+            HandlerOutcome::Response(bytes) => serde_json::from_slice(&bytes).unwrap(),
+            other => panic!("expected status, got {other:?}"),
+        }
+    }
+
+    let f = fixture();
+    assert!(status(&f, f.signals.clone())
+        .await
+        .get("normalization_findings")
+        .is_none());
+    let bad = br#"{"p":{"models":{
+        "bad":{"cost":{"input":"1.25","output":"2.5"}},
+        "good":{"cost":{"input":1,"output":2,"input_audio":3}}
+    }}}"#;
+    let first = run(&f, body(bad, None), 1_000);
+    assert!(matches!(first.outcome, TickOutcome::Changed { .. }));
+    let expected = json!({"observation_id":first.observation_id,
+                         "counts":{"refused_base_schedule":2,"unattributable_charge_unit":1}});
+    let first_status = status(&f, f.signals.clone()).await;
+    assert!(first_status.get("failures").is_none());
+    assert_eq!(
+        first_status["normalization_findings"], expected,
+        "a successful poll must disclose its normalization findings"
+    );
+
+    run(
+        &f,
+        FetchOutcome::NotModified {
+            etag: None,
+            duration: Duration::ZERO,
+        },
+        2_000,
+    );
+    assert_eq!(
+        status(&f, f.signals.clone()).await["normalization_findings"],
+        expected
+    );
+    assert!(status(&f, Arc::new(Signals::new()))
+        .await
+        .get("normalization_findings")
+        .is_none());
+
+    let good = br#"{"p":{"models":{"bad":{"cost":{"input":1,"output":2}},"good":{"cost":{"input":1,"output":2}}}}}"#;
+    let last = run(&f, body(good, None), 3_000);
+    assert_eq!(
+        status(&f, f.signals.clone()).await["normalization_findings"],
+        json!({"observation_id":last.observation_id,"counts":{}})
+    );
+}
+
+#[test]
 fn changed_poll_rolls_back_observation_and_retries() {
     let f = fixture();
     let source = SourceId::ModelsDev;

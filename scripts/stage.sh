@@ -109,8 +109,8 @@ trap on_exit EXIT
 ckdev_run() {
   local built="$1"; shift
   local link="$CKDEV_DIR/ckdev-$(basename "$built" | sed 's/^ck-//')"
-  rm -f "$link"
-  ln "$built" "$link" 2>/dev/null || cp "$built" "$link"
+  rm -f "$link" || return 1
+  ln "$built" "$link" 2>/dev/null || cp "$built" "$link" || return 1
   "$link" "$@"
 }
 
@@ -118,8 +118,29 @@ ckdev_run() {
 # for the same reason the release script's must.
 ./scripts/release-build.sh
 
-mkdir -p "$STAGE"
-cp target/release/ck-fusiform target/release/ck-models "$STAGE/"
+stage_created=0
+refuse_stage() {
+  printf 'REFUSING TO STAGE: %s\n' "$*" >&2
+  if [ "$stage_created" -eq 1 ]; then
+    rm -rf "$STAGE"
+  fi
+  exit 1
+}
+
+# The revision and tree must still match the build inputs, not merely the
+# revision stamped into the binaries before cargo started.
+after_rev=$(git rev-parse HEAD) || refuse_stage 'could not read HEAD after the build'
+dirty=$(git status --porcelain) || refuse_stage 'could not read git status after the build'
+if [[ "$after_rev" != "$HEAD_REV" || -n "$dirty" ]]; then
+  refuse_stage "the checkout changed during the build (expected clean $HEAD_REV; HEAD is $after_rev)"
+fi
+
+mkdir -p "$(dirname "$STAGE")"
+mkdir "$STAGE" || refuse_stage "could not create a new staging directory at $STAGE"
+stage_created=1
+cp target/release/ck-fusiform target/release/ck-models "$STAGE/" || refuse_stage 'could not copy release binaries'
+
+revision_pattern='\(([0-9a-f]{40})\)'
 
 for bin in ck-fusiform ck-models; do
   # Sign under signing-topology v2 with a pinned identifier. Never `--sign -`:
@@ -130,27 +151,22 @@ for bin in ck-fusiform ck-models; do
   # gate requires before it stops handing modules their launch nonce through
   # the environment. It leaves the designated requirement unchanged, so the
   # macOS grants tied to that requirement still apply.
-  codesign --force --sign "$IDENTITY" --identifier "$bin" -o runtime "$STAGE/$bin"
-  codesign --verify --strict "$STAGE/$bin"
+  codesign --force --sign "$IDENTITY" --identifier "$bin" -o runtime "$STAGE/$bin" ||
+    refuse_stage "could not sign $bin"
+  codesign --verify --strict "$STAGE/$bin" || refuse_stage "could not verify the signature of $bin"
   # Captured first, not piped into `grep -q`: under pipefail, `grep -q` exits
   # on its first match, codesign then dies of SIGPIPE, and the pipeline fails
   # exactly when the flag IS present.
-  signature="$(codesign -dv "$STAGE/$bin" 2>&1)"
+  signature="$(codesign -dv "$STAGE/$bin" 2>&1)" ||
+    refuse_stage "could not inspect the signature of $bin: $signature"
   if [[ "$signature" != *"(runtime)"* ]]; then
-    echo "stage.sh: $bin was signed without the hardened runtime" >&2
-    rm -rf "$STAGE"
-    exit 1
+    refuse_stage "$bin was signed without the hardened runtime"
   fi
 
   # THE GATE. Ask the signed bytes what they are.
-  reported="$(ckdev_run "$STAGE/$bin" --version | grep -oE '\([0-9a-f]{40}\)' | tr -d '()')"
-  if [ "$reported" != "$HEAD_REV" ]; then
-    echo >&2
-    echo "REFUSING TO STAGE: $bin reports rev $reported, tree is on $HEAD_REV" >&2
-    echo "The staged bytes are not this commit. A previous build was reused, or" >&2
-    echo "the build did not run. Nothing has been published." >&2
-    rm -rf "$STAGE"
-    exit 1
+  out=$(ckdev_run "$STAGE/$bin" --version) || refuse_stage "$bin --version could not run"
+  if [[ ! "$out" =~ $revision_pattern || "${BASH_REMATCH[1]}" != "$HEAD_REV" ]]; then
+    refuse_stage "$bin does not report revision $HEAD_REV: ${out:-<no version output>}"
   fi
 done
 
@@ -400,7 +416,7 @@ echo "  ARM       name WHICH BINARY renders it, and paste output you EXECUTED
 # the module and `ck-models.current` for the CLI. Both are written here from the
 # one stage, with identical contents, so they cannot name different builds.
 declaration="stage=$STAGE
-revision=$(git rev-parse HEAD)
+revision=$HEAD_REV
 declared_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 for name in fusiform ck-models; do
     current="$HOME/ck-stage/$name.current"

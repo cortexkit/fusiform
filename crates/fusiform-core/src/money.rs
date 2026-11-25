@@ -106,11 +106,10 @@ pub fn decimal_str_to_minor_units(s: &str, exponent: u8) -> Result<i64, MoneyErr
 
     let digits: String = format!("{int_part}{frac_part}");
     let trimmed = digits.trim_start_matches('0');
-    let value: i128 = if trimmed.is_empty() {
-        0
-    } else {
-        trimmed.parse().map_err(|_| err())?
-    };
+    if trimmed.is_empty() {
+        return Ok(0);
+    }
+    let value: i128 = trimmed.parse().map_err(|_| err())?;
 
     // value × 10^(exp - frac_len) currency units
     //   → minor = value × 10^(exponent + exp - frac_len)
@@ -118,7 +117,11 @@ pub fn decimal_str_to_minor_units(s: &str, exponent: u8) -> Result<i64, MoneyErr
     // 10^38 is the largest power of ten representable in i128.
     let power = shift.unsigned_abs();
     if power > 38 {
-        return Err(err());
+        return Err(if shift < 0 {
+            MoneyError::RoundsToZero(s.to_string())
+        } else {
+            err()
+        });
     }
     let factor = 10i128.pow(power as u32);
     let scaled: i128 = if shift >= 0 {
@@ -151,7 +154,7 @@ pub fn decimal_str_to_minor_units(s: &str, exponent: u8) -> Result<i64, MoneyErr
                 }
             }
         };
-        if rounded == 0 && value != 0 {
+        if rounded == 0 {
             return Err(MoneyError::RoundsToZero(s.to_string()));
         }
         rounded

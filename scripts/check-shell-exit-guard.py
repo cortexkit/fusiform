@@ -26,6 +26,10 @@ ERREXIT = re.compile(r"^\s*set\s+(-[A-Za-z]*e[A-Za-z]*\b|.*-o\s+errexit\b)")
 EXIT_TRAP = re.compile(r"^\s*trap\s+.*\bEXIT\b")
 # `finished=1`, or a prefixed name such as `train_push_finished=1`.
 FINISHED = re.compile(r"^\s*(\w+_)?finished=1\s*$")
+SHELL_SHEBANG = re.compile(
+    rb"^#!\s*(?:\S*/env\s+(?:-S\s+)?|(?:\S*/)?)"
+    rb"(?:sh|bash|dash|ash|ksh|mksh|zsh)(?:\s|$)"
+)
 
 # Copied from another repository and replaced whole when re-lifted, so a fix
 # belongs upstream. Each entry names who owns the fix.
@@ -43,15 +47,19 @@ def unsafe(text):
 
 
 def scripts(root):
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z", "--cached"], cwd=root, capture_output=True, check=True,
+    ).stdout
     found = []
-    for directory in ("scripts", ".githooks"):
-        for base, _, names in os.walk(os.path.join(root, directory)):
-            for name in names:
-                path = os.path.join(base, name)
-                with open(path, "rb") as handle:
-                    head = handle.read(64)
-                if name.endswith(".sh") or head.startswith(b"#!/bin/sh") or b"bash" in head.split(b"\n")[0]:
-                    found.append(os.path.relpath(path, root))
+    for name in set(filter(None, tracked.split(b"\0"))):
+        rel = os.fsdecode(name)
+        path = os.path.join(root, rel)
+        # Gitlinks are directories. A symlink has no script body of its own.
+        if not os.path.isfile(path) or os.path.islink(path):
+            continue
+        with open(path, "rb") as handle:
+            if rel.endswith(".sh") or SHELL_SHEBANG.match(handle.readline(512)):
+                found.append(rel)
     return sorted(found)
 
 
@@ -99,9 +107,11 @@ def self_test():
     ]
     for body, want in cases:
         with tempfile.TemporaryDirectory() as root:
+            subprocess.run(["git", "init", "-q", root], check=True)
             os.makedirs(os.path.join(root, "scripts"))
             with open(os.path.join(root, "scripts", "planted.sh"), "w") as handle:
                 handle.write(body)
+            subprocess.run(["git", "-C", root, "add", "scripts/planted.sh"], check=True)
             got = subprocess.run(
                 [sys.executable, __file__, "--root", root],
                 capture_output=True,
@@ -110,9 +120,40 @@ def self_test():
             if got != want:
                 print("self-test FAILED: expected exit %d, got %d for:\n%s" % (want, got, body), file=sys.stderr)
                 return 1
+    with tempfile.TemporaryDirectory() as root:
+        def git(*args):
+            subprocess.run(["git", *args], cwd=root, check=True)
+
+        git("init", "-q")
+        for rel, body in [
+            ("scripts/guarded.sh", guarded),
+            ("crates/demo/tests/untracked.sh", unguarded),
+            ("crates/demo/tests/bad.sh", unguarded),
+            ("crates/demo/tests/unmarked", unguarded.replace("env bash", "env -S sh")),
+        ]:
+            path = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(body)
+        git("add", "scripts/guarded.sh", "crates/demo/tests/bad.sh", "crates/demo/tests/unmarked")
+        result = subprocess.run(
+            [sys.executable, __file__, "--root", root], capture_output=True, text=True,
+        )
+        if (
+            result.returncode != 1
+            or "crates/demo/tests/bad.sh" not in result.stderr
+            or "crates/demo/tests/unmarked" not in result.stderr
+            or "untracked.sh" in result.stderr
+        ):
+            print(
+                "self-test FAILED: tracked scripts outside scripts/ were not both refused: "
+                f"exit={result.returncode}; {result.stdout}{result.stderr}", file=sys.stderr,
+            )
+            return 1
     print(
         "shell-exit-guard self-test: refuses an unguarded, a commented and a look-alike guard;"
-        " accepts a guarded, a prefixed-guard and a no-errexit script"
+        " accepts a guarded, a prefixed-guard and a no-errexit script;"
+        " scans tracked .sh and shebang scripts outside scripts/"
     )
     return 0
 

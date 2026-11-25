@@ -117,7 +117,10 @@ pub fn meta() -> Result<SeedMeta, SeedError> {
 /// nothing to change.
 pub fn catalog() -> Result<NormalizedCatalog, SeedError> {
     normalize_models_dev_with(SNAPSHOT, &crate::input_audio::evidence())
-        .map(|outcome| outcome.catalog)
+        .map(|outcome| {
+            crate::normalization::log_findings("seed", &outcome.findings);
+            outcome.catalog
+        })
         .map_err(|e| SeedError::Snapshot(e.to_string()))
 }
 
