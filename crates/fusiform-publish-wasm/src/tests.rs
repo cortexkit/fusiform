@@ -41,6 +41,7 @@ fn publish_index_and_replayed_index_agree_by_hash() {
     let (summary, next) = publish_step(MODELS, &prior, EVIDENCE).unwrap();
     let summary: Value = serde_json::from_slice(&summary).unwrap();
     assert_eq!(summary["model_count"], 2);
+    assert_eq!(summary["base_upstream_hash"], upstream_hash(&prior).unwrap());
     assert!(summary.get("refusal").is_none());
     let next = next.unwrap();
     let change = canonical_json(&json!({"upstream": summary["ops"], "curation_set": null}));
@@ -50,6 +51,49 @@ fn publish_index_and_replayed_index_agree_by_hash() {
         upstream_hash(&next).unwrap()
     );
     assert_eq!(summary["upstream_hash"], upstream_hash(&next).unwrap());
+}
+
+#[test]
+fn release_builder_refuses_a_diff_from_a_stale_index() {
+    use fusiform_release::{ReleaseEnvelope, build_release};
+
+    let empty = FactIndex::from_snapshot_upstream(&Default::default())
+        .unwrap()
+        .to_bytes();
+    let curation = include_bytes!("../fixtures/curation.json");
+    let (genesis, after1) = publish_step(MODELS, &empty, EVIDENCE).unwrap();
+    let after1 = after1.unwrap();
+    let release = |summary: &[u8], parent: &[u8], number, time| {
+        build_release(summary, curation, parent, number, time, time - 1)
+    };
+    let envelope = |wire: &[u8]| {
+        let unsigned: Value = serde_json::from_slice(wire).unwrap();
+        let envelope: ReleaseEnvelope = serde_json::from_value(unsigned["envelope"].clone()).unwrap();
+        serde_json::to_vec(&envelope).unwrap()
+    };
+    let r1 = envelope(&release(&genesis, &[], 1, 1).unwrap());
+
+    let mut catalog: Value = serde_json::from_slice(MODELS).unwrap();
+    catalog["alpha"]["models"]["-"]["cost"] = json!({});
+    let (with_removal, after2) =
+        publish_step(&canonical_json(&catalog), &after1, EVIDENCE).unwrap();
+    let r2 = envelope(&release(&with_removal, &r1, 2, 2).unwrap());
+    let mut stale = catalog;
+    stale["zeta"]["models"]["mini"]["name"] = json!("Mini 2");
+    let catalog = canonical_json(&stale);
+    let (stale, _) = publish_step(&catalog, &after1, EVIDENCE).unwrap();
+    let summary: Value = serde_json::from_slice(&stale).unwrap();
+    assert!(summary["ops"].as_array().unwrap().contains(&json!({
+        "op": "remove", "provider": "alpha", "model": "-", "fact": "rate.input"
+    })));
+    assert_eq!(
+        release(&stale, &r2, 3, 3).err().map(|err| err.class),
+        Some("invalid_summary"),
+        "builder accepted a repeated removal diffed from release 1 against parent release 2"
+    );
+    let (fresh, _) = publish_step(&catalog, &after2.unwrap(), EVIDENCE).unwrap();
+    assert!(release(&fresh, &r2, 3, 3).is_ok());
+    assert_eq!(release(&stale, &[], 1, 3).unwrap_err().class, "invalid_summary");
 }
 
 #[test]

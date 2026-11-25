@@ -47,7 +47,11 @@ fn models_with_rename() -> Vec<u8> {
 fn summary(models: &[u8], previous: &FactIndex) -> (Vec<u8>, FactIndex) {
     let step = publish_step(models, previous, &ChargeUnitEvidence::default()).unwrap();
     (
-        wire(json!({"ops": step.ops, "upstream_hash": step.upstream_hash})),
+        wire(json!({
+            "base_upstream_hash": previous.upstream_hash(),
+            "ops": step.ops,
+            "upstream_hash": step.upstream_hash,
+        })),
         step.index,
     )
 }

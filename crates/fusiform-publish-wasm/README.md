@@ -40,8 +40,13 @@ Release numbers and millisecond timestamps passed as arguments are `bigint`.
 | `head_signing_bytes` | Bare `head` body | Exact Ed25519 message bytes checked by Rust `verify_head` |
 | `history_attestation_signing_bytes` | Bare history attestation body | Exact Ed25519 message bytes checked by Rust `verify_history_attestation` |
 
-The publish summary is canonical JSON. Success has `ops`, `upstream_hash`,
-`model_count` and `conflicts`. Each conflict identifies `provider`, `model`,
+The publish summary is canonical JSON. Success has `ops`, `base_upstream_hash`,
+`upstream_hash`, `model_count` and `conflicts`. `base_upstream_hash` identifies
+the index the diff used; `upstream_hash` identifies the resulting index.
+`build_release` refuses a summary whose base does not match the parent
+(or the empty upstream for release 1). If the index is stale, recover it
+against the current head and compute a new diff before retrying.
+Each conflict identifies `provider`, `model`,
 `fact` and `values` (distinct storage JSON strings for the omitted fact).
 A refusal has just `ops: []`, `conflicts: []` and `refusal: {class, detail}`;
 its classes are `empty_index`, `parse`, and `implausible`. Keep the previous

@@ -53,6 +53,7 @@ fn publish_step(
         )));
     }
     let previous = decode_index(index)?;
+    let base_upstream_hash = previous.upstream_hash();
     let evidence = decode_evidence(evidence)?;
     let step = match fusiform_publish::publish_step(models_dev, &previous, &evidence) {
         Ok(step) => step,
@@ -72,7 +73,9 @@ fn publish_step(
             })
         })
         .collect();
-    let mut summary = b"{\"conflicts\":".to_vec();
+    let mut summary = br#"{"base_upstream_hash":"#.to_vec();
+    write_json(&mut summary, base_upstream_hash);
+    summary.extend_from_slice(br#","conflicts":"#);
     write_json(&mut summary, conflicts);
     summary.extend_from_slice(b",\"model_count\":");
     write_json(&mut summary, step.model_count);

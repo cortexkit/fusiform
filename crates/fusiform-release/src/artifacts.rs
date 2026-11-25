@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::{
     Change, ChangeOp, CurationSet, Hash, ReleaseEnvelope, ReleaseFormat, fact_hash, state_hash,
-    validate_upstream_key, write_canonical_json,
+    upstream_hash_sorted, validate_upstream_key, write_canonical_json,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -60,6 +60,7 @@ pub fn build_release(
 ) -> Result<Vec<u8>, ArtifactRefusal> {
     #[derive(Deserialize)]
     struct Summary {
+        base_upstream_hash: Hash,
         ops: Vec<ChangeOp>,
         upstream_hash: Hash,
     }
@@ -106,6 +107,16 @@ pub fn build_release(
     envelope
         .validate_parent()
         .map_err(|err| ArtifactRefusal::new("invalid_parent", err))?;
+    let expected_base = parent.as_ref().map_or_else(
+        || upstream_hash_sorted(std::iter::empty()),
+        |prior| prior.upstream_hash,
+    );
+    if summary.base_upstream_hash != expected_base {
+        return Err(ArtifactRefusal::new(
+            "invalid_summary",
+            "summary base_upstream_hash does not match the parent upstream hash",
+        ));
+    }
     if parent
         .as_ref()
         .is_some_and(|prior| !envelope.chronology_follows(prior, !summary.ops.is_empty()))

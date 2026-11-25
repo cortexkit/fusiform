@@ -73,7 +73,11 @@ pub fn import(
         })
         .collect();
     let unsigned = release::build_release(
-        &release::canonical_json(&json!({"ops": ops, "upstream_hash": upstream_hash})),
+        &release::canonical_json(&json!({
+            "base_upstream_hash": release::upstream_hash_sorted(std::iter::empty()),
+            "ops": ops,
+            "upstream_hash": upstream_hash,
+        })),
         &release::canonical_json(&serde_json::to_value(curation_set)?),
         b"",
         1,
