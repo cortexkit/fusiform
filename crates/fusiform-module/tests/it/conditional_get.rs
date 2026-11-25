@@ -38,6 +38,38 @@ async fn tick(
     http_stub::within_deadline(fusiform_module::loop_::tick(ctx, at)).await
 }
 
+const BODY: &[u8] = br#"{"anthropic":{"name":"Anthropic","models":{
+    "baseline":{"name":"Baseline","type":"chat","capabilities":{},"api":{
+        "messages":{"base_url":"https://example.com/v1"}
+    }}
+}}}"#;
+
+const BODY_WITH_MODEL: &[u8] = br#"{"anthropic":{"name":"Anthropic","models":{
+    "baseline":{"name":"Baseline","type":"chat","capabilities":{},"api":{
+        "messages":{"base_url":"https://example.com/v1"}
+    }},
+    "m":{"name":"M","type":"chat","capabilities":{},"api":{
+        "messages":{"base_url":"https://example.com/v1"}
+    }}
+}}}"#;
+
+const BODY_WITH_RENAMED_MODEL: &[u8] = br#"{"anthropic":{"name":"Anthropic","models":{
+    "baseline":{"name":"Baseline","type":"chat","capabilities":{},"api":{
+        "messages":{"base_url":"https://example.com/v1"}
+    }},
+    "m":{"name":"B","type":"chat","capabilities":{},"api":{
+        "messages":{"base_url":"https://example.com/v1"}
+    }}
+}}}"#;
+
+const BODY_WITH_DATE_PRICE: &[u8] = br#"{"anthropic":{"name":"Anthropic","models":{
+    "m":{"name":"M","type":"chat","capabilities":{},"api":{
+        "messages":{"base_url":"https://example.com/v1"}
+    },"cost":{"text":{"input":{"price":1,"overrides":[
+        {"when":{"date":{"gte":"2027-01-01"}},"price":2}
+    ]}}}}
+}}}"#;
+
 /// What the stub answers next.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Answer {
@@ -45,6 +77,7 @@ enum Answer {
     Body,
     BodyWithModel,
     ConditionalBodyWithModel,
+    ConditionalBodyWithDatePrice,
     UntaggedChangedModel,
     /// 304 with an ETag and no body, as models.dev really answers.
     NotModified,
@@ -84,7 +117,7 @@ impl Upstream {
 
         Self {
             _server: server,
-            url: format!("http://127.0.0.1:{port}/api.json"),
+            url: format!("http://127.0.0.1:{port}/experimental/v2.0/api.json"),
             answer,
             heads,
             requests,
@@ -124,13 +157,18 @@ fn serve_one(mut stream: TcpStream, answer: Answer, heads: &Arc<Mutex<Vec<String
         .expect("stub request read before its deadline");
     assert!(n > 0, "stub client closed without a request");
     let request = String::from_utf8_lossy(&buf[..n]).into_owned();
-    let answer = if answer == Answer::ConditionalBodyWithModel {
+    let answer = if matches!(
+        answer,
+        Answer::ConditionalBodyWithModel | Answer::ConditionalBodyWithDatePrice
+    ) {
         if header_line(&request, "if-none-match:")
             .is_some_and(|line| line.split_once(':').unwrap().1.trim() == "\"v1\"")
         {
             Answer::NotModified
-        } else {
+        } else if answer == Answer::ConditionalBodyWithModel {
             Answer::BodyWithModel
+        } else {
+            answer
         }
     } else {
         answer
@@ -141,11 +179,15 @@ fn serve_one(mut stream: TcpStream, answer: Answer, heads: &Arc<Mutex<Vec<String
         .push(request);
 
     match answer {
-        Answer::Body | Answer::BodyWithModel | Answer::UntaggedChangedModel => {
+        Answer::Body
+        | Answer::BodyWithModel
+        | Answer::ConditionalBodyWithDatePrice
+        | Answer::UntaggedChangedModel => {
             let (body, validator): (&[u8], &str) = match answer {
-                Answer::Body => (br#"{"anthropic":{"id":"anthropic","name":"A","models":{}}}"#, "ETag: \"v1\"\r\n"),
-                Answer::BodyWithModel => (br#"{"anthropic":{"id":"anthropic","name":"A","models":{"m":{"id":"m","name":"M"}}}}"#, "ETag: \"v1\"\r\n"),
-                _ => (br#"{"anthropic":{"id":"anthropic","name":"A","models":{"m":{"id":"m","name":"B"}}}}"#, ""),
+                Answer::Body => (BODY, "ETag: \"v1\"\r\n"),
+                Answer::BodyWithModel => (BODY_WITH_MODEL, "ETag: \"v1\"\r\n"),
+                Answer::ConditionalBodyWithDatePrice => (BODY_WITH_DATE_PRICE, "ETag: \"v1\"\r\n"),
+                _ => (BODY_WITH_RENAMED_MODEL, ""),
             };
             let head = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
@@ -376,6 +418,94 @@ async fn the_stored_validator_reaches_the_next_request() {
     );
 }
 
+#[tokio::test]
+async fn a_date_price_boundary_bypasses_the_validator_and_opens_an_era() {
+    use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+    use fusiform_core::{SourceId, Timestamp, TokenClass};
+    use fusiform_module::{
+        loop_::{PollContext, TickOutcome},
+        signals::Signals,
+    };
+    use fusiform_store::{CatalogStore, FactKey};
+
+    const BOUNDARY: i64 = 1_798_761_600_000; // 2027-01-01 UTC
+    let upstream = Upstream::start(Answer::ConditionalBodyWithDatePrice);
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_string_lossy().into(),
+        },
+    })
+    .unwrap();
+    let ctx = PollContext::new(
+        Arc::new(store),
+        Fetcher::new().unwrap(),
+        upstream.endpoint(),
+        Arc::new(Signals::new()),
+    );
+    let history = || {
+        ctx.store
+            .fact_history(
+                SourceId::ModelsDev,
+                "anthropic",
+                "m",
+                &FactKey::rate(TokenClass::Input),
+            )
+            .unwrap()
+    };
+    let units = |value: &str| {
+        serde_json::from_str::<serde_json::Value>(value).unwrap()["units"]
+            .as_i64()
+            .unwrap()
+    };
+
+    let first = tick(&ctx, BOUNDARY - 60_000).await.unwrap();
+    assert!(matches!(first.outcome, TickOutcome::Changed { .. }));
+    let before = history();
+    assert_eq!(before.len(), 1);
+    assert_eq!(units(&before[0].value_json), 1_000_000_000);
+    let raw_hash = |id| ctx.store.raw_hash_of_observation(id).unwrap().unwrap();
+
+    // Prove the validator would be sent by the same process before the date passes.
+    assert_eq!(
+        tick(&ctx, BOUNDARY - 1).await.unwrap().outcome,
+        TickOutcome::NotModified
+    );
+    assert_eq!(history(), before);
+
+    let changed = tick(&ctx, BOUNDARY).await.unwrap();
+    let heads = upstream.heads();
+    assert_eq!(heads.len(), 3);
+    assert!(header_line(&heads[1], "if-none-match:").is_some_and(|line| line.ends_with("\"v1\"")));
+    assert!(
+        header_line(&heads[2], "if-none-match:").is_none(),
+        "a 304 at the boundary would hide the new price: {}",
+        heads[2]
+    );
+    assert!(matches!(changed.outcome, TickOutcome::Changed { .. }));
+    assert_eq!(changed.eras_written, 1);
+    assert_eq!(
+        raw_hash(changed.observation_id),
+        raw_hash(first.observation_id)
+    );
+    let after = history();
+    assert_eq!(after.len(), 2);
+    assert_eq!(after[0], before[0]);
+    assert_eq!(after[1].boundary_kind, "observed");
+    assert_eq!(after[1].prior_observation_at, Some(Timestamp(BOUNDARY - 1)));
+    assert_eq!(after[1].boundary_at, Timestamp(BOUNDARY));
+    assert_eq!(units(&after[1].value_json), 2_000_000_000);
+
+    assert_eq!(
+        tick(&ctx, BOUNDARY + 1).await.unwrap().outcome,
+        TickOutcome::NotModified,
+        "once the date price has landed, the next poll can use the validator again"
+    );
+}
+
 /// A new process reads the whole document once before it trusts a validator
 /// stored by the process before it.
 ///
@@ -541,15 +671,19 @@ async fn first_full_poll_repairs_a_legacy_hash_ahead_of_its_eras() {
             Arc::new(Signals::new()),
         )
     };
-    tick(&process(), 1_000).await.unwrap();
+    assert!(matches!(
+        tick(&process(), 1_000).await.unwrap().outcome,
+        TickOutcome::Changed { .. }
+    ));
 
     // Simulate an interrupted old writer, including a later retry that trusted
     // the dangling hash and incorrectly marked the document unchanged.
-    let doc =
-        br#"{"anthropic":{"id":"anthropic","name":"A","models":{"m":{"id":"m","name":"M"}}}}"#;
-    let catalog = fusiform_core::normalize_legacy_models_dev_for_tests(doc)
-        .unwrap()
-        .catalog;
+    let catalog = fusiform_core::normalize_models_dev_v2_with(
+        BODY_WITH_MODEL,
+        &fusiform_core::ChargeUnitEvidence::none(),
+    )
+    .unwrap()
+    .catalog;
     let digest = fusiform_store::ingest::catalog_digest(&catalog);
     for (at, outcome) in [
         (2_000, ObservationOutcome::Changed { snapshot_seq: 0 }),

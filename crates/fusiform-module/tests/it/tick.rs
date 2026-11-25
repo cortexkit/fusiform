@@ -20,7 +20,9 @@ use fusiform_module::loop_::{apply, TickOutcome};
 use fusiform_module::signals::Signals;
 use fusiform_testkit::mutate;
 
-const FIXTURE: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
+// Convert fusiform-core/fixtures/models-dev-excerpt.json to the current poll shape
+// rather than use a newer snapshot, so the models, prices and limits stay fixed.
+const FIXTURE: &[u8] = include_bytes!("fixtures/models-dev-v2-excerpt.json");
 
 struct Fixture {
     store: Arc<CatalogStore>,
@@ -65,6 +67,13 @@ fn body_with_extra_model(priced: bool) -> Vec<u8> {
     serde_json::to_vec(&document).unwrap()
 }
 
+fn body_with_sonnet_input_price(price: u64) -> Vec<u8> {
+    let mut document: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
+    document["anthropic"]["models"]["claude-sonnet-4-5"]["cost"]["text"]["input"]["price"] =
+        serde_json::json!(price);
+    serde_json::to_vec(&document).unwrap()
+}
+
 fn run(f: &Fixture, outcome: FetchOutcome, at: i64) -> fusiform_module::loop_::TickReport {
     apply(&f.store, &f.signals, SourceId::ModelsDev, outcome, at).unwrap()
 }
@@ -73,14 +82,22 @@ fn run(f: &Fixture, outcome: FetchOutcome, at: i64) -> fusiform_module::loop_::T
 fn a_refused_schedule_keeps_its_eras_and_a_true_omission_withdraws_it() {
     use fusiform_store::FactKey;
     let f = fixture();
-    let good = br#"{"p":{"models":{"m":{"cost":{"input":1,"output":2,"tiers":[{"tier":{"type":"context","size":200000},"input":3}]}}}}}"#;
-    let refused = br#"{"p":{"models":{"m":{"cost":{"input":"unreadable","output":40}}}}}"#;
-    let omitted = br#"{"p":{"models":{"m":{}}}}"#;
+    let good = br#"{"p":{"models":{"m":{"type":"chat","capabilities":{},"api":{},"cost":{"text":{
+        "input":{"price":1,"overrides":[{"when":{"context":{"gt":200000}},"price":3}]},
+        "output":{"price":2}
+    }}}}}}"#;
+    let refused =
+        br#"{"p":{"models":{"m":{"type":"chat","capabilities":{},"api":{},"cost":{"text":{
+        "input":{"price":"unreadable"},"output":{"price":40}
+    }}}}}}"#;
+    let omitted = br#"{"p":{"models":{"m":{"type":"chat","capabilities":{},"api":{}}}}}"#;
     let histories = || {
         [
             FactKey::rate(fusiform_core::TokenClass::Input),
             FactKey::rate(fusiform_core::TokenClass::Output),
             FactKey::rate_above_context(fusiform_core::TokenClass::Input, 200_000),
+            // V2 projects the unchanged output price into the input override's context band.
+            FactKey::rate_above_context(fusiform_core::TokenClass::Output, 200_000),
         ]
         .map(|key| {
             f.store
@@ -106,7 +123,7 @@ fn a_refused_schedule_keeps_its_eras_and_a_true_omission_withdraws_it() {
         .unwrap();
 
     let missing = run(&f, body(omitted, None), 3_000);
-    assert_eq!(missing.eras_written, 3);
+    assert_eq!(missing.eras_written, 4);
     for (new, old) in histories().iter().zip(initial.iter()) {
         assert_eq!(new.len(), 2);
         assert_eq!(&new[0], &old[0]);
@@ -130,8 +147,9 @@ fn unreadable_facts_keep_their_boundaries_while_readable_siblings_land() {
     let document = |input, output, context, temperature, fast| {
         format!(
             r#"
-        {{"p":{{"models":{{"m":{{"limit":{{"context":{context},"output":{output}}},
-            "temperature":{temperature},"cost":{{"input":{input}}},
+        {{"p":{{"models":{{"m":{{"type":"chat","api":{{}},
+            "limit":{{"context":{context},"output":{output}}},
+            "capabilities":{{"temperature":{temperature}}},"cost":{{"text":{{"input":{{"price":{input}}}}}}},
             "experimental":{{"modes":{{"fast":{{"cost":{fast}}}}}}}
         }}}}}}}}
     "#
@@ -143,7 +161,8 @@ fn unreadable_facts_keep_their_boundaries_while_readable_siblings_land() {
             .unwrap()
     };
 
-    let first = document("1", 100, "200000", "true", r#"{"input":3}"#);
+    let fast_cost = r#"{"text":{"input":{"price":3}}}"#;
+    let first = document("1", 100, "200000", "true", fast_cost);
     run(&f, body(first.as_bytes(), None), 1_000);
     let rate = FactKey::rate(fusiform_core::TokenClass::Input);
     let mode = FactKey::rate_in_mode(fusiform_core::TokenClass::Input, "fast");
@@ -170,10 +189,10 @@ fn unreadable_facts_keep_their_boundaries_while_readable_siblings_land() {
     );
     assert_eq!(history(FactKey::limit("output"))[1].value_json, "200");
 
-    let same = document("1", 200, "200000", "true", r#"{"input":3}"#);
+    let same = document("1", 200, "200000", "true", fast_cost);
     assert_eq!(run(&f, body(same.as_bytes(), None), 3_000).eras_written, 0);
     assert_eq!(held.clone().map(&history), initial);
-    let changed = document("2", 200, "200000", "true", r#"{"input":3}"#);
+    let changed = document("2", 200, "200000", "true", fast_cost);
     assert_eq!(
         run(&f, body(changed.as_bytes(), None), 4_000).eras_written,
         1
@@ -205,14 +224,27 @@ async fn status_counts_normalization_findings_for_the_latest_parsed_body() {
         .await
         .get("normalization_findings")
         .is_none());
-    let bad = br#"{"p":{"models":{
-        "bad":{"cost":{"input":"1.25","output":"2.5"}},
-        "good":{"cost":{"input":1,"output":2,"input_audio":3}}
-    }}}"#;
-    let first = run(&f, body(bad, None), 1_000);
+    let document = |input, output, audio| {
+        format!(
+            r#"{{"p":{{"models":{{
+                "bad":{{"type":"chat","capabilities":{{}},"api":{{}},"cost":{{"text":{{
+                    "input":{{"price":{input}}},"output":{{"price":{output}}}
+                }}}}}},
+                "good":{{"type":"chat","capabilities":{{}},"api":{{}},"cost":{{
+                    "text":{{"input":{{"price":1}},"output":{{"price":2}}}}{audio}
+                }}}}
+            }}}}}}"#
+        )
+    };
+    let bad = document(
+        r#""1.25""#,
+        r#""2.5""#,
+        r#", "audio":{"input":{"unit":"token","price":3}}"#,
+    );
+    let first = run(&f, body(bad.as_bytes(), None), 1_000);
     assert!(matches!(first.outcome, TickOutcome::Changed { .. }));
     let expected = json!({"observation_id":first.observation_id,
-                         "counts":{"refused_base_schedule":2,"unattributable_charge_unit":1}});
+                          "counts":{"refused_price":2,"unattributable_charge_unit":1}});
     let first_status = status(&f, f.signals.clone()).await;
     assert!(first_status.get("failures").is_none());
     assert_eq!(
@@ -237,8 +269,8 @@ async fn status_counts_normalization_findings_for_the_latest_parsed_body() {
         .get("normalization_findings")
         .is_none());
 
-    let good = br#"{"p":{"models":{"bad":{"cost":{"input":1,"output":2}},"good":{"cost":{"input":1,"output":2}}}}}"#;
-    let last = run(&f, body(good, None), 3_000);
+    let good = document("1", "2", "");
+    let last = run(&f, body(good.as_bytes(), None), 3_000);
     assert_eq!(
         status(&f, f.signals.clone()).await["normalization_findings"],
         json!({"observation_id":last.observation_id,"counts":{}})
@@ -781,10 +813,8 @@ fn a_not_modified_response_is_an_observation() {
 
     // A subsequent change opens its window against the 304, not against the
     // earlier full fetch.
-    let mutated = String::from_utf8(FIXTURE.to_vec())
-        .unwrap()
-        .replace("\"input\": 3,", "\"input\": 4,");
-    let report = run(&f, body(mutated.as_bytes(), Some("\"v2\"")), 3_000);
+    let mutated = body_with_sonnet_input_price(4);
+    let report = run(&f, body(&mutated, Some("\"v2\"")), 3_000);
     assert!(matches!(report.outcome, TickOutcome::Changed { .. }));
 
     let row = f
@@ -833,10 +863,8 @@ fn a_failed_poll_records_the_attempt_and_nothing_more() {
         assert_eq!(report.eras_written, 0);
     }
 
-    let mutated = String::from_utf8(FIXTURE.to_vec())
-        .unwrap()
-        .replace("\"input\": 3,", "\"input\": 4,");
-    run(&f, body(mutated.as_bytes(), None), 4_000);
+    let mutated = body_with_sonnet_input_price(4);
+    run(&f, body(&mutated, None), 4_000);
 
     let row = f
         .store
@@ -925,17 +953,10 @@ fn the_version_advances_once_per_change() {
     run(&f, body(FIXTURE, None), 1_000);
     let mut previous = f.store.catalog_version().unwrap();
 
-    let text = String::from_utf8(FIXTURE.to_vec()).unwrap();
-    for (i, (from, to)) in [
-        ("\"input\": 3,", "\"input\": 4,"),
-        ("\"input\": 4,", "\"input\": 5,"),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let mutated = mutate(&text, from, to);
+    for (i, price) in [4, 5].into_iter().enumerate() {
+        let mutated = body_with_sonnet_input_price(price);
         let at = 2_000 + i as i64 * 1_000;
-        let report = run(&f, body(mutated.as_bytes(), None), at);
+        let report = run(&f, body(&mutated, None), at);
         assert!(
             matches!(report.outcome, TickOutcome::Changed { .. }),
             "round {i} should be a change"
@@ -972,18 +993,14 @@ fn rates_version_tracks_rate_polls_but_not_renames_or_grades() {
     run(&f, body(FIXTURE, None), 2_000);
     let before = status_versions(&f.store);
 
-    let mut changed: serde_json::Value = serde_json::from_slice(FIXTURE).unwrap();
-    changed["anthropic"]["models"]["claude-sonnet-4-5"]["cost"]["input"] = serde_json::json!(4);
-    let report = run(
-        &f,
-        body(&serde_json::to_vec(&changed).unwrap(), None),
-        3_000,
-    );
+    let repriced = body_with_sonnet_input_price(4);
+    let report = run(&f, body(&repriced, None), 3_000);
     assert_eq!(report.eras_written, 1);
     let after_rate = status_versions(&f.store);
     assert_eq!(after_rate, (3_000, 3_000));
     assert!(after_rate.0 > before.0 && after_rate.1 > before.1);
 
+    let mut changed: serde_json::Value = serde_json::from_slice(&repriced).unwrap();
     changed["anthropic"]["models"]["claude-sonnet-4-5"]["name"] =
         serde_json::json!("Renamed Sonnet");
     let report = run(
@@ -1096,6 +1113,14 @@ fn the_reported_failure_class_matches_the_stored_one() {
             "http_status",
         ),
         (body(b"{ not json", None), FailureClass::Parse, "parse"),
+        (
+            body(
+                include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json"),
+                None,
+            ),
+            FailureClass::Parse,
+            "parse",
+        ),
     ];
 
     for (i, (outcome, expected, stored_name)) in cases.into_iter().enumerate() {
@@ -1141,21 +1166,25 @@ fn the_reported_failure_class_matches_the_stored_one() {
 fn a_tick_reports_arrivals_and_changes_separately() {
     let f = fixture();
 
-    let doc = |models: &[(&str, &str, &str)]| {
-        let entries: Vec<String> = models
+    let doc = |models: &[(&str, &str, f64)]| {
+        let providers: serde_json::Map<String, serde_json::Value> = models
             .iter()
             .map(|(prov, id, rate)| {
-                format!(
-                    r#""{prov}":{{"id":"{prov}","name":"{prov}","models":{{"{id}":{{"id":"{id}","name":"{id}","cost":{{"input":{rate},"output":{rate}}}}}}}}}"#
+                (
+                    (*prov).to_owned(),
+                    serde_json::json!({"name": prov, "models": {*id: {
+                        "type": "chat", "name": id, "capabilities": {}, "api": {},
+                        "cost": {"text": {"input": {"price": rate}, "output": {"price": rate}}}
+                    }}}),
                 )
             })
             .collect();
-        format!("{{{}}}", entries.join(","))
+        serde_json::to_vec(&providers).unwrap()
     };
 
     // Seed: two models.
-    let first = doc(&[("anthropic", "sonnet", "3.0"), ("openai", "gpt5", "2.0")]);
-    let seeded = run(&f, body(first.as_bytes(), None), 1_000);
+    let first = doc(&[("anthropic", "sonnet", 3.0), ("openai", "gpt5", 2.0)]);
+    let seeded = run(&f, body(&first, None), 1_000);
     assert!(seeded.eras_written > 0, "the seed must write something");
 
     // Next poll: one rate moves on a known model, TWO models arrive, one goes.
@@ -1164,11 +1193,11 @@ fn a_tick_reports_arrivals_and_changes_separately() {
     // withdrawal, and a mutation swapping the two fields survived — the test
     // could not tell them apart. Two and one can.
     let second = doc(&[
-        ("anthropic", "sonnet", "4.0"),
-        ("mistral", "large", "1.0"),
-        ("google", "gemini", "5.0"),
+        ("anthropic", "sonnet", 4.0),
+        ("mistral", "large", 1.0),
+        ("google", "gemini", 5.0),
     ]);
-    let report = run(&f, body(second.as_bytes(), None), 2_000);
+    let report = run(&f, body(&second, None), 2_000);
 
     let c = report.composition;
     assert_eq!(c.models_arrived, 2, "mistral and google arrived: {c:?}");
@@ -1219,7 +1248,11 @@ fn the_raw_hash_distinguishes_the_documents_it_summarises() {
     // Two documents that differ in bytes. Whether they differ in FACTS is not
     // the question here — that is `normalized_hash`, the consumer half.
     let first = String::from_utf8(FIXTURE.to_vec()).expect("the fixture is utf8");
-    let second = mutate(&first, "\"attachment\": false", "\"attachment\":   false");
+    let second = mutate(
+        &first,
+        "\"name\": \"Claude Sonnet 4.5 (latest)\"",
+        "\"name\":   \"Claude Sonnet 4.5 (latest)\"",
+    );
 
     let r1 = run(&f, body(first.as_bytes(), Some("e1")), 1_000);
     let h1 = f
