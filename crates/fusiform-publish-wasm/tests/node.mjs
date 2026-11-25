@@ -85,6 +85,16 @@ test('publish domain refusals have no replacement index, hash or model count', (
   assertRefusal(publish_step(models, largeIndex, evidence, observedAt), 'implausible');
 });
 
+test('the v2 publisher refuses a models.dev v1 document without publishing', () => {
+  const v1 = bytes({ alpha: { id: 'alpha', models: { mini: {
+    id: 'mini', name: 'Mini', cost: { input: 1 }, modalities: { input: ['text'], output: ['text'] },
+  } } } });
+  const prior = index_from_snapshot(snapshot);
+  const original = prior.slice();
+  assertRefusal(publish_step(v1, prior, evidence, observedAt), 'parse');
+  assert.deepEqual(prior, original);
+});
+
 test('boundary errors throw JSON; a late change refusal leaves the input alone', () => {
   const prior = index_from_snapshot(snapshot);
   const original = prior.slice();
@@ -252,6 +262,14 @@ test('build and sign the live v2 release chain, history and snapshot for the Rus
   const { history, historySignature } = await signedHistory(sign, r2, baseFile, dayFile);
   const snapshot = Buffer.from(snapshot_bytes(changedModels, evidence, r2.env, curation,
     bytes(r2.signatures), bytes(history), bytes(historySignature), publicKey));
+  const r1History = [{ file: 'base.json', sha256: sha256(baseFile) }];
+  const r1HistorySignature = await sign(history_attestation_signing_bytes(bytes({
+    release: 1, state_hash: r1.body.state_hash, history: r1History,
+  })));
+  const previous = snapshot_bytes(models, evidence, r1.env, curation, bytes(r1.signatures),
+    bytes(r1History), bytes(r1HistorySignature), publicKey);
+  assert.deepEqual(Buffer.from(wasm.snapshot_bytes_from_previous(previous, r2.wire,
+    bytes(history), bytes(historySignature), publicKey)), snapshot);
   assert.deepEqual(Buffer.from(wasm.snapshot_bytes_from_state(snapshotState(snapshot), r2.env,
     bytes(r2.signatures), bytes(history), bytes(historySignature), publicKey)), snapshot);
   assert.equal(upstream_hash(index_from_snapshot(snapshot)), upstream_hash(after2));
@@ -268,6 +286,74 @@ test('build and sign the live v2 release chain, history and snapshot for the Rus
     base: baseFile.toString(),
     day: dayFile.toString(),
   }, 'chain');
+});
+
+test('snapshot replay keeps held values, applies set and remove ops, and verifies the chain', async () => {
+  const { sign, publicKey } = await testKey();
+  const first = JSON.parse(models);
+  first.zeta.models.mini.limit = { context: 1000, output: 10 };
+  first.zeta.models.mini.name = 'Original';
+  const raw1 = bytes(first);
+  const [genesis, after1] = publish_step(raw1, emptyIndex(), evidence, start - 2n);
+  const r1 = await signedRelease(sign, genesis, curation, Buffer.alloc(0), 1n, start - 1n, start - 2n);
+  const history = [{ file: 'base.json', sha256: sha256(releaseFixture('chain/base.json')) }];
+  const attest = (body) => sign(history_attestation_signing_bytes(bytes({
+    release: body.release, state_hash: body.state_hash, history,
+  })));
+  const previous = snapshot_bytes(raw1, evidence, r1.env, curation, bytes(r1.signatures),
+    bytes(history), bytes(await attest(r1.body)), publicKey);
+  assert.ok(JSON.parse(Buffer.from(previous)).state, Buffer.from(previous).toString());
+
+  first.zeta.models.mini.limit = { context: 'refused' };
+  first.zeta.models.mini.name = 'Renamed';
+  delete first.alpha.models['-'].cost;
+  const raw2 = bytes(first);
+  const [summary] = publish_step(raw2, after1, evidence, start - 1n);
+  const summaryBody = JSON.parse(Buffer.from(summary));
+  assert.equal(summaryBody.held_fact_count, 1);
+  assert.deepEqual(summaryBody.ops, [
+    { op: 'remove', provider: 'alpha', model: '-', fact: 'rate.input' },
+    { op: 'set', provider: 'zeta', model: 'mini', fact: 'limit.output', value: null },
+    { op: 'set', provider: 'zeta', model: 'mini', fact: 'model.name', value: 'Renamed' },
+  ]);
+  const r2 = await signedRelease(sign, summary, curation, r1.env, 2n, start, start - 1n);
+  const nextCuration = Buffer.from(curation.toString().replace('"version":1', '"version":2'));
+  const r3Summary = bytes({ base_upstream_hash: r2.body.upstream_hash, upstream_hash: r2.body.upstream_hash, ops: [] });
+  const r3 = await signedRelease(sign, r3Summary, nextCuration, r2.env, 3n, start + 86400000n, start - 1n);
+  const nextHistorySignature = bytes(await attest(r3.body));
+  const build = (base, lines, historySignature = nextHistorySignature) =>
+    Buffer.from(wasm.snapshot_bytes_from_previous(base, lines, bytes(history), historySignature, publicKey));
+  const lines = Buffer.concat([r2.wire, Buffer.from('\n'), r3.wire, Buffer.from('\n')]);
+
+  // Use the previous state and independently apply the expected changes.
+  const state = JSON.parse(snapshotState(Buffer.from(previous)), (_key, value, context) =>
+    typeof value === 'number' ? JSON.rawJSON(context.source) : value);
+  state.curation_set.version = 2;
+  delete state.upstream.alpha.models['-']['rate.input'];
+  const mini = state.upstream.zeta.models.mini;
+  mini['limit.output'] = null;
+  mini['model.name'] = 'Renamed';
+  const expected = Buffer.from(wasm.snapshot_bytes_from_state(bytes(state), r3.env,
+    bytes(r3.signatures), bytes(history), nextHistorySignature, publicKey));
+  assert.ok(JSON.parse(expected).state, expected.toString());
+  assert.equal(JSON.parse(expected).state.upstream.zeta.models.mini['limit.context'], 1000);
+  assert.deepEqual(build(previous, lines), expected);
+
+  const refusal = (wire) => JSON.parse(Buffer.from(wire)).refusal.class;
+  assert.equal(refusal(snapshot_bytes(raw2, evidence, r2.env, curation, bytes(r2.signatures),
+    bytes(history), bytes(await attest(r2.body)), publicKey)), 'snapshot_hash_mismatch');
+  assert.equal(refusal(build(previous, r3.wire)), 'invalid_parent');
+  assert.equal(refusal(build(previous, Buffer.alloc(0))), 'empty_release_range');
+  assert.equal(refusal(build(previous, lines, bytes(r3.signatures))), 'invalid_history_signature');
+  assert.equal(refusal(build(previous, Buffer.from(lines.toString().replace('Renamed', 'Corrupted')))), 'change_hash_mismatch');
+  assert.equal(refusal(build(previous, Buffer.from(lines.toString().replace(r3.signatures.sig, r2.signatures.sig)))), 'invalid_release_signature');
+  const tamperedBase = Buffer.from(Buffer.from(previous).toString().replace('"limit.context":1000', '"limit.context":1001'));
+  assert.equal(refusal(build(tamperedBase, lines)), 'snapshot_hash_mismatch');
+  const mismatching = { ...r2.body, upstream_hash: r1.body.upstream_hash, state_hash: r1.body.state_hash };
+  const mismatchingWire = Buffer.from(r2.wire.toString().replace(r2.body.upstream_hash, mismatching.upstream_hash)
+    .replace(r2.body.state_hash, mismatching.state_hash)
+    .replace(r2.signatures.sig, (await sign(envelope_signing_bytes(bytes(mismatching)))).sig));
+  assert.equal(refusal(build(previous, mismatchingWire, bytes(await attest(mismatching)))), 'snapshot_hash_mismatch');
 });
 
 test('snapshot from state streams the signed upstream and rejects tampering', async () => {

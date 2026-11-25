@@ -14,6 +14,7 @@ use serde_json::{json, value::RawValue};
 
 #[cfg(target_arch = "wasm32")]
 mod artifacts;
+mod snapshot_replay;
 #[cfg(target_arch = "wasm32")]
 mod web;
 

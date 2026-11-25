@@ -31,6 +31,7 @@ Release numbers and millisecond timestamps passed as arguments are `bigint`.
 | `build_release` | `summary`, raw curation set, parent envelope (zero bytes for release 1), release number, publication time in ms, upstream observation time in ms | Canonical unsigned `{envelope, change}` or an in-band refusal |
 | `snapshot_bytes` | models.dev, audio evidence, envelope, raw curation set, release signatures, history file list, history signatures, pinned release public key | Canonical signed snapshot or an in-band refusal |
 | `snapshot_bytes_from_state` | Full `state.json`, envelope, release signatures, history file list, history signatures, pinned release public key | Canonical signed snapshot from an imported state or an in-band refusal |
+| `snapshot_bytes_from_previous` | Previous signed snapshot, signed releases as JSON Lines, history file list, history signatures, pinned release public key | Canonical signed snapshot at the last supplied release, or an in-band refusal |
 | `history_day_bytes` | UTC day as UTF-8 `YYYY-MM-DD`, then signed release objects as JSON Lines | Canonical `{day, releases}` with signatures retained, or an in-band refusal |
 | `canonical_json` | Any JSON value | Canonical bytes with curation number spellings preserved |
 | `index_from_snapshot` | Complete `snapshot.json` | Opaque index. Reads `state.upstream` one value at a time and checks the envelope's upstream hash; does not verify signatures or curation. |
@@ -48,12 +49,11 @@ An unreadable claim is reported in `findings` and is not a withdrawal.
 `held_fact_count` counts facts whose new upstream value could not be read
 (for example a malformed number or an unsupported price condition): the
 previous fact hash is kept in the index, and no op is emitted for it.
-Once any fact is held, build daily snapshots with `snapshot_bytes_from_state`
-from verified materialized release state, not with `snapshot_bytes` from raw
-models.dev bytes. The original value is not in the new document; the incremental
-index retains only its hash. `snapshot_bytes` checks the reconstructed state
-against the signed envelope and refuses on mismatch. Recovery from a verified
-snapshot and changes does not reparse models.dev.
+Build daily snapshots with `snapshot_bytes_from_previous`. A held value is in
+the previous snapshot or a signed release, not in the new upstream document;
+the incremental index retains only its hash. `snapshot_bytes` checks the
+reconstructed state against the signed envelope and refuses on mismatch.
+Use `snapshot_bytes_from_state` for the release 1 import.
 `base_upstream_hash` identifies the index the diff used; `upstream_hash`
 identifies the resulting index.
 `build_release` refuses a summary whose base does not match the parent
@@ -64,6 +64,10 @@ Each conflict identifies `provider`, `model`,
 A refusal has just `ops: []`, `conflicts: []` and `refusal: {class, detail}`;
 its classes are `empty_index`, `parse`, and `implausible`. Keep the previous
 index on refusal. A zero-length index is not a bootstrap operation.
+
+Switch the source to `https://models.dev/experimental/v2.0/api.json` at the
+same time as deploying the v2 WASM. A v1 catalog is refused without publishing:
+the publisher returns a parse refusal and no replacement index.
 
 `publish_step` selects date-conditioned prices at `upstream_observed_at_ms`.
 Pass the same timestamp to `build_release` so it is recorded in the release
@@ -153,6 +157,26 @@ document is `{kid, public_key}`, where `public_key` is the raw 32-byte Ed25519
 key encoded in unpadded base64url. The snapshot builder verifies both
 signatures, verifies upstream and curation against the envelope, and places
 the ordered list only in `history_attestation.body.history`.
+
+For a subsequent checkpoint, pass consecutive signed release bodies from
+`previous.envelope.release + 1` through `head.release`, inclusive, as JSON
+Lines (one body per line, not a JSON array or a history day wrapper). The
+range can span multiple UTC days. Compute and sign the history attestation
+for the final release with `history_attestation_signing_bytes`, then call:
+
+```js
+const snapshot = snapshot_bytes_from_previous(previousSnapshotBytes, releasesJsonlBytes,
+  historyFilesBytes, historySignaturesBytes, pinnedReleasePublicKeyBytes);
+```
+
+The final JSONL release carries its release signature; the caller supplies
+the history signature separately. The export signs nothing. It verifies the
+base snapshot's signed state, then reads one release at a time, verifying
+the signature, change hash and parent. It
+applies set and remove operations; a held fact has no operation and keeps
+its prior value. It checks the resulting state and the supplied history
+attestation against the final envelope. If the head is already checkpointed,
+there is nothing to build. On refusal, leave the previous checkpoint in place.
 
 For recovery, the host owns checking the snapshot signatures and curation,
 replaying verified changes up to the current head, and comparing the recovered
