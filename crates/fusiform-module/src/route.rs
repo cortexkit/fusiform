@@ -992,7 +992,7 @@ fn serve_catalog_get_snapshot(
     let published;
     let owned_tables;
     let tables = if let Some(page) = page {
-        page.tables
+        page.inputs.tables
     } else {
         published = crate::curation::PublishedCuration::load(store, request.at_ms)
             .map_err(RouteError::unavailable)?;
@@ -1004,6 +1004,8 @@ fn serve_catalog_get_snapshot(
     };
     let range = page.map(|page| page.range);
     let plane = select_billing_plane(&request, tables.billing_planes)?;
+    // Refusal size describes the served projection, not the support facts fetched below.
+    let whole_key = WholeCatalogKey::new(store, &request, source, frame_limit)?;
     let requested_prefixes = request.fact_prefixes.clone();
     request.fact_prefixes = request.fact_prefixes.as_ref().map(|prefixes| {
         let mut wide = prefixes.clone();
@@ -1018,19 +1020,10 @@ fn serve_catalog_get_snapshot(
             wide.push("existence".to_string());
         }
         let selects_effort = prefixes.iter().any(|p| curate::selects_effort_facts(p));
-        let selects_chat_score = prefixes
-            .iter()
-            .any(|p| "quality.elo".starts_with(p) || "quality.eq".starts_with(p));
-        let selects_judgment = selects_effort
-            || selects_chat_score
-            || prefixes.iter().any(|p| {
-                "quality.decommissioned".starts_with(p)
-                    || "quality.grade.".starts_with(p)
-                    || p.starts_with("quality.grade.")
-            });
+        let selects_chat_score = prefixes.iter().any(|p| selects_chat_score(p));
         // All judgments join on the served canonical key. Keep the supporting
         // facts until the join, including when replaying a dated judgment.
-        if selects_judgment {
+        if selects_judgments(prefixes) {
             wide.extend(["model.canonical_id", "existence"].map(str::to_owned));
         }
         if selects_effort {
@@ -1148,8 +1141,6 @@ fn serve_catalog_get_snapshot(
         _ => None,
     };
     let prepared = prepared.or(owned.as_ref());
-
-    let whole_key = WholeCatalogKey::new(store, &request, source, frame_limit)?;
 
     // Checked ONCE, before the branch, so both read paths inherit it.
     // Keep this ahead of cache lookup: the first observation can establish a
@@ -1315,6 +1306,7 @@ fn serve_catalog_get_snapshot(
                 at,
                 prepared,
                 tables,
+                None,
             );
         }
     }
@@ -1492,6 +1484,7 @@ fn serve_catalog_get_snapshot(
         at,
         prepared,
         tables,
+        page.map(|page| page.inputs.judgments),
     )?;
     // Observed plane rows keep their envelope when billing rules remove all
     // selected rates. Curated rows and plain bulk rows require a selected fact.
@@ -1653,8 +1646,11 @@ fn page_catalog(
     response.next_page_token = None;
     let mut sized = Vec::with_capacity(providers.len());
     let mut token_reserve = 0;
+    // A whole response supplies only the catalog-wide disclosure; the range
+    // renderer measures each provider's own timestamp before packing.
+    let quality = QualityContribution::measure(response.quality_scores.as_ref())?;
     for (provider, rows) in providers {
-        let contribution = rows.contribution()?;
+        let contribution = rows.contribution(quality)?;
         let token = format!(
             "v1:{}:{}:{}",
             response.catalog_version, response.resolved_at_ms, provider
@@ -1666,11 +1662,10 @@ fn page_catalog(
     // Reserve the largest encoded token before packing. Replacing that reserve
     // with each boundary's actual token cost preserves exact greedy boundaries,
     // including the final page, which needs no token at all.
-    let pending_quality_bytes = quality_disclosure_size(response.quality_scores.as_ref())?;
     let mut estimate = PageEstimate {
-        bytes: compact_size(&response)? - pending_quality_bytes + token_reserve,
+        bytes: compact_size(&response)? - quality.map_or(0, |q| q.bytes) + token_reserve,
         present: [false; 12],
-        pending_quality_bytes,
+        quality: None,
     };
     let mut count = 0;
     for (index, (_, _, contribution, _, token_bytes)) in sized.iter().enumerate() {
@@ -1778,23 +1773,50 @@ const DISCLOSURE_HEADERS: [&str; 11] = [
 struct ProviderContribution {
     bytes: usize,
     present: [bool; 12],
-    has_quality: bool,
+    quality: Option<QualityContribution>,
+}
+
+#[derive(Clone, Copy)]
+struct QualityContribution {
+    graded_at_ms: i64,
+    bytes: usize,
+}
+
+impl QualityContribution {
+    fn measure(
+        quality: Option<&fusiform_protocol::QualityScoresWire>,
+    ) -> Result<Option<Self>, RouteError> {
+        quality
+            .map(|quality| {
+                Ok(Self {
+                    graded_at_ms: quality.graded_at_ms,
+                    bytes: compact_size(quality)? + r#","quality_scores":"#.len(),
+                })
+            })
+            .transpose()
+    }
 }
 
 #[derive(Clone, Copy)]
 struct PageEstimate {
     bytes: usize,
     present: [bool; 12],
-    pending_quality_bytes: usize,
+    quality: Option<QualityContribution>,
 }
 
 impl PageEstimate {
     fn with_provider(mut self, provider: &ProviderContribution) -> Result<Self, RouteError> {
         let mut added = provider.bytes;
-        // Quality attribution is page-local. Charge its envelope once, when
-        // the first provider with a graded fact is actually included.
-        if provider.has_quality {
-            added += std::mem::take(&mut self.pending_quality_bytes);
+        // The page has one disclosure, from the newest judgment it serves.
+        if let Some(quality) = provider.quality {
+            if self
+                .quality
+                .is_none_or(|prior| quality.graded_at_ms > prior.graded_at_ms)
+            {
+                self.bytes -= self.quality.map_or(0, |prior| prior.bytes);
+                self.quality = Some(quality);
+                added += quality.bytes;
+            }
         }
         for (index, present) in provider.present.iter().enumerate() {
             if *present {
@@ -1817,7 +1839,10 @@ impl PageEstimate {
 }
 
 impl ProviderRows {
-    fn contribution(&self) -> Result<ProviderContribution, RouteError> {
+    fn contribution(
+        &self,
+        quality: Option<QualityContribution>,
+    ) -> Result<ProviderContribution, RouteError> {
         let present = [
             !self.models.is_empty(),
             !self.curated.is_empty(),
@@ -1840,16 +1865,14 @@ impl ProviderRows {
         // This serializes each provider's map entries and disclosure rows once,
         // including escaped keys, values, and separators within each collection.
         let bytes = compact_size(self)? - r#"{"models":{}}"#.len() - headers;
-        let has_quality = self.models.values().any(|facts| {
-            facts.contains_key("quality.elo")
-                || facts.contains_key("quality.eq")
-                || facts.keys().any(|key| key.starts_with("quality.grade."))
-                || facts.keys().any(|key| curate::is_effort_fact(key))
-        });
         Ok(ProviderContribution {
             bytes,
             present,
-            has_quality,
+            quality: quality.filter(|_| {
+                self.models
+                    .values()
+                    .any(curate::counts_for_quality_disclosure)
+            }),
         })
     }
 
@@ -1888,15 +1911,6 @@ fn compact_size<T: serde::Serialize>(value: &T) -> Result<usize, RouteError> {
     let mut count = CountBytes(0);
     serde_json::to_writer(&mut count, value).map_err(|e| RouteError::unavailable(e.to_string()))?;
     Ok(count.0)
-}
-
-fn quality_disclosure_size(
-    quality: Option<&fusiform_protocol::QualityScoresWire>,
-) -> Result<usize, RouteError> {
-    match quality {
-        Some(quality) => Ok(compact_size(quality)? + r#","quality_scores":"#.len()),
-        None => Ok(0),
-    }
 }
 
 fn partition_providers(response: &mut CatalogGetResponse) -> BTreeMap<String, ProviderRows> {
@@ -2040,6 +2054,43 @@ fn select_billing_plane<'a>(
     }))
 }
 
+fn selects_chat_score(prefix: &str) -> bool {
+    "quality.elo".starts_with(prefix) || "quality.eq".starts_with(prefix)
+}
+
+fn selects_judgments(prefixes: &[String]) -> bool {
+    prefixes.iter().any(|p| {
+        selects_chat_score(p)
+            || "quality.decommissioned".starts_with(p)
+            || curate::selects_effort_facts(p)
+    }) || curate::TaskGradeRequirement::required_facts_for_prefixes(prefixes)
+        .next()
+        .is_some()
+}
+
+#[derive(Default)]
+struct CatalogJudgments {
+    published: curate::Quality,
+    local: fusiform_store::LocalOverrides,
+}
+
+impl CatalogJudgments {
+    fn load(
+        store: &CatalogStore,
+        at: Option<i64>,
+        prefixes: Option<&[String]>,
+    ) -> Result<Self, RouteError> {
+        // Judgments and their disclosures are served only with selected judgment facts.
+        if prefixes.is_some_and(|p| !selects_judgments(p)) {
+            return Ok(Self::default());
+        }
+        Ok(Self {
+            published: read_quality_at(store, at)?,
+            local: read_local_overrides_at(store, at)?,
+        })
+    }
+}
+
 /// Gather the additional reads needed by the selected view. The transformations
 /// stay in the curation crate; historically resolved rules are passed as data.
 #[allow(clippy::too_many_arguments)]
@@ -2052,6 +2103,7 @@ fn finish_plane_view(
     at: Option<Timestamp>,
     prepared: Option<&dated_model::DatedModel>,
     tables: &curate::CurationSet<'_>,
+    judgments: Option<&CatalogJudgments>,
 ) -> Result<CatalogGetResponse, RouteError> {
     let historical_rules = at
         .map(|at| match prepared {
@@ -2062,21 +2114,25 @@ fn finish_plane_view(
         .map_err(|e| store_error(&e))?;
     let lifetimes = historical_rules.as_ref().unwrap_or(tables.cache_lifetimes);
     let current = at.is_none().then_some(tables);
-    let published_quality = if at.is_none() {
-        read_quality(store)?
+    let owned_judgments;
+    let judgments = if let Some(judgments) = judgments {
+        judgments
     } else {
-        read_quality_at(store, at.map(|time| time.0))?
+        owned_judgments = CatalogJudgments::load(
+            store,
+            at.map(|time| time.0),
+            requested_prefixes.map(Vec::as_slice),
+        )?;
+        &owned_judgments
     };
-    let local = store
-        .local_overrides_at(at.map(|time| time.0))
-        .map_err(|e| store_error(&e))?;
-    let (quality, metadata) = local_overrides::overlay(&published_quality, &local);
+    let published_quality = &judgments.published;
+    let (quality, metadata) = local_overrides::overlay(published_quality, &judgments.local);
     if metadata.is_empty() {
         curate::derive_row_facts(
             &mut response,
             current,
             lifetimes,
-            &published_quality,
+            published_quality,
             requested_prefixes,
         );
     } else {
@@ -2085,7 +2141,7 @@ fn finish_plane_view(
             &mut published,
             current,
             lifetimes,
-            &published_quality,
+            published_quality,
             requested_prefixes,
         );
         curate::derive_row_facts(
@@ -2169,11 +2225,18 @@ fn finish_plane_view(
     Ok(response)
 }
 
-fn read_quality(store: &CatalogStore) -> Result<curate::Quality, RouteError> {
-    read_quality_at(store, None)
+fn read_local_overrides_at(
+    store: &CatalogStore,
+    at: Option<i64>,
+) -> Result<fusiform_store::LocalOverrides, RouteError> {
+    #[cfg(test)]
+    paging_tests::LOCAL_OVERRIDE_READS.with(|count| count.set(count.get() + 1));
+    store.local_overrides_at(at).map_err(|e| store_error(&e))
 }
 
 fn read_quality_at(store: &CatalogStore, at: Option<i64>) -> Result<curate::Quality, RouteError> {
+    #[cfg(test)]
+    paging_tests::PUBLISHED_QUALITY_READS.with(|count| count.set(count.get() + 1));
     let grades = match at {
         Some(at) => store.quality_grades_at(at),
         None => store.quality_grades(),

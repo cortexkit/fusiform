@@ -195,20 +195,13 @@ pub(super) fn grades(
     if request.model.is_some() && request.prefix.is_some() {
         return Err(RouteError::bad_request("model and prefix are exclusive"));
     }
-    let rows = if let Some(model) = request.model {
-        let mut history = store
-            .quality_grade_history(&model)
-            .map_err(|e| store_error(&e))?;
-        if history.is_empty() {
-            return Err(RouteError {
-                code: "no_coverage",
-                message: format!("no quality grade history for {model:?}"),
-            });
-        }
-        history.reverse();
-        history
+    let read = || grade_rows(store, request.model.as_deref());
+    let rows = if store.is_store_mode() {
+        store
+            .with_read_snapshot(read)
+            .map_err(|e| store_error(&e))??
     } else {
-        store.quality_grades().map_err(|e| store_error(&e))?
+        read()?
     };
     Ok(QualityGradesResponse {
         grades: rows
@@ -222,6 +215,49 @@ pub(super) fn grades(
             .map(wire)
             .collect(),
     })
+}
+
+fn grade_rows(
+    store: &CatalogStore,
+    model: Option<&str>,
+) -> Result<Vec<QualityGradeEra>, RouteError> {
+    if let Some(model) = model {
+        let mut history = store
+            .quality_grade_history(model)
+            .map_err(|e| store_error(&e))?;
+        if store.is_store_mode() {
+            history.extend(
+                store
+                    .local_quality_grade_history(model)
+                    .map_err(|e| store_error(&e))?,
+            );
+        }
+        if history.is_empty() {
+            return Err(RouteError {
+                code: "no_coverage",
+                message: format!("no quality grade history for {model:?}"),
+            });
+        }
+        history.reverse();
+        if store.is_store_mode() {
+            // IDs are only ordered within one table. Break timestamp ties by
+            // keeping the newest insertion first, with local rows before published rows.
+            history.sort_by_key(|row| std::cmp::Reverse(row.recorded_at_ms));
+        }
+        return Ok(history);
+    }
+
+    let published = store.quality_grades().map_err(|e| store_error(&e))?;
+    if !store.is_store_mode() {
+        return Ok(published);
+    }
+    let local = store.local_quality_grades().map_err(|e| store_error(&e))?;
+    let by_key: std::collections::BTreeMap<_, _> = published
+        .into_iter()
+        .chain(local)
+        .map(|row| ((row.model.clone(), row.kind.clone()), row))
+        .collect();
+    Ok(by_key.into_values().collect())
 }
 
 pub(super) fn grade(store: &CatalogStore, body: &[u8]) -> Result<QualityWriteResponse, RouteError> {

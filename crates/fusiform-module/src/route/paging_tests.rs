@@ -106,6 +106,88 @@ fn get(store: &CatalogStore, args: Value, budget: usize) -> CatalogGetResponse {
     serve_catalog_get_with_budget(store, &serde_json::to_vec(&args).unwrap(), budget).unwrap()
 }
 
+thread_local! {
+    pub(super) static PUBLISHED_QUALITY_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(super) static LOCAL_OVERRIDE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[test]
+fn cold_and_warm_pages_only_load_selected_judgments_once() {
+    let (store, _dir) = fixture();
+    store
+        .append_quality_grade(
+            "p00/m",
+            None,
+            Some(&fusiform_store::QualityGrade::Chat {
+                elo: 1.into(),
+                eq: 2.into(),
+            }),
+            "operator",
+            "fixture",
+            9000,
+        )
+        .unwrap();
+    let read = |prefixes: &[&str], paged| {
+        PUBLISHED_QUALITY_READS.with(|count| count.set(0));
+        LOCAL_OVERRIDE_READS.with(|count| count.set(0));
+        let result = get(
+            &store,
+            json!({"at_ms": 9999, "fact_prefixes": prefixes, "paged": paged}),
+            usize::MAX,
+        );
+        assert!(!result.models.is_empty());
+        let want_quality = prefixes.contains(&"quality.elo");
+        assert_eq!(
+            result.quality_scores.map(|scores| scores.graded_at_ms),
+            want_quality.then_some(9000)
+        );
+        (
+            PUBLISHED_QUALITY_READS.with(std::cell::Cell::get),
+            LOCAL_OVERRIDE_READS.with(std::cell::Cell::get),
+        )
+    };
+    let counts = |prefixes: &[&str]| {
+        let whole = read(prefixes, false);
+        let cold = read(prefixes, true);
+        let warm = read(prefixes, true);
+        println!("{prefixes:?} (published, local override) loads: whole={whole:?}, cold={cold:?}, warm={warm:?}");
+        [whole, cold, warm]
+    };
+    let family = counts(&["model.family"]);
+    let with_quality = counts(&["model.family", "quality.elo"]);
+    assert_eq!(family, [(0, 0); 3]);
+    assert_eq!(with_quality, [(1, 1); 3]);
+}
+
+#[test]
+fn disjoint_fact_filters_omit_retired_only_rows_from_bulk_and_pages() {
+    let (store, _dir) = fixture();
+    let provider = "google";
+    let model = "antigravity-claude-sonnet-4-6-thinking";
+    let id = format!("{provider}/{model}");
+    let baseline = get(
+        &store,
+        json!({"provider_id": provider, "include_retired": true, "fact_prefixes": ["existence"]}),
+        usize::MAX,
+    );
+    assert_eq!(baseline.models[&id]["existence"], "absent");
+
+    let mut args = json!({"include_retired": true, "fact_prefixes": ["fixture.unmatched."]});
+    for paged in [false, true] {
+        args["paged"] = paged.into();
+        let result = get(&store, args.clone(), usize::MAX);
+        assert!(
+            !result.models.contains_key(&id),
+            "empty retirement in paged={paged}"
+        );
+    }
+
+    args["paged"] = false.into();
+    args["provider_id"] = provider.into();
+    args["model_id"] = model.into();
+    assert!(get(&store, args, usize::MAX).models[&id].is_empty());
+}
+
 #[test]
 fn pages_cover_whole_providers_in_order_and_scope_disclosures() {
     let (store, _dir) = fixture();
@@ -502,6 +584,26 @@ fn fitting_catalogs_and_other_read_forms_are_never_cached_as_refusals() {
     assert!(cached_get(&store, &cache, json!({"paged":true}), 1).is_ok());
     let invalid = cached_get(&store, &cache, json!({"auth_method":"apikey"}), 1).unwrap_err();
     assert_eq!(invalid.message, "auth_method requires provider_id");
+}
+
+#[test]
+fn oversized_refusals_do_not_cross_requested_projections() {
+    let (store, _dir) = fixture();
+    let cache = Mutex::new(None);
+    let narrow = json!({"fact_prefixes": ["quality.elo"]});
+    let wide =
+        json!({"fact_prefixes": ["quality.elo", "model.canonical_id", "model.type", "existence"]});
+    let read = |args, limit| cached_get(&store, &cache, args, limit);
+    let limit = compact_size(&read(narrow.clone(), usize::MAX).unwrap()).unwrap();
+    assert!(compact_size(&read(wide.clone(), usize::MAX).unwrap()).unwrap() > limit);
+    assert!(read(narrow.clone(), limit).is_ok(), "narrow control");
+    let error = read(wide, limit).unwrap_err();
+    assert_eq!(error.code, "bad_request");
+    assert!(error.message.contains("reply limit"));
+    assert!(
+        read(narrow, limit).is_ok(),
+        "the small response must still fit after the broad projection exceeds the limit"
+    );
 }
 
 #[test]

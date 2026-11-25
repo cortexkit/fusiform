@@ -350,7 +350,9 @@ pub fn apply_retired_id(
             facts.insert("successor".to_string(), serde_json::json!(successor));
         }
         narrow_to_requested(&mut facts, prefixes);
-        response.models.insert(id, facts);
+        if named || !facts.is_empty() {
+            response.models.insert(id, facts);
+        }
     } else if named {
         response.retired.push(fusiform_protocol::RetiredModelWire {
             model: id,

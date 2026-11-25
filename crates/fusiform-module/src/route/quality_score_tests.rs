@@ -136,7 +136,11 @@ fn assert_workload_minimum_serving(store_mode: bool) {
         .unwrap();
 
     let minimum = "workload.code.effort_minimum";
-    for args in [json!({}), json!({"at_ms":2200})] {
+    for args in [
+        json!({}),
+        json!({"at_ms": 2200}),
+        json!({"at_ms": 2200, "paged": true, "fact_prefixes": ["existence", minimum]}),
+    ] {
         let reply = get(&store, args);
         let reseller = &reply.models["reseller/shared"];
         let google = &reply.models["google/gemini-4-argon"];
@@ -739,6 +743,72 @@ fn quality_grades_lists_current_or_newest_first_history_and_response_dates() {
     );
 }
 
+#[test]
+fn store_mode_grade_refresh_and_history_follow_local_writes() {
+    let (store, dir) = fixture_in_mode(false, true);
+    let db = rusqlite::Connection::open(dir.path().join("quality.db")).unwrap();
+    let model = "local:fixture/stt";
+    let call = |name, arguments| {
+        serve_tool_call(
+            &store,
+            &serde_json::to_vec(&json!({"name": name, "arguments": arguments})).unwrap(),
+        )
+        .unwrap()
+    };
+    let list = |args| {
+        let ToolResponse::QualityGrades(response) = call("quality.grades", args) else {
+            panic!("expected grades response");
+        };
+        response.grades
+    };
+    let refresh = || list(json!({"prefix": "local:"}));
+    let history = || list(json!({"model": model}));
+    let ToolResponse::QualityWrite(write) = call(
+        "quality.grade",
+        json!({"model": model, "kind": "transcription", "grade": 42,
+               "reason": "local fixture", "dry_run": false}),
+    ) else {
+        panic!("expected write response");
+    };
+    assert!(!write.dry_run);
+    assert_eq!(store.local_overrides_at(None).unwrap().grades.len(), 1);
+    let rows = refresh();
+    assert_eq!(rows.len(), 1, "committed active grade missing from refresh");
+    assert_eq!(rows[0], write.new);
+    assert_eq!(history(), vec![write.new.clone()]);
+
+    // Add published grades for the same key and for a different kind. Only
+    // the matching kind should be shadowed by the local grade.
+    for (kind, grade) in [("transcription", "21"), ("speech", "23")] {
+        db.execute(
+            "INSERT INTO quality_grade_era (model, kind, grade, withdrawn, graded_by, reason, recorded_at_ms) \
+             VALUES (?1, ?2, ?3, 0, 'operator', 'published fixture', 1000)",
+            rusqlite::params![model, kind, grade],
+        )
+        .unwrap();
+    }
+    let rows = refresh();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].grade, Some(23.into()));
+    assert_eq!(rows[1], write.new);
+    assert!(list(json!({"prefix": "local:other/"})).is_empty());
+    let ToolResponse::QualityWrite(withdraw) = call(
+        "quality.withdraw",
+        json!({"model": model, "kind": "transcription", "reason": "withdraw fixture",
+               "dry_run": false}),
+    ) else {
+        panic!("expected withdrawal response");
+    };
+    assert!(withdraw.new.withdrawn);
+    let rows = refresh();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1].grade, Some(21.into()));
+    let rows = history();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[..2], [withdraw.new, write.new]);
+    assert!(rows[2..].iter().all(|row| row.graded_by == "operator"));
+}
+
 const GRADES: &str = r#"{"graded_by":"operator","graded_at_ms":123,"purpose":"routing","rows":[
     {"model":"lab/shared","elo":1284,"eq":1599.8},
     {"model":"reseller/own","elo":1000.00,"eq":900.00},
@@ -1154,16 +1224,21 @@ fn quality_scores_page_estimate_charges_each_task_disclosure_once() {
             )]),
             ..Default::default()
         };
-        let contribution = rows.contribution().unwrap();
+        let disclosure = QualityContribution {
+            graded_at_ms: -100,
+            bytes: 73,
+        };
+        let contribution = rows.contribution(Some(disclosure)).unwrap();
         let estimate = PageEstimate {
             bytes: 0,
             present: [false; 12],
-            pending_quality_bytes: 73,
+            quality: None,
         }
         .with_provider(&contribution)
         .unwrap();
         assert_eq!(
-            estimate.pending_quality_bytes, 0,
+            estimate.quality.unwrap().graded_at_ms,
+            disclosure.graded_at_ms,
             "{kind} must charge attribution"
         );
         assert_eq!(estimate.bytes, contribution.bytes + 73);
@@ -1172,6 +1247,20 @@ fn quality_scores_page_estimate_charges_each_task_disclosure_once() {
             twice.bytes,
             contribution.bytes * 2 + 74,
             "the second provider adds its separator, not a second attribution"
+        );
+
+        let newer = rows
+            .contribution(Some(QualityContribution {
+                graded_at_ms: 1,
+                bytes: 70,
+            }))
+            .unwrap();
+        let twice_with_newer = estimate.with_provider(&newer).unwrap();
+        assert_eq!(twice_with_newer.quality.unwrap().graded_at_ms, 1);
+        assert_eq!(
+            twice_with_newer.bytes,
+            contribution.bytes * 2 + 71,
+            "replace the older disclosure even when the newer timestamp is shorter"
         );
     }
 }
