@@ -114,16 +114,17 @@ pub fn decimal_str_to_minor_units(s: &str, exponent: u8) -> Result<i64, MoneyErr
 
     // value × 10^(exp - frac_len) currency units
     //   → minor = value × 10^(exponent + exp - frac_len)
-    let shift = i32::from(exponent) + exp - frac_part.len() as i32;
+    let shift = i128::from(exponent) + i128::from(exp) - frac_part.len() as i128;
+    // 10^38 is the largest power of ten representable in i128.
+    let power = shift.unsigned_abs();
+    if power > 38 {
+        return Err(err());
+    }
+    let factor = 10i128.pow(power as u32);
     let scaled: i128 = if shift >= 0 {
-        let factor = 10i128
-            .checked_pow(u32::try_from(shift).map_err(|_| err())?)
-            .ok_or_else(err)?;
         value.checked_mul(factor).ok_or_else(err)?
     } else {
-        let divisor = 10i128
-            .checked_pow(u32::try_from(-shift).map_err(|_| err())?)
-            .ok_or_else(err)?;
+        let divisor = factor;
         let quotient = value / divisor;
         let remainder = value % divisor;
         // Compare the remainder against HALF the divisor rather than doubling

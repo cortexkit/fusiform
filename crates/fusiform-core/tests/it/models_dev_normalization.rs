@@ -18,6 +18,23 @@ use fusiform_testkit::mutate;
 
 const FIXTURE: &[u8] = include_bytes!("../../fixtures/models-dev-excerpt.json");
 
+#[test]
+fn extreme_valid_json_exponents_return_bad_rate() {
+    for literal in ["1e2147483647", "1.1e-2147483648"] {
+        let payload = format!(r#"{{"p":{{"models":{{"m":{{"cost":{{"input":{literal}}}}}}}}}}}"#);
+        assert!(serde_json::from_str::<serde_json::Value>(&payload).is_ok());
+        assert!(matches!(
+            normalize_models_dev(payload.as_bytes()),
+            Err(NormalizeError::BadRate { model, field, detail: fusiform_core::money::MoneyError::NotExact(_), .. })
+                if model == "p/m" && field == "input"
+        ));
+    }
+    assert_eq!(
+        fusiform_core::money::decimal_str_to_minor_units("1e1", 9),
+        Ok(10_000_000_000)
+    );
+}
+
 fn catalog() -> fusiform_core::NormalizeOutcome {
     normalize_models_dev(FIXTURE).expect("the measured document must normalize")
 }
