@@ -18,11 +18,18 @@ fn evidence_fixture_is_canonical_and_comes_from_both_embedded_documents() {
         "output-audio-per-token": doc(include_bytes!("../../fusiform-module/data/output-audio-per-token.json")),
     });
     assert_eq!(EVIDENCE, canonical_json(&expected));
+}
 
+#[test]
+fn both_evidence_documents_authorize_audio_token_prices() {
     let index = index_from_snapshot(SNAPSHOT).unwrap();
-    let audio = br#"{"google":{"models":{"gemini-3.1-flash-live-preview":{"cost":{"input_audio":3,"output_audio":12}}}}}"#;
+    let audio = br#"{"google":{"models":{"gemini-3.1-flash-live-preview":{
+        "type":"chat", "capabilities":{}, "api":{},
+        "cost":{"audio":{"input":{"price":3},"output":{"price":12}}}
+    }}}}"#;
     let (summary, _) = publish_step(audio, &index, EVIDENCE, 0).unwrap();
-    let ops = &doc(&summary)["ops"];
+    let summary: Value = serde_json::from_slice(&summary).unwrap();
+    let ops = &summary["ops"];
     for fact in ["rate.input_audio", "rate.output_audio"] {
         assert!(
             ops.as_array()
@@ -44,6 +51,7 @@ fn publish_index_and_replayed_index_agree_by_hash() {
     let (summary, next) = publish_step(MODELS, &prior, EVIDENCE, 0).unwrap();
     let summary: Value = serde_json::from_slice(&summary).unwrap();
     assert_eq!(summary["model_count"], 2);
+    assert_eq!(summary.get("next_date_boundary_ms"), Some(&Value::Null));
     assert_eq!(
         summary["base_upstream_hash"],
         upstream_hash(&prior).unwrap()
@@ -83,12 +91,12 @@ fn release_builder_refuses_a_diff_from_a_stale_index() {
     let mut catalog: Value = serde_json::from_slice(MODELS).unwrap();
     catalog["alpha"]["models"]["-"]["cost"] = json!({});
     let (with_removal, after2) =
-        publish_step(&canonical_json(&catalog), &after1, EVIDENCE, 0).unwrap();
+        publish_step(&canonical_json(&catalog), &after1, EVIDENCE, 1).unwrap();
     let r2 = envelope(&release(&with_removal, &r1, 2, 2).unwrap());
     let mut stale = catalog;
     stale["zeta"]["models"]["mini"]["name"] = json!("Mini 2");
     let catalog = canonical_json(&stale);
-    let (stale, _) = publish_step(&catalog, &after1, EVIDENCE, 0).unwrap();
+    let (stale, _) = publish_step(&catalog, &after1, EVIDENCE, 2).unwrap();
     let summary: Value = serde_json::from_slice(&stale).unwrap();
     assert!(summary["ops"].as_array().unwrap().contains(&json!({
         "op": "remove", "provider": "alpha", "model": "-", "fact": "rate.input"
@@ -98,7 +106,7 @@ fn release_builder_refuses_a_diff_from_a_stale_index() {
         Some("invalid_summary"),
         "builder accepted a repeated removal diffed from release 1 against parent release 2"
     );
-    let (fresh, _) = publish_step(&catalog, &after2.unwrap(), EVIDENCE, 0).unwrap();
+    let (fresh, _) = publish_step(&catalog, &after2.unwrap(), EVIDENCE, 2).unwrap();
     assert!(release(&fresh, &r2, 3, 3).is_ok());
     assert_eq!(
         release(&stale, &[], 1, 3).unwrap_err().class,
@@ -122,14 +130,14 @@ fn release_with_decision_grade_replays_but_unknown_kind_is_refused() {
     index.apply_change(&first.change).unwrap();
     let mut catalog: Value = serde_json::from_slice(MODELS).unwrap();
     catalog["zeta"]["models"]["mini"]["name"] = json!("Mini 2");
+    let time = first.envelope.published_at_ms + 1;
     let (summary, next) =
-        publish_step(&canonical_json(&catalog), &index.to_bytes(), EVIDENCE, 0).unwrap();
+        publish_step(&canonical_json(&catalog), &index.to_bytes(), EVIDENCE, time).unwrap();
     let mut curation = first.change.curation_set.clone().unwrap();
     curation.version += 1;
     curation
         .kind_grades
         .insert("zeta/mini".into(), [("decision".into(), 83.into())].into());
-    let time = first.envelope.published_at_ms + 1;
     let unsigned = build_release(
         &summary,
         &serde_json::to_vec(&curation).unwrap(),
@@ -181,6 +189,7 @@ fn zero_length_index_is_not_bootstrap() {
     assert_eq!(summary["conflicts"], json!([]));
     assert!(summary.get("upstream_hash").is_none());
     assert!(summary.get("model_count").is_none());
+    assert!(summary.get("next_date_boundary_ms").is_none());
 }
 
 #[test]

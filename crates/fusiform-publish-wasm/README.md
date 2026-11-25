@@ -27,7 +27,7 @@ Release numbers and millisecond timestamps passed as arguments are `bigint`.
 
 | Export | Inputs | Result |
 | --- | --- | --- |
-| `publish_step` | Complete models.dev response, persisted index, audio evidence | `[summaryBytes, newIndexBytes]` on success; `[summaryBytes, null]` on a refusal |
+| `publish_step` | Complete models.dev v2 response, persisted index, audio evidence, `upstream_observed_at_ms` (`bigint`) | `[summaryBytes, newIndexBytes]` on success; `[summaryBytes, null]` on a refusal |
 | `build_release` | `summary`, raw curation set, parent envelope (zero bytes for release 1), release number, publication time in ms, upstream observation time in ms | Canonical unsigned `{envelope, change}` or an in-band refusal |
 | `snapshot_bytes` | models.dev, audio evidence, envelope, raw curation set, release signatures, history file list, history signatures, pinned release public key | Canonical signed snapshot or an in-band refusal |
 | `snapshot_bytes_from_state` | Full `state.json`, envelope, release signatures, history file list, history signatures, pinned release public key | Canonical signed snapshot from an imported state or an in-band refusal |
@@ -41,8 +41,9 @@ Release numbers and millisecond timestamps passed as arguments are `bigint`.
 | `history_attestation_signing_bytes` | Bare history attestation body | Exact Ed25519 message bytes checked by Rust `verify_history_attestation` |
 
 The publish summary is canonical JSON. Success has `ops`, `base_upstream_hash`,
-`upstream_hash`, `model_count` and `conflicts`. `base_upstream_hash` identifies
-the index the diff used; `upstream_hash` identifies the resulting index.
+`upstream_hash`, `model_count`, `conflicts` and `next_date_boundary_ms`.
+`base_upstream_hash` identifies the index the diff used; `upstream_hash`
+identifies the resulting index.
 `build_release` refuses a summary whose base does not match the parent
 (or the empty upstream for release 1). If the index is stale, recover it
 against the current head and compute a new diff before retrying.
@@ -51,6 +52,15 @@ Each conflict identifies `provider`, `model`,
 A refusal has just `ops: []`, `conflicts: []` and `refusal: {class, detail}`;
 its classes are `empty_index`, `parse`, and `implausible`. Keep the previous
 index on refusal. A zero-length index is not a bootstrap operation.
+
+`publish_step` selects date-conditioned prices at `upstream_observed_at_ms`.
+Pass the same timestamp to `build_release` so it is recorded in the release
+envelope; use the envelope's timestamp when replaying that release.
+`next_date_boundary_ms` is the next UTC price boundary in Unix milliseconds,
+or `null` if there is none. Once the boundary is reached, the Worker must
+fetch the catalog without `If-None-Match`, even if it already has an ETag.
+A `304 Not Modified` would skip recomputing prices and leave the old price
+in place even though the catalog bytes are unchanged.
 
 The evidence is canonical JSON `{"input-audio-per-token": <doc>,
 "output-audio-per-token": <doc>}`. Use the two full documents from the selected
@@ -141,10 +151,10 @@ successfully published head.
 
 ## Snapshot memory
 
-`snapshot_bytes` is the heaviest call. On Linux with Node 24, the full seed
-(6,735,471 input bytes) produced a 9,708,042-byte snapshot. Peak WASM linear
-memory was 51.2 MiB; the host input and output buffers add about 15.7 MiB.
-Node's whole-process peak RSS was 105.8 MiB, up from 40.1 MiB before the call.
+`snapshot_bytes` is the heaviest call. On Linux with Node 24, the full v2 seed
+(12,667,100 input bytes) produced a 10,789,541-byte snapshot. Peak WASM linear
+memory was 60.4 MiB; the host catalog and snapshot buffers add about 22.4 MiB.
+Node's whole-process peak RSS was 155.3 MiB, up from 47.2 MiB before the call.
 Node RSS includes the runtime and does not measure a Worker isolate's limit.
 
 To reproduce, build the WASM, run `cargo run --locked -p fusiform-publish

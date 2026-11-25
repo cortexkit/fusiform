@@ -15,6 +15,13 @@ assert.ok(workDir && ['recovery', 'publish', 'snapshot'].includes(mode), 'expect
 const read = (name) => readFileSync(join(workDir, name));
 const wasm = readFileSync(new URL('../../../dist/publish-wasm/fusiform_publish_wasm_bg.wasm', import.meta.url));
 const { memory } = initSync({ module: new WebAssembly.Module(wasm) });
+const envelope = read('snapshot-envelope.json');
+const { release, state_hash, upstream_observed_at_ms } = JSON.parse(envelope);
+const data = (name) => readFileSync(new URL(`../../fusiform-module/data/${name}.json`, import.meta.url));
+const evidence = Buffer.concat([
+  Buffer.from('{"input-audio-per-token":'), data('input-audio-per-token'),
+  Buffer.from(',"output-audio-per-token":'), data('output-audio-per-token'), Buffer.from('}'),
+]);
 
 function measure(label, call) {
   const start = performance.now();
@@ -30,23 +37,15 @@ if (mode === 'recovery') {
   assert.deepEqual(Buffer.from(recovered), read('index'));
 } else if (mode === 'publish') {
   const index = read('index');
-  const evidence = readFileSync(new URL('../fixtures/evidence.json', import.meta.url));
   const input = read('one.json');
-  const [wire, next] = measure('publish_step', () => publish_step(input, index, evidence));
+  const [wire, next] = measure('publish_step', () => publish_step(input, index, evidence, BigInt(upstream_observed_at_ms)));
   const summary = JSON.parse(Buffer.from(wire));
   assert.equal(summary.ops.length, 1);
   assert.equal(summary.ops[0].fact, 'model.name');
   assert.ok(next instanceof Uint8Array);
-  console.log(`models=${summary.model_count} ops=${summary.ops.length} upstream_hash=${summary.upstream_hash}`);
+  console.log(`models=${summary.model_count} ops=${summary.ops.length} upstream_hash=${summary.upstream_hash} next_date_boundary_ms=${summary.next_date_boundary_ms}`);
 } else {
-  const data = (name) => readFileSync(new URL(`../../fusiform-module/data/${name}.json`, import.meta.url));
   const models = data('models-dev-seed');
-  const evidence = Buffer.concat([
-    Buffer.from('{"input-audio-per-token":'), data('input-audio-per-token'),
-    Buffer.from(',"output-audio-per-token":'), data('output-audio-per-token'), Buffer.from('}'),
-  ]);
-  const envelope = read('snapshot-envelope.json');
-  const { release, state_hash } = JSON.parse(envelope);
   const curation = read('snapshot-curation.json');
   const signatures = read('snapshot-signatures.json');
   const { kid } = JSON.parse(signatures);

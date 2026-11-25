@@ -6,7 +6,7 @@
 //!     /usr/bin/time -v measure_seed one <work-dir>
 //!     /usr/bin/time -v measure_seed large <work-dir>
 
-use std::{fs, io::BufWriter, path::Path, time::Instant};
+use std::{collections::BTreeMap, fs, io::BufWriter, path::Path, time::Instant};
 
 use fusiform_core::{
     ChargeUnitEvidence, normalize_models_dev_with,
@@ -19,7 +19,12 @@ use fusiform_publish::{FactIndex, publish_step};
 use fusiform_release::{
     ProviderFacts, SigningKey, Snapshot, Upstream, sign_envelope, state_hash, upstream_state_hash,
 };
-use serde_json::{Value, json};
+use serde_json::{
+    Value,
+    value::{RawValue, to_raw_value},
+};
+
+type RawObject = BTreeMap<String, Box<RawValue>>;
 
 const SEED: &[u8] = include_bytes!("../../fusiform-module/data/models-dev-seed.json");
 const SEED_META: &str = include_str!("../../fusiform-module/data/models-dev-seed.meta.json");
@@ -137,24 +142,62 @@ fn prepare(path: &Path) {
     fs::write(path.join("index"), &bytes).unwrap();
     println!("serialized_index_bytes={}", bytes.len());
 
-    let mut edited: Value = serde_json::from_slice(SEED).unwrap();
-    let label = &mut edited["openai"]["models"]["gpt-realtime-2.1"]["name"];
-    assert!(label.is_string());
-    *label = json!("Changed display label");
+    // Keep the API and cache-write TTL member order, which v2 uses to select
+    // defaults. Only decode the objects whose fields are being edited.
+    let mut edited: RawObject = serde_json::from_slice(SEED).unwrap();
+    let openai = edited.get_mut("openai").unwrap();
+    let mut provider = raw_object(openai);
+    let mut models = raw_object(&provider["models"]);
+    let realtime = models.get_mut("gpt-realtime-2.1").unwrap();
+    let mut model = raw_object(realtime);
+    assert!(
+        serde_json::from_str::<Value>(model["name"].get())
+            .unwrap()
+            .is_string()
+    );
+    model.insert(
+        "name".into(),
+        to_raw_value("Changed display label").unwrap(),
+    );
+    *realtime = to_raw_value(&model).unwrap();
+    provider.insert("models".into(), to_raw_value(&models).unwrap());
+    *openai = to_raw_value(&provider).unwrap();
     write_json(path, "one.json", &edited);
 
     let mut context_changes = 11_403 - model_count;
-    for provider in edited.as_object_mut().unwrap().values_mut() {
-        for model in provider["models"].as_object_mut().unwrap().values_mut() {
-            model["name"] = json!("Changed display label for large diff");
-            if context_changes > 0 && model["limit"]["context"].as_u64().is_some() {
-                model["limit"]["context"] = json!(1_234_567);
-                context_changes -= 1;
+    for raw in edited.values_mut() {
+        let mut provider = raw_object(raw);
+        let mut models = raw_object(&provider["models"]);
+        for raw in models.values_mut() {
+            let mut model = raw_object(raw);
+            model.insert(
+                "name".into(),
+                to_raw_value("Changed display label for large diff").unwrap(),
+            );
+            if context_changes > 0
+                && let Some(raw_limit) = model.get_mut("limit")
+            {
+                let mut limit = raw_object(raw_limit);
+                if limit
+                    .get("context")
+                    .is_some_and(|value| serde_json::from_str::<u64>(value.get()).is_ok())
+                {
+                    limit.insert("context".into(), to_raw_value(&1_234_567).unwrap());
+                    *raw_limit = to_raw_value(&limit).unwrap();
+                    context_changes -= 1;
+                }
             }
+            *raw = to_raw_value(&model).unwrap();
         }
+        provider.insert("models".into(), to_raw_value(&models).unwrap());
+        *raw = to_raw_value(&provider).unwrap();
     }
     assert_eq!(context_changes, 0);
     write_json(path, "large.json", &edited);
+}
+
+fn raw_object(value: &RawValue) -> RawObject {
+    serde_json::from_str(value.get()).unwrap()
 }
 
 fn write_snapshot(path: &Path, upstream: Upstream) {
@@ -173,6 +216,8 @@ fn write_snapshot(path: &Path, upstream: Upstream) {
             .insert(name.to_owned(), serde_json::from_str(doc).unwrap());
     }
     let envelope = &mut snapshot.envelope;
+    envelope.upstream_observed_at_ms = seed_observed_at_ms();
+    envelope.published_at_ms = envelope.upstream_observed_at_ms;
     envelope.upstream_hash = upstream_state_hash(&snapshot.state.upstream);
     envelope.curation_hash = curation.curation_hash();
     envelope.state_hash = state_hash(envelope.curation_hash, envelope.upstream_hash);
@@ -243,11 +288,12 @@ fn measure(bytes: &[u8], previous: &FactIndex, evidence: &ChargeUnitEvidence, ex
     let elapsed = start.elapsed();
     assert_eq!(result.ops.len(), expected_ops);
     println!(
-        "publish_step_ms={:.1} models={} facts={} ops={} upstream_hash={}",
+        "publish_step_ms={:.1} models={} facts={} ops={} upstream_hash={} next_date_boundary_ms={:?}",
         elapsed.as_secs_f64() * 1000.0,
         result.model_count,
         result.index.fact_count(),
         result.ops.len(),
-        result.upstream_hash
+        result.upstream_hash,
+        result.next_date_boundary_ms
     );
 }
