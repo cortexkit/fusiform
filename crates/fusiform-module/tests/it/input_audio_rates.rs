@@ -283,9 +283,14 @@ fn audio_tokens_per_second_survives_prefix_only_and_plane_reads_including_aliase
                 args["auth_method"] = method.into();
             }
             let response = read(&store, args);
-            let facts = response["models"][format!("google/{model}")]
-                .as_object()
-                .unwrap();
+            let row = &response["models"][format!("google/{model}")];
+            // The Antigravity alias lists only the Antigravity sign-in, so an
+            // API-key read withholds the whole alias row.
+            if model.starts_with("antigravity-") && auth_method == Some("apikey") {
+                assert!(row.is_null(), "{response}");
+                continue;
+            }
+            let facts = row.as_object().unwrap();
             assert_eq!(facts.len(), 1, "{response}");
             assert_eq!(facts["limit.audio_tokens_per_second"], 25, "{response}");
         }
