@@ -1,11 +1,15 @@
-//! Compare a signed store bootstrap with the backup used to publish it.
+//! Rehearse a store-mode start or compare the result with the database backup used to publish the releases.
 
 use std::{
     collections::BTreeSet, env, fs, path::Path, process::ExitCode, sync::Arc, time::Instant,
 };
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_module::{route::serve_tool_call, settings, store_poll::StorePoller};
+use fusiform_module::{
+    route::{serve_status, serve_tool_call},
+    settings,
+    store_poll::StorePoller,
+};
 use fusiform_protocol::{
     TOOL_GET, TOOL_HISTORY, TOOL_PLAN_PRICES, TOOL_QUALITY_GRADES, TOOL_STATUS,
 };
@@ -39,13 +43,17 @@ const HISTORY_PROBES: [(&str, &str, &str); 10] = [
 
 #[tokio::main]
 async fn main() -> Result<ExitCode> {
-    let [base, kid, key, source_path, work_dir] = env::args_os()
-        .skip(1)
-        .collect::<Vec<_>>()
-        .try_into()
-        .map_err(|_| {
-            "usage: store-rehearsal <base-url> <kid> <public-key-b64url> <source-store.db> <work-dir>"
-        })?;
+    let args: Vec<_> = env::args_os().skip(1).collect();
+    if let [mode, data_dir] = args.as_slice() {
+        if mode == "--start" {
+            rehearse_start(Path::new(data_dir)).await?;
+            return Ok(ExitCode::SUCCESS);
+        }
+    }
+    let [base, kid, key, source_path, work_dir] = args.try_into().map_err(|_| {
+        "usage: store-rehearsal --start <data-dir>\n       \
+         store-rehearsal <base-url> <kid> <public-key-b64url> <source-store.db> <work-dir>"
+    })?;
     let base = base.to_str().ok_or("base URL must be UTF-8")?;
     let kid = kid.to_str().ok_or("key ID must be UTF-8")?;
     let key = key.to_str().ok_or("public key must be UTF-8")?;
@@ -138,6 +146,61 @@ async fn main() -> Result<ExitCode> {
     } else {
         ExitCode::FAILURE
     })
+}
+
+/// Start with an empty disposable data directory, then run again on it to check the persisted cursor.
+async fn rehearse_start(data_dir: &Path) -> Result<()> {
+    let started = Instant::now();
+    let settings::Source::Store { url, keys } = settings::Settings::load()?.source else {
+        return Err("--start requires store mode in fusiform.jsonc".into());
+    };
+    let (url, keys) = settings::validate_store(&url, &keys)?;
+    let mut poller = StorePoller::new(url, keys)?;
+    let namespace = data_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("data directory name must be UTF-8")?;
+    let path = data_dir.join("catalog.db");
+    let store = Arc::new(CatalogStore::open_for_store(&descriptor(
+        &path,
+        format!("{namespace}-start"),
+    )?)?);
+    let prior = store.latest_store_release()?;
+    match &prior {
+        Some(cursor) => println!("Starting with persisted release {}", cursor.release),
+        None => println!("Starting without a stored release"),
+    }
+    let poll_result = poller.poll(&store).await;
+    let elapsed = started.elapsed();
+    let peak = peak_rss_kib().map_or_else(|| "unavailable".into(), |n| format!("{n} KiB"));
+    println!(
+        "Start to completed signed-store poll: {:.3} s, process peak RSS {peak}",
+        elapsed.as_secs_f64()
+    );
+    let verified = poll_result?;
+    let release = store
+        .latest_store_release()?
+        .ok_or("start installed no release")?;
+    if release.release != verified {
+        return Err("verified head was not persisted".into());
+    }
+    if prior.is_some_and(|cursor| cursor.release == verified) {
+        println!("Signed head unchanged; no release replayed");
+    }
+    println!(
+        "Stored release {} (state hash {})",
+        release.release, release.state_hash
+    );
+    let status = serve_status(&store, br#"{"polls":0}"#)
+        .map_err(|error| format!("catalog.status: {}: {}", error.code, error.message))?;
+    let earliest = status
+        .history_begins_at_ms
+        .ok_or("catalog.status reported no history")?;
+    println!(
+        "Catalog models: {}; history begins at {earliest} ms since Unix epoch",
+        status.model_count
+    );
+    Ok(())
 }
 
 fn descriptor(path: &Path, storage_namespace: String) -> Result<StorageDescriptor> {
