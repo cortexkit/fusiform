@@ -1,5 +1,10 @@
 # fusiform
 
+> [!WARNING]
+> **Alpha.** Fusiform is in early development and is not yet released for general use.
+> Breaking changes will happen between versions, including changes to its settings,
+> stored data and interfaces. Pin an exact version if you depend on it.
+
 Fusiform is the CortexKit catalog of AI models: what models exist, what each
 can do, and what it costs, across providers and modalities, with the full
 history of every fact. It runs as `ck-fusiform`, a module supervised by the
