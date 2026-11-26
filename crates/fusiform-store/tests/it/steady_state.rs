@@ -120,16 +120,16 @@ fn the_unchanged_poll_path_grows_sublinearly_with_history() {
     assert!(first.is_empty());
 
     // Now accumulate history on the scale that could actually expose an
-    // algorithmic problem. Ten rounds, each repricing EVERY model that
-    // publishes an input rate, so the era table roughly triples with
-    // superseded rows the steady-state read must skip past.
+    // algorithmic problem. Each round reprices every model with a text input
+    // rate. Use enough rounds to grow the table by more than half: each rate
+    // represents a smaller share of the facts in the richer v2 catalog.
     //
     // Moving one model per round would add 40 rows against 67,718 — 0.06%
     // growth, which no scan-shaped defect would show up in. A measurement too
     // small to fail is not a measurement.
     let mut clock = 4_000i64;
     let mut extra_eras = 0usize;
-    const ROUNDS: usize = 10;
+    const ROUNDS: usize = 15;
     for round in 0..ROUNDS {
         let providers = doc.as_object_mut().unwrap();
         for (_, provider) in providers.iter_mut() {

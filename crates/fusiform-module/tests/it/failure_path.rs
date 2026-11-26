@@ -151,7 +151,7 @@ fn serve_one(mut stream: TcpStream, behaviour: Behaviour) {
     }
 }
 
-const CATALOG: &[u8] = include_bytes!("fixtures/models-dev-v2-excerpt.json");
+const CATALOG: &[u8] = include_bytes!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
 struct Harness {
     ctx: PollContext,
