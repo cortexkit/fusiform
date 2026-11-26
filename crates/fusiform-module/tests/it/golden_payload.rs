@@ -833,7 +833,8 @@ fn temperature_golden_cases_pin_acceptance_correction_and_safe_alias_projection(
 }
 
 fn render_login_methods() -> serde_json::Map<String, serde_json::Value> {
-    // These rate-filtered vectors test the login plane over ordinary prices,
+    // These rate-filtered vectors test how a read naming a login method
+    // (`auth_method`) changes ordinary prices,
     // so keep regional conditions out of the price fixture.
     let (store, _dir) = super::cache_lifetimes::store(None);
     let mut cases = serde_json::Map::new();

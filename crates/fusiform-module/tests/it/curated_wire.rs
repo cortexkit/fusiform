@@ -163,7 +163,8 @@ fn store_with_anthropic_api(api: Option<&str>) -> (CatalogStore, tempfile::TempD
             .models
             .insert((*id).into(), row);
     }
-    // The historical override was added before the catalog published an image-token price.
+    // Remove the image price, so the row looks as it did before models.dev
+    // published one, when the hand-kept image-price override was still needed.
     let flash = upstream
         .get_mut("google")
         .unwrap()

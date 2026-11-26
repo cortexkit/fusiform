@@ -211,10 +211,15 @@ pub struct Quarantine {
 pub struct NormalizedProvider {
     pub provider_id: String,
 
-    /// Whether the provider published an `api` default before the v2 cutover.
+    /// Whether models.dev's older v1 catalog gave this provider an `api`
+    /// default that fusiform set aside. The v2 parser always leaves it false,
+    /// because v2 resolves the endpoint on each model. It stays so a saved v1
+    /// normalized catalog compares with a v2 one field by field.
     pub api_base_quarantined: bool,
     pub models: Vec<NormalizedModel>,
-    /// Whether the provider published an `npm` default before the v2 cutover.
+    /// Whether models.dev's older v1 catalog gave this provider an `npm`
+    /// default that fusiform set aside. Always false from the v2 parser, for
+    /// the same reason as `api_base_quarantined`.
     pub npm_quarantined: bool,
 }
 
