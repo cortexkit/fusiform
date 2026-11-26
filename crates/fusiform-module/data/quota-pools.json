@@ -1,4 +1,110 @@
 {
   "schema": "quota-pools/v1",
-  "entries": []
+  "entries": [
+    {
+      "provider_id": "anthropic",
+      "pool_id": "Fable",
+      "models": [
+        "anthropic/claude-fable-5",
+        "anthropic/claude-fable-5-1",
+        "anthropic/claude-fable-5-2"
+      ],
+      "source_ref": "https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans; https://support.claude.com/en/articles/17506494-claude-fable-5-2-launch-offers",
+      "quote": "Max and Ultra plans also have a separate weekly limit for Fable. ... a Fable limit reset only restores usage spent on Fable models. ... Every Fable model: Fable 5.2, Fable 5.1, and Fable 5.",
+      "established_at_ms": 1795651200000,
+      "review_by_ms": 1800835200000
+    },
+    {
+      "provider_id": "google",
+      "pool_id": "gemini-5h",
+      "models": [
+        "google/antigravity-gemini-3.8-flash",
+        "google/antigravity-gemini-4-argon",
+        "google/antigravity-gemini-4-carbon",
+        "google/antigravity-gemini-4-hydrogen",
+        "google/antigravity-gemini-4-neon"
+      ],
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/quota-manager.ts#L655-L668 (bucket ids to pools), https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/model-registry.ts#L612-L642 (getQuotaGroupForModel), https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/__fixtures__/quota/pro-ruqs.json (Google's quota summary groups)",
+      "quote": "Google's quota summary groups the gemini-5h and gemini-weekly buckets as \"Gemini Models\". The plugin counts every Antigravity Gemini model against them; Hydrogen and Carbon are there by its default until a separate bucket is observed, and none has been on Ultra accounts. Operator ruling, 26 Nov 2026.",
+      "established_at_ms": 1795651200000,
+      "review_by_ms": 1800835200000
+    },
+    {
+      "provider_id": "google",
+      "pool_id": "gemini-weekly",
+      "models": [
+        "google/antigravity-gemini-3.8-flash",
+        "google/antigravity-gemini-4-argon",
+        "google/antigravity-gemini-4-carbon",
+        "google/antigravity-gemini-4-hydrogen",
+        "google/antigravity-gemini-4-neon"
+      ],
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/quota-manager.ts#L655-L668 (bucket ids to pools), https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/model-registry.ts#L612-L642 (getQuotaGroupForModel), https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/__fixtures__/quota/pro-ruqs.json (Google's quota summary groups)",
+      "quote": "Google's quota summary groups the gemini-5h and gemini-weekly buckets as \"Gemini Models\". The plugin counts every Antigravity Gemini model against them; Hydrogen and Carbon are there by its default until a separate bucket is observed, and none has been on Ultra accounts. Operator ruling, 26 Nov 2026.",
+      "established_at_ms": 1795651200000,
+      "review_by_ms": 1800835200000
+    },
+    {
+      "provider_id": "google",
+      "pool_id": "Gemini Models",
+      "models": [
+        "google/antigravity-gemini-3.8-flash",
+        "google/antigravity-gemini-4-argon",
+        "google/antigravity-gemini-4-carbon",
+        "google/antigravity-gemini-4-hydrogen",
+        "google/antigravity-gemini-4-neon"
+      ],
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/quota-manager.ts#L655-L668 (bucket ids to pools), https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/model-registry.ts#L612-L642 (getQuotaGroupForModel), https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/__fixtures__/quota/pro-ruqs.json (Google's quota summary groups)",
+      "quote": "Google's quota summary groups the gemini-5h and gemini-weekly buckets as \"Gemini Models\". The plugin counts every Antigravity Gemini model against them; Hydrogen and Carbon are there by its default until a separate bucket is observed, and none has been on Ultra accounts. Operator ruling, 26 Nov 2026.",
+      "established_at_ms": 1795651200000,
+      "review_by_ms": 1800835200000
+    },
+    {
+      "provider_id": "google",
+      "pool_id": "3p-5h",
+      "models": [
+        "google/antigravity-claude-opus-5-5",
+        "google/antigravity-claude-sonnet-5-5"
+      ],
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/quota-manager.ts#L655-L668 (bucket ids to pools), https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/model-registry.ts#L612-L642 (getQuotaGroupForModel), https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/__fixtures__/quota/pro-ruqs.json (Google's quota summary groups)",
+      "quote": "Google's quota summary groups the 3p-5h and 3p-weekly buckets as \"Claude and GPT models\"; the plugin maps models containing claude or gpt-oss to them.",
+      "established_at_ms": 1795651200000,
+      "review_by_ms": 1800835200000
+    },
+    {
+      "provider_id": "google",
+      "pool_id": "3p-weekly",
+      "models": [
+        "google/antigravity-claude-opus-5-5",
+        "google/antigravity-claude-sonnet-5-5"
+      ],
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/quota-manager.ts#L655-L668 (bucket ids to pools), https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/model-registry.ts#L612-L642 (getQuotaGroupForModel), https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/__fixtures__/quota/pro-ruqs.json (Google's quota summary groups)",
+      "quote": "Google's quota summary groups the 3p-5h and 3p-weekly buckets as \"Claude and GPT models\"; the plugin maps models containing claude or gpt-oss to them.",
+      "established_at_ms": 1795651200000,
+      "review_by_ms": 1800835200000
+    },
+    {
+      "provider_id": "google",
+      "pool_id": "Claude and GPT models",
+      "models": [
+        "google/antigravity-claude-opus-5-5",
+        "google/antigravity-claude-sonnet-5-5"
+      ],
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/quota-manager.ts#L655-L668 (bucket ids to pools), https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/model-registry.ts#L612-L642 (getQuotaGroupForModel), https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/__fixtures__/quota/pro-ruqs.json (Google's quota summary groups)",
+      "quote": "Google's quota summary groups the 3p-5h and 3p-weekly buckets as \"Claude and GPT models\"; the plugin maps models containing claude or gpt-oss to them.",
+      "established_at_ms": 1795651200000,
+      "review_by_ms": 1800835200000
+    },
+    {
+      "provider_id": "google",
+      "pool_id": "gemini-argon-wtu-weekly",
+      "models": [
+        "google/antigravity-gemini-4-argon"
+      ],
+      "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/quota-manager.ts#L655-L668, https://github.com/cortexkit/antigravity-auth/blob/6616c84d/packages/core/src/model-registry.ts#L623-L628; https://github.com/cortexkit/antigravity-auth/issues/43",
+      "quote": "The gemini-argon-wtu-weekly bucket is Gemini 4 Argon's own weekly allowance; it appears only on Pro plans, per a user report in the plugin's issue tracker. On plans without it, Argon counts in the shared Gemini limit. Operator ruling, 26 Nov 2026.",
+      "established_at_ms": 1795651200000,
+      "review_by_ms": 1800835200000
+    }
+  ]
 }
