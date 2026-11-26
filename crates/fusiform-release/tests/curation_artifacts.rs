@@ -145,6 +145,62 @@ fn refuses_rejected_plan_price_row() {
     );
 }
 
+#[test]
+fn quota_pools_validate_against_the_draft_catalog_but_not_when_decoding_history() {
+    let pool = json!({
+        "provider_id":"p", "pool_id":"Weekly", "models":["p/active", "p/alias"],
+        "source_ref":"https://example.test/quota", "quote":"Synthetic pool membership",
+        "established_at_ms":1000, "review_by_ms":5_184_001_000_i64,
+    });
+    let mut docs = std::collections::BTreeMap::from([
+        (
+            "quota-pools".into(),
+            json!({"schema":"quota-pools/v1", "entries":[pool]}),
+        ),
+        (
+            "model-aliases".into(),
+            json!({"aliases":[{
+                "provider_id":"p", "model_id":"alias", "target":{"provider_id":"p", "model_id":"active"},
+                "basis":"Synthetic route", "source_ref":"https://example.test/route",
+                "established_at_ms":1000, "review_by_ms":5_184_001_000_i64,
+            }], "retired":[{
+                "provider_id":"p", "model_id":"retired", "retired_at_ms":2, "reason":"Withdrawn",
+            }]}),
+        ),
+    ]);
+    let mut upstream = Upstream::new();
+    upstream.insert(
+        "p".into(),
+        fusiform_release::ProviderFacts {
+            provider: Default::default(),
+            models: [("active".into(), Default::default())].into(),
+        },
+    );
+    validate_published(&docs, &upstream).unwrap();
+    for models in [
+        json!([]),
+        json!(["p/active", "p/unknown"]),
+        json!(["p/retired"]),
+    ] {
+        docs.get_mut("quota-pools").unwrap()["entries"][0]["models"] = models;
+        let error = validate_published(&docs, &upstream).unwrap_err();
+        assert!(
+            error.starts_with("quota-pools: entry 0 p/Weekly:"),
+            "{error}"
+        );
+    }
+    docs.get_mut("quota-pools").unwrap()["entries"][0] = pool;
+
+    // An older snapshot must decode unchanged after an upstream withdrawal.
+    let (_, mut curation) = legacy_carbon_curation();
+    curation.vendor_facts = docs;
+    assert!(validate_published(&curation.vendor_facts, &Upstream::new()).is_err());
+    let raw = serde_json::to_vec(&curation).unwrap();
+    let (decoded, hash) = decode_curation(&raw).unwrap();
+    assert_eq!(decoded, curation);
+    assert_eq!(hash, curation.curation_hash());
+}
+
 fn legacy_carbon_aliases() -> Value {
     json!({"schema": "model-aliases/v1", "aliases": [{
         "provider_id": "google",

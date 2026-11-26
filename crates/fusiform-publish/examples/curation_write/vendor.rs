@@ -183,6 +183,7 @@ fn rows(kind: VendorDocument, doc: &Value) -> BTreeMap<String, &Value> {
         ModelAliases => &[("aliases", MODEL), ("retired", MODEL)],
         ModelCreators => &[("creators", &["family"])],
         PlanPrices => &[("cells", &["provider_id", "tier"])],
+        QuotaPools => &[("entries", &["provider_id", "pool_id"])],
         SpeedTwins => &[("speed_twins", &["provider_id", "base_model_id", "mode"])],
         TemperatureRanges => &[("ranges", PROVIDER)],
         WireCorrections => &[("corrections", &["provider", "model"])],

@@ -234,7 +234,9 @@ pub fn serve_tool_call(store: &CatalogStore, body: &[u8]) -> Result<ToolResponse
         TOOL_RETRACT_ARTIFACT => {
             serve_retract_artifact(store, &args).map(ToolResponse::RetractArtifact)
         }
-        TOOL_PLAN_PRICES => serve_plan_prices(store, &args).map(ToolResponse::PlanPrices),
+        TOOL_PLAN_PRICES => store
+            .with_read_snapshot(|| serve_plan_prices(store, &args).map(ToolResponse::PlanPrices))
+            .map_err(|e| store_error(&e))?,
         TOOL_QUALITY_GRADE => quality::grade(store, &args).map(ToolResponse::QualityWrite),
         fusiform_protocol::TOOL_QUALITY_WORKLOAD => {
             quality_efforts::workload(store, &args).map(ToolResponse::WorkloadEffortWrite)
@@ -3038,6 +3040,8 @@ fn serve_plan_prices(store: &CatalogStore, args: &[u8]) -> Result<PlanPricesResp
         resolved_at_ms: now,
         tier_vocabulary: crate::plan_prices::TIER_VOCABULARY.to_string(),
         unit_policy: crate::plan_prices::UNIT_POLICY.to_string(),
+        quota_pools: crate::quota_pools::at(store, now, request.provider_id.as_deref())
+            .map_err(|e| store_error(&e))?,
     })
 }
 

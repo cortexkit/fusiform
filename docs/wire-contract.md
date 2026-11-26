@@ -1398,6 +1398,15 @@ for plan rows that no longer carry a price. Its independent review is due
 after 60 days. Consumers choose their own settings
 overrides; the catalog does not infer a cap from usage or rate limits.
 
+The response may also carry a top-level `quota_pools` array. Each entry has
+`provider_id`, the exact case-sensitive `pool_id` from the quota reader, `models`
+(a nonempty list of provider-qualified catalog ids), `source_ref`, a first-party
+`quote`, `established_at_ms` and `review_by_ms` (60 days after establishment).
+`provider_id` filters the array when supplied. The field is omitted if there are
+no matching entries. A missing entry means **membership is not established**,
+not that its model list is empty. Store reads use the signed document in force at
+`resolved_at_ms`; native reads serve only the current compiled-in document.
+
 ## 10. Versioning
 
 1. The wire types are the `fusiform-protocol` crate, whose version moves with

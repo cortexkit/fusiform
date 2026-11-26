@@ -524,6 +524,65 @@ mod tests {
     use fusiform_store::{CatalogStore, ReleaseArrival, StoreRelease};
 
     #[test]
+    fn plan_prices_serve_quota_pools_in_force_at_each_instant() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CatalogStore::open_for_store(&StorageDescriptor {
+            module_id: "fusiform".into(),
+            storage_namespace: "default".into(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir.path().join("store.db").to_str().unwrap().into(),
+            },
+        })
+        .unwrap();
+        let pool = |model, at| {
+            json!({"provider_id":"test-provider", "pool_id":"Fable", "models":[model],
+                "source_ref":"https://example.test/quota", "quote":"Synthetic pool membership",
+                "established_at_ms":at, "review_by_ms":at + 60 * 86_400_000_i64})
+        };
+        let old = pool("test-provider/old", 1500);
+        let new = pool("test-provider/new", 2500);
+        let arrival = |release, at, pool: &Value| {
+            let doc = json!({"schema":"quota-pools/v1", "entries":[pool]});
+            let mut rows = ImportedTables::new();
+            document_rows(
+                &mut rows,
+                None,
+                &Documents::from([("quota-pools".into(), doc)]),
+                at,
+            )
+            .unwrap();
+            ReleaseArrival {
+                published_at_ms: at,
+                release: StoreRelease {
+                    release,
+                    state_hash: "a".repeat(64),
+                    curation_hash: "b".repeat(64),
+                    applied_at_ms: at,
+                },
+                rows,
+                upstream: None,
+            }
+        };
+        store
+            .apply_store_releases(
+                Some(&ImportedTables::new()),
+                &[arrival(1, 2000, &old), arrival(2, 3000, &new)],
+            )
+            .unwrap();
+        let read = |arguments: Value| {
+            let body =
+                serde_json::to_vec(&json!({"name":"plan.prices","arguments":arguments})).unwrap();
+            serde_json::to_value(crate::route::serve_tool_call(&store, &body).unwrap()).unwrap()
+        };
+        assert!(read(json!({"at_ms":1999})).get("quota_pools").is_none());
+        for (at, expected) in [(2000, &old), (2999, &old), (3000, &new)] {
+            assert_eq!(read(json!({"at_ms":at}))["quota_pools"], json!([expected]));
+        }
+        assert_eq!(read(json!({}))["quota_pools"], json!([new]));
+    }
+
+    #[test]
     fn current_reads_reuse_parsed_curation_only_for_the_same_store_and_version() {
         use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
         use fusiform_store::{FactKey, NewEra, NewObservation};
@@ -945,6 +1004,13 @@ mod tests {
                 .models
                 .insert(id.1, BTreeMap::new());
         }
+        let (provider, model) = aliases.keys().next().expect("at least one current alias");
+        let pools = documents.get_mut("quota-pools").unwrap();
+        pools["entries"].as_array_mut().unwrap().push(json!({
+            "provider_id":provider, "pool_id":"synthetic", "models":[format!("{provider}/{model}")],
+            "source_ref":"https://example.test/quota", "quote":"Synthetic pool membership",
+            "established_at_ms":1000, "review_by_ms":5_184_001_000_i64,
+        }));
         validate_published(&documents, &upstream).unwrap();
 
         let dir = tempfile::tempdir().unwrap();
@@ -1016,13 +1082,18 @@ mod tests {
                         .unwrap();
                     served.model_lineage.lookup(model, None, None, false) == lineage.as_str()
                 }
-                PlanPrices => {
+                PlanPrices | QuotaPools => {
+                    // Quota pools are served by the plan route, not catalog curation.
                     let body =
                         serde_json::to_vec(&json!({"name":"plan.prices","arguments":{"at_ms":at}}))
                             .unwrap();
                     let response = crate::route::serve_tool_call(&store, &body).unwrap();
                     let response = serde_json::to_value(response).unwrap();
-                    !response["prices"].as_array().unwrap().is_empty()
+                    if kind == PlanPrices {
+                        !response["prices"].as_array().unwrap().is_empty()
+                    } else {
+                        response["quota_pools"] == documents[name]["entries"]
+                    }
                 }
                 SpeedTwins => !served.speed_twins.is_empty(),
                 TemperatureRanges => !served.temperature_ranges.is_empty(),
@@ -1058,6 +1129,13 @@ mod tests {
                 "established_at_ms":1500, "review_by_ms":6000,
                 "currency":"USD","exponent":2,"period":"month","minor_units":price,
                 "concurrency_json":concurrency.to_string()});
+            let pools = json!({"schema":"quota-pools/v1", "entries":[{
+                "provider_id":"provider", "pool_id":"weekly", "models":[format!("provider/model-{release}")],
+                "source_ref":"https://example.test/quota", "quote":"Synthetic pool membership",
+                "established_at_ms":1500, "review_by_ms":1500 + 60 * 86_400_000_i64,
+            }]});
+            let pools = json!({"document":"quota-pools", "document_json":pools.to_string(),
+                "recorded_at_ms":published_at_ms});
             ReleaseArrival {
                 published_at_ms,
                 release: StoreRelease {
@@ -1066,10 +1144,16 @@ mod tests {
                     curation_hash: "b".repeat(64),
                     applied_at_ms: published_at_ms,
                 },
-                rows: ImportedTables::from([(
-                    "plan_price_era".to_string(),
-                    vec![row.as_object().unwrap().clone()],
-                )]),
+                rows: ImportedTables::from([
+                    (
+                        "plan_price_era".into(),
+                        vec![row.as_object().unwrap().clone()],
+                    ),
+                    (
+                        "store_document_era".into(),
+                        vec![pools.as_object().unwrap().clone()],
+                    ),
+                ]),
                 upstream: None,
             }
         };
@@ -1107,15 +1191,29 @@ mod tests {
                 let reply = crate::route::serve_tool_call(&store,
                 br#"{"name":"plan.prices","arguments":{"provider_id":"provider","at_ms":3000}}"#,
             ).unwrap();
-                serde_json::to_value(reply).unwrap()["prices"][0].clone()
+                serde_json::to_value(reply).unwrap()
             };
         let with_interleaved_commit = read();
         assert_eq!(store.latest_store_release().unwrap().unwrap().release, 2);
-        assert_eq!(with_interleaved_commit["price"]["minor_units"], 1000);
-        assert_eq!(with_interleaved_commit["concurrency"]["limit"], 2);
+        assert_eq!(
+            with_interleaved_commit["prices"][0]["price"]["minor_units"],
+            1000
+        );
+        assert_eq!(
+            with_interleaved_commit["prices"][0]["concurrency"]["limit"],
+            2
+        );
+        assert_eq!(
+            with_interleaved_commit["quota_pools"][0]["models"],
+            json!(["provider/model-1"])
+        );
         let after_commit = read();
-        assert_eq!(after_commit["price"]["minor_units"], 2000);
-        assert_eq!(after_commit["concurrency"]["limit"], 4);
+        assert_eq!(after_commit["prices"][0]["price"]["minor_units"], 2000);
+        assert_eq!(after_commit["prices"][0]["concurrency"]["limit"], 4);
+        assert_eq!(
+            after_commit["quota_pools"][0]["models"],
+            json!(["provider/model-2"])
+        );
     }
 
     #[test]

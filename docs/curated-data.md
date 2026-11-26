@@ -25,6 +25,7 @@ that keep them honest.
 | `input-audio-per-token.json` | providers with sourced per-token audio pricing, less excluded models, and optional documented audio tokens per second | at ingest: lets an eligible upstream `cost.input_audio` with no conditional audio price be stored as `rate.input_audio`; at read time: joins `limit.audio_tokens_per_second` onto current rows serving that rate (§8) |
 | `output-audio-per-token.json` | providers with separately sourced output-audio token units and optional excluded models | at ingest: lets eligible unconditional `cost.output_audio` become `rate.output_audio`; conditional audio remains unpriced. In store mode the signed rate facts are served; the unit document is retained for curation history, not read by the serving path. |
 | `plan-prices.json` | subscription list prices, quota values and service-tier entitlements | prices written to `plan_price_era` at start; quota values and service tiers joined only on current reads |
+| `quota-pools.json` | sourced model membership of subscription quota windows | compiled document on current native reads; signed curation history on store reads |
 | `models-dev-seed.json` | a copy of the upstream catalog for offline first boot | written as seed eras into an empty store |
 | `curated-providers.json` | sourced provider identities models.dev does not list | test-side provider vector generation only; published and retained for completeness of the signed curation set, but never joined into served model rows |
 | `engram-catalog.json` | the backup enrollment descriptor | written beside `store.db` at start; not otherwise read |
@@ -83,6 +84,18 @@ onto current reads, omitted for tombstones, never stored and never create a
 price era. Review each cap after 60 days; the review-date gate checks it
 independently of the price. Usage allowances and requests-per-time limits do
 not establish concurrency.
+
+`quota-pools.json` has schema `quota-pools/v1` and an `entries` array, initially
+empty. A claim names a `provider_id` and exact, case-sensitive `pool_id` and
+lists the catalog ids in `models`. Lists must be nonempty and contain no
+duplicates; each provider/pool pair may appear only once. Each model must be a
+current upstream model or current (not retired) alias when the claim is checked
+for publication. Each entry needs `source_ref`, a verbatim first-party `quote`,
+`established_at_ms`, and `review_by_ms` exactly 60 days later. The loader reports
+and drops refused entries; the store's draft validator refuses documents with
+rejects. Withdrawal of a model or retirement of an alias does not invalidate
+earlier signed curation. Membership changes open a new document era, not a
+price era. See [Plan prices §5.3](plan-prices.md#53-quota-pools).
 
 The seed and the enrollment descriptor are covered in
 [`architecture.md`](architecture.md) and

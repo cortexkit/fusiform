@@ -305,7 +305,23 @@ pub struct ServiceTierWire {
     pub credit_rate: Option<QuotaDecimal>,
 }
 
-/// Curated subscription prices.
+/// The established model membership of one subscription quota pool.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct QuotaPoolWire {
+    /// The models.dev provider id used by `plan.prices`.
+    pub provider_id: String,
+    /// The quota reader's exact, case-sensitive window id.
+    pub pool_id: String,
+    /// Nonempty list of provider-qualified catalog model ids. No entry for a
+    /// pool means its membership is not established, not that it has no models.
+    pub models: Vec<String>,
+    pub source_ref: String,
+    pub quote: String,
+    pub established_at_ms: i64,
+    pub review_by_ms: i64,
+}
+
+/// Curated subscription prices and quota pool memberships.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PlanPricesResponse {
     /// Every row in force, including refusals.
@@ -332,6 +348,10 @@ pub struct PlanPricesResponse {
     /// something else, and this plane cannot see which — that is a fact about
     /// one account and belongs on the account's own record.
     pub unit_policy: String,
+    /// Model membership of quota pools in force at `resolved_at_ms`.
+    /// Omitted when no membership is established for this answer.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quota_pools: Vec<QuotaPoolWire>,
 }
 
 /// Take back a mark on one poll.

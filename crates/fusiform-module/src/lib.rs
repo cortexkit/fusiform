@@ -28,6 +28,7 @@ pub mod model_lineage;
 mod normalization;
 pub mod output_audio;
 pub mod plan_prices;
+pub mod quota_pools;
 pub mod route;
 pub mod seed;
 pub mod settings;

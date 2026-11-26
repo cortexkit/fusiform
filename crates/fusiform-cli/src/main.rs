@@ -1917,7 +1917,6 @@ fn render_plan_prices(response: &serde_json::Value) -> String {
 
     if rows.is_empty() {
         out.push_str("no curated subscription prices\n");
-        return out;
     }
 
     let now = std::time::SystemTime::now()
@@ -1988,7 +1987,27 @@ fn render_plan_prices(response: &serde_json::Value) -> String {
         }
     }
 
-    if let Some(policy) = response["unit_policy"].as_str() {
+    for row in response["quota_pools"].as_array().into_iter().flatten() {
+        let provider = row["provider_id"].as_str().unwrap_or("?");
+        let pool = row["pool_id"].as_str().unwrap_or("?");
+        let models: Vec<_> = row["models"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        out.push_str(&format!(
+            "  {provider}/{pool}  quota pool ({} {}): {}\n",
+            models.len(),
+            if models.len() == 1 { "model" } else { "models" },
+            models.join(", ")
+        ));
+    }
+
+    if let Some(policy) = response["unit_policy"]
+        .as_str()
+        .filter(|_| !rows.is_empty())
+    {
         out.push_str(&format!("\n{policy}\n"));
     }
     out
@@ -3011,6 +3030,26 @@ mod tests {
         assert!(
             !out.contains("quota value 0"),
             "absence must not invent zero: {out}"
+        );
+    }
+
+    #[test]
+    fn quota_pools_render_one_line_per_pool_with_the_models() {
+        let response = serde_json::json!({"prices":[], "quota_pools":[
+            {"provider_id":"p", "pool_id":"Weekly", "models":["p/a", "p/b"]},
+            {"provider_id":"q", "pool_id":"few-hours", "models":["q/x"]}
+        ]});
+        let output = render_plan_prices(&response);
+        assert_eq!(
+            output.lines().skip(1).collect::<Vec<_>>(),
+            [
+                "  p/Weekly  quota pool (2 models): p/a, p/b",
+                "  q/few-hours  quota pool (1 model): q/x",
+            ]
+        );
+        assert_eq!(
+            render_plan_prices(&serde_json::json!({"prices":[]})),
+            "no curated subscription prices\n"
         );
     }
 

@@ -491,6 +491,10 @@ fn render_all() -> String {
     ordinary
         .as_object_mut()
         .unwrap()
+        .extend(render_plan_quota_pools());
+    ordinary
+        .as_object_mut()
+        .unwrap()
         .extend(render_quality_tools());
     ordinary
         .as_object_mut()
@@ -1896,6 +1900,60 @@ fn render_plan_concurrency() -> serde_json::Value {
     serde_json::json!({"request":request,"response":response})
 }
 
+fn render_plan_quota_pools() -> serde_json::Map<String, serde_json::Value> {
+    use serde_json::{json, to_value, to_vec};
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = CatalogStore::open(&StorageDescriptor {
+        module_id: "fusiform".into(),
+        storage_namespace: "default".into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir.path().join("store.db").to_str().unwrap().into(),
+        },
+    })
+    .unwrap();
+    let rows = ["google", "openai"].map(|provider_id| fusiform_store::NewPlanPrice {
+        provider_id: provider_id.into(),
+        tier: "fixture".into(),
+        minor_units: Some(2000),
+        exponent: Some(2),
+        currency: Some("USD".into()),
+        period: Some("month".into()),
+        boundary_at_ms: 1000,
+        established_by: "fixture".into(),
+        established_at_ms: 1000,
+        review_by_ms: 5_184_001_000,
+        source_ref: "https://example.invalid/pricing".into(),
+        refusal_reason: None,
+    });
+    store.append_plan_prices(&rows).unwrap();
+    let _planted = fusiform_module::quota_pools::plant(
+        &json!({"schema":"quota-pools/v1", "entries":[{
+            "provider_id":"google", "pool_id":"Weekly", "models":["google/antigravity-gemini-4-hydrogen"],
+            "source_ref":"https://example.invalid/quota", "quote":"Synthetic pool membership",
+            "established_at_ms":1000, "review_by_ms":5_184_001_000_i64
+        }]})
+        .to_string(),
+    );
+    [
+        ("plan.prices — synthetic quota pool", "google"),
+        ("plan.prices — provider without a quota pool", "openai"),
+    ]
+    .into_iter()
+    .map(|(label, provider)| {
+        let request = json!({"name":"plan.prices","arguments":{"provider_id":provider}});
+        let mut response =
+            to_value(serve_tool_call(&store, &to_vec(&request).unwrap()).unwrap()).unwrap();
+        response["resolved_at_ms"] = json!(NOW_PLACEHOLDER);
+        (
+            label.to_owned(),
+            json!({"request":request,"response":response}),
+        )
+    })
+    .collect()
+}
+
 fn render_paged() -> serde_json::Value {
     let (store, _dir) = store();
     // The second provider cannot fit with the first. Its large family value
@@ -2047,6 +2105,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
     let quality_tools = render_quality_tools();
     let media_quality = render_media_quality();
     let login_methods = render_login_methods();
+    let plan_quota_pools = render_plan_quota_pools();
     let served_history = super::served_history::golden_cases();
     let speed_twins = render_speed_twins();
     let plain_speed_twins = speed_twins
@@ -2071,6 +2130,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
                 + quality_tools.len()
                 + media_quality.len()
                 + plain_login_cases
+                + plan_quota_pools.len()
                 + render_cache_lifetimes().len()
                 + served_history.len()
                 + render_attachment_limits().len()
@@ -2095,6 +2155,7 @@ fn every_non_plane_golden_case_has_no_plane_bytes() {
             media_quality.len(),
         ),
         (render(), cases().len()),
+        (serde_json::to_string(&plan_quota_pools).unwrap(), 2),
         (
             serde_json::json!({"search_engines":render_search_engines()}).to_string(),
             1,
@@ -3386,6 +3447,16 @@ fn the_fixture_pins_the_shapes_it_exists_for() {
         );
     }
     let golden: serde_json::Value = serde_json::from_str(GOLDEN).unwrap();
+    let pools = &golden["plan.prices — synthetic quota pool"]["response"]["quota_pools"];
+    assert_eq!(pools.as_array().unwrap().len(), 1);
+    assert_eq!(pools[0]["pool_id"], "Weekly");
+    assert!(
+        golden["plan.prices — provider without a quota pool"]["response"]
+            .as_object()
+            .unwrap()
+            .get("quota_pools")
+            .is_none()
+    );
     let hy4 = &golden["catalog.get — per-model Go Hy4 Flash v2 wire facts"]["response"]["models"]
         ["opencode-go/hy4-flash-free"];
     assert_eq!(hy4["wire.family"], "openai.chat_completions");
@@ -3527,6 +3598,7 @@ fn every_read_response_field_reaches_the_fixture() {
             "StoreStatusWire",
             "PlanPricesResponse",
             "PlanPriceWire",
+            "QuotaPoolWire",
             "ConcurrencyWire",
         ],
     );

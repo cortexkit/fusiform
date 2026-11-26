@@ -26,6 +26,7 @@ Response:
 | `resolved_at_ms` | the requested `at_ms`, or the current time if omitted |
 | `tier_vocabulary` | a statement of what the `tier` strings name (§3) |
 | `unit_policy` | a statement of what the prices are quoted on (§4) |
+| `quota_pools` | optional list of established quota pool memberships (§5.3) |
 
 Each row in `prices`:
 
@@ -158,6 +159,24 @@ caps are joined onto current reads by `(provider_id, tier)`, omitted for
 tombstones, and never stored. Changing only concurrency writes no
 `plan_price_era`. Malformed caps are counted rejects without dropping the price;
 their review dates expire independently of the price.
+
+### 5.3. Quota pools
+
+`quota_pools` is a top-level list, not a property of a subscription tier. It
+describes which catalog models count against particular quota windows, not the
+size or value of the allowance. Each entry has `provider_id` (the models.dev
+provider id), `pool_id` (the quota reader's verbatim, case-sensitive window id),
+`models` (nonempty list of provider-qualified catalog ids), `source_ref`, `quote`,
+`established_at_ms` and `review_by_ms`. A missing pool means its membership is
+not established. The field is omitted if no entries match. A `provider_id`
+filter applies to both prices and pools; a requested provider without price
+rows is still refused.
+
+In store mode, current and dated reads use the signed quota-pool document in
+force at `resolved_at_ms`. Before its first publication there are no established
+pools. A changed list affects reads from its publication onward, not earlier
+reads. Native mode serves current pools only, from the compiled-in document,
+and does not accept `at_ms`.
 
 ## 6. The file
 

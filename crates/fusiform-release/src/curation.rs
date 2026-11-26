@@ -7,8 +7,8 @@ use crate::{CurationSet, Upstream, VendorDocument};
 
 type Documents = BTreeMap<String, Value>;
 
-/// Check vendor documents before an operator writes a draft. A login allowlist
-/// must name a current upstream model or alias, so the writer cannot publish a typo.
+/// Check vendor documents before an operator writes a draft. Login allowlists
+/// and quota pools must name current upstream models or aliases.
 pub fn validate_published(documents: &Documents, upstream: &Upstream) -> Result<(), String> {
     validate_vendor_documents(documents, Some(upstream), false)
 }
@@ -20,8 +20,8 @@ pub fn validate_received(documents: &Documents) -> Result<(), String> {
 }
 
 pub(crate) fn validate_new_release_documents(documents: &Documents) -> Result<(), String> {
-    // A login allowlist only restricts a model while it is served. An upstream
-    // withdrawal after approval must not prevent a release from being built.
+    // The draft was checked against upstream. A withdrawal after approval must
+    // not prevent the approved release from being built.
     validate_vendor_documents(documents, None, false)
 }
 
@@ -95,6 +95,26 @@ fn validate_vendor_documents(
             WireCorrections => curate::wire_corrections::load_reporting_rejects(&doc).1,
             WireFamilies => curate::wire_families::load_reporting_rejects(&doc).1,
             PlanPrices => curate::plan_prices::load_reporting_rejects(&doc).1,
+            QuotaPools => match upstream {
+                Some(upstream) => {
+                    let retired = documents
+                        .get("model-aliases")
+                        .map_or_else(BTreeMap::new, |raw| {
+                            curate::aliases::load_retired(&raw.to_string())
+                        });
+                    curate::quota_pools::load_where(&doc, |provider, model| {
+                        upstream
+                            .get(provider)
+                            .is_some_and(|row| row.models.contains_key(model))
+                            || {
+                                let id = (provider.to_owned(), model.to_owned());
+                                aliases.contains_key(&id) && !retired.contains_key(&id)
+                            }
+                    })
+                    .1
+                }
+                None => curate::quota_pools::load_stored_reporting_rejects(&doc).1,
+            },
         };
         accepted(name, ((), rejects))?;
     }
