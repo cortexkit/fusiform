@@ -93,6 +93,30 @@ fn get(store: &CatalogStore, args: Value) -> CatalogGetResponse {
 }
 
 #[test]
+fn images_shape_requires_a_verified_openai_image_sdk() {
+    let ids = [
+        ("google", "gemini-3.1-flash-image"),
+        ("openai", "gpt-image-2.6-flare"),
+        ("openrouter", "openai/gpt-image-1"),
+    ];
+    let (store, _dir) = super::media_catalog::v2_seed_store(&ids);
+    for args in [json!({}), json!({"at_ms":1000})] {
+        let response = get(&store, args.clone());
+        let actual = ids.map(|(provider, model)| {
+            let id = format!("{provider}/{model}");
+            let row = &response.models[&id];
+            assert_eq!(row["wire.shape"]["value"], "images", "{id}");
+            row.get("wire.family")
+        });
+        assert_eq!(
+            actual,
+            [None, Some(&json!("openai.images")), None],
+            "{args}"
+        );
+    }
+}
+
+#[test]
 fn opencode_go_serves_saved_v2_protocols_on_plain_and_apikey_reads() {
     let snapshot = super::curated_wire::seed_providers();
     let (store, _dir) = build_store(

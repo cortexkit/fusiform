@@ -204,7 +204,7 @@ value would do to a consumer:
 | `wire.npm` | advisory | `{"value": "<published client package>", "from": "model" or "provider"}`; otherwise no fact |
 | `wire.api` | advisory | `{"value": "<base URL>", "from": "model", "provider" or "curated"}`; otherwise no fact; corrections/withholding disclosed in `wire_corrections` |
 | `wire.shape` | advisory | `{"value": "<published request shape>", "from": "model"}`; otherwise no fact |
-| `wire.family` | byte-affecting | verified request protocol token; current reads only; otherwise the request protocol is not verified |
+| `wire.family` | byte-affecting | verified request protocol token; absent when the request protocol is not verified |
 | `route.reasoning_wire_ids` | byte-affecting | curated effort → backend model id object on live aliases only; otherwise no fact |
 | `route.mode_wire_ids` | byte-affecting | curated speed tier (`fast` or `ultrafast`) → separately served model id; the runner sends that id |
 | `route.mode_labels` | advisory | vendor display labels for those speed tiers, such as `{"fast":"Highspeed"}` |
@@ -263,17 +263,23 @@ The only tokens are `anthropic.messages`, `openai.responses`,
 `openai.chat_completions`, `openai.chatgpt_responses`,
 `google.generate_content`, `google.code_assist`, `aws.bedrock_converse` and
 `elevenlabs.text_to_speech`, `openai.images` and `google.interactions`.
-`openai.images` is verified from the Flare model's
+`openai.images` names the OpenAI request format, as documented by the Flare model's
 [supported image endpoints](https://platform.openai.com/docs/models/gpt-image-2.6-flare)
 (`/v1/images/generations` and `/v1/images/edits`, not Responses).
+On an upstream row, the `images` shape says only that the API generates images.
+It derives `openai.images` only when the recorded `wire.npm` is `@ai-sdk/openai`,
+`@ai-sdk/azure`, `@ai-sdk/openai-compatible` or `@ai-sdk/xai`: their OpenAI-style
+image models POST to `/images/generations` relative to the API base. An `images`
+row with any other package or no package has no derived family and does not
+fall back to the package rule table.
 `google.interactions` is verified from the
 [Omni guide](https://ai.google.dev/gemini-api/docs/omni)
 (`POST /v1beta/interactions`). The ElevenLabs token is verified from its
 [text-to-speech endpoint](https://elevenlabs.io/docs/api-reference/text-to-speech/convert),
 `POST /v1/text-to-speech/{voice_id}` with `xi-api-key` authentication.
-For plain upstream rows, the compiled-in `wire-families.json` matches the exact
-`wire.npm` package and `wire.shape` (including absence). Today's verification is
-broca's pinned `wire_family` table at
+Where the package rule table applies, the compiled-in `wire-families.json`
+matches the exact `wire.npm` package and `wire.shape` (including absence).
+Today's verification is broca's pinned `wire_family` table at
 [`d75a77db7249d4eb094ba667d1fa0d649e2e1682`](https://github.com/cortexkit/broca/blob/d75a77db7249d4eb094ba667d1fa0d649e2e1682/crates/broca-catalog/src/family.rs#L19-L40).
 A new rule is added when someone verifies a package's protocol, citing the
 package source or the provider's docs. Unknown packages or shapes produce no
@@ -287,8 +293,9 @@ value with the optional `wire_family` in `billing-planes.json`: `openai/chatgpt`
 uses `openai.chatgpt_responses`, and `meta/oauth` uses `openai.responses`.
 Other planes inherit the row's value. Curated plane-only and System One rows
 have no package-derived protocol; a plane's verified value can still apply.
-These derived facts are computed only on current upstream reads, never stored, and omitted on
-`at_ms` reads. `fact_prefixes: ["wire.family"]` and `["wire."]` select them.
+Derived families are never stored. The package rule table applies only to
+current upstream reads; the image rule also applies to `at_ms` reads using the
+recorded claims. `fact_prefixes: ["wire.family"]` and `["wire."]` select the fact.
 
 Curated rows may state their own sourced `wire.api` (`from: curated`)
 and verified `wire.family`, without inheriting a provider default or a

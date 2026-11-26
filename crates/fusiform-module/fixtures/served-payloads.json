@@ -2005,7 +2005,6 @@
             "from": "model",
             "value": "https://generativelanguage.googleapis.com/v1beta"
           },
-          "wire.family": "openai.images",
           "wire.npm": {
             "from": "model",
             "value": "@ai-sdk/google"

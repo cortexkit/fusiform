@@ -151,13 +151,20 @@ pub fn render_row<'a>(
     if let Some("decision" | "extraction") = facts.get("model.type").and_then(|v| v.as_str()) {
         facts.insert("model.kind".to_string(), facts["model.type"].clone());
     }
-    let protocol_family = match facts
+    let stored_shape = facts
         .get("wire.shape")
-        .and_then(|claim| claim["value"].as_str())
-    {
-        Some("images") => Some("openai.images"),
-        Some("interactions") => Some("google.interactions"),
-        Some("speech") => Some("elevenlabs.text_to_speech"),
+        .and_then(|claim| claim["value"].as_str());
+    let stored_npm = facts
+        .get("wire.npm")
+        .and_then(|claim| claim["value"].as_str());
+    let is_image_api = stored_shape == Some("images");
+    let protocol_family = match (stored_shape, stored_npm) {
+        (
+            Some("images"),
+            Some("@ai-sdk/openai" | "@ai-sdk/azure" | "@ai-sdk/openai-compatible" | "@ai-sdk/xai"),
+        ) => Some("openai.images"),
+        (Some("interactions"), _) => Some("google.interactions"),
+        (Some("speech"), _) => Some("elevenlabs.text_to_speech"),
         _ => None,
     };
     let mut endpoint_withheld = false;
@@ -213,6 +220,11 @@ pub fn render_row<'a>(
                 .get("wire.shape")
                 .and_then(|claim| claim["value"].as_str());
             if let Some(family) = protocol_family.or_else(|| {
+                // An image API without a verified image protocol must not use
+                // the package's protocol for a different kind of request.
+                if is_image_api {
+                    return None;
+                }
                 npm.and_then(|npm| crate::wire_families::lookup(current.wire_families, npm, shape))
             }) {
                 facts.insert("wire.family".to_string(), serde_json::json!(family));

@@ -1332,6 +1332,16 @@ Only `anthropic.messages`, `openai.responses`, `openai.chat_completions`,
 `openai.images` is verified from
 https://platform.openai.com/docs/models/gpt-image-2.6-flare
 (`/v1/images/generations` and `/v1/images/edits`, not Responses).
+The upstream `images` shape alone does not identify OpenAI's request format.
+It derives `openai.images` only for `@ai-sdk/openai`, `@ai-sdk/azure`,
+`@ai-sdk/openai-compatible` and `@ai-sdk/xai`, whose OpenAI-style image models
+POST to `/images/generations` relative to the API base. Other or missing SDKs
+leave the family absent on `images` rows; the package table is not consulted.
+The package sources are
+[`@ai-sdk/openai`](https://github.com/vercel/ai/blob/%40ai-sdk/openai%402.0.85/packages/openai/src/image/openai-image-model.ts#L66-L80),
+[`@ai-sdk/azure`'s OpenAI image model selection](https://github.com/vercel/ai/blob/%40ai-sdk/azure%402.0.87/packages/azure/src/azure-openai-provider.ts#L211-L217),
+[`@ai-sdk/openai-compatible`](https://github.com/vercel/ai/blob/ai%406.0.0/packages/openai-compatible/src/image/openai-compatible-image-model.ts#L117-L140),
+and [`@ai-sdk/xai`](https://github.com/vercel/ai/blob/%40ai-sdk/xai%405.0.51/packages/xai/src/xai-image-model.ts#L123-L183).
 `google.interactions` is verified from
 https://ai.google.dev/gemini-api/docs/omni
 (`POST https://generativelanguage.googleapis.com/v1beta/interactions`).
@@ -1343,8 +1353,8 @@ tokens, malformed rules, missing provenance and duplicate selectors; shipped
 rules must have zero rejects. Alias and billing-plane loaders reject unknown
 protocol tokens too.
 
-Current upstream reads derive the fact from `wire.npm` and `wire.shape` only
-after endpoint corrections. Withheld endpoints get no protocol. Present alias
+Current upstream reads use `wire.npm` and `wire.shape` after endpoint corrections
+for package table rules. Withheld endpoints get no protocol. Present alias
 rows use their own curated `wire_family` (§3); retired aliases get none.
 `billing-planes.json` may set an optional per-plane `wire_family` in place of the
 row's value; unspecified planes inherit it. Only these planes override today:
@@ -1368,8 +1378,9 @@ row's value; unspecified planes inherit it. Only these planes override today:
 Curated plane-only and System One rows have no package-derived protocol. The
 Meta plane has an explicit verified value; no protocol is inferred for the
 Cloudflare or TypeSafe curated rows from their decision/extraction kind.
-For upstream rows, derived `wire.family` is never stored, appears only on current reads, is omitted on
-`at_ms` reads, and respects `wire.family` and `wire.` fact-prefix filters.
+For upstream rows, derived `wire.family` is never stored and respects
+`wire.family` and `wire.` fact-prefix filters. Package table rules are omitted
+on `at_ms` reads; the image rule applies there using the recorded claims.
 `tests/it/wire_families.rs` exercises real seed witnesses, endpoint withholding,
 aliases, planes, history and filters through the served route.
 
