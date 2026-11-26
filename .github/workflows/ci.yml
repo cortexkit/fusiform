@@ -178,6 +178,11 @@ jobs:
           scripts/no-outside-path-deps.sh --self-test
           scripts/no-outside-path-deps.sh
 
+      - name: Only approved CortexKit paths are tracked
+        run: |
+          scripts/check-cortexkit-layout.sh --self-test
+          scripts/check-cortexkit-layout.sh
+
       # This check reads the scripts' source text rather than running them, so
       # it works here even though Linux bash 5 does not show the macOS bash 3.2
       # exit-0 it guards against. Self-test first, for the same

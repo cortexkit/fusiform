@@ -93,6 +93,8 @@ step fmt cargo --locked fmt --all -- --check
 step lock-resolves cargo metadata --locked --offline --format-version 1
 step path-deps-self-test scripts/no-outside-path-deps.sh --self-test
 step path-deps scripts/no-outside-path-deps.sh
+step cortexkit-layout-self-test scripts/check-cortexkit-layout.sh --self-test
+step cortexkit-layout scripts/check-cortexkit-layout.sh
 step shell-guard-self-test python3 scripts/check-shell-exit-guard.py --self-test
 step shell-guard python3 scripts/check-shell-exit-guard.py
 step wire-crate-version wire_version
