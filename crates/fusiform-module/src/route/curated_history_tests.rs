@@ -9,8 +9,9 @@
 use super::*;
 use crate::curated_models::{apply_to_store, load_table_reporting_rejects, Table};
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+use fusiform_core::upstream_facts::Existence;
 use fusiform_core::{BoundaryKind, ObservationOutcome};
-use fusiform_store::{ingest::plan_ingest, NewObservation};
+use fusiform_store::{ingest::plan_ingest, NewEra, NewObservation};
 use serde_json::{json, Value};
 
 const TYPESAFE: &str = "typesafe";
@@ -40,31 +41,28 @@ fn empty_store() -> (CatalogStore, tempfile::TempDir) {
     (store, dir)
 }
 
-/// Ingest one models.dev document listing an ordinary Cloudflare model and,
-/// when asked, clef with upstream facts unlike the curated row's. The first
-/// document is a seed, every later one an observed change, as in the poll
-/// loop.
+/// Seed an ordinary Cloudflare model, then record Clef's listing or withdrawal.
+/// The listed Clef's upstream facts differ from the curated row's.
 fn ingest(store: &CatalogStore, at: i64, lists_clef: bool) {
     let mut models = serde_json::Map::new();
     models.insert(
         "@cf/meta/ordinary".into(),
-        json!({"id":"@cf/meta/ordinary", "name":"Ordinary", "family":"ordinary",
-               "limit":{"context":4000, "output":1000}, "cost":{"input":1, "output":2}}),
+        json!({"id":"@cf/meta/ordinary", "type":"chat", "name":"Ordinary", "family":"ordinary",
+               "capabilities":{}, "api":{},
+               "limit":{"context":4000, "output":1000},
+               "cost":{"text":{"input":{"price":1}, "output":{"price":2}}}}),
     );
     if lists_clef {
         models.insert(
             CLEF.into(),
-            json!({"id":CLEF, "name":"Clef (upstream)", "family":"upstream-clef",
-                   "limit":{"context":1000, "output":500}, "cost":{"input":9, "output":9}}),
+            json!({"id":CLEF, "type":"chat", "name":"Clef (upstream)", "family":"upstream-clef",
+                   "capabilities":{}, "api":{},
+                   "limit":{"context":1000, "output":500},
+                   "cost":{"text":{"input":{"price":9}, "output":{"price":9}}}}),
         );
     }
     let doc =
         json!({CLOUDFLARE: {"id":CLOUDFLARE, "name":"Cloudflare Workers AI", "models":models}});
-    let catalog = fusiform_core::normalize::normalize_legacy_models_dev_for_tests(
-        &serde_json::to_vec(&doc).unwrap(),
-    )
-    .unwrap()
-    .catalog;
     let seed = at == RECORD_BEGINS_AT;
     let observation = store
         .record_observation(&NewObservation {
@@ -87,8 +85,27 @@ fn ingest(store: &CatalogStore, at: i64, lists_clef: bool) {
     } else {
         (BoundaryKind::Observed, Some(observation))
     };
-    let plan = plan_ingest(store, &catalog, Timestamp(at), kind, era_observation).unwrap();
-    store.append_eras(&plan.eras).unwrap();
+    if !seed && !lists_clef {
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: CLOUDFLARE.into(),
+                model_id: CLEF.into(),
+                fact_key: FactKey::existence(),
+                value_json: Existence::Absent.as_json().into(),
+                boundary_at: Timestamp(at),
+                boundary_kind: kind,
+                observation_id: era_observation,
+            }])
+            .unwrap();
+    } else {
+        let catalog =
+            fusiform_core::normalize::normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+                .unwrap()
+                .catalog;
+        let plan = plan_ingest(store, &catalog, Timestamp(at), kind, era_observation).unwrap();
+        store.append_eras(&plan.eras).unwrap();
+    }
     store
         .advance_catalog_version(observation, Timestamp(at))
         .unwrap();
@@ -630,6 +647,7 @@ fn a_historical_read_where_upstream_had_the_model_serves_the_upstream_row() {
     let listed_at = clef_established + 2 * DAY_MS;
     let withdrawn_at = clef_established + 3 * DAY_MS;
     ingest(&store, listed_at, true);
+    // The models.dev v2 parser cannot emit this historical withdrawal inferred from a full snapshot.
     ingest(&store, withdrawn_at, false);
 
     let file_row = &shipped().models[&(CLOUDFLARE.to_string(), CLEF.to_string())];

@@ -7,13 +7,14 @@
 //! containing values.
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
-use fusiform_core::normalize::normalize_legacy_models_dev_for_tests;
+use fusiform_core::normalize::normalize_models_dev;
+use fusiform_core::upstream_facts::Existence;
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp, TokenClass};
 use fusiform_module::route::{
     serve_catalog_get, serve_tool_call, CatalogGetResponse, ToolResponse,
 };
 use fusiform_store::ingest::plan_ingest;
-use fusiform_store::{CatalogStore, NewObservation};
+use fusiform_store::{CatalogStore, FactKey, NewEra, NewObservation};
 
 const FIXTURE: &str = include_str!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
@@ -23,6 +24,10 @@ struct Fixture {
 }
 
 fn fixture() -> Fixture {
+    fixture_from(FIXTURE.as_bytes())
+}
+
+fn fixture_from(document: &[u8]) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".to_string(),
@@ -34,13 +39,37 @@ fn fixture() -> Fixture {
     })
     .unwrap();
 
-    let catalog = normalize_legacy_models_dev_for_tests(FIXTURE.as_bytes())
-        .unwrap()
-        .catalog;
+    let catalog = normalize_models_dev(document).unwrap().catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
 
     Fixture { store, _dir: dir }
+}
+
+fn sonnet_price_document(input: f64) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({"anthropic":{
+        "id":"anthropic", "name":"Anthropic", "models":{
+            "claude-sonnet-4-5":{"id":"claude-sonnet-4-5", "type":"chat", "name":"Claude Sonnet 4.5",
+                "capabilities":{}, "api":{},
+                "cost":{"text":{"input":{"price":input}}}}
+        }
+    }}))
+    .unwrap()
+}
+
+fn retire_sonnet(f: &Fixture, observation_id: i64) {
+    f.store
+        .append_eras(&[NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "anthropic".into(),
+            model_id: "claude-sonnet-4-5".into(),
+            fact_key: FactKey::existence(),
+            value_json: Existence::Absent.as_json().into(),
+            boundary_at: Timestamp(3_000),
+            boundary_kind: BoundaryKind::Observed,
+            observation_id: Some(observation_id),
+        }])
+        .unwrap();
 }
 
 fn get(f: &Fixture, body: &str) -> CatalogGetResponse {
@@ -126,17 +155,7 @@ fn fact_values_are_values_not_strings() {
 /// A point-in-time request is honoured rather than served as current.
 #[test]
 fn a_point_in_time_request_is_honoured() {
-    let f = fixture();
-
-    // A change after the seed.
-    let mut doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
-    doc.get_mut("anthropic")
-        .and_then(|p| p.get_mut("models"))
-        .and_then(|m| m.get_mut("claude-sonnet-4-5"))
-        .and_then(|m| m.get_mut("cost"))
-        .and_then(|c| c.as_object_mut())
-        .unwrap()
-        .insert("input".to_string(), serde_json::json!(11.0));
+    let f = fixture_from(&sonnet_price_document(3.0));
 
     let obs = f
         .store
@@ -151,7 +170,7 @@ fn a_point_in_time_request_is_honoured() {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
+    let catalog = normalize_models_dev(&sonnet_price_document(11.0))
         .unwrap()
         .catalog;
     let plan = plan_ingest(
@@ -313,14 +332,6 @@ fn a_malformed_request_is_refused_rather_than_defaulted() {
 fn retired_models_are_excluded_by_default() {
     let f = fixture();
 
-    // Withdraw a model.
-    let mut doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
-    doc.get_mut("anthropic")
-        .and_then(|p| p.get_mut("models"))
-        .and_then(|m| m.as_object_mut())
-        .unwrap()
-        .remove("claude-sonnet-4-5");
-
     let obs = f
         .store
         .record_observation(&NewObservation {
@@ -334,18 +345,8 @@ fn retired_models_are_excluded_by_default() {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
-        .unwrap()
-        .catalog;
-    let plan = plan_ingest(
-        &f.store,
-        &catalog,
-        Timestamp(3_000),
-        BoundaryKind::Observed,
-        Some(obs),
-    )
-    .unwrap();
-    f.store.append_eras(&plan.eras).unwrap();
+    // The models.dev v2 parser cannot emit this historical retirement inferred from a full snapshot.
+    retire_sonnet(&f, obs);
 
     let default = get(&f, "{}");
     assert!(!default.models.contains_key("anthropic/claude-sonnet-4-5"));
@@ -444,19 +445,10 @@ fn the_tool_call_envelope_is_unwrapped() {
 /// `catalog.history` returns a fact's eras oldest first, with their windows.
 #[test]
 fn history_returns_eras_with_their_windows() {
-    let f = fixture();
+    let f = fixture_from(&sonnet_price_document(3.0));
 
     // Reprice twice, so the history has a seed and two observed boundaries.
     for (at, rate) in [(3_000i64, 7.0f64), (5_000, 11.0)] {
-        let mut doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
-        doc.get_mut("anthropic")
-            .and_then(|p| p.get_mut("models"))
-            .and_then(|m| m.get_mut("claude-sonnet-4-5"))
-            .and_then(|m| m.get_mut("cost"))
-            .and_then(|c| c.as_object_mut())
-            .unwrap()
-            .insert("input".to_string(), serde_json::json!(rate));
-
         let obs = f
             .store
             .record_observation(&NewObservation {
@@ -470,7 +462,7 @@ fn history_returns_eras_with_their_windows() {
                 detail: None,
             })
             .unwrap();
-        let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
+        let catalog = normalize_models_dev(&sonnet_price_document(rate))
             .unwrap()
             .catalog;
         let plan = plan_ingest(
@@ -1304,6 +1296,9 @@ fn every_field_id() -> Vec<fusiform_core::FieldId> {
         FieldId::Model {
             attribute: fusiform_core::ModelAttributeId::Status,
         },
+        FieldId::Model {
+            attribute: fusiform_core::ModelAttributeId::Type,
+        },
         FieldId::Wire {
             attribute: fusiform_core::WireAttributeId::Npm,
         },
@@ -2111,21 +2106,15 @@ fn an_empty_history_names_which_cause_applies() {
 /// freshly maintained.
 #[test]
 fn the_served_last_change_ignores_an_artifact_poll() {
-    let f = fixture();
+    let f = fixture_from(&sonnet_price_document(3.0));
 
     // A genuine reprice, then a poll that rewrites the same value.
-    let mut repriced: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
-    repriced
-        .get_mut("anthropic")
-        .and_then(|p| p.get_mut("models"))
-        .and_then(|m| m.get_mut("claude-sonnet-4-5"))
-        .and_then(|m| m.get_mut("cost"))
-        .and_then(|c| c.as_object_mut())
+    let repriced = normalize_models_dev(&sonnet_price_document(7.0))
         .unwrap()
-        .insert("input".to_string(), serde_json::json!(7.0));
+        .catalog;
 
     let mut artifact_obs = None;
-    for (at, doc) in [(3_000i64, &repriced), (5_000, &repriced)] {
+    for at in [3_000i64, 5_000] {
         let obs = f
             .store
             .record_observation(&NewObservation {
@@ -2139,12 +2128,9 @@ fn the_served_last_change_ignores_an_artifact_poll() {
                 detail: None,
             })
             .unwrap();
-        let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(doc).unwrap())
-            .unwrap()
-            .catalog;
         let plan = plan_ingest(
             &f.store,
-            &catalog,
+            &repriced,
             Timestamp(at),
             BoundaryKind::Observed,
             Some(obs),
@@ -2600,13 +2586,6 @@ fn an_unstamped_build_names_why_its_commit_is_absent() {
 fn a_named_read_of_a_retired_model_says_so() {
     let f = fixture();
 
-    let mut doc: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
-    doc.get_mut("anthropic")
-        .and_then(|p| p.get_mut("models"))
-        .and_then(|m| m.as_object_mut())
-        .unwrap()
-        .remove("claude-sonnet-4-5");
-
     let obs = f
         .store
         .record_observation(&NewObservation {
@@ -2620,18 +2599,8 @@ fn a_named_read_of_a_retired_model_says_so() {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
-        .unwrap()
-        .catalog;
-    let plan = plan_ingest(
-        &f.store,
-        &catalog,
-        Timestamp(3_000),
-        BoundaryKind::Observed,
-        Some(obs),
-    )
-    .unwrap();
-    f.store.append_eras(&plan.eras).unwrap();
+    // The models.dev v2 parser cannot emit this historical retirement inferred from a full snapshot.
+    retire_sonnet(&f, obs);
 
     let named = get(
         &f,

@@ -1,14 +1,14 @@
 //! A curated row and an upstream row models.dev listed and then withdrew.
 //!
 //! Upstream wins only while it currently publishes the model. These tests
-//! ingest real models.dev documents into a real store: one that lists
-//! `cloudflare-workers-ai/@cf/cloudflare/clef`, a later one that withdraws it,
-//! and (in the control) a third that lists it again.
+//! ingest v2 documents listing `cloudflare-workers-ai/@cf/cloudflare/clef`
+//! and write a historical withdrawal between listings.
 
 use super::*;
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+use fusiform_core::upstream_facts::Existence;
 use fusiform_core::{BoundaryKind, ObservationOutcome};
-use fusiform_store::{ingest::plan_ingest, NewObservation};
+use fusiform_store::{ingest::plan_ingest, NewEra, NewObservation};
 use serde_json::{json, Value};
 
 const PROVIDER: &str = "cloudflare-workers-ai";
@@ -37,14 +37,16 @@ fn empty_store() -> (CatalogStore, tempfile::TempDir) {
     (store, dir)
 }
 
-/// Ingest one models.dev document as the poll loop does: the first document
-/// into an empty store is a seed, every later one an observed change.
+/// Record a listing or withdrawal. The first listing is a seed; later changes
+/// have observed boundaries.
 fn ingest(store: &CatalogStore, at: i64, lists_clef: bool) {
     let mut models = serde_json::Map::new();
     models.insert(
         "@cf/meta/ordinary".into(),
-        json!({"id":"@cf/meta/ordinary", "name":"Ordinary", "family":"ordinary",
-               "limit":{"context":4000, "output":1000}, "cost":{"input":1, "output":2}}),
+        json!({"id":"@cf/meta/ordinary", "type":"chat", "name":"Ordinary", "family":"ordinary",
+               "capabilities":{}, "api":{},
+               "limit":{"context":4000, "output":1000},
+               "cost":{"text":{"input":{"price":1}, "output":{"price":2}}}}),
     );
     if lists_clef {
         // Upstream facts deliberately unlike the curated row's, and some keys
@@ -52,17 +54,13 @@ fn ingest(store: &CatalogStore, at: i64, lists_clef: bool) {
         // into a curated read is visible.
         models.insert(
             MODEL.into(),
-            json!({"id":MODEL, "name":"Clef (upstream)", "family":"upstream-clef",
-                   "reasoning":true, "limit":{"context":1000, "output":500},
-                   "cost":{"input":9, "output":9}}),
+            json!({"id":MODEL, "type":"chat", "name":"Clef (upstream)", "family":"upstream-clef",
+                   "capabilities":{"reasoning":{"supported":true}}, "api":{},
+                   "limit":{"context":1000, "output":500},
+                   "cost":{"text":{"input":{"price":9}, "output":{"price":9}}}}),
         );
     }
     let doc = json!({PROVIDER: {"id":PROVIDER, "name":"Cloudflare Workers AI", "models":models}});
-    let catalog = fusiform_core::normalize::normalize_legacy_models_dev_for_tests(
-        &serde_json::to_vec(&doc).unwrap(),
-    )
-    .unwrap()
-    .catalog;
     let seed = at == LISTED_AT;
     let observation = store
         .record_observation(&NewObservation {
@@ -85,8 +83,27 @@ fn ingest(store: &CatalogStore, at: i64, lists_clef: bool) {
     } else {
         (BoundaryKind::Observed, Some(observation))
     };
-    let plan = plan_ingest(store, &catalog, Timestamp(at), kind, era_observation).unwrap();
-    store.append_eras(&plan.eras).unwrap();
+    if lists_clef {
+        let catalog =
+            fusiform_core::normalize::normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
+                .unwrap()
+                .catalog;
+        let plan = plan_ingest(store, &catalog, Timestamp(at), kind, era_observation).unwrap();
+        store.append_eras(&plan.eras).unwrap();
+    } else {
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: PROVIDER.into(),
+                model_id: MODEL.into(),
+                fact_key: FactKey::existence(),
+                value_json: Existence::Absent.as_json().into(),
+                boundary_at: Timestamp(at),
+                boundary_kind: kind,
+                observation_id: era_observation,
+            }])
+            .unwrap();
+    }
     store
         .advance_catalog_version(observation, Timestamp(at))
         .unwrap();
@@ -239,6 +256,7 @@ fn a_withdrawn_upstream_row_gives_way_to_the_curated_row() {
     let _planted = served();
     let (store, _dir) = empty_store();
     ingest(&store, LISTED_AT, true);
+    // The models.dev v2 parser cannot emit this historical withdrawal inferred from a full snapshot.
     ingest(&store, WITHDRAWN_AT, false);
 
     // Control: the store really holds clef as a withdrawn upstream row with
@@ -304,6 +322,7 @@ fn an_upstream_relisting_wins_over_the_curated_row_again() {
     let _planted = served();
     let (store, _dir) = empty_store();
     ingest(&store, LISTED_AT, true);
+    // The models.dev v2 parser cannot emit this historical withdrawal inferred from a full snapshot.
     ingest(&store, WITHDRAWN_AT, false);
     // Withdrawn: the curated row is served.
     assert_curated_clef(&get(&store, json!({})), "bulk after withdrawal");
@@ -327,6 +346,7 @@ fn a_held_row_leaves_the_withdrawn_upstream_row_to_report_itself() {
     let _held = crate::curated_models::plant(&crate::curated_models::document_holding_system_one());
     let (store, _dir) = empty_store();
     ingest(&store, LISTED_AT, true);
+    // The models.dev v2 parser cannot emit this historical withdrawal inferred from a full snapshot.
     ingest(&store, WITHDRAWN_AT, false);
 
     let named = get(&store, json!({"provider_id":PROVIDER, "model_id":MODEL}));

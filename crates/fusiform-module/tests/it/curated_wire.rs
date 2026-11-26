@@ -2,8 +2,14 @@ use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::{BoundaryKind, ObservationOutcome, SourceId, Timestamp};
 use fusiform_module::route::{serve_tool_call, ToolResponse};
 use fusiform_protocol::CatalogGetResponse;
-use fusiform_store::{ingest::plan_ingest, CatalogStore, NewObservation};
-use serde_json::{json, Value};
+use fusiform_store::{ingest::plan_ingest, CatalogStore, FactKey, NewEra, NewObservation};
+use serde::{Deserialize, Serialize};
+use serde_json::{
+    json,
+    value::{to_raw_value, RawValue},
+    Value,
+};
+use std::collections::BTreeMap;
 
 const FLASH: &str = "google/antigravity-gemini-3.8-flash";
 const ARGON: &str = "google/antigravity-gemini-4-argon";
@@ -11,55 +17,165 @@ const SONNET: &str = "google/antigravity-claude-sonnet-5-5";
 const OPUS: &str = "google/antigravity-claude-opus-5-5";
 const RETIRED: &str = "google/antigravity-gemini-3.7-flash";
 
+#[derive(Deserialize, Serialize)]
+pub(super) struct FixtureProvider<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(borrow)]
+    pub models: BTreeMap<String, &'a RawValue>,
+}
+
+pub(super) type FixtureDocument<'a> = BTreeMap<String, FixtureProvider<'a>>;
+
+pub(super) fn seed_providers() -> BTreeMap<&'static str, &'static RawValue> {
+    const SEED: &str = include_str!("../../data/models-dev-seed.json");
+    serde_json::from_str(SEED).unwrap()
+}
+
+pub(super) fn seed_cut(rows: &[(&str, &str)]) -> FixtureDocument<'static> {
+    let seed = seed_providers();
+    let mut cut = FixtureDocument::new();
+    for &(provider, _) in rows {
+        cut.entry(provider.into())
+            .or_insert_with(|| serde_json::from_str(seed[provider].get()).unwrap());
+    }
+    for (provider, row) in &mut cut {
+        row.models
+            .retain(|model, _| rows.contains(&(provider, model)));
+    }
+    for &(provider, model) in rows {
+        assert!(
+            cut[provider].models.contains_key(model),
+            "missing seed row {provider}/{model}"
+        );
+    }
+    // Keep each model raw: the parser uses document order for API and TTL defaults.
+    cut
+}
+
 pub(crate) fn store() -> (CatalogStore, tempfile::TempDir) {
     store_with_anthropic_api(None)
 }
 
 fn store_with_anthropic_api(api: Option<&str>) -> (CatalogStore, tempfile::TempDir) {
-    let seed: Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    let mut upstream = json!({});
-    for (provider, ids) in [
+    let mut upstream = seed_cut(&[
+        ("opencode-go", "claude-haiku-5-5"),
+        ("opencode-go", "minimax-m2.7"),
+        ("opencode-go", "minimax-m3"),
+        ("google", "gemini-3.8-flash"),
+        ("google", "gemini-4-argon"),
+        ("google", "gemini-3.1-flash-image"),
+        ("openai", "gpt-6.1-sol"),
+        ("anthropic", "claude-opus-5-5"),
+        ("anthropic", "claude-sonnet-5-5"),
+        ("xai", "grok-4.7"),
+        ("cerebras", "qwen-3.8-27b"),
+    ]);
+    let mut observed: BTreeMap<String, Box<RawValue>> =
+        serde_json::from_str(upstream["openai"].models["gpt-6.1-sol"].get()).unwrap();
+    observed.insert("id".into(), to_raw_value("observed-api").unwrap());
+    observed.insert(
+        "api".into(),
+        to_raw_value(&json!({"responses":{
+            "base_url":"https://observed.example/model/v1","sdk":{"aisdk":"@ai-sdk/openai"}
+        }}))
+        .unwrap(),
+    );
+    let observed = to_raw_value(&observed).unwrap();
+    upstream
+        .get_mut("openai")
+        .unwrap()
+        .models
+        .insert("observed-api".into(), &observed);
+
+    // Exercise endpoint fallback with a single API that names an SDK but no base URL.
+    let without_endpoints: Vec<_> = [
+        ("openai", "gpt-6.1-sol", "responses", "@ai-sdk/openai"),
         (
-            "opencode-go",
-            vec!["claude-haiku-5-5", "minimax-m2.7", "minimax-m3"],
+            "anthropic",
+            "claude-opus-5-5",
+            "messages",
+            "@ai-sdk/anthropic",
+        ),
+        (
+            "anthropic",
+            "claude-sonnet-5-5",
+            "messages",
+            "@ai-sdk/anthropic",
         ),
         (
             "google",
-            vec![
-                "gemini-3.8-flash",
-                "gemini-4-argon",
-                "gemini-3.1-flash-image",
-            ],
+            "gemini-3.8-flash",
+            "generate-content",
+            "@ai-sdk/google",
         ),
-        ("openai", vec!["gpt-6.1-sol"]),
-        ("anthropic", vec!["claude-opus-5-5", "claude-sonnet-5-5"]),
-        ("xai", vec!["grok-4.7"]),
-        ("cerebras", vec!["qwen-3.8-27b"]),
-    ] {
-        upstream[provider] = seed[provider].clone();
-        upstream[provider]["models"] = json!({});
-        for id in ids {
-            assert!(
-                seed[provider]["models"][id].is_object(),
-                "missing seed cut {provider}/{id}"
+        ("xai", "grok-4.7", "responses", "@ai-sdk/xai"),
+        (
+            "cerebras",
+            "qwen-3.8-27b",
+            "chat-completions",
+            "@ai-sdk/cerebras",
+        ),
+    ]
+    .into_iter()
+    .map(|(provider, id, protocol, sdk)| {
+        let mut row: BTreeMap<String, Box<RawValue>> =
+            serde_json::from_str(upstream[provider].models[id].get()).unwrap();
+        row.insert(
+            "api".into(),
+            to_raw_value(&json!({protocol:{"sdk":{"aisdk":sdk}}})).unwrap(),
+        );
+        if provider == "openai" {
+            // Endpoint fallback should still render the ordinary price card.
+            let mut cost: BTreeMap<String, Box<RawValue>> =
+                serde_json::from_str(row["cost"].get()).unwrap();
+            let mut rules: Vec<&RawValue> =
+                serde_json::from_str(cost["multipliers"].get()).unwrap();
+            rules.retain(|rule| {
+                let rule: Value = serde_json::from_str(rule.get()).unwrap();
+                rule.pointer("/when/not/region").is_none()
+            });
+            cost.insert("multipliers".into(), to_raw_value(&rules).unwrap());
+            row.insert("cost".into(), to_raw_value(&cost).unwrap());
+        } else if provider == "anthropic" {
+            // The alias assertions compare base rates, not regional or service-tier prices.
+            let (input, read, write, output) = if id == "claude-opus-5-5" {
+                (4, 0.2, 5.0, 20)
+            } else {
+                (2, 0.1, 2.5, 10)
+            };
+            row.insert(
+                "cost".into(),
+                to_raw_value(&json!({"text":{
+                    "input":{"price":input,"cache":{"read":read,"write":write}},
+                    "output":{"price":output}
+                }}))
+                .unwrap(),
             );
-            upstream[provider]["models"][id] = seed[provider]["models"][id].clone();
         }
+        (provider, id, to_raw_value(&row).unwrap())
+    })
+    .collect();
+    for (provider, id, row) in &without_endpoints {
+        upstream
+            .get_mut(*provider)
+            .unwrap()
+            .models
+            .insert((*id).into(), row);
     }
-    // A shape claim is independent of an endpoint correction or withholding.
-    for id in ["claude-haiku-5-5", "minimax-m2.7"] {
-        upstream["opencode-go"]["models"][id]["provider"]["shape"] = json!("observed-shape");
-    }
-    // Exercise upstream endpoint precedence without relying on seed omissions.
-    let mut observed = upstream["openai"]["models"]["gpt-6.1-sol"].clone();
-    observed["id"] = json!("observed-api");
-    observed["provider"]["api"] = json!("https://observed.example/model/v1");
-    upstream["openai"]["models"]["observed-api"] = observed;
-    if let Some(api) = api {
-        upstream["anthropic"]["api"] = json!(api);
-    }
+    // The historical override was added before the catalog published an image-token price.
+    let flash = upstream
+        .get_mut("google")
+        .unwrap()
+        .models
+        .get_mut("gemini-3.1-flash-image")
+        .unwrap();
+    let mut row: BTreeMap<String, Box<RawValue>> = serde_json::from_str(flash.get()).unwrap();
+    let mut cost: Value = serde_json::from_str(row["cost"].get()).unwrap();
+    assert!(cost.as_object_mut().unwrap().remove("image").is_some());
+    row.insert("cost".into(), to_raw_value(&cost).unwrap());
+    let flash_without_image_price = to_raw_value(&row).unwrap();
+    *flash = &flash_without_image_price;
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -82,13 +198,41 @@ fn store_with_anthropic_api(api: Option<&str>) -> (CatalogStore, tempfile::TempD
             detail: None,
         })
         .unwrap();
-    let catalog = fusiform_core::normalize_legacy_models_dev_for_tests(
+    let catalog = fusiform_core::normalize_models_dev_v2_with(
         &serde_json::to_vec(&upstream).unwrap(),
+        &fusiform_module::input_audio::evidence(),
     )
     .unwrap()
     .catalog;
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
+    if let Some(api) = api {
+        // Provider-origin endpoints predate the model-only API entries in models.dev v2.
+        store
+            .append_eras(&[NewEra {
+                source: SourceId::ModelsDev,
+                provider_id: "anthropic".into(),
+                model_id: "claude-opus-5-5".into(),
+                fact_key: FactKey::from_stored("wire.api".into()),
+                value_json: json!({"value":api,"from":"provider"}).to_string(),
+                boundary_at: Timestamp(1_000),
+                boundary_kind: BoundaryKind::Seed,
+                observation_id: None,
+            }])
+            .unwrap();
+    }
+    // Opaque wire shapes predate the protocol-derived shapes in models.dev v2.
+    let old_shapes = ["claude-haiku-5-5", "minimax-m2.7"].map(|id| NewEra {
+        source: SourceId::ModelsDev,
+        provider_id: "opencode-go".into(),
+        model_id: id.into(),
+        fact_key: FactKey::from_stored("wire.shape".into()),
+        value_json: json!({"value":"observed-shape","from":"model"}).to_string(),
+        boundary_at: Timestamp(1_000),
+        boundary_kind: BoundaryKind::Seed,
+        observation_id: None,
+    });
+    store.append_eras(&old_shapes).unwrap();
     (store, dir)
 }
 
