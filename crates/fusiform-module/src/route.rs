@@ -1471,13 +1471,6 @@ fn serve_catalog_get_snapshot(
             named,
         );
     }
-    if at.is_none() {
-        curate::apply_login_methods(
-            tables.login_methods,
-            &mut response,
-            request.auth_method.as_deref(),
-        );
-    }
     let mut response = finish_plane_view(
         store,
         source,
@@ -2141,6 +2134,13 @@ fn finish_plane_view(
     judgments: Option<&CatalogJudgments>,
     history_sample: bool,
 ) -> Result<CatalogGetResponse, RouteError> {
+    if at.is_none() {
+        curate::apply_login_methods(
+            tables.login_methods,
+            &mut response,
+            plane.as_ref().map(|plane| plane.wire.auth_method.as_str()),
+        );
+    }
     let historical_rules = at
         .map(|at| match prepared {
             Some(prepared) => Ok(prepared.lifetimes_at(at).cloned().unwrap_or_default()),

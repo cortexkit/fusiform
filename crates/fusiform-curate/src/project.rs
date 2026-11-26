@@ -348,18 +348,19 @@ pub fn curated_disclosure(
     }
 }
 
-/// Login evidence follows the upstream identity, never an alias of that row.
+/// Login evidence applies to the named identity, upstream or alias. An alias
+/// never inherits its target's login evidence.
 pub fn apply_login_methods(rows: &Rows, response: &mut CatalogGetResponse, method: Option<&str>) {
     for row in rows.values() {
         let id = format!("{}/{}", row.provider_id, row.model_id);
         if !response.models.contains_key(&id)
-            || response.aliased.iter().any(|alias| alias.model == id)
             || response.curated.iter().any(|curated| curated.model == id)
         {
             continue;
         }
         if method.is_some_and(|method| !row.auth_methods.iter().any(|m| m == method)) {
             response.models.remove(&id);
+            response.aliased.retain(|alias| alias.model != id);
             response.canonical_links.retain(|link| link.model != id);
             response.fact_overrides.retain(|claim| claim.model != id);
             response

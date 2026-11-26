@@ -661,7 +661,7 @@ from the records in force at the requested instant.
 | `uncertain` | when non-empty | §5.4 |
 | `aliased` | when non-empty | §5.5 |
 | `curated` | when non-empty | §5.6 |
-| `login_methods` | on current reads, when non-empty | upstream-row login allowlists, same member shape as `curated` (§5.6) |
+| `login_methods` | on current reads, when non-empty | upstream and alias login allowlists, same member shape as `curated` (§5.6) |
 | `wire_corrections` | when non-empty | sourced current-read corrections/withholding of `wire.api` (§4.1) |
 | `fact_overrides` | when non-empty | sourced additions or replacements applied on this read (§5.8) |
 | `plane` | on a billing-plane read | [`billing-planes.md`](billing-planes.md) |
@@ -810,9 +810,10 @@ also omitted because an alias reaches a different backend. Rules, tested in
 `curated` lists rows served from `data/curated-models.json` rather than from
 stored upstream observations. Each entry has `model`, `auth_methods`,
 `source_ref` and `review_by_ms`. `auth_methods` is an allowlist: a consumer
-must refuse a credential whose login method is not listed. Upstream rows can
-instead carry the parallel `login_methods` disclosure described below. A curated row may be the
-only thing fusiform serves under its provider (`typesafe`, which models.dev
+must refuse a credential whose login method is not listed. Upstream and alias
+rows can instead carry the parallel `login_methods` disclosure described below.
+A curated row may be the only thing fusiform serves under its provider
+(`typesafe`, which models.dev
 does not list): such a provider is known to every read, so a named read of a
 model it does not carry is refused as an unknown model, not an unknown
 provider (`route::system_one_tests::an_unknown_typesafe_model_is_refused_as_an_unknown_model`).
@@ -821,15 +822,14 @@ instant (§3 item 7).
 Rules are in [`curated-data.md`](curated-data.md) §4.
 
 `login_methods` has the same member shape (`model`, `auth_methods`, `source_ref`,
-`review_by_ms`), but describes sourced login restrictions on upstream rows,
-not curated model facts. It applies only to current reads, is never stored,
-and does not change aliases. A plane read omits a row whose allowlist excludes
-the method. A fact-prefix filter does not remove the disclosure of a served
-row. Unlisted rows carry no established claim either way; in particular OpenAI
-publishes no exhaustive allowlist, and its live Codex list is account-specific.
-Routing consumers restrict a non-`apikey` method to explicit rows once any row
-for that provider lists it, across both disclosures. Otherwise absence still
-means any; for `apikey`, absence always means any.
+`review_by_ms`), but describes sourced login restrictions on upstream and
+alias rows, not curated model facts. It applies only to current reads and does
+not enter model fact history. An alias can carry its own allowlist but never
+inherits its target's. A plane read omits a row whose allowlist excludes the
+method. A fact-prefix filter does not remove the disclosure of a served row.
+The `google/antigravity-*` aliases list only `antigravity`; plain
+`google/gemini-*` rows are unlisted. An unlisted row carries no established
+login claim, and its treatment is up to the reader.
 
 ### 5.7 Canonical links
 

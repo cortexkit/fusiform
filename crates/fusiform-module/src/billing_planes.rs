@@ -12,8 +12,49 @@ const BILLING_PLANES: &str = include_str!("../data/billing-planes.json");
 pub(crate) const OPENAI_CHATGPT_SOURCE: &str = "Billing: https://help.openai.com/en/articles/20001106. Protocol: OpenAI Codex at 708e3e2c70142c75682a375669ca60754f76976d, https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/model-provider-info/src/lib.rs#L85 defines CHATGPT_CODEX_BASE_URL as https://chatgpt.com/backend-api/codex; #L151-L159 and #L467-L486 select it for AuthMode::Chatgpt. https://github.com/openai/codex/blob/708e3e2c70142c75682a375669ca60754f76976d/codex-rs/codex-api/src/endpoint/responses.rs#L135-L150 builds a POST to /responses; codex-rs/cli/src/doctor.rs#L3943-L3952 asserts https://chatgpt.com/backend-api/codex/responses.";
 /// The compiled-in table, parsed once per process.
 pub fn planes() -> &'static Planes {
+    #[cfg(test)]
+    if let Some(planes) = PLANTED.with(|slot| slot.get()) {
+        return planes;
+    }
     static PARSED: OnceLock<Planes> = OnceLock::new();
     PARSED.get_or_init(|| load_reporting_rejects(BILLING_PLANES).0)
+}
+
+#[cfg(test)]
+thread_local! {
+    static PLANTED: std::cell::Cell<Option<&'static Planes>> = const { std::cell::Cell::new(None) };
+}
+
+/// Exercise a declared Antigravity plane without making a production billing claim.
+#[cfg(test)]
+pub(crate) fn plant_antigravity() -> Planted {
+    let mut planes = planes().clone();
+    let (fixture, rejects) = load_reporting_rejects(
+        r#"{"planes":[{"provider_id":"google","auth_method":"antigravity","kind":"upstream",
+        "source_ref":"https://example.test/plane","established_by":"reader",
+        "established_at_ms":1,"review_by_ms":1000,"rules":[]}]}"#,
+    );
+    assert!(rejects.is_empty(), "{rejects:?}");
+    planes.extend(fixture);
+    let planes = Box::leak(Box::new(planes));
+    Planted {
+        previous: PLANTED.with(|slot| slot.replace(Some(planes))),
+        _thread_bound: std::marker::PhantomData,
+    }
+}
+
+#[cfg(test)]
+#[must_use]
+pub(crate) struct Planted {
+    previous: Option<&'static Planes>,
+    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+#[cfg(test)]
+impl Drop for Planted {
+    fn drop(&mut self) {
+        PLANTED.with(|slot| slot.set(self.previous));
+    }
 }
 
 #[cfg(test)]

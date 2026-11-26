@@ -1364,10 +1364,11 @@ fn quality_scores_empty_table_serves_no_facts_or_disclosure() {
 
 #[test]
 fn quality_scores_aliases_require_canonical_identity_and_planes_match_plain_reads() {
+    let _plane = crate::billing_planes::plant_antigravity();
     for canonical in [true, false] {
         let (store, _dir) = fixture(canonical);
         seed_grades(&store);
-        for auth in [Value::Null, json!("apikey")] {
+        for auth in [Value::Null, json!("antigravity")] {
             let response = get(
                 &store,
                 json!({"provider_id":"google","model_id":"antigravity-gemini-4-argon","auth_method":auth,"fact_prefixes":["quality."]}),

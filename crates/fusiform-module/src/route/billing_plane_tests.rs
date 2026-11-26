@@ -1257,7 +1257,11 @@ fn upstream_rules_never_overwrite_a_published_key_but_fill_each_missing_tier() {
 #[test]
 fn named_and_bulk_alias_plane_reads_keep_the_family_and_filter_last() {
     let (store, _dir) = store();
+    // Google has no declared Antigravity billing plane in production. Plant a
+    // plane to exercise the alias on an allowed login without asserting billing.
+    let _plane = billing_planes::plant_antigravity();
     seed(&store, "google", "gemini-3.8-flash", card());
+    let alias = "google/antigravity-gemini-3.8-flash";
     for model in [None, Some("antigravity-gemini-3.8-flash")] {
         for prefix in [
             None,
@@ -1265,8 +1269,16 @@ fn named_and_bulk_alias_plane_reads_keep_the_family_and_filter_last() {
             Some("rate.input.above_context."),
             Some("capability."),
         ] {
-            let response = get(&store, request("google", model, "apikey", prefix)).unwrap();
-            let facts = &response.models["google/antigravity-gemini-3.8-flash"];
+            let refused = get(&store, request("google", model, "apikey", prefix)).unwrap();
+            assert!(!refused.models.contains_key(alias));
+            assert!(refused.aliased.is_empty());
+            assert!(refused.login_methods.is_empty());
+
+            let response = get(&store, request("google", model, "antigravity", prefix)).unwrap();
+            let facts = &response.models[alias];
+            assert_eq!(response.login_methods.len(), 1);
+            assert_eq!(response.login_methods[0].model, alias);
+            assert_eq!(response.login_methods[0].auth_methods, ["antigravity"]);
             assert_eq!(response.plane.unwrap().kind, "upstream");
             assert!(response.billing_rules.is_empty());
             if let Some(prefix) = prefix {

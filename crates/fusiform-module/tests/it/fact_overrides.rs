@@ -783,13 +783,6 @@ fn the_antigravity_alias_serves_the_overridden_value() {
         ("provider", get(&store, json!({"provider_id":"google"}))),
         ("bulk", get(&store, json!({}))),
         ("paged", paged(&store, json!({}))),
-        (
-            "apikey plane",
-            get(
-                &store,
-                json!({"provider_id":"google","model_id":"antigravity-gemini-4-argon","auth_method":"apikey"}),
-            ),
-        ),
     ] {
         assert_overridden(&response, ALIAS, label);
         assert!(
@@ -805,6 +798,12 @@ fn the_antigravity_alias_serves_the_overridden_value() {
     );
     assert_eq!(named.fact_overrides.len(), 3);
     assert!(named.fact_overrides.iter().all(|row| row.model == ALIAS));
+    let refused = get(
+        &store,
+        json!({"provider_id":"google","model_id":"antigravity-gemini-4-argon","auth_method":"apikey"}),
+    );
+    assert!(refused.models.is_empty());
+    assert!(refused.fact_overrides.is_empty());
 }
 
 #[test]

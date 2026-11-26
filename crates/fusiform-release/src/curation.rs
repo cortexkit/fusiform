@@ -8,7 +8,7 @@ use crate::{CurationSet, Upstream, VendorDocument};
 type Documents = BTreeMap<String, Value>;
 
 /// Check vendor documents before an operator writes a draft. A login allowlist
-/// must name a model upstream publishes now, so the writer cannot publish a typo.
+/// must name a current upstream model or alias, so the writer cannot publish a typo.
 pub fn validate_published(documents: &Documents, upstream: &Upstream) -> Result<(), String> {
     validate_vendor_documents(documents, Some(upstream), false)
 }
@@ -37,11 +37,23 @@ fn validate_vendor_documents(
         .map(curated)
         .transpose()?
         .unwrap_or_default();
+    let aliases = documents
+        .get("model-aliases")
+        .map(|raw| {
+            let doc = raw.to_string();
+            let loaded = if stored {
+                curate::aliases::load_stored_reporting_rejects(&doc)
+            } else {
+                curate::aliases::load_reporting_rejects(&doc)
+            };
+            accepted("model-aliases", loaded)
+        })
+        .transpose()?
+        .unwrap_or_default();
     for (name, raw) in documents {
         let doc = raw.to_string();
         let rejects = match document_kind(name)? {
-            ModelAliases if stored => curate::aliases::load_stored_reporting_rejects(&doc).1,
-            ModelAliases => curate::aliases::load_reporting_rejects(&doc).1,
+            ModelAliases => continue,
             AttachmentLimits => curate::attachment_limits::load(&doc).1,
             BillingPlanes => curate::billing_planes::load_reporting_rejects(&doc).1,
             CacheLifetimes => curate::cache_lifetimes::load_reporting_rejects(&doc).1,
@@ -69,6 +81,7 @@ fn validate_vendor_documents(
                         upstream
                             .get(provider)
                             .is_some_and(|row| row.models.contains_key(model))
+                            || aliases.contains_key(&(provider.to_owned(), model.to_owned()))
                     })
                 })
                 .1

@@ -14,6 +14,41 @@ fn get(store: &CatalogStore, args: Value) -> Value {
 }
 
 #[test]
+fn antigravity_login_allowlist_applies_only_to_the_alias() {
+    let (store, _dir) = super::media_catalog::v2_seed_store(&[("google", "gemini-4-hydrogen")]);
+    let alias = "google/antigravity-gemini-4-hydrogen";
+    let plain = "google/gemini-4-hydrogen";
+    for method in [None, Some("apikey")] {
+        let mut args = json!({"provider_id":"google", "model_id":"antigravity-gemini-4-hydrogen"});
+        if let Some(method) = method {
+            args["auth_method"] = json!(method);
+        }
+        let response = get(&store, args);
+        if method == Some("apikey") {
+            assert_eq!(response["models"], json!({}));
+            assert!(response.get("aliased").is_none());
+            assert!(response.get("login_methods").is_none());
+        } else {
+            assert!(response["models"].get(alias).is_some());
+            assert_eq!(response["aliased"][0]["model"], alias);
+            assert_eq!(response["login_methods"][0]["model"], alias);
+            assert_eq!(
+                response["login_methods"][0]["auth_methods"],
+                json!(["antigravity"])
+            );
+        }
+
+        let mut args = json!({"provider_id":"google", "model_id":"gemini-4-hydrogen"});
+        if let Some(method) = method {
+            args["auth_method"] = json!(method);
+        }
+        let response = get(&store, args);
+        assert!(response["models"].get(plain).is_some(), "{method:?}");
+        assert!(response.get("login_methods").is_none());
+    }
+}
+
+#[test]
 fn gpt_6_2_models_are_reachable_on_verified_chatgpt_and_apikey_routes() {
     let (store, _dir) = super::cache_lifetimes::store(None);
     for model in ["gpt-6.2-astra", "gpt-6.2-sol"] {

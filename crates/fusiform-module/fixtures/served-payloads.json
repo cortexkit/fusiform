@@ -1136,6 +1136,16 @@
           }
         }
       ],
+      "login_methods": [
+        {
+          "auth_methods": [
+            "antigravity"
+          ],
+          "model": "google/antigravity-claude-sonnet-5-5",
+          "review_by_ms": 1800835200000,
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/d17ca2e88fe033f54f745faf31f6b815a75c32e1/packages/core/src/model-registry.ts#L188-L216 (vertexModelId: 'claude-sonnet-5-5@default' on all three tiers), #L327-L340 (variants and limits), #L472 (public id); packages/core/src/transform/model-resolver.ts#L205-L211 (actualModel: `${modelWithoutQuota}-low`, tier: 'low') at the same revision; protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope"
+        }
+      ],
       "models": {
         "google/antigravity-claude-sonnet-5-5": {
           "capability.attachment": true,
@@ -2660,6 +2670,16 @@
         }
       ],
       "catalog_version": 0,
+      "login_methods": [
+        {
+          "auth_methods": [
+            "antigravity"
+          ],
+          "model": "google/antigravity-gemini-4-hydrogen",
+          "review_by_ms": 1800835200000,
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/packages/core/src/model-registry.ts#L107-L135 (native routes), #L323-L337 (public model), #L635-L648 (tier mapping); https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/test-fixtures/agy-cli-1.5.5/hydrogen-evidence.json (native xhigh request); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope"
+        }
+      ],
       "models": {
         "google/antigravity-gemini-4-hydrogen": {
           "limit.audio_tokens_per_second": 31,
@@ -2721,6 +2741,16 @@
             "key": "rate.output",
             "state": "billed_as"
           }
+        }
+      ],
+      "login_methods": [
+        {
+          "auth_methods": [
+            "antigravity"
+          ],
+          "model": "google/antigravity-gemini-3.8-flash",
+          "review_by_ms": 1800835200000,
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/df5124aba0d29bb8a20e20e2e55c4ad5496425fc/packages/core/src/model-registry.ts#L513-L520 (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts#L280-L287 (resolveModelWithTier) at the same revision; protocol: https://github.com/cortexkit/antigravity-auth/blob/df5124aba0d29bb8a20e20e2e55c4ad5496425fc/packages/core/src/engine/request.ts#L1469 constructs /v1internal:${rawAction} with ?alt=sse for streaming; test-fixtures/agy-cli-1.5.8/assert-identity.test.ts#L51 pins the six-key Antigravity envelope (project, requestId, request, model, userAgent, requestType)"
         }
       ],
       "models": {
@@ -3757,6 +3787,16 @@
           "value": 65536
         }
       ],
+      "login_methods": [
+        {
+          "auth_methods": [
+            "antigravity"
+          ],
+          "model": "google/antigravity-gemini-4-argon",
+          "review_by_ms": 1800835200000,
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/48919aa7ae9378ea19af17e7d9da5b986395f00a/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS, RESOLVER_ALIASES, getGeminiArgonAntigravityModel), resolved by packages/core/src/transform/model-resolver.ts (resolveModelWithTier, isGeminiArgonModel); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope"
+        }
+      ],
       "models": {
         "google/antigravity-gemini-4-argon": {
           "limit.audio_tokens_per_second": 32,
@@ -3818,6 +3858,16 @@
             "key": "rate.output",
             "state": "billed_as"
           }
+        }
+      ],
+      "login_methods": [
+        {
+          "auth_methods": [
+            "antigravity"
+          ],
+          "model": "google/antigravity-gemini-3.8-flash",
+          "review_by_ms": 1800835200000,
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/df5124aba0d29bb8a20e20e2e55c4ad5496425fc/packages/core/src/model-registry.ts#L513-L520 (GEMINI_38_FLASH_ROUTES), resolved by packages/core/src/transform/model-resolver.ts#L280-L287 (resolveModelWithTier) at the same revision; protocol: https://github.com/cortexkit/antigravity-auth/blob/df5124aba0d29bb8a20e20e2e55c4ad5496425fc/packages/core/src/engine/request.ts#L1469 constructs /v1internal:${rawAction} with ?alt=sse for streaming; test-fixtures/agy-cli-1.5.8/assert-identity.test.ts#L51 pins the six-key Antigravity envelope (project, requestId, request, model, userAgent, requestType)"
         }
       ],
       "models": {
@@ -4340,6 +4390,16 @@
           "review_by_ms": 1799539200000,
           "source_ref": "https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon (accessed 2026-11-11)",
           "value": 65536
+        }
+      ],
+      "login_methods": [
+        {
+          "auth_methods": [
+            "antigravity"
+          ],
+          "model": "google/antigravity-gemini-4-carbon",
+          "review_by_ms": 1800835200000,
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/cb40633d96e87ad2ad958e4940c71fa2a685df94/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS antigravity-gemini-4-carbon, RESOLVER_ALIASES, isGeminiCarbonModel, getGeminiCarbonAntigravityModel), pinned by packages/core/src/carbon-model.test.ts at the same commit; protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope"
         }
       ],
       "models": {
@@ -9342,6 +9402,16 @@
           "value": false
         }
       ],
+      "login_methods": [
+        {
+          "auth_methods": [
+            "antigravity"
+          ],
+          "model": "google/antigravity-gemini-4-carbon",
+          "review_by_ms": 1800835200000,
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/cb40633d96e87ad2ad958e4940c71fa2a685df94/packages/core/src/model-registry.ts (ALL_MODEL_DEFINITIONS antigravity-gemini-4-carbon, RESOLVER_ALIASES, isGeminiCarbonModel, getGeminiCarbonAntigravityModel), pinned by packages/core/src/carbon-model.test.ts at the same commit; protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope"
+        }
+      ],
       "models": {
         "google/antigravity-gemini-4-carbon": {
           "capability.temperature": false
@@ -9373,6 +9443,16 @@
         }
       ],
       "catalog_version": 0,
+      "login_methods": [
+        {
+          "auth_methods": [
+            "antigravity"
+          ],
+          "model": "google/antigravity-claude-sonnet-5-5",
+          "review_by_ms": 1800835200000,
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/d17ca2e88fe033f54f745faf31f6b815a75c32e1/packages/core/src/model-registry.ts#L188-L216 (vertexModelId: 'claude-sonnet-5-5@default' on all three tiers), #L327-L340 (variants and limits), #L472 (public id); packages/core/src/transform/model-resolver.ts#L205-L211 (actualModel: `${modelWithoutQuota}-low`, tier: 'low') at the same revision; protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope"
+        }
+      ],
       "models": {
         "google/antigravity-claude-sonnet-5-5": {
           "capability.temperature": false
@@ -9404,6 +9484,16 @@
         }
       ],
       "catalog_version": 0,
+      "login_methods": [
+        {
+          "auth_methods": [
+            "antigravity"
+          ],
+          "model": "google/antigravity-gemini-4-hydrogen",
+          "review_by_ms": 1800835200000,
+          "source_ref": "https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/packages/core/src/model-registry.ts#L107-L135 (native routes), #L323-L337 (public model), #L635-L648 (tier mapping); https://github.com/cortexkit/antigravity-auth/blob/6fa3a18b/test-fixtures/agy-cli-1.5.5/hydrogen-evidence.json (native xhigh request); protocol: https://github.com/cortexkit/antigravity-auth/blob/44eb8fa0ddd93e236942b9b36f9bb10fa2abde6d/packages/opencode/src/plugin/request.ts#L1387-L1390 constructs /v1internal:${rawAction}?alt=sse; #L2373-L2393 serializes the Antigravity project/request/model envelope"
+        }
+      ],
       "models": {
         "google/antigravity-gemini-4-hydrogen": {}
       },

@@ -168,9 +168,8 @@ impl PublishedCuration {
             curate::wire_corrections::load_stored_reporting_rejects,
         )?;
         let login_methods = load(&docs, "login-methods", |doc| {
-            // The release validator already established that these identities
-            // occur upstream. A later withdrawal must not invalidate an older
-            // signed login document on reload.
+            // The publisher checked these identities against its catalog. A
+            // later withdrawal must not invalidate a signed document on reload.
             let mut models = json!({});
             if let Ok(raw) = serde_json::from_str::<Value>(doc) {
                 for row in raw["models"].as_array().into_iter().flatten() {
@@ -895,7 +894,7 @@ mod tests {
         // The writer still has to remove the withdrawn row before it publishes.
         assert!(validate_published(&documents, &upstream)
             .unwrap_err()
-            .contains("openai/withdrawn: row is missing from the embedded seed"));
+            .contains("openai/withdrawn: row is neither an upstream model nor a current alias"));
         // Leniency covers only identities the allowlist itself names.
         let typo = BTreeMap::from([(
             "login-methods".into(),
@@ -927,15 +926,24 @@ mod tests {
             "review_by_ms": 1 + 60 * 86_400_000_i64,
         }));
         let mut upstream = Upstream::new();
+        let aliases =
+            curate::aliases::load_reporting_rejects(&documents["model-aliases"].to_string()).0;
         for row in documents["login-methods"]["models"].as_array().unwrap() {
+            let id = (
+                row["provider_id"].as_str().unwrap().to_owned(),
+                row["model_id"].as_str().unwrap().to_owned(),
+            );
+            if aliases.contains_key(&id) {
+                continue;
+            }
             upstream
-                .entry(row["provider_id"].as_str().unwrap().into())
+                .entry(id.0)
                 .or_insert_with(|| fusiform_release::ProviderFacts {
                     provider: BTreeMap::new(),
                     models: BTreeMap::new(),
                 })
                 .models
-                .insert(row["model_id"].as_str().unwrap().into(), BTreeMap::new());
+                .insert(id.1, BTreeMap::new());
         }
         validate_published(&documents, &upstream).unwrap();
 

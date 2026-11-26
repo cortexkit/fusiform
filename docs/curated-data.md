@@ -509,8 +509,8 @@ fact-prefix filters and the decoded rate states, by `route.rs`'s
 `system_one_tests`, against the shipped file with nothing held.
 
 The consuming router must refuse a credential whose login method is not in
-`auth_methods`. Upstream rows can instead carry a `login_methods` disclosure
-(see below); absence from `curated` alone is not a login claim.
+`auth_methods`. Upstream and alias rows can instead carry a `login_methods`
+disclosure (see below); absence from `curated` alone is not a login claim.
 
 When models.dev starts publishing the same identity, the suite fails with
 "upstream now publishes this row; remove the curated row"
@@ -518,41 +518,44 @@ When models.dev starts publishing the same identity, the suite fails with
 embedded seed for every row. A seed planted with each shipped identity in turn
 trips it (`planted_upstream_row_triggers_the_removal_fence`).
 
-### Upstream login allowlists (`login-methods.json`)
+### Upstream and alias login allowlists (`login-methods.json`)
 
-`crates/fusiform-module/data/login-methods.json` names existing upstream rows,
-not replacement model facts. Each `models` entry has `provider_id`, `model_id`,
-`auth_methods`, `source_ref`, an exact source `quote`, `established_at_ms` and
-`review_by_ms`. The file records the access date. Methods are a nonempty,
+`crates/fusiform-module/data/login-methods.json` names existing upstream rows or
+current aliases, not replacement model facts. Each `models` entry has
+`provider_id`, `model_id`, `auth_methods`, `source_ref`, a source excerpt in
+`quote`, `established_at_ms` and `review_by_ms`. The file records the access
+date. Methods are a nonempty,
 distinct subset of the billing planes' closed vocabulary. The loader counts
-rejects for malformed rows, duplicates, models missing from the embedded seed,
-and identities already owned by `curated-models.json`. Each review deadline
-must be exactly 60 days after establishment; the shipped-file review test fails
-after that deadline, and a planted overdue row tests the gate itself.
+rejects for malformed rows, duplicates, identities absent from both upstream and
+the active alias table, and identities already owned by `curated-models.json`.
+Each review deadline must be exactly 60 days after establishment; the
+shipped-file review test fails after that deadline, and a planted overdue row
+tests the gate itself.
 
 On current reads, each applied entry is disclosed in the parallel
 `login_methods` array with the same four fields as a `curated` member:
 `model`, `auth_methods`, `source_ref`, `review_by_ms`. A plane read omits a row
 whose allowlist excludes its method, exactly as it does for a curated row.
 Fact-prefix filtering does not hide the disclosure for a served row; paging
-keeps it beside the provider. Nothing is stored, historical reads apply none of
-these restrictions or disclosures, and aliases remain unchanged.
+keeps it beside the provider. Login evidence belongs to the named identity, so
+an alias never inherits its target's allowlist. No model observations are stored
+for these claims, and historical reads apply none of these restrictions or
+disclosures.
 
 OpenAI publishes no exhaustive allowlist: Codex's models endpoint returns the
 live list per account. The file establishes only the documented availability
 or retirement of the named models; unlisted OpenAI rows are not established
 either way. Availability also depends on plan, client, workspace and rollout.
-The routing consumer treats a non-`apikey` method as explicit-only for a
-provider once any row lists it (across `curated` and `login_methods`). For a
-provider with no listing of that method, absence still means any. `apikey`
-always retains absent-means-any.
+The `google/antigravity-*` aliases list only `antigravity`, as established by
+the plugin routes. Plain `google/gemini-*` rows are unlisted. Fusiform serves
+the evidence; how to handle an unlisted row is the reader's decision.
 
-Tests in `login_methods` cover the shipped data, counted rejects, seed and
-curated collision checks, and review gates. Integration tests in
-`tests/it/login_methods.rs` cover allowed and refused ChatGPT plane reads,
-unlisted rows, fact filters, paging, historical reads and an unchanged catalog
-version. The golden fixture pins listed, API-key-only, unlisted, allowed-plane
-and refused-plane responses.
+Tests in `login_methods` cover the shipped data, counted rejects, identity
+checks and review gates. Integration tests in `tests/it/login_methods.rs` cover
+alias disclosure, refused API-key alias reads, allowed and refused ChatGPT plane
+reads, unlisted rows, fact filters, paging, historical reads and an unchanged
+catalog version. The golden fixture pins both upstream and alias disclosures,
+unlisted rows, and allowed and refused plane responses.
 
 ## 5. Canonical links (`canonical-links.json`)
 

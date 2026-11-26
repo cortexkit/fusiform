@@ -178,8 +178,9 @@ fn lineage_obeys_prefix_filters_and_is_not_served_at_ms() {
 
 #[test]
 fn lineage_alias_uses_exact_entry_or_its_canonical_identity_and_planes_match_plain() {
+    let _plane = crate::billing_planes::plant_antigravity();
     let (store, _dir) = fixture(true);
-    for auth in [Value::Null, json!("apikey")] {
+    for auth in [Value::Null, json!("antigravity")] {
         let response = get(
             &store,
             json!({"provider_id":"google", "model_id":"antigravity-gemini-4-argon", "auth_method":auth, "fact_prefixes":["model.lineage"]}),
@@ -196,7 +197,7 @@ fn lineage_alias_uses_exact_entry_or_its_canonical_identity_and_planes_match_pla
     let _classifications = crate::model_lineage::plant(&doc.to_string());
     for canonical in [true, false] {
         let (store, _dir) = fixture(canonical);
-        for auth in [Value::Null, json!("apikey")] {
+        for auth in [Value::Null, json!("antigravity")] {
             let response = get(
                 &store,
                 json!({"provider_id":"google", "model_id":"antigravity-gemini-4-argon", "auth_method":auth, "fact_prefixes":["model.lineage"]}),

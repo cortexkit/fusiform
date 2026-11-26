@@ -623,19 +623,17 @@ pub struct CatalogGetResponse {
     /// curated claim in force at that instant from fusiform's stored curated
     /// history. `auth_methods` is an allowlist: only these login methods may
     /// serve the row. The routing consumer must refuse a credential whose login
-    /// method is not listed. Upstream rows can instead carry a `login_methods`
-    /// disclosure. Omitted when empty; an upstream row
+    /// method is not listed. Upstream and alias rows can instead carry a
+    /// `login_methods` disclosure. Omitted when empty; an upstream row
     /// present at the same instant always wins.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub curated: Vec<CuratedModelWire>,
 
-    /// Sourced login allowlists on upstream rows, not curated model facts.
-    /// Current reads only; never stored history or aliases. Members have the
-    /// same shape and allowlist meaning as `curated`. Unlisted rows carry no
-    /// established login claim, rather than an implied denial or permission.
-    /// Routing consumers restrict a non-apikey method to explicitly listing
-    /// rows once any row of that provider lists the method; otherwise absence
-    /// still means any. For apikey, absence always means any.
+    /// Sourced login allowlists on current upstream and alias rows, not model
+    /// fact history. Members have the same shape and allowlist meaning as
+    /// `curated`. An alias never inherits its target's allowlist. Unlisted
+    /// rows carry no established login claim, rather than an implied denial
+    /// or permission.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub login_methods: Vec<LoginMethodsWire>,
 
@@ -1983,7 +1981,7 @@ pub struct CuratedModelWire {
     pub review_by_ms: i64,
 }
 
-/// Provenance and login restrictions for one upstream provider row.
+/// Provenance and login restrictions for one upstream or alias row.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LoginMethodsWire {
     pub model: String,

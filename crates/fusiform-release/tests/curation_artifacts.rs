@@ -4,6 +4,52 @@ use fusiform_release::{
 };
 use serde_json::{Value, json};
 
+#[test]
+fn published_login_methods_accept_live_aliases_but_not_retired_unknown_or_curated_ids() {
+    let alias = json!({
+        "provider_id": "p", "model_id": "alias",
+        "target": {"provider_id": "p", "model_id": "target"},
+        "basis": "Synthetic route", "source_ref": "https://example.test/route",
+        "established_at_ms": 1, "review_by_ms": 1 + 60 * 86_400_000_i64,
+    });
+    let login = json!({
+        "provider_id": "p", "model_id": "alias", "auth_methods": ["antigravity"],
+        "source_ref": "https://example.test/route", "quote": "Synthetic login",
+        "established_at_ms": 1, "review_by_ms": 1 + 60 * 86_400_000_i64,
+    });
+    let curated = json!({
+        "provider_id": "p", "model_id": "curated", "auth_methods": ["apikey"],
+        "facts": {"model.name": "Curated model"}, "source_ref": "https://example.test/models",
+        "established_at_ms": 1, "review_by_ms": 1 + 60 * 86_400_000_i64,
+    });
+    let mut docs = std::collections::BTreeMap::from([
+        (
+            "model-aliases".into(),
+            json!({"aliases": [alias], "retired": [{
+                "provider_id": "p", "model_id": "retired", "retired_at_ms": 2, "reason": "Withdrawn",
+            }]}),
+        ),
+        ("login-methods".into(), json!({"models": [login]})),
+        ("curated-models".into(), json!({"models": [curated]})),
+    ]);
+
+    let upstream = Upstream::new();
+    validate_published(&docs, &upstream).unwrap();
+    for (model, reason) in [
+        ("retired", "neither an upstream model nor a current alias"),
+        ("unknown", "neither an upstream model nor a current alias"),
+        ("curated", "already curated"),
+    ] {
+        docs.get_mut("login-methods").unwrap()["models"][0]["model_id"] = json!(model);
+        let error = validate_published(&docs, &upstream).unwrap_err();
+        assert!(
+            error.contains(&format!("login methods p/{model}:")),
+            "{error}"
+        );
+        assert!(error.contains(reason), "{error}");
+    }
+}
+
 fn check_refusal(edit: impl FnOnce(&mut Value), detail: &str) {
     let first: Release = serde_json::from_slice(include_bytes!(
         "../fixtures/release-format-v1/chain/release-1.json"

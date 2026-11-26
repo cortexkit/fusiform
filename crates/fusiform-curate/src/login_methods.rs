@@ -1,5 +1,5 @@
-//! Sourced login allowlists for upstream rows, applied only on current reads.
-//! These restrictions are not upstream facts and never enter stored history.
+//! Sourced login allowlists for upstream and alias rows, applied only on current reads.
+//! These restrictions are not observations and do not enter model fact history.
 
 use std::collections::BTreeMap;
 
@@ -78,7 +78,7 @@ pub fn load_where(
         } else if curated.contains_key(&key) {
             Some("row is already curated; keep its login methods in curated-models.json")
         } else if !known_model(&row.provider_id, &row.model_id) {
-            Some("row is missing from the embedded seed; correct or remove the login allowlist")
+            Some("row is neither an upstream model nor a current alias; correct or remove the login allowlist")
         } else if rows.contains_key(&key) {
             Some("duplicate login methods identity")
         } else {
