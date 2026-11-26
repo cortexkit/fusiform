@@ -71,10 +71,6 @@ fn date_ms(raw: &RawValue) -> Option<i64> {
     Some(date.midnight().assume_utc().unix_timestamp() * 1_000)
 }
 
-pub(super) fn tier_hint(when: &Object<'_>) -> Option<String> {
-    read_name(when.object("service_tier")?.raw("equals")?)
-}
-
 pub(super) fn read_name(raw: &RawValue) -> Option<String> {
     serde_json::from_str::<String>(raw.get())
         .ok()

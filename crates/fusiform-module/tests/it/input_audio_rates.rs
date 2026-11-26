@@ -45,10 +45,6 @@ fn doc(with_audio: bool) -> String {
             "{provider}/{model} must be in the embedded seed"
         );
         let cost = row["cost"].as_object_mut().unwrap();
-        if *provider == "google-vertex" {
-            // These cases exercise the base rates, not the Vertex regional guard.
-            cost.remove("multipliers");
-        }
         if !with_audio {
             assert!(cost.remove("audio").is_some());
         }

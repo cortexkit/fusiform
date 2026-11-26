@@ -260,7 +260,7 @@ fn v2_mode_audio_needs_directional_evidence_and_does_not_reprice_unit_audio() {
     }}});
     add_refused_mode(&mut input);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "ultrafast", "region");
+    assert_mode_base_unchanged_by_refused_condition(&outcome);
     let actual = facts(&outcome);
     assert_unaffected(&actual);
     assert_eq!(actual["rate.input_audio.per_second"]["per"], 60);
@@ -285,12 +285,170 @@ fn v2_mode_audio_needs_directional_evidence_and_does_not_reprice_unit_audio() {
 }
 
 #[test]
-fn v2_unconditional_price_uses_base_key_beside_a_refused_mode() {
+fn v2_unconditional_price_uses_base_key_beside_a_refused_mode_override() {
     let mut input = document();
     add_refused_mode(&mut input);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "ultrafast", "region");
+    assert_mode_base_unchanged_by_refused_condition(&outcome);
     assert_unaffected(&facts(&outcome));
+}
+
+#[test]
+fn v2_unsupported_multiplier_alone_does_not_hide_base_prices() {
+    let mut input = document();
+    model(&mut input)["cost"]["multipliers"] = json!([
+        {"when": {"region": {"equals": "us"}}, "factor": {"text": 2}}
+    ]);
+    let outcome = normalize(&input);
+    assert_eq!(facts(&outcome), facts(&normalize(&document())));
+    assert!(outcome.catalog.models().next().unwrap().refused.is_empty());
+    assert_refused_finding(&outcome, "unsupported condition region (equals)");
+}
+
+fn saved_v2_catalog() -> Vec<u8> {
+    let snapshot = std::process::Command::new("gzip")
+        .args([
+            "-dc",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/data/models-dev-v2/api-v2-20261125.json.gz"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(snapshot.status.success());
+    snapshot.stdout
+}
+
+fn normalize_saved_model(bytes: &[u8], provider: &str, model_id: &str) -> NormalizeV2Outcome {
+    type Object<'a> = BTreeMap<String, &'a serde_json::value::RawValue>;
+    let providers: Object<'_> = serde_json::from_slice(bytes).unwrap();
+    let fields: Object<'_> = serde_json::from_str(providers[provider].get()).unwrap();
+    let models: Object<'_> = serde_json::from_str(fields["models"].get()).unwrap();
+    // Keep the raw price object so the first cache-write TTL stays first.
+    let input = BTreeMap::from([(
+        provider,
+        BTreeMap::from([("models", BTreeMap::from([(model_id, models[model_id])]))]),
+    )]);
+    normalize_models_dev_v2_with(
+        &serde_json::to_vec(&input).unwrap(),
+        &ChargeUnitEvidence::none(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn v2_regional_multipliers_leave_saved_base_tier_and_mode_prices_intact() {
+    let snapshot = saved_v2_catalog();
+    for (provider, model_id, finding, expected) in [
+        (
+            "openai",
+            "gpt-6.1-sol",
+            "unsupported condition not (region)",
+            &[
+                ("cache_read", 100_000_000),
+                ("cache_write", 2_500_000_000),
+                ("input", 2_000_000_000),
+                ("output", 10_000_000_000),
+                ("cache_read.above_context.272000", 200_000_000),
+                ("cache_write.above_context.272000", 5_000_000_000),
+                ("input.above_context.272000", 4_000_000_000),
+                ("output.above_context.272000", 15_000_000_000),
+                ("cache_read.mode.fast", 200_000_000),
+                ("cache_write.mode.fast", 5_000_000_000),
+                ("input.mode.fast", 4_000_000_000),
+                ("output.mode.fast", 20_000_000_000),
+                ("cache_read.mode.flex", 50_000_000),
+                ("cache_write.mode.flex", 1_250_000_000),
+                ("input.mode.flex", 1_000_000_000),
+                ("output.mode.flex", 5_000_000_000),
+                ("cache_read.mode.ultrafast", 600_000_000),
+                ("cache_write.mode.ultrafast", 15_000_000_000),
+                ("input.mode.ultrafast", 12_000_000_000),
+                ("output.mode.ultrafast", 60_000_000_000),
+            ][..],
+        ),
+        (
+            "anthropic",
+            "claude-opus-5-5",
+            "unsupported condition region (equals)",
+            &[
+                ("cache_read", 200_000_000),
+                ("cache_write", 5_000_000_000),
+                ("input", 4_000_000_000),
+                ("output", 20_000_000_000),
+                ("cache_read.mode.fast", 400_000_000),
+                ("cache_write.mode.fast", 10_000_000_000),
+                ("input.mode.fast", 8_000_000_000),
+                ("output.mode.fast", 40_000_000_000),
+            ][..],
+        ),
+        (
+            "google-vertex",
+            "gemini-3.8-flash",
+            "unsupported condition not (region)",
+            &[
+                ("cache_read", 75_000_000),
+                ("input", 750_000_000),
+                ("output", 3_750_000_000),
+                ("cache_read.mode.flex", 37_500_000),
+                ("input.mode.flex", 375_000_000),
+                ("output.mode.flex", 1_875_000_000),
+                ("cache_read.mode.priority", 135_000_000),
+                ("input.mode.priority", 1_350_000_000),
+                ("output.mode.priority", 6_750_000_000),
+            ][..],
+        ),
+    ] {
+        let outcome = normalize_saved_model(&snapshot, provider, model_id);
+        let actual: BTreeMap<_, _> = facts(&outcome)
+            .into_iter()
+            .filter_map(|(key, value)| {
+                key.strip_prefix("rate.")
+                    .filter(|_| value["state"] == "priced")
+                    .map(|key| (key.to_owned(), value["units"].as_u64().unwrap()))
+            })
+            .collect();
+        let expected: BTreeMap<_, u64> = expected
+            .iter()
+            .map(|(key, value)| (key.to_string(), *value))
+            .collect();
+        assert_eq!(actual, expected, "{provider}/{model_id}");
+        assert!(
+            outcome.findings.iter().any(|item| {
+                item.key
+                    == FindingKey::RefusedPrice {
+                        role: "multipliers".into(),
+                        detail: finding.into(),
+                    }
+                    && item.first_model_id.as_deref() == Some(model_id)
+                    && item.occurrences == 1
+            }),
+            "{provider}/{model_id}: {:?}",
+            outcome.findings
+        );
+    }
+}
+
+#[test]
+fn v2_cache_only_context_band_keeps_nodecode_text_tier_prices() {
+    let outcome = normalize_saved_model(&saved_v2_catalog(), "nodecode", "nodecode-cyber-v1");
+    let actual: BTreeMap<_, _> = facts(&outcome)
+        .into_iter()
+        .filter(|(key, _)| key.contains(".above_context."))
+        .map(|(key, value)| (key, value["units"].as_u64().unwrap()))
+        .collect();
+    assert_eq!(
+        actual,
+        BTreeMap::from([
+            ("rate.input.above_context.262144".to_owned(), 330_000_000),
+            ("rate.output.above_context.262144".to_owned(), 1_320_000_000),
+            (
+                "rate.cache_read.above_context.262144".to_owned(),
+                36_000_000
+            ),
+        ])
+    );
 }
 
 #[test]
@@ -302,7 +460,7 @@ fn v2_context_gt_and_gte_use_exclusive_selector_keys() {
     ]);
     add_refused_mode(&mut input);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "ultrafast", "region");
+    assert_mode_base_unchanged_by_refused_condition(&outcome);
     let actual = facts(&outcome);
     assert_unaffected(&actual);
     assert_eq!(
@@ -324,7 +482,7 @@ fn v2_service_tier_override_uses_the_tier_unless_it_has_a_declared_mode() {
     ]);
     add_refused_mode(&mut input);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "ultrafast", "region");
+    assert_mode_base_unchanged_by_refused_condition(&outcome);
     assert_eq!(
         facts(&outcome)["rate.output.mode.priority"]["units"],
         2_000_000_000
@@ -348,7 +506,7 @@ fn v2_service_tier_multiplier_is_exact_and_prices_only_named_roles() {
     ]);
     add_refused_mode(&mut input);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "ultrafast", "region");
+    assert_mode_base_unchanged_by_refused_condition(&outcome);
     let actual = facts(&outcome);
     assert_unaffected(&actual);
     // Rounding the base to two nanodollars before multiplying would give four.
@@ -405,7 +563,7 @@ fn v2_same_spelling_different_tiers_do_not_chain_multipliers() {
     ]);
     add_refused_mode(&mut input);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "ultrafast", "region");
+    assert_mode_base_unchanged_by_refused_condition(&outcome);
     let actual = facts(&outcome);
     assert_unaffected(&actual);
     assert_eq!(actual["rate.output.mode.fast"]["units"], 250_000_000);
@@ -438,13 +596,39 @@ fn v2_conflicting_named_and_direct_mode_rates_refuse_the_mode() {
 fn v2_context_and_service_tier_cannot_be_combined() {
     let mut input = document();
     model(&mut input)["cost"]["text"]["output"]["overrides"] = json!([
-        {"when": {"service_tier": {"equals": "priority"}, "context": {"gt": 32}}, "price": 2}
+        {"when": {"service_tier": {"equals": "priority"}, "context": {"gt": 32}}, "price": 2},
+        {"when": {"service_tier": {"equals": "priority"}}, "price": 1}
     ]);
     let outcome = normalize(&input);
-    assert_mode_refused(&outcome, "priority", "combined conditions");
+    assert_refused_finding(&outcome, "combined conditions");
+    assert!(outcome.catalog.models().next().unwrap().refused.is_empty());
     let actual = facts(&outcome);
     assert_unaffected(&actual);
+    assert_eq!(actual["rate.output.mode.priority"]["units"], 1_000_000_000);
     assert!(actual.keys().all(|key| !key.contains(".above_context.")));
+}
+
+#[test]
+fn v2_mixed_supported_and_unsupported_multiplier_is_not_partially_applied() {
+    let mut input = document();
+    model(&mut input)["cost"]["multipliers"] = json!([
+        {"when": {"service_tier": {"equals": "priority"}}, "factor": {"text": 2}},
+        {"when": {"service_tier": {"equals": "priority"}, "region": {"equals": "us"}}, "factor": {"text": 7}},
+        {"when": {"date": {"gte": "2027-01-01"}, "region": {"equals": "us"}}, "factor": {"text": 9}},
+        {"when": {"date": {"gte": "2027-01-01"}}, "factor": {"text": 3}}
+    ]);
+    let outcome = fusiform_core::normalize_models_dev_with(
+        &serde_json::to_vec(&input).unwrap(),
+        &ChargeUnitEvidence::none(),
+        fusiform_core::Timestamp(1_798_761_600_000),
+    )
+    .unwrap();
+    assert!(outcome.catalog.models().next().unwrap().refused.is_empty());
+    assert_refused_finding(&outcome, "combined conditions");
+    assert_eq!(outcome.next_date_boundary_ms, None);
+    let actual = facts(&outcome);
+    assert_eq!(actual["rate.output"]["units"], 375_000_000);
+    assert_eq!(actual["rate.output.mode.priority"]["units"], 750_000_000);
 }
 
 fn model(document: &mut Value) -> &mut Value {
@@ -455,6 +639,14 @@ fn add_refused_mode(document: &mut Value) {
     model(document)["experimental"]["modes"]["ultrafast"] = json!({"cost": {"text": {"output": {
         "price": 8, "overrides": [{"when": {"region": {"equals": "us"}}, "price": 9}]
     }}}});
+}
+
+fn assert_mode_base_unchanged_by_refused_condition(outcome: &NormalizeV2Outcome) {
+    let key = FactKey::from_stored("rate.output.mode.ultrafast".into());
+    let model = outcome.catalog.models().next().unwrap();
+    assert!(!model.refused.iter().any(|scope| scope.covers(&key)));
+    assert_eq!(facts(outcome)[key.as_str()]["units"], 8_000_000_000u64);
+    assert_refused_finding(outcome, "region");
 }
 
 fn assert_mode_refused(outcome: &NormalizeV2Outcome, mode: &str, reason: &str) {
@@ -478,24 +670,30 @@ fn assert_refused_finding(outcome: &NormalizeV2Outcome, reason: &str) {
     );
 }
 
-fn assert_refused_base_condition(when: Value, reason: &str) {
+fn assert_refused_override(when: Value, reason: &str) {
     let mut input = document();
     let row = model(&mut input);
-    row["cost"]["text"]["output"]["overrides"] = json!([{"when": when, "price": 2}]);
+    row["cost"]["text"]["output"]["overrides"] = json!([
+        {"when": when, "price": 2},
+        {"when": {"context": {"gt": 128}}, "price": 1}
+    ]);
     row["experimental"]["modes"]["fast"] = json!({"cost": {"text": {"output": {"price": 3}}}});
     let outcome = normalize(&input);
     let model = outcome.catalog.models().next().unwrap();
-    assert_eq!(model.refused, [RefusedFactScope::BaseAndTierRates].into());
-    assert!(
-        RefusedFactScope::BaseAndTierRates.covers(&FactKey::from_stored("rate.output".to_owned()))
-    );
+    assert!(model.refused.is_empty());
     let actual = facts(&outcome);
+    assert_unaffected(&actual);
     assert_eq!(actual["rate.output.mode.fast"]["units"], 3_000_000_000u64);
-    assert_eq!(actual["limit.context"], 2048);
-    assert!(actual
-        .keys()
-        .filter(|key| key.starts_with("rate."))
-        .eq(["rate.output.mode.fast"]));
+    assert_eq!(
+        actual["rate.output.above_context.128"]["units"],
+        1_000_000_000
+    );
+    assert!(actual.keys().filter(|key| key.starts_with("rate.")).eq([
+        "rate.input_audio.per_second",
+        "rate.output",
+        "rate.output.above_context.128",
+        "rate.output.mode.fast"
+    ]));
     assert_refused_finding(&outcome, reason);
 }
 
@@ -503,7 +701,7 @@ macro_rules! refused_condition {
     ($test:ident, $reason:literal, $when:tt) => {
         #[test]
         fn $test() {
-            assert_refused_base_condition(json!($when), $reason);
+            assert_refused_override(json!($when), $reason);
         }
     };
 }

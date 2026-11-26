@@ -296,12 +296,12 @@ fn served_history_excludes_judgments_but_dated_get_replays_them() {
         .contains_key("quality.decommissioned"));
 }
 
-// Use the shipped catalog as background load: a tiny store hides queries that
+// Use the frozen catalog as background load: a tiny store hides queries that
 // scan other models once for every boundary of the requested model.
 fn oscillating_store() -> (CatalogStore, tempfile::TempDir) {
     use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
     use fusiform_core::{BoundaryKind, ObservationOutcome, Timestamp};
-    use fusiform_store::{ingest::plan_ingest, NewObservation};
+    use fusiform_store::{FactKey, NewEra, NewObservation};
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -312,20 +312,49 @@ fn oscillating_store() -> (CatalogStore, tempfile::TempDir) {
         },
     })
     .unwrap();
-    let mut document: Value =
-        serde_json::from_str(include_str!("../../data/models-dev-seed.json")).unwrap();
-    for index in 0..229 {
-        for (model, count) in [
-            ("deepseek/deepseek-v4.1-flash", 229),
-            ("moonshotai/kimi-k3", 224),
-        ] {
-            if index < count {
-                let row = &mut document["openrouter"]["models"][model];
-                assert!(row.is_object(), "seed is missing {model}");
-                row["cost"]["text"]["input"]["price"] = json!(0.1 + (index % 2) as f64 * 0.1);
-                row["cost"]["text"]["output"]["price"] = json!(0.3 + (index % 2) as f64 * 0.2);
-            }
+    // Start with the recorded pre-v2 facts so this history keeps the same
+    // prices and background load without needing the retired parser.
+    let fixture = std::process::Command::new("gzip")
+        .args([
+            "-dc",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../fusiform-core/tests/data/models-dev-v2/v1-fixture.json.gz"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(fixture.status.success());
+    let fixture: Value = serde_json::from_slice(&fixture.stdout).unwrap();
+    let mut initial = fixture["providers"].as_object().unwrap().to_owned();
+    let changing = [
+        ("deepseek/deepseek-v4.1-flash", 229),
+        ("moonshotai/kimi-k3", 224),
+    ];
+    let prices_at = |index| {
+        let (input, output) = if index % 2 == 0 {
+            (100_000_000, 300_000_000)
+        } else {
+            (200_000_000, 500_000_000)
+        };
+        [("rate.input", input), ("rate.output", output)].map(|(key, units)| {
+            (
+                key,
+                format!(r#"{{"state":"priced","units":{units},"exponent":9,"currency":"USD"}}"#),
+            )
+        })
+    };
+    for (model, _) in changing {
+        let facts = &mut initial.get_mut("openrouter").unwrap()["models"][model];
+        for (key, value) in prices_at(0) {
+            assert!(facts
+                .as_object_mut()
+                .unwrap()
+                .insert(key.to_owned(), Value::from(value))
+                .is_some());
         }
+    }
+    for index in 0..229 {
         let at = Timestamp(1_000 + index * 1_000);
         let observation = store
             .record_observation(&NewObservation {
@@ -339,21 +368,36 @@ fn oscillating_store() -> (CatalogStore, tempfile::TempDir) {
                 detail: None,
             })
             .unwrap();
-        let catalog = fusiform_core::normalize_models_dev_v2_with(
-            &serde_json::to_vec(&document).unwrap(),
-            &fusiform_module::input_audio::evidence(),
-        )
-        .unwrap()
-        .catalog;
-        let plan = plan_ingest(
-            &store,
-            &catalog,
-            at,
-            BoundaryKind::Asserted,
-            Some(observation),
-        )
-        .unwrap();
-        store.append_eras(&plan.eras).unwrap();
+        let era = |provider: &str, model: &str, key: &str, value_json: String| NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: provider.into(),
+            model_id: model.into(),
+            fact_key: FactKey::from_stored(key.into()),
+            value_json,
+            boundary_at: at,
+            boundary_kind: BoundaryKind::Asserted,
+            observation_id: Some(observation),
+        };
+        let mut eras = Vec::new();
+        if index == 0 {
+            for (provider, data) in &initial {
+                for (model, facts) in data["models"].as_object().unwrap() {
+                    eras.push(era(provider, model, "existence", r#""present""#.into()));
+                    for (key, value) in facts.as_object().unwrap() {
+                        eras.push(era(provider, model, key, value.as_str().unwrap().into()));
+                    }
+                }
+            }
+        } else {
+            for (model, count) in changing {
+                if index < count {
+                    for (key, value) in prices_at(index) {
+                        eras.push(era("openrouter", model, key, value));
+                    }
+                }
+            }
+        }
+        assert_eq!(store.append_eras(&eras).unwrap(), eras.len());
     }
     (store, dir)
 }

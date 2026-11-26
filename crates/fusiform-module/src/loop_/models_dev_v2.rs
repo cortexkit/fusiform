@@ -971,7 +971,7 @@ fn models_dev_v2_guarded_switch_keeps_history_and_served_wire_continuity() {
             facts_changed: changes.len(),
         }
     );
-    assert_eq!(tick.eras_written, 48_403);
+    assert_eq!(tick.eras_written, 48_572);
     let after = served(&store, &prefixes);
     verify_wire(
         &before,

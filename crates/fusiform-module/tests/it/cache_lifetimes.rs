@@ -14,61 +14,34 @@ const SEED: &str = include_str!("../../data/models-dev-seed.json");
 
 type Object = BTreeMap<String, Box<RawValue>>;
 
-fn edit_object(value: &mut Box<RawValue>, edit: impl FnOnce(&mut Object)) {
-    let mut object = serde_json::from_str(value.get()).unwrap();
-    edit(&mut object);
+fn edit_object(value: &mut Box<RawValue>, path: &[&str], edit: impl FnOnce(&mut Object)) {
+    let mut object: Object = serde_json::from_str(value.get()).unwrap();
+    if let Some((first, rest)) = path.split_first() {
+        edit_object(object.get_mut(*first).unwrap(), rest, edit);
+    } else {
+        edit(&mut object);
+    }
     *value = to_raw_value(&object).unwrap();
 }
 
 fn price_catalog(adjustment: Option<(&str, &str, Option<u64>, f64)>) -> NormalizedCatalog {
-    // This fixture exercises TTL pricing for the ordinary text schedule, not
-    // regional pricing. Keep its API and TTL entries in their published order.
+    // Keep the API entries and the cache TTLs in their published order:
+    // the first value in each is the default.
     let mut doc: Object = serde_json::from_str(SEED).unwrap();
     doc.retain(|id, _| matches!(id.as_str(), "openai" | "anthropic"));
-    for (provider, row) in &mut doc {
-        edit_object(row, |row| {
-            edit_object(row.get_mut("models").unwrap(), |models| {
-                for (model, row) in models {
-                    edit_object(row, |row| {
-                        let Some(cost) = row.get_mut("cost") else {
-                            return;
-                        };
-                        edit_object(cost, |cost| {
-                            if let Some(multipliers) = cost.get_mut("multipliers") {
-                                let mut rules: Vec<&RawValue> =
-                                    serde_json::from_str(multipliers.get()).unwrap();
-                                rules.retain(|rule| {
-                                    let rule: Value = serde_json::from_str(rule.get()).unwrap();
-                                    rule.pointer("/when/region").is_none()
-                                        && rule.pointer("/when/not/region").is_none()
-                                });
-                                *multipliers = to_raw_value(&rules).unwrap();
-                            }
-                            if let Some((p, m, input, write)) = adjustment {
-                                if provider == p && model == m {
-                                    edit_object(cost.get_mut("text").unwrap(), |text| {
-                                        edit_object(text.get_mut("input").unwrap(), |entry| {
-                                            if let Some(price) = input {
-                                                entry.insert(
-                                                    "price".into(),
-                                                    to_raw_value(&price).unwrap(),
-                                                );
-                                            }
-                                            edit_object(entry.get_mut("cache").unwrap(), |cache| {
-                                                cache.insert(
-                                                    "write".into(),
-                                                    to_raw_value(&write).unwrap(),
-                                                );
-                                            });
-                                        });
-                                    });
-                                }
-                            }
-                        });
-                    });
+    if let Some((provider, model, input, write)) = adjustment {
+        edit_object(
+            doc.get_mut(provider).unwrap(),
+            &["models", model, "cost", "text", "input"],
+            |entry| {
+                if let Some(price) = input {
+                    entry.insert("price".into(), to_raw_value(&price).unwrap());
                 }
-            });
-        });
+                edit_object(entry.get_mut("cache").unwrap(), &[], |cache| {
+                    cache.insert("write".into(), to_raw_value(&write).unwrap());
+                });
+            },
+        );
     }
     normalize_models_dev(&serde_json::to_vec(&doc).unwrap())
         .unwrap()

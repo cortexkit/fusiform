@@ -17,7 +17,7 @@
 //!   mode prices are served separately from the bytes that select the mode.
 //! - **Infer a semantic from a field's name.** A price override becomes a
 //!   context tier only when its predicate can be represented exactly as a
-//!   context threshold. Unsupported predicates refuse the affected schedule.
+//!   context threshold. An unsupported predicate refuses only its own price.
 //! - **Turn a missing value into a real one.** A zero limit is absence, a
 //!   missing rate is `Unpriced`, and an unattributable charge unit is
 //!   `UnknownChargeBasis` — never a number a consumer would spend against.

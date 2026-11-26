@@ -319,8 +319,6 @@ fn image_store(output: i64) -> (CatalogStore, tempfile::TempDir) {
             .unwrap()
             .remove("image")
             .is_some());
-        // Regional pricing is a separate schedule; this fixture isolates the split.
-        row["cost"].as_object_mut().unwrap().remove("multipliers");
         if provider == "google" {
             row["cost"]["text"]["output"]["price"] = json!(output);
         }

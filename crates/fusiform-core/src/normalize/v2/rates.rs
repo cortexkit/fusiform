@@ -33,6 +33,7 @@ pub(super) fn normalize_rates(
         rates: Vec::new(),
         base: BTreeMap::new(),
         overrides: BTreeMap::new(),
+        text_thresholds: BTreeSet::new(),
         modes: Vec::new(),
         mode_prices: BTreeMap::new(),
         shadowed_prices: BTreeMap::new(),
@@ -70,6 +71,7 @@ struct Prices<'a, 'raw> {
     rates: Vec<NormalizedRate>,
     base: BTreeMap<ChargeBasis, Price<'raw>>,
     overrides: BTreeMap<(RateCondition, ChargeBasis), Price<'raw>>,
+    text_thresholds: BTreeSet<u64>,
     modes: Vec<Mode<'raw>>,
     mode_prices: BTreeMap<(String, ChargeBasis), Decimal>,
     shadowed_prices: BTreeMap<(String, ChargeBasis), Decimal>,
@@ -90,6 +92,10 @@ impl<'raw> Prices<'_, 'raw> {
 
     fn refuse(&mut self, scope: RefusedFactScope, role: &str, detail: impl Into<String>) {
         self.refused.insert(scope);
+        self.report_refused_price(role, detail);
+    }
+
+    fn report_refused_price(&mut self, role: &str, detail: impl Into<String>) {
         self.finding(FindingKey::RefusedPrice {
             role: role.to_owned(),
             detail: detail.into(),
@@ -273,6 +279,15 @@ impl<'raw> Prices<'_, 'raw> {
                     };
                     match self.read_condition(&rule, role, owner) {
                         Some(Parsed::Rate(condition)) => {
+                            match condition {
+                                RateCondition::MinContextTokens { tokens }
+                                    if matches!(role, "text.input" | "text.output")
+                                        && unit == "token" =>
+                                {
+                                    self.text_thresholds.insert(tokens);
+                                }
+                                _ => {}
+                            }
                             self.read_fields(&schedule, &rule, &condition, owner)
                         }
                         Some(Parsed::Date(_)) => {
@@ -303,8 +318,7 @@ impl<'raw> Prices<'_, 'raw> {
                 Some(Parsed::Rate(condition))
             }
             Ok(_) => {
-                self.refuse(
-                    scope(owner),
+                self.report_refused_price(
                     role,
                     format!(
                         "condition inside named mode cannot be represented: {}",
@@ -314,18 +328,10 @@ impl<'raw> Prices<'_, 'raw> {
                 None
             }
             Err(detail) => {
-                if let (None, Some(tier)) = (owner, condition::tier_hint(&when)) {
-                    for (name, _) in self.targets(&tier) {
-                        self.refuse(scope(Some(&name)), role, &detail);
-                    }
-                } else {
-                    let refused = if owner.is_none() && when.raw("service_tier").is_some() {
-                        RefusedFactScope::ModeRates(None)
-                    } else {
-                        scope(owner)
-                    };
-                    self.refuse(refused, role, detail);
-                }
+                // The base price applies when no condition matches. An
+                // unsupported predicate describes a different price, not a
+                // malformed replacement for the base or a supported variant.
+                self.report_refused_price(role, detail);
                 None
             }
         }
@@ -609,8 +615,18 @@ impl<'raw> Prices<'_, 'raw> {
                     Some(factor) => self.date_factors.push(factor),
                     None => self.refuse(scope(None), "multipliers", "missing multiplier factor"),
                 },
-                Parsed::Rate(RateCondition::Mode { name }) => tiers.push((name, rule.raw("factor"))),
-                Parsed::Rate(_) => self.refuse(scope(None), "multipliers", "a multiplier requires a service_tier or date condition, not an unconditional or context-tier price"),
+                Parsed::Rate(RateCondition::Mode { name }) => {
+                    tiers.push((name, rule.raw("factor")))
+                }
+                Parsed::Rate(RateCondition::MinContextTokens { .. }) => self.report_refused_price(
+                    "multipliers",
+                    "a context-tier multiplier cannot be represented",
+                ),
+                Parsed::Rate(_) => self.refuse(
+                    scope(None),
+                    "multipliers",
+                    "an unconditional multiplier cannot be represented",
+                ),
             }
         }
         for (tier, factor) in tiers {
@@ -711,19 +727,13 @@ impl Prices<'_, '_> {
     fn finish(mut self) -> Vec<NormalizedRate> {
         let overrides = std::mem::take(&mut self.overrides);
         let base = std::mem::take(&mut self.base);
-        // Models.dev's v1 context bands carry both text input and output
-        // prices. A partial v2 override leaves the other base price unchanged.
+        // A text override names a context band even if it only prices cache.
+        // Carry both text prices into the band unless the band overrides one.
+        // Cache and reasoning prices get tier keys only when written for it.
         let text_pair = [TokenClass::Input, TokenClass::Output]
             .map(|class| ChargeBasis::PerMillionTokens { class });
-        let text_thresholds: BTreeSet<_> = overrides
-            .keys()
-            .filter_map(|(condition, basis)| {
-                (matches!(condition, RateCondition::MinContextTokens { .. })
-                    && text_pair.contains(basis))
-                .then_some(condition.clone())
-            })
-            .collect();
-        for condition in text_thresholds {
+        for tokens in std::mem::take(&mut self.text_thresholds) {
+            let condition = RateCondition::MinContextTokens { tokens };
             for basis in &text_pair {
                 if !overrides.contains_key(&(condition.clone(), basis.clone())) {
                     if let Some(price) = base.get(basis) {

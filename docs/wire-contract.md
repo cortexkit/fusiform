@@ -337,21 +337,17 @@ filters, including disclosure-only pages when an endpoint is withheld.
 withholding change stored facts or `catalog.history`; `at_ms` reads retain the
 uncorrected upstream claims.
 
-The `rate.input_audio` rule: models.dev publishes `cost.input_audio` beside
-the token rates with no unit, so the key alone establishes nothing. It is
-served only for a provider listed in
+The `rate.input_audio` rule: even a models.dev v2 `cost.audio.input` price
+with a token unit does not establish that the provider bills audio per token.
+A token audio amount is served only for a provider listed in
 `crates/fusiform-module/data/input-audio-per-token.json`, whose own pricing
 page, quoted in that file, prices audio input per million tokens (see
 [`curated-data.md`](curated-data.md) §8); a listed provider may exclude single
-models its page does not support. Today only `google` is listed. Elsewhere
-the key stays `unknown_charge_basis` internally and no fact is served: **an
-absent `rate.input_audio` means the unit is not established, never that audio
-is free.** Only the unconditional rate is served; a provider that prices audio
-inside a context tier serves no audio rate, and a mode that prices audio is
-refused whole, as before
-(`models_dev_normalization::an_evidenced_provider_prices_input_audio_per_token`,
-`models_dev_normalization::evidence_for_one_provider_does_not_attribute_another`,
-`models_dev_normalization::tiered_audio_is_not_served_even_with_evidence`).
+models its page does not support. Without evidence, an otherwise readable
+base audio token rate is `unpriced` with reason `unknown_charge_basis`,
+never free. The evidence gate also applies to conditional token prices
+(`models_dev_v2_normalization::v2_token_audio_and_cached_audio_need_evidence`,
+`models_dev_v2_normalization::v2_mode_audio_needs_directional_evidence_and_does_not_reprice_unit_audio`).
 When the same provider row documents audio tokens per second, current reads
 also serve `limit.audio_tokens_per_second` on rows carrying `rate.input_audio`,
 including aliases borrowing that rate. Today Google's documented value is `32`.
@@ -397,7 +393,9 @@ their suffix comes from the upstream:
   applies when the request's context exceeds the threshold
   (`ingest::a_tiered_rate_has_its_own_fact_key`). The catalog does not say
   whether crossing the threshold reprices the whole request or only the
-  excess; that is the provider's billing rule.
+  excess; that is the provider's billing rule. A text context band can
+  override just the cache price. The band still carries the upstream text
+  input and output prices, at their base amounts unless overridden.
 - **Modes**: `rate.<class>.mode.<name>`, the rate in one of the upstream's
   named request modes, with the name restricted to `[a-z0-9_-]+`
   (`mode_rates::a_rate_read_returns_mode_rates_shaped_like_base_rates`). A
@@ -406,6 +404,14 @@ their suffix comes from the upstream:
   The request bytes that select a mode are never served
   (`mode_rates::a_modes_request_bytes_are_never_served`).
 
+The base rate is the upstream price when no price condition applies. An
+override or multiplier with an unsupported condition (including a combined
+condition that cannot be represented in full) is not served and produces a
+normalization finding. It does not suppress the base or other supported
+variants. A dated rule with a supported start boundary still takes effect at
+that boundary. An unreadable price in a supported schedule is different:
+ingest can keep a previously recorded value rather than treat it as withdrawn.
+
 ### 4.2 Absent, null and zero
 
 These are different states and fusiform never converts one into another.
@@ -413,24 +419,23 @@ These are different states and fusiform never converts one into another.
 1. **An absent key** means the upstream published nothing for that fact, or
    the read's filters excluded it, or the fact was withheld (§5.3). For a rate
    it is a statement about publication, never about price: an absent rate
-   does not mean free (`served_corrections::an_ordinary_read_preserves_unpublished_rate_absence`).
-2. **`null`** means unknown. A capability the upstream left out and one it
-   set to `null` are both served as `null`
-   (`models_dev_normalization::an_absent_capability_and_an_explicit_null_are_both_unknown`).
-   Consumers must not coerce `null` to `false` or to a number.
+   does not mean free (`served_corrections::an_ordinary_read_preserves_unsourced_rate_absence`).
+2. **`null`** means unknown. Some fact keys are sparse instead (for example,
+   `capability.structured_output` is omitted when the upstream did not state
+   it). Consumers must not coerce either form to `false` or a number.
 3. **Limits**: an upstream limit of `0` is served as `null`, the same as an
    absent limit, because no model accepts zero tokens
-   (`models_dev_normalization::a_zero_limit_and_an_absent_limit_are_both_unknown`).
+   (`served_vocabulary::every_limit_field_reaches_a_fact`).
    A consumer cannot recover whether the upstream wrote `0`.
 4. **Modality lists**: `null` (unpublished) and `[]` (published as empty) are
-   different claims (`models_dev_normalization::a_missing_modality_block_is_unknown_rather_than_empty`).
+   different claims (`served_vocabulary::an_unknown_modality_list_is_stored_as_null`).
 5. **Reasoning options**: `null` (unpublished), `[]` (the upstream states no
    options) and a populated list are served distinctly, and the list is
    verbatim, order included
    (`reasoning_options::absent_empty_and_populated_are_served_distinctly`,
    `reasoning_options::a_populated_list_round_trips_verbatim`).
 6. **Rates**: a published `0` is `stated_zero`, never a priced zero and never
-   absent (`models_dev_normalization::a_stated_zero_rate_is_distinct_from_no_rate`).
+   absent (`ingest::a_withdrawn_rate_is_tombstoned_rather_than_left_current`).
 7. A stored value that fails to parse is served as its raw string, never as
    `null` (`crates/fusiform-module/src/route.rs`: `wire_value_tests::an_unparseable_row_never_becomes_null`).
 
