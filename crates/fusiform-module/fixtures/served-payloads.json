@@ -69,6 +69,7 @@
           "model.name": "Claude Sonnet 4.5 (latest)",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Anthropic",
           "quality.decommissioned": true,
           "rate.cache_read": {
@@ -141,7 +142,7 @@
           },
           "wire.family": "anthropic.messages",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/anthropic"
           }
         }
@@ -264,6 +265,7 @@
           "model.name": "DeepSeek V4.1 Flash 1017",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "DeepSeek",
           "quality.elo": 1649,
           "quality.eq": 1812,
@@ -312,12 +314,12 @@
             "units": 600000000
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.deepseek.com"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         }
@@ -432,6 +434,7 @@
           "model.name": "GPT-5.6 Luna",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "OpenAI",
           "quality.decommissioned": true,
           "quality.elo": 1479,
@@ -606,7 +609,7 @@
           },
           "wire.family": "openai.responses",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai"
           }
         }
@@ -701,6 +704,7 @@
           "model.name": "Grok 4.20 (Non-Reasoning)",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "xAI",
           "quality.elo": 660,
           "quality.eq": 1347,
@@ -773,12 +777,12 @@
             "units": 5000000000
           },
           "wire.api": {
-            "from": "curated",
+            "from": "model",
             "value": "https://api.x.ai/v1"
           },
           "wire.family": "openai.responses",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/xai"
           }
         }
@@ -795,23 +799,7 @@
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
-      "source": "models.dev",
-      "wire_corrections": [
-        {
-          "established_at_ms": 1792713600000,
-          "established_by": "fusiform",
-          "field": "wire.api",
-          "model": "grok-4.20-0309-non-reasoning",
-          "provider": "xai",
-          "review_by_ms": 1797897600000,
-          "source_ref": {
-            "commit": "accessed 2026-10-23",
-            "file": "https://docs.x.ai/developers/quickstart#step-4-make-your-first-request",
-            "repo": "https://docs.x.ai"
-          },
-          "withheld": false
-        }
-      ]
+      "source": "models.dev"
     }
   },
   "apikey-vs-gateway anthropic": {
@@ -981,6 +969,7 @@
           "model.name": "Claude Opus 5.5",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Anthropic",
           "quality.elo": 2315,
           "quality.eq": 2273,
@@ -1090,7 +1079,7 @@
           },
           "wire.family": "anthropic.messages",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/anthropic"
           }
         }
@@ -1180,6 +1169,7 @@
           "model.name": "Claude Sonnet 5.5 (Antigravity)",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Google",
           "quality.elo": 1834,
           "quality.eq": 2133,
@@ -2203,6 +2193,7 @@
       "catalog_version": 0,
       "models": {
         "google/antigravity-gemini-4-hydrogen": {
+          "limit.audio_tokens_per_second": 31,
           "limit.context": 1048576,
           "limit.output": 65536
         }
@@ -2299,6 +2290,7 @@
           "model.name": "Gemini 3.8 Flash (Antigravity)",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Google",
           "quality.elo": 1586,
           "quality.eq": 1715,
@@ -2318,6 +2310,86 @@
             },
             "units": 75000000
           },
+          "rate.cache_read.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 37500000
+          },
+          "rate.cache_read.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 135000000
+          },
+          "rate.cached_input_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 75000000
+          },
+          "rate.cached_input_audio.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 37500000
+          },
+          "rate.cached_input_audio.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 135000000
+          },
           "rate.input": {
             "currency": "USD",
             "exponent": 9,
@@ -2333,6 +2405,38 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 750000000
+          },
+          "rate.input.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 375000000
+          },
+          "rate.input.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1350000000
           },
           "rate.input_audio": {
             "currency": "USD",
@@ -2350,6 +2454,38 @@
             },
             "units": 750000000
           },
+          "rate.input_audio.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 375000000
+          },
+          "rate.input_audio.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1350000000
+          },
           "rate.output": {
             "currency": "USD",
             "exponent": 9,
@@ -2365,6 +2501,38 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 3750000000
+          },
+          "rate.output.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1875000000
+          },
+          "rate.output.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 6750000000
           },
           "rate.reasoning": {
             "key": "rate.output",
@@ -2461,7 +2629,7 @@
           ],
           "model": "typesafe/jev-1.13.0",
           "review_by_ms": 1797724800000,
-          "source_ref": "Display names confirmed 2026-10-26 at https://docs.typesafe.ai/models: the table labels model id jev-1.13.0 as 'Jev 1.13'; 'Jev is TypeSafe's flagship model'. Read 2026-10-21. https://docs.typesafe.ai/models: \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\"; \"Price: You pay per input token. Output tokens are free. A Btok is a billion tokens and an Mtok is a million tokens.\"; \"| `jev-latest` | `jev-1.13.0` | The most recent stable, official release.\"; \"| Context length | 64k per-request / 32k per-question |\". https://docs.typesafe.ai/concepts/system-one: \"It returns typed decisions and probabilities rather than generated text.\"; \"System One models do not write replies, produce code, or generate explanations of their reasoning.\" No limit.context: the docs give only \"64k\", and neither https://docs.typesafe.ai/api/list-models nor https://api.typesafe.ai/openapi.json states an exact token count. No capability.attachment: the models page lists \"| Input | Text | Text |\" while https://docs.typesafe.ai/images says \"Jev 1.13 and Jev 1.14 both accept images.\" Provider typesafe is not in https://models.dev/api.json (embedded seed fetched 2026-10-13)."
+          "source_ref": "Display names confirmed 2026-10-26 at https://docs.typesafe.ai/models: the table labels model id jev-1.13.0 as 'Jev 1.13'; 'Jev is TypeSafe's flagship model'. Read 2026-10-21. https://docs.typesafe.ai/models: \"| Price (per Btok / per Mtok) | $42 / $0.042 | $42 / $0.042 |\"; \"Price: You pay per input token. Output tokens are free. A Btok is a billion tokens and an Mtok is a million tokens.\"; \"| `jev-latest` | `jev-1.13.0` | The most recent stable, official release.\"; \"| Context length | 64k per-request / 32k per-question |\". https://docs.typesafe.ai/concepts/system-one: \"It returns typed decisions and probabilities rather than generated text.\"; \"System One models do not write replies, produce code, or generate explanations of their reasoning.\" No limit.context: the docs give only \"64k\", and neither https://docs.typesafe.ai/api/list-models nor https://api.typesafe.ai/openapi.json states an exact token count. No capability.attachment: the models page lists \"| Input | Text | Text |\" while https://docs.typesafe.ai/images says \"Jev 1.13 and Jev 1.14 both accept images.\" The models.dev v1 catalog did not list provider typesafe (embedded seed fetched 2026-10-13)."
         }
       ],
       "models": {
@@ -2586,6 +2754,7 @@
           "model.name": "Claude Opus 4.6",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "AnyAPI",
           "rate.cache_read.mode.fast": {
             "currency": "USD",
@@ -2628,12 +2797,12 @@
             "units": 150000000000
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.anyapi.ai/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         }
@@ -2693,6 +2862,7 @@
           "model.name": "Claude Opus 4.6",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "AnyAPI",
           "rate.cache_read.mode.fast": {
             "currency": "USD",
@@ -2735,12 +2905,12 @@
             "units": 150000000000
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.anyapi.ai/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         }
@@ -3120,6 +3290,7 @@
       ],
       "models": {
         "google/antigravity-gemini-4-argon": {
+          "limit.audio_tokens_per_second": 32,
           "limit.context": 1048576,
           "limit.output": 65536
         }
@@ -3207,6 +3378,7 @@
           "capability.temperature": false,
           "capability.tool_call": true,
           "existence": "present",
+          "limit.audio_tokens_per_second": 25,
           "limit.context": 1048576,
           "limit.output": 65536,
           "model.canonical_id": "google/gemini-3.8-flash",
@@ -3215,6 +3387,7 @@
           "model.name": "Gemini 3.8 Flash (Antigravity)",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Google",
           "quality.elo": 1586,
           "quality.eq": 1715,
@@ -3234,6 +3407,86 @@
             },
             "units": 75000000
           },
+          "rate.cache_read.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 37500000
+          },
+          "rate.cache_read.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 135000000
+          },
+          "rate.cached_input_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 75000000
+          },
+          "rate.cached_input_audio.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 37500000
+          },
+          "rate.cached_input_audio.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 135000000
+          },
           "rate.input": {
             "currency": "USD",
             "exponent": 9,
@@ -3250,6 +3503,86 @@
             },
             "units": 750000000
           },
+          "rate.input.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 375000000
+          },
+          "rate.input.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1350000000
+          },
+          "rate.input_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 750000000
+          },
+          "rate.input_audio.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 375000000
+          },
+          "rate.input_audio.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1350000000
+          },
           "rate.output": {
             "currency": "USD",
             "exponent": 9,
@@ -3265,6 +3598,38 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 3750000000
+          },
+          "rate.output.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1875000000
+          },
+          "rate.output.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "inherited_from": {
+              "basis": "alias",
+              "family": "gemini-flash",
+              "model_id": "gemini-3.8-flash",
+              "provider_id": "google"
+            },
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 6750000000
           },
           "rate.reasoning": {
             "key": "rate.output",
@@ -3846,6 +4211,7 @@
           "model.name": "Claude Opus 5.5",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Anthropic",
           "quality.elo": 2315,
           "quality.eq": 2273,
@@ -3954,12 +4320,12 @@
             "state": "billed_as"
           },
           "wire.api": {
-            "from": "curated",
+            "from": "model",
             "value": "https://api.anthropic.com/v1"
           },
           "wire.family": "anthropic.messages",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/anthropic"
           }
         }
@@ -3969,23 +4335,7 @@
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
-      "source": "models.dev",
-      "wire_corrections": [
-        {
-          "established_at_ms": 1792713600000,
-          "established_by": "fusiform",
-          "field": "wire.api",
-          "model": "claude-opus-5-5",
-          "provider": "anthropic",
-          "review_by_ms": 1797897600000,
-          "source_ref": {
-            "commit": "accessed 2026-10-23",
-            "file": "https://docs.anthropic.com/claude/reference/getting-started-with-the-api; https://docs.anthropic.com/en/api/messages#messages-create",
-            "repo": "https://docs.anthropic.com"
-          },
-          "withheld": false
-        }
-      ]
+      "source": "models.dev"
     }
   },
   "catalog.get — cache lifetimes dated anthropic/claude-opus-5-5": {
@@ -4038,6 +4388,7 @@
           "model.name": "Claude Opus 5.5",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Anthropic",
           "quality.elo": 2315,
           "quality.eq": 2273,
@@ -4141,8 +4492,12 @@
             },
             "units": 40000000000
           },
+          "wire.api": {
+            "from": "model",
+            "value": "https://api.anthropic.com/v1"
+          },
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/anthropic"
           }
         }
@@ -4205,6 +4560,7 @@
           "model.name": "GPT-6.1 Sol",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "OpenAI",
           "quality.elo": 1931,
           "quality.eq": 1660,
@@ -4448,8 +4804,12 @@
             },
             "units": 60000000000
           },
+          "wire.api": {
+            "from": "model",
+            "value": "https://api.openai.com/v1"
+          },
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai"
           }
         }
@@ -4582,6 +4942,7 @@
           "model.name": "GPT-6.1 Sol",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "OpenAI",
           "quality.elo": 1931,
           "quality.eq": 1660,
@@ -4830,12 +5191,12 @@
             "state": "billed_as"
           },
           "wire.api": {
-            "from": "curated",
+            "from": "model",
             "value": "https://api.openai.com/v1"
           },
           "wire.family": "openai.responses",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai"
           }
         }
@@ -4845,23 +5206,7 @@
         "graded_by": "operator"
       },
       "resolved_at_ms": -1,
-      "source": "models.dev",
-      "wire_corrections": [
-        {
-          "established_at_ms": 1792713600000,
-          "established_by": "fusiform",
-          "field": "wire.api",
-          "model": "gpt-6.1-sol",
-          "provider": "openai",
-          "review_by_ms": 1797897600000,
-          "source_ref": {
-            "commit": "accessed 2026-10-23",
-            "file": "https://platform.openai.com/docs/api-reference/responses/create?lang=csharp#example",
-            "repo": "https://platform.openai.com"
-          },
-          "withheld": false
-        }
-      ]
+      "source": "models.dev"
     }
   },
   "catalog.get — chat and per-kind media grades": {
@@ -5246,6 +5591,7 @@
           "model.name": "Synthetic model",
           "model.open_weights": null,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Synthetic first provider"
         }
       },
@@ -5324,6 +5670,7 @@
           "model.name": "Claude Sonnet 4.5 (latest)",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Anthropic",
           "rate.cache_read": {
             "currency": "USD",
@@ -5356,7 +5703,7 @@
             "units": 15000000000
           },
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/anthropic"
           }
         }
@@ -5904,6 +6251,7 @@
           "model.name": "Claude Sonnet 4.5 (latest)",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Anthropic",
           "quality.decommissioned": true,
           "rate.cache_read": {
@@ -5976,7 +6324,7 @@
           },
           "wire.family": "anthropic.messages",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/anthropic"
           }
         }
@@ -6151,6 +6499,7 @@
           "model.name": "MiniMax-M3",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "OpenCode Go",
           "quality.elo": 1311,
           "quality.eq": 1520,
@@ -6282,6 +6631,7 @@
           "model.name": "Claude Haiku 5.5",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "OpenCode Go",
           "quality.elo": 1621,
           "quality.eq": 1912,
@@ -6449,6 +6799,7 @@
           "model.name": "MiniMax-M2.7",
           "model.open_weights": true,
           "model.status": "deprecated",
+          "model.type": "chat",
           "provider.name": "OpenCode Go",
           "quality.decommissioned": true,
           "quality.elo": 884,
@@ -6635,6 +6986,7 @@
           "model.name": "GPT-6.1 Sol",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "OpenAI",
           "quality.elo": 1931,
           "quality.eq": 1660,
@@ -6888,7 +7240,7 @@
           },
           "wire.family": "openai.responses",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai"
           }
         }
@@ -7202,6 +7554,7 @@
       ],
       "models": {
         "google/gemini-4-argon": {
+          "limit.audio_tokens_per_second": 32,
           "limit.context": 1048576,
           "limit.document_bytes": 50000000,
           "limit.document_pages": 1000,
@@ -7422,6 +7775,7 @@
           "model.name": "Kimi K3.1 Pro",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Kimi For Coding (kimi.ai)",
           "quality.elo": 1813,
           "quality.eq": 1829,
@@ -7564,12 +7918,12 @@
             "fast": "k3.1-pro-highspeed"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.kimi.ai/coding/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         }
@@ -7643,6 +7997,7 @@
           "model.name": "Kimi K3.1 Pro",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Kimi For Coding (kimi.ai)",
           "quality.elo": 1813,
           "quality.eq": 1829,
@@ -7677,12 +8032,12 @@
             "fast": "k3.1-pro-highspeed"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.kimi.ai/coding/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         }
@@ -7774,6 +8129,7 @@
           "model.name": "Kimi K3.1 Pro Highspeed",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Kimi For Coding (kimi.ai)",
           "quality.elo": 1813,
           "quality.eq": 1829,
@@ -7846,12 +8202,12 @@
             "state": "billed_as"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.kimi.ai/coding/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         }
@@ -7929,6 +8285,7 @@
           "model.name": "Kimi K3.1 Pro Highspeed",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Kimi For Coding (kimi.ai)",
           "quality.elo": 1813,
           "quality.eq": 1829,
@@ -7945,12 +8302,12 @@
             "state": "stated_zero"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.kimi.ai/coding/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         }
@@ -8059,6 +8416,7 @@
           "model.name": "Kimi K3.1 Pro",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Moonshot AI",
           "quality.elo": 1813,
           "quality.eq": 1829,
@@ -8153,12 +8511,12 @@
             "fast": "kimi-k3.1-pro-highspeed"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.moonshot.ai/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         }
@@ -8249,6 +8607,7 @@
           "model.name": "Kimi K3.1 Pro Highspeed",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Moonshot AI",
           "quality.elo": 1813,
           "quality.eq": 1829,
@@ -8297,12 +8656,12 @@
             "state": "billed_as"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.moonshot.ai/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         }
@@ -9708,7 +10067,7 @@
       "bus_publish_failures": 0,
       "bus_published_version": null,
       "catalog_version": 0,
-      "era_count": 438,
+      "era_count": 482,
       "failures": {
         "ever": 1,
         "last_at_ms": 2000,
@@ -10125,6 +10484,7 @@
           "model.name": "gpt-image-1",
           "model.open_weights": false,
           "model.status": "deprecated",
+          "model.type": "image",
           "provider.name": "OpenAI",
           "quality.decommissioned": true,
           "rate.cache_write": {
@@ -10137,8 +10497,12 @@
           },
           "wire.family": "openai.chatgpt_responses",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai"
+          },
+          "wire.shape": {
+            "from": "model",
+            "value": "images"
           }
         }
       },
@@ -10648,6 +11012,7 @@
           "model.name": "GPT-5.6 Luna",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "OpenAI",
           "quality.decommissioned": true,
           "quality.elo": 1479,
@@ -10760,7 +11125,7 @@
           },
           "wire.family": "openai.chatgpt_responses",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai"
           }
         },
@@ -10787,6 +11152,7 @@
           "model.name": "gpt-image-1",
           "model.open_weights": false,
           "model.status": "deprecated",
+          "model.type": "image",
           "provider.name": "OpenAI",
           "quality.decommissioned": true,
           "rate.cache_write": {
@@ -10799,8 +11165,12 @@
           },
           "wire.family": "openai.chatgpt_responses",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai"
+          },
+          "wire.shape": {
+            "from": "model",
+            "value": "images"
           }
         }
       },
@@ -11272,6 +11642,7 @@
           "model.name": "GPT-5.6 Luna",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "OpenAI",
           "quality.decommissioned": true,
           "quality.elo": 1479,
@@ -11384,7 +11755,7 @@
           },
           "wire.family": "openai.chatgpt_responses",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai"
           }
         }
@@ -11556,6 +11927,7 @@
           "model.name": "Claude Sonnet 4.5 (latest)",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Anthropic",
           "quality.decommissioned": true,
           "rate.cache_read": {
@@ -11628,7 +12000,7 @@
           },
           "wire.family": "anthropic.messages",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/anthropic"
           }
         }
@@ -11684,6 +12056,7 @@
           "model.name": "The same weights served by someone who publishes no rate",
           "model.open_weights": true,
           "model.status": "beta",
+          "model.type": "chat",
           "provider.name": "Synthetic reseller publishing no price (not a real provider)",
           "rate.input": {
             "currency": "USD",
@@ -11859,6 +12232,7 @@
           "model.name": "Kimi K3",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Kimi For Coding (kimi.ai)",
           "quality.decommissioned": true,
           "quality.elo": 1703,
@@ -11932,12 +12306,12 @@
             "state": "billed_as"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.kimi.ai/coding/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         },
@@ -11974,6 +12348,7 @@
           "model.name": "Kimi K3-256K",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Kimi For Coding (kimi.ai)",
           "quality.decommissioned": true,
           "quality.elo": 1703,
@@ -12047,12 +12422,12 @@
             "state": "billed_as"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.kimi.ai/coding/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         },
@@ -12089,6 +12464,7 @@
           "model.name": "kimi-for-coding",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Kimi For Coding (kimi.ai)",
           "quality.decommissioned": true,
           "rate.cache_read": {
@@ -12112,12 +12488,12 @@
             "state": "unpriced"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.kimi.ai/coding/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         },
@@ -12145,6 +12521,7 @@
           "model.name": "Kimi For Coding HighSpeed",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Kimi For Coding (kimi.ai)",
           "rate.cache_read": {
             "currency": "USD",
@@ -12199,12 +12576,12 @@
             "state": "billed_as"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.kimi.ai/coding/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         }
@@ -12652,6 +13029,7 @@
           "model.name": "Kimi K3",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Kimi For Coding (kimi.ai)",
           "quality.decommissioned": true,
           "quality.elo": 1703,
@@ -12669,12 +13047,12 @@
             "state": "stated_zero"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.kimi.ai/coding/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         },
@@ -12711,6 +13089,7 @@
           "model.name": "Kimi K3-256K",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Kimi For Coding (kimi.ai)",
           "quality.decommissioned": true,
           "quality.elo": 1703,
@@ -12728,12 +13107,12 @@
             "state": "stated_zero"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.kimi.ai/coding/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         },
@@ -12770,6 +13149,7 @@
           "model.name": "kimi-for-coding",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Kimi For Coding (kimi.ai)",
           "quality.decommissioned": true,
           "rate.cache_read": {
@@ -12785,12 +13165,12 @@
             "state": "stated_zero"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.kimi.ai/coding/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         },
@@ -12818,6 +13198,7 @@
           "model.name": "Kimi For Coding HighSpeed",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Kimi For Coding (kimi.ai)",
           "rate.cache_read": {
             "state": "stated_zero"
@@ -12832,12 +13213,12 @@
             "state": "stated_zero"
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://api.kimi.ai/coding/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         }
@@ -12920,6 +13301,7 @@
           "model.name": "Claude Sonnet 4.5 (latest)",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "Anthropic",
           "quality.decommissioned": true,
           "rate.cache_read": {
@@ -13022,7 +13404,7 @@
           },
           "wire.family": "anthropic.messages",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/anthropic"
           }
         }
@@ -13100,6 +13482,7 @@
           "model.name": "DeepSeek V4 Flash (2x usage)",
           "model.open_weights": true,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "OpenCode Go",
           "rate.cache_read": {
             "currency": "USD",
@@ -13147,12 +13530,12 @@
             "units": 140000000
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://opencode.ai/zen/go/v1"
           },
           "wire.family": "openai.chat_completions",
           "wire.npm": {
-            "from": "provider",
+            "from": "model",
             "value": "@ai-sdk/openai-compatible"
           }
         },
@@ -13187,6 +13570,7 @@
           "model.name": "Qwen3.7 Plus",
           "model.open_weights": false,
           "model.status": null,
+          "model.type": "chat",
           "provider.name": "OpenCode Go",
           "rate.cache_read": {
             "currency": "USD",
@@ -13309,7 +13693,7 @@
             "units": 4800000000
           },
           "wire.api": {
-            "from": "provider",
+            "from": "model",
             "value": "https://opencode.ai/zen/go/v1"
           },
           "wire.family": "anthropic.messages",

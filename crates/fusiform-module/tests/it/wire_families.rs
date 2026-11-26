@@ -2,7 +2,12 @@ use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::{BoundaryKind, SourceId, Timestamp};
 use fusiform_protocol::CatalogGetResponse;
 use fusiform_store::{ingest::plan_ingest, CatalogStore};
-use serde_json::{json, Value};
+use serde_json::{
+    json,
+    value::{to_raw_value, RawValue},
+    Value,
+};
+use std::collections::BTreeMap;
 
 // Every rule has a real seed witness. Additional witnesses cover each package
 // and shape combination that the seed actually publishes.
@@ -26,10 +31,6 @@ const CASES: &[(&str, &str, &str)] = &[
 ];
 
 fn store() -> (CatalogStore, tempfile::TempDir) {
-    let seed: Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    let mut upstream = json!({});
     let extras = [
         ("perplexity", "sonar", ""),
         ("google", "gemini-4-argon", ""),
@@ -39,17 +40,33 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
         ("google", "gemini-3.1-flash-image", ""),
         ("anthropic", "claude-opus-5-5", ""),
     ];
-    for &(provider, model, _) in CASES.iter().chain(extras.iter()) {
-        assert!(
-            seed[provider]["models"][model].is_object(),
-            "missing seed row {provider}/{model}"
-        );
-        if !upstream[provider].is_object() {
-            upstream[provider] = seed[provider].clone();
-            upstream[provider]["models"] = json!({});
-        }
-        upstream[provider]["models"][model] = seed[provider]["models"][model].clone();
-    }
+    let rows: Vec<_> = CASES
+        .iter()
+        .chain(&extras)
+        .map(|&(provider, model, _)| (provider, model))
+        .collect();
+    let mut upstream = super::curated_wire::seed_cut(&rows);
+    let flash = upstream
+        .get_mut("google")
+        .unwrap()
+        .models
+        .get_mut("gemini-3.1-flash-image")
+        .unwrap();
+    let mut row: BTreeMap<String, Box<RawValue>> = serde_json::from_str(flash.get()).unwrap();
+    // Use the image model's GenerateContent entry: the current-only case tests
+    // SDK rules, not the recorded images protocol that also serves in history.
+    let mut apis: BTreeMap<String, Box<RawValue>> = serde_json::from_str(row["api"].get()).unwrap();
+    let generate = apis.remove("generate-content").unwrap();
+    row.insert(
+        "api".into(),
+        to_raw_value(&BTreeMap::from([("generate-content", generate)])).unwrap(),
+    );
+    let generate_only = to_raw_value(&row).unwrap();
+    *flash = &generate_only;
+    build_store(&serde_json::to_vec(&upstream).unwrap())
+}
+
+fn build_store(bytes: &[u8]) -> (CatalogStore, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -60,8 +77,8 @@ fn store() -> (CatalogStore, tempfile::TempDir) {
         },
     })
     .unwrap();
-    let catalog = fusiform_core::normalize_legacy_models_dev_for_tests_with(
-        &serde_json::to_vec(&upstream).unwrap(),
+    let catalog = fusiform_core::normalize_models_dev_v2_with(
+        bytes,
         &fusiform_module::input_audio::evidence(),
     )
     .unwrap()
@@ -77,26 +94,14 @@ fn get(store: &CatalogStore, args: Value) -> CatalogGetResponse {
 
 #[test]
 fn opencode_go_serves_saved_v2_protocols_on_plain_and_apikey_reads() {
-    let snapshot: Value =
-        serde_json::from_slice(include_bytes!("../../data/models-dev-seed.json")).unwrap();
-    let catalog = fusiform_core::normalize_models_dev_v2_with(
-        &serde_json::to_vec(&json!({"opencode-go": snapshot["opencode-go"]})).unwrap(),
-        &fusiform_module::input_audio::evidence(),
-    )
-    .unwrap()
-    .catalog;
-    let dir = tempfile::tempdir().unwrap();
-    let store = CatalogStore::open(&StorageDescriptor {
-        module_id: "fusiform".into(),
-        storage_namespace: "default".into(),
-        isolation: Isolation::Module,
-        backend: StorageBackend::Sqlite {
-            path: dir.path().join("store.db").to_string_lossy().into(),
-        },
-    })
-    .unwrap();
-    let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
-    store.append_eras(&plan.eras).unwrap();
+    let snapshot = super::curated_wire::seed_providers();
+    let (store, _dir) = build_store(
+        &serde_json::to_vec(&std::collections::BTreeMap::from([(
+            "opencode-go",
+            snapshot["opencode-go"],
+        )]))
+        .unwrap(),
+    );
 
     let plain = get(
         &store,

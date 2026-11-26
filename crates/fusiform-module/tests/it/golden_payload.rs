@@ -27,34 +27,36 @@
 //! before/after in the payload a consumer parses, at review time.
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
+use fusiform_core::normalize::NormalizedCatalog;
+use fusiform_core::upstream_facts::Existence;
 use fusiform_core::{
     BoundaryKind, Correction, FieldId, ObservationOutcome, SourceId, Timestamp, TokenClass,
 };
 use fusiform_module::route::serve_tool_call;
 use fusiform_store::ingest::plan_ingest;
 use fusiform_store::{CatalogStore, FactKey, NewEra, NewObservation};
+use serde_json::{
+    json,
+    value::{to_raw_value, RawValue},
+    Value,
+};
+use std::collections::BTreeMap;
 
-/// Legacy test fixtures are models.dev v1 documents, so they go through the
-/// test-only v1 parser and keep the stored facts they were recorded with.
-/// Cases built from the current seed use the v2 parser with the seed's
-/// observation time.
-fn normalize_legacy_models_dev_for_tests(
-    bytes: &[u8],
-) -> Result<fusiform_core::NormalizeOutcome, fusiform_core::NormalizeError> {
-    fusiform_core::normalize_legacy_models_dev_for_tests_with(
-        bytes,
-        &fusiform_module::input_audio::evidence(),
-    )
+use super::curated_wire::{seed_cut, seed_providers, FixtureDocument, FixtureProvider};
+
+fn normalize(bytes: &[u8]) -> NormalizedCatalog {
+    fusiform_core::normalize_models_dev_v2_with(bytes, &fusiform_module::input_audio::evidence())
+        .unwrap()
+        .catalog
 }
 
 const UPSTREAM: &str = include_str!("../../../fusiform-core/fixtures/models-dev-excerpt.json");
 
-/// A SYNTHETIC upstream document: one model publishing no `reasoning` key.
+/// A SYNTHETIC upstream document: one model publishing no reasoning capability.
 ///
 /// Inline rather than in the fixtures directory, deliberately. A file sitting
 /// beside `models-dev-excerpt.json` would read as another real cut, and this is
-/// not one — no model in today's live document omits the key. Keeping it here,
-/// next to the reason, makes it impossible to mistake for measured data.
+/// not one. Keeping it here makes it clear the omitted capability is deliberate.
 const UNKNOWN_REASONING: &str = r#"{
   "synthetic": {
     "id": "synthetic",
@@ -62,6 +64,7 @@ const UNKNOWN_REASONING: &str = r#"{
     "models": {
       "unknown-reasoning": {
         "id": "unknown-reasoning",
+        "type": "chat", "capabilities": {}, "api": {},
         "name": "A model whose reasoning capability the upstream did not state",
         "limit": { "context": 128000, "output": 8192 }
       }
@@ -94,34 +97,33 @@ const UNKNOWN_REASONING: &str = r#"{
 /// The pair also publishes a shared canonical identity and differing lifecycle
 /// labels, including an unknown value, so these upstream strings reach the wire
 /// without being confused with the row ids or a closed status vocabulary.
-/// Connection claims cover provider defaults and model overrides without
-/// changing the pair's artifact identity or price relationship.
+/// The priced model also publishes a model-level connection claim.
 const INHERITANCE_PAIR: &str = r#"{
   "zai": {
     "id": "zai",
     "name": "Synthetic zai entry (models are synthetic, the id is real)",
-    "npm": "@sdk/provider",
-    "api": "https://provider.example/v1/",
     "models": {
       "synthetic-glm": {
         "id": "synthetic-glm",
         "name": "A model whose weights the creator publishes and prices",
-        "canonical_model_id": "zai/synthetic-glm-1.0",
+        "canonical_id": "zai/synthetic-glm-1.0",
         "status": "future-preview",
         "type": "transcription",
-        "provider": { "npm": "@sdk/model", "api": "https://model.example/v1//", "shape": "responses" },
+        "capabilities": {},
+        "api": {"responses": {"base_url": "https://model.example/v1//", "sdk": {"aisdk": "@sdk/model"}}},
         "family": "glm",
         "open_weights": true,
         "limit": { "context": 128000, "output": 8192 },
-        "cost": { "input": 0.075, "output": 0.25 }
+        "cost": {"text":{"input":{"price":0.075},"output":{"price":0.25}}}
       },
       "synthetic-glm-free": {
         "id": "synthetic-glm-free",
         "name": "A model whose creator states every dimension free",
+        "type": "chat", "capabilities": {}, "api": {},
         "family": "glm",
         "open_weights": true,
         "limit": { "context": 128000, "output": 8192 },
-        "cost": { "input": 0, "output": 0 }
+        "cost": {"text":{"input":{"price":0},"output":{"price":0}}}
       }
     }
   },
@@ -132,7 +134,8 @@ const INHERITANCE_PAIR: &str = r#"{
       "synthetic-glm": {
         "id": "synthetic-glm",
         "name": "The same weights served by someone who publishes no rate",
-        "canonical_model_id": "zai/synthetic-glm-1.0",
+        "canonical_id": "zai/synthetic-glm-1.0",
+        "type": "chat", "capabilities": {}, "api": {},
         "status": "beta",
         "family": "glm",
         "open_weights": true,
@@ -141,6 +144,7 @@ const INHERITANCE_PAIR: &str = r#"{
       "synthetic-glm-free": {
         "id": "synthetic-glm-free",
         "name": "Free weights served by someone who publishes no rate",
+        "type": "chat", "capabilities": {}, "api": {},
         "family": "glm",
         "open_weights": true,
         "limit": { "context": 128000, "output": 8192 }
@@ -149,12 +153,6 @@ const INHERITANCE_PAIR: &str = r#"{
   }
 }"#;
 const GOLDEN: &str = include_str!("../../fixtures/served-payloads.json");
-
-/// The embedded models.dev seed. The plane cases copy real xAI and DeepSeek rows
-/// out of it, because the fixture excerpt has neither provider.
-fn legacy_seed() -> &'static str {
-    fusiform_core::normalize::legacy_models_dev_snapshot_for_tests()
-}
 
 /// The target of the shipped alias the fixture pins.
 ///
@@ -167,106 +165,83 @@ const ALIAS_TARGET: (&str, &str) = ("google", "gemini-3.8-flash");
 
 /// The real upstream cut with the synthetic unknown-reasoning provider added.
 ///
-/// Merged as JSON rather than concatenated as text, so a malformed splice fails
-/// here instead of producing a document that parses into something unintended.
-fn merged_upstream() -> String {
-    let mut doc: serde_json::Value = serde_json::from_str(UPSTREAM).unwrap();
-    let obj = doc.as_object_mut().expect("the upstream is an object");
+/// Keep the raw models intact so merging never changes API or cache TTL order.
+fn merged_upstream() -> FixtureDocument<'static> {
+    let mut doc: FixtureDocument<'_> = serde_json::from_str(UPSTREAM).unwrap();
     for src in [UNKNOWN_REASONING, INHERITANCE_PAIR] {
-        let synthetic: serde_json::Value = serde_json::from_str(src).unwrap();
-        for (k, v) in synthetic.as_object().expect("synthetic is an object") {
+        let synthetic: FixtureDocument<'_> = serde_json::from_str(src).unwrap();
+        for (k, v) in synthetic {
             assert!(
-                obj.insert(k.clone(), v.clone()).is_none(),
+                !doc.contains_key(&k),
                 "a synthetic provider must not collide with a real one: {k}"
             );
+            doc.insert(k, v);
         }
     }
 
-    let seed: serde_json::Value = serde_json::from_str(legacy_seed()).expect("the seed parses");
-    for (provider, model) in [ALIAS_TARGET, ("google", "gemini-4-carbon")] {
-        let target = seed[provider]["models"][model].clone();
+    let mut targets = seed_cut(&[ALIAS_TARGET, ("google", "gemini-4-carbon")]);
+    let models = &mut doc.get_mut("google").unwrap().models;
+    for (model, target) in targets.remove("google").unwrap().models {
         assert!(
-            target.is_object(),
-            "the alias target must be in the embedded seed, or the alias cases \
-             below pin a refusal instead of an aliased entry"
-        );
-        let models = obj
-            .get_mut(provider)
-            .and_then(|p| p.get_mut("models"))
-            .and_then(|m| m.as_object_mut())
-            .expect("the excerpt carries the target's provider");
-        assert!(
-            models.insert(model.to_string(), target).is_none(),
+            models.insert(model, target).is_none(),
             "the excerpt already carries the alias target; drop the splice"
         );
     }
-    serde_json::to_string(&doc).unwrap()
+    doc
 }
 
 /// Keep plane-only provider splices out of the ordinary store: even an unused
 /// model changes the counts published by catalog.status.
 fn plane_store() -> (CatalogStore, tempfile::TempDir, Vec<(String, String)>) {
-    let mut doc: serde_json::Value = serde_json::from_str(&merged_upstream()).unwrap();
-    let seed: serde_json::Value = serde_json::from_str(legacy_seed()).unwrap();
-    let mut cuts = Vec::new();
-    for (provider, id) in [
+    let mut doc = merged_upstream();
+    let fill_cases = [
         ("xai", "grok-4.20-0309-non-reasoning"),
         ("deepseek", "deepseek-flash"),
-    ] {
-        // Pin the cut, rather than picking the first matching id: a seed update
-        // must not silently replace the tiered row this fixture exists to serve.
-        let row = &seed[provider]["models"][id];
-        assert!(row.is_object(), "the seed must carry {provider}/{id}");
+    ];
+    let mut slice = seed_cut(&fill_cases);
+    // Isolate the cache-write fill from unrelated service tiers and time multipliers.
+    let prices = [
+        json!({"text":{
+            "input":{"price":1.25,"cache":{"read":0.2},"overrides":[{"when":{"context":{"gt":200000}},"price":2.5,"cache":{"read":0.4}}]},
+            "output":{"price":2.5,"overrides":[{"when":{"context":{"gt":200000}},"price":5}]}
+        }}),
+        json!({"text":{"input":{"price":0.15,"cache":{"read":0.003}},"output":{"price":0.6,"reasoning":0.6}}}),
+    ];
+    let models = fill_cases
+        .iter()
+        .zip(prices)
+        .map(|(&(provider, id), cost)| {
+            let mut row: BTreeMap<String, Box<RawValue>> =
+                serde_json::from_str(slice[provider].models[id].get()).unwrap();
+            row.insert("cost".into(), to_raw_value(&cost).unwrap());
+            to_raw_value(&row).unwrap()
+        })
+        .collect::<Vec<_>>();
+    for ((provider, id), row) in fill_cases.into_iter().zip(&models) {
+        let mut cut = slice.remove(provider).unwrap();
+        cut.models.insert(id.into(), row);
         assert!(
-            row["cost"]["input"].is_number(),
-            "{provider}/{id} must publish input"
-        );
-        assert!(
-            !row["cost"].to_string().contains("cache_write"),
-            "{provider}/{id} must not publish cache_write, including tiers"
-        );
-        let mut cut = seed[provider].clone();
-        cut["models"] = serde_json::json!({id: row});
-        assert!(
-            doc.as_object_mut()
-                .unwrap()
-                .insert(provider.into(), cut)
-                .is_none(),
+            doc.insert(provider.into(), cut).is_none(),
             "the excerpt already carries {provider}; drop the splice"
         );
         // A splice must never replace the row the ordinary alias fixture pins.
         assert_ne!((provider, id), ALIAS_TARGET);
-        cuts.push((provider.to_string(), id.to_string()));
     }
     // Keep the real coding-plan zeros and their canonical API targets together;
     // the missing preview target must remain missing, not a synthetic price.
-    for (provider, ids) in [
-        (
-            "kimi-code-plan-global",
-            vec![
-                "k3",
-                "k3-256k",
-                "kimi-for-coding",
-                "kimi-for-coding-highspeed",
-            ],
-        ),
-        ("moonshotai", vec!["kimi-k3", "kimi-k2.7-code-highspeed"]),
-    ] {
-        let mut cut = seed[provider].clone();
-        let mut models = serde_json::Map::new();
-        for id in ids {
-            let row = &seed[provider]["models"][id];
-            assert!(row.is_object(), "the seed must carry {provider}/{id}");
-            models.insert(id.to_string(), row.clone());
-        }
-        cut["models"] = models.into();
-        assert!(doc
-            .as_object_mut()
-            .unwrap()
-            .insert(provider.into(), cut)
-            .is_none());
+    for (provider, cut) in seed_cut(&[
+        ("kimi-code-plan-global", "k3"),
+        ("kimi-code-plan-global", "k3-256k"),
+        ("kimi-code-plan-global", "kimi-for-coding"),
+        ("kimi-code-plan-global", "kimi-for-coding-highspeed"),
+        ("moonshotai", "kimi-k3"),
+        ("moonshotai", "kimi-k2.7-code-highspeed"),
+    ]) {
+        assert!(doc.insert(provider, cut).is_none());
     }
-    assert!(seed["moonshotai"]["models"]["kimi-k2.8-preview"].is_null());
+    let moonshot: FixtureProvider<'_> =
+        serde_json::from_str(seed_providers()["moonshotai"].get()).unwrap();
+    assert!(!moonshot.models.contains_key("kimi-k2.8-preview"));
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -277,12 +252,12 @@ fn plane_store() -> (CatalogStore, tempfile::TempDir, Vec<(String, String)>) {
         },
     })
     .unwrap();
-    let catalog =
-        normalize_legacy_models_dev_for_tests(serde_json::to_string(&doc).unwrap().as_bytes())
-            .unwrap()
-            .catalog;
+    let catalog = normalize(&serde_json::to_vec(&doc).unwrap());
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
+    let cuts = fill_cases
+        .map(|(p, m)| (p.to_owned(), m.to_owned()))
+        .to_vec();
     (store, dir, cuts)
 }
 
@@ -561,20 +536,37 @@ fn render_all() -> String {
     text
 }
 
+fn single_api_seed(rows: &[(&str, &str, &str)]) -> Value {
+    let ids: Vec<_> = rows.iter().map(|&(p, m, _)| (p, m)).collect();
+    let mut seed = serde_json::to_value(seed_cut(&ids)).unwrap();
+    // The Value-based store helper sorts object keys. Keep only the protocol
+    // under test so sorting cannot select a different default.
+    for &(provider, model, protocol) in rows {
+        let api = &mut seed[provider]["models"][model]["api"];
+        let entry = api.as_object_mut().unwrap().remove(protocol).unwrap();
+        *api = json!({protocol:entry});
+    }
+    seed
+}
+
 pub(super) fn speed_twin_store() -> (CatalogStore, tempfile::TempDir) {
-    let mut seed: serde_json::Value = serde_json::from_str(legacy_seed()).unwrap();
-    seed.as_object_mut().unwrap().retain(|provider, row| {
-        let ids: &[&str] = match provider.as_str() {
-            "kimi-code-plan-global" => &["k3.1-pro", "k3.1-pro-highspeed"],
-            "moonshotai" => &["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"],
-            _ => return false,
-        };
-        row["models"]
-            .as_object_mut()
-            .unwrap()
-            .retain(|id, _| ids.contains(&id.as_str()));
-        true
-    });
+    let mut seed = single_api_seed(&[
+        ("kimi-code-plan-global", "k3.1-pro", "chat-completions"),
+        (
+            "kimi-code-plan-global",
+            "k3.1-pro-highspeed",
+            "chat-completions",
+        ),
+        ("moonshotai", "kimi-k3.1-pro", "chat-completions"),
+        ("moonshotai", "kimi-k3.1-pro-highspeed", "chat-completions"),
+    ]);
+    for model in ["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"] {
+        let write =
+            &mut seed["moonshotai"]["models"][model]["cost"]["text"]["input"]["cache"]["write"];
+        // The default write price in the seed is the first TTL, 5m.
+        let default = write.as_object_mut().unwrap().remove("5m").unwrap();
+        *write = json!({"5m":default});
+    }
     let mut before_launch = seed.clone();
     before_launch["moonshotai"]["models"]
         .as_object_mut()
@@ -582,9 +574,7 @@ pub(super) fn speed_twin_store() -> (CatalogStore, tempfile::TempDir) {
         .remove("kimi-k3.1-pro-highspeed")
         .unwrap();
     let (store, dir) = super::temperature::store(before_launch);
-    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&seed).unwrap())
-        .unwrap()
-        .catalog;
+    let catalog = normalize(&serde_json::to_vec(&seed).unwrap());
     let launch = Timestamp(1_792_782_357_000); // 2026-10-23 19:05:57 UTC
     let plan = plan_ingest(&store, &catalog, launch, BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
@@ -631,17 +621,7 @@ pub(super) fn render_speed_twins() -> serde_json::Map<String, serde_json::Value>
 }
 
 fn render_hydrogen_alias() -> serde_json::Value {
-    let mut seed: serde_json::Value = serde_json::from_str(legacy_seed()).unwrap();
-    seed.as_object_mut().unwrap().retain(|provider, row| {
-        if provider != "google" {
-            return false;
-        }
-        row["models"]
-            .as_object_mut()
-            .unwrap()
-            .retain(|id, _| id == "gemini-4-hydrogen");
-        true
-    });
+    let seed = single_api_seed(&[("google", "gemini-4-hydrogen", "generate-content")]);
     let (store, _dir) = super::temperature::store(seed);
     let request = serde_json::json!({"name":"catalog.get","arguments":{
         "provider_id":"google","model_id":"antigravity-gemini-4-hydrogen","fact_prefixes":["limit."]
@@ -682,27 +662,16 @@ pub(super) fn render_cache_lifetimes() -> serde_json::Map<String, serde_json::Va
 fn current_cache_lifetime_models_keep_the_original_golden_bytes() {
     use sha2::{Digest, Sha256};
     let cases = render_cache_lifetimes();
-    // These are the serialized current vectors before dated lifetimes were added.
+    // Pin current vectors independently of the dated cases. Models.dev v2 adds
+    // model types and model-origin API/SDK facts; the cache prices are unchanged.
     for (identity, digest) in [
         (
             "anthropic/claude-opus-5-5",
-            // Re-pinned when current reads began serving the sourced
-            // `capability.reasoning_default` addition and its disclosure, and
-            // again for the sourced `capability.allowed_fallback_models`
-            // addition and its disclosure, and again for the sourced
-            // `capability.effort_change_cache` addition and its disclosure.
-            // The sourced reasoning rate adds its own fact and disclosure.
-            "11d6e5c1b99e749460b135de652ac696fd32600bec8145e6956d94fd7819a5be",
+            "d84e68f6987d588ca2bb058aa59d193715f79b87c42f8e93b8947ef486cb9518",
         ),
         (
             "openai/gpt-6.1-sol",
-            // Re-pinned after the 2026-11-17 seed refresh: upstream added a
-            // `flex` service mode to this model, which adds its own mode keys.
-            // Re-pinned again when current reads began serving the sourced
-            // `capability.reasoning_default` addition and its disclosure, and
-            // for the sourced `capability.effort_change_cache` addition.
-            // The sourced reasoning rate adds its own fact and disclosure.
-            "284e5330cdf5e223bb7576a6beda45aa063a8256d5b9594cf74975eadf7aa7da",
+            "cc92d2996c6110251029098d25ae31b4d99072d6c3777790a55716e7fa314466",
         ),
     ] {
         let label = format!("catalog.get — cache lifetimes {identity}");
@@ -748,25 +717,19 @@ pub(super) fn render_attachment_limits() -> serde_json::Map<String, serde_json::
 }
 
 pub(super) fn render_temperature() -> serde_json::Map<String, serde_json::Value> {
-    let mut seed: serde_json::Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    seed.as_object_mut().unwrap().retain(|provider, row| {
-        let models: &[&str] = match provider.as_str() {
-            "openai" => &["gpt-4.1"],
-            "google" => &["gemini-4-carbon", "gemini-4-hydrogen"],
-            "anthropic" => &["claude-sonnet-5-5"],
-            _ => return false,
-        };
-        row["models"]
-            .as_object_mut()
-            .unwrap()
-            .retain(|id, _| models.contains(&id.as_str()));
-        true
-    });
+    let mut seed = single_api_seed(&[
+        ("openai", "gpt-4.1", "responses"),
+        ("google", "gemini-4-carbon", "generate-content"),
+        ("google", "gemini-4-hydrogen", "generate-content"),
+        ("anthropic", "claude-sonnet-5-5", "messages"),
+    ]);
+    // These cases read temperature only; no cache TTL choice is under test.
+    for (p, m) in [("openai", "gpt-4.1"), ("anthropic", "claude-sonnet-5-5")] {
+        seed[p]["models"][m].as_object_mut().unwrap().remove("cost");
+    }
     // Give the live Hydrogen alias a target that accepts temperature so the
     // fixture pins omission of an upstream true, not of a missing fact.
-    seed["google"]["models"]["gemini-4-hydrogen"]["temperature"] = serde_json::json!(true);
+    seed["google"]["models"]["gemini-4-hydrogen"]["capabilities"]["temperature"] = json!(true);
     let (store, _dir) = super::temperature::store(seed);
     let mut cases = serde_json::Map::new();
     for (label, provider, model) in [
@@ -811,19 +774,17 @@ pub(super) fn render_temperature() -> serde_json::Map<String, serde_json::Value>
 /// The two Claude rows that carry Anthropic's announced per-category refusal
 /// routes, with their permitted fallback lists, so readers pin both shapes.
 pub(super) fn render_refusal_fallbacks() -> serde_json::Map<String, serde_json::Value> {
-    let mut seed: serde_json::Value =
-        serde_json::from_str(fusiform_core::normalize::legacy_models_dev_snapshot_for_tests())
-            .unwrap();
-    seed.as_object_mut().unwrap().retain(|provider, row| {
-        if provider != "anthropic" {
-            return false;
-        }
-        row["models"]
-            .as_object_mut()
-            .unwrap()
-            .retain(|id, _| ["claude-fable-5", "claude-opus-5"].contains(&id.as_str()));
-        true
-    });
+    let mut seed = single_api_seed(&[
+        ("anthropic", "claude-fable-5", "messages"),
+        ("anthropic", "claude-opus-5", "messages"),
+    ]);
+    for model in seed["anthropic"]["models"]
+        .as_object_mut()
+        .unwrap()
+        .values_mut()
+    {
+        model.as_object_mut().unwrap().remove("cost");
+    }
     let (store, _dir) = super::temperature::store(seed);
     let mut cases = serde_json::Map::new();
     for model in ["claude-fable-5", "claude-opus-5"] {
@@ -872,7 +833,9 @@ fn temperature_golden_cases_pin_acceptance_correction_and_safe_alias_projection(
 }
 
 fn render_login_methods() -> serde_json::Map<String, serde_json::Value> {
-    let (store, _dir) = super::login_methods::store();
+    // These rate-filtered vectors test the login plane over ordinary prices,
+    // so keep regional conditions out of the price fixture.
+    let (store, _dir) = super::cache_lifetimes::store(None);
     let mut cases = serde_json::Map::new();
     for (label, model, method) in [
         (
@@ -1165,15 +1128,14 @@ fn render_realtime_audio() -> serde_json::Value {
 /// Render the seed's `ollama-cloud/kimi-k2.6` row separately so this identity
 /// case does not change the model counts in the ordinary golden cases.
 fn render_canonical_link() -> serde_json::Value {
-    let seed: serde_json::Value = serde_json::from_str(legacy_seed()).unwrap();
-    let row = seed["ollama-cloud"]["models"]["kimi-k2.6"].clone();
-    assert!(row.is_object());
-    assert_eq!(row["canonical_model_id"], "moonshotai/kimi-k2.6");
-    let doc = serde_json::json!({"ollama-cloud": {
-        "id":"ollama-cloud", "name":"Ollama Cloud",
-        "models":{"kimi-k2.6":row}
-    }});
-    render_canonical_identity(&doc, "ollama-cloud", "kimi-k2.6")
+    let doc = seed_cut(&[("ollama-cloud", "kimi-k2.6")]);
+    let row: Value = serde_json::from_str(doc["ollama-cloud"].models["kimi-k2.6"].get()).unwrap();
+    assert_eq!(row["canonical_id"], "moonshotai/kimi-k2.6");
+    render_canonical_identity(
+        &serde_json::to_vec(&doc).unwrap(),
+        "ollama-cloud",
+        "kimi-k2.6",
+    )
 }
 
 /// Pin disclosure bytes even when upstream identities make all shipped links unnecessary.
@@ -1196,10 +1158,15 @@ fn render_synthetic_canonical_link() -> serde_json::Value {
     let doc = serde_json::json!({"synthetic-provider": {
         "id":"synthetic-provider", "name":"Synthetic Provider",
         "models":{"synthetic-model": {
-            "id":"synthetic-model", "name":"Synthetic Model", "canonical_model_id":null
+            "id":"synthetic-model", "name":"Synthetic Model",
+            "type":"chat", "api":{}, "capabilities":{}
         }}
     }});
-    render_canonical_identity(&doc, "synthetic-provider", "synthetic-model")
+    render_canonical_identity(
+        &serde_json::to_vec(&doc).unwrap(),
+        "synthetic-provider",
+        "synthetic-model",
+    )
 }
 
 /// Pin exact grade decimals and their disclosure through the store-backed join.
@@ -1218,20 +1185,21 @@ pub(super) fn render_synthetic_quality_scores() -> serde_json::Value {
         "id":"synthetic-quality-reseller", "name":"Synthetic Quality Reseller",
         "models":{
             "synthetic-model": {
-                "id":"synthetic-model", "canonical_model_id":"synthetic-lab/synthetic-model",
-                "reasoning_options":[{"type":"effort","values":["low","high"]}]
+                "id":"synthetic-model", "canonical_id":"synthetic-lab/synthetic-model",
+                "type":"chat", "api":{},
+                "capabilities":{"reasoning":{"supported":true,"effort":["low","high"]}}
             },
             "synthetic-model-no-effort": {
-                "id":"synthetic-model-no-effort", "canonical_model_id":"synthetic-lab/synthetic-model"
+                "id":"synthetic-model-no-effort", "canonical_id":"synthetic-lab/synthetic-model",
+                "type":"chat", "api":{}, "capabilities":{}
             },
             "synthetic-excluded": {
-                "id":"synthetic-excluded", "canonical_model_id":"synthetic-lab/synthetic-excluded"
+                "id":"synthetic-excluded", "canonical_id":"synthetic-lab/synthetic-excluded",
+                "type":"chat", "api":{}, "capabilities":{}
             }
         }
     }});
-    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
-        .unwrap()
-        .catalog;
+    let catalog = normalize(&serde_json::to_vec(&doc).unwrap());
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     let request = serde_json::json!({"name":"catalog.get","arguments":{
@@ -1694,18 +1662,16 @@ pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Valu
     .unwrap();
     let doc = serde_json::json!({"openai": {
         "id":"openai", "models": {
-            "gpt-transcribe":{"id":"gpt-transcribe", "type":"transcription", "modalities":{"input":["audio"],"output":["text"]}},
-            "synthetic-chat":{"id":"synthetic-chat"},
-            "synthetic-multimodal":{"id":"synthetic-multimodal", "type":"chat", "modalities":{"input":["audio"],"output":["text","audio","image","video"]}}
+            "gpt-transcribe":{"id":"gpt-transcribe", "type":"transcription", "api":{}, "capabilities":{}, "modalities":{"input":["audio"],"output":["text"]}},
+            "synthetic-chat":{"id":"synthetic-chat", "type":"chat", "api":{}, "capabilities":{}},
+            "synthetic-multimodal":{"id":"synthetic-multimodal", "type":"chat", "api":{}, "capabilities":{}, "modalities":{"input":["audio"],"output":["text","audio","image","video"]}}
         }
     }});
     let mut doc = doc;
     doc["cloudflare-workers-ai"]["models"]["@cf/cloudflare/clef-flash"] = serde_json::json!({
-        "type":"decision", "limit":{"context":24576,"output":24576}
+        "type":"decision", "api":{}, "capabilities":{}, "limit":{"context":24576,"output":24576}
     });
-    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
-        .unwrap()
-        .catalog;
+    let catalog = normalize(&serde_json::to_vec(&doc).unwrap());
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     store
@@ -1834,11 +1800,7 @@ pub(super) fn render_media_quality() -> serde_json::Map<String, serde_json::Valu
     cases
 }
 
-fn render_canonical_identity(
-    doc: &serde_json::Value,
-    provider: &str,
-    model: &str,
-) -> serde_json::Value {
+fn render_canonical_identity(bytes: &[u8], provider: &str, model: &str) -> serde_json::Value {
     let dir = tempfile::tempdir().unwrap();
     let store = CatalogStore::open(&StorageDescriptor {
         module_id: "fusiform".into(),
@@ -1849,9 +1811,7 @@ fn render_canonical_identity(
         },
     })
     .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&doc).unwrap())
-        .unwrap()
-        .catalog;
+    let catalog = normalize(bytes);
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     let request = serde_json::json!({"name":"catalog.get","arguments":{
@@ -1905,13 +1865,11 @@ fn render_paged() -> serde_json::Value {
     // stays off this page, keeping the golden small while using the real budget.
     let upstream = serde_json::json!({
         "000-page": {"id":"000-page","name":"Synthetic first provider","models":{
-            "m":{"id":"m","name":"Synthetic model","family":"synthetic"}}},
+            "m":{"id":"m","type":"chat","api":{},"capabilities":{},"name":"Synthetic model","family":"synthetic"}}},
         "001-page": {"id":"001-page","name":"Synthetic page boundary","models":{
-            "m":{"id":"m","name":"Synthetic model","family":"x".repeat(3 * 1024 * 1024)}}}
+            "m":{"id":"m","type":"chat","api":{},"capabilities":{},"name":"Synthetic model","family":"x".repeat(3 * 1024 * 1024)}}}
     });
-    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&upstream).unwrap())
-        .unwrap()
-        .catalog;
+    let catalog = normalize(&serde_json::to_vec(&upstream).unwrap());
     let plan = plan_ingest(&store, &catalog, Timestamp(1000), BoundaryKind::Seed, None).unwrap();
     // Keep the ordinary fixture's rows intact; only these synthetic providers
     // are added to the independent store used for this one golden case.
@@ -2724,37 +2682,22 @@ pub(super) fn store() -> (CatalogStore, tempfile::TempDir) {
             detail: None,
         })
         .unwrap();
-    // ONE document, not two.
-    //
-    // A second `plan_ingest` at the same instant would diff the synthetic
-    // document against the store and tombstone every model from the first --
-    // ingest treats "absent from this document" as a withdrawal, which is
-    // correct and is exactly why a fixture must present one document rather
-    // than two. Caught by the schema's uniqueness constraint on first run.
-    let catalog = normalize_legacy_models_dev_for_tests(merged_upstream().as_bytes())
-        .unwrap()
-        .catalog;
+    let mut doc = merged_upstream();
+    let fixture_catalog = |doc: &FixtureDocument<'_>| {
+        let mut catalog = normalize(&serde_json::to_vec(doc).unwrap());
+        // Historical rows without a model type predate models.dev v2, which requires one.
+        catalog
+            .providers
+            .iter_mut()
+            .find(|p| p.provider_id == "synthetic")
+            .unwrap()
+            .models[0]
+            .model_type = None;
+        catalog
+    };
+    let catalog = fixture_catalog(&doc);
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
-
-    // A model whose reasoning capability is UNKNOWN, from a document that is
-    // deliberately synthetic and labelled as such.
-    //
-    // The ordinary rows come from a real upstream cut: a hand-written fixture
-    // encodes its author's understanding of the format. Synthetic rows also
-    // exercise inheritance and open-ended model labels. The unknown-reasoning
-    // row cannot be cut from that payload, and the reason is worth
-    // stating rather than hiding. Measured on the live document today: all
-    // 6,291 models publish the `reasoning` key, so ABSENT does not occur
-    // upstream and cannot be cut from it.
-    //
-    // It is pinned because a consumer calling `as_bool().unwrap_or(false)`
-    // would collapse unknown to false and silently disable reasoning. A null
-    // row lets consumer decoder tests distinguish unknown from explicit false.
-    //
-    // The alternative was to leave the wire shape unpinned until the upstream
-    // produces one, which means the first real occurrence is also the first
-    // test of the path.
 
     // A SECOND INGEST WITH ONE RATE WITHDRAWN, so the fixture carries an
     // `unpriced` rate produced by the ingest path rather than written by hand.
@@ -2771,39 +2714,25 @@ pub(super) fn store() -> (CatalogStore, tempfile::TempDir) {
     // BELIEVE the producer emits, and the fixture's whole job is to pin what it
     // ACTUALLY emits. If `withdrawal_value` changes, this reddens; a literal
     // would not.
-    let withdrawn = {
-        let mut doc: serde_json::Value =
-            serde_json::from_str(&merged_upstream()).expect("the merged upstream parses");
-        let cost = doc["zhipuai"]["models"]["glm-4.5-flash"]["cost"]
+    let flash = doc
+        .get_mut("zhipuai")
+        .unwrap()
+        .models
+        .get_mut("glm-4.5-flash")
+        .unwrap();
+    let mut row: BTreeMap<String, Box<RawValue>> = serde_json::from_str(flash.get()).unwrap();
+    let mut cost: Value = serde_json::from_str(row["cost"].get()).unwrap();
+    assert!(
+        cost["text"]["input"]["cache"]
             .as_object_mut()
-            .expect("glm-4.5-flash has a cost object");
-        assert!(
-            cost.remove("cache_write").is_some(),
-            "the key being withdrawn must exist first, or this ingest is a no-op \
-             and the fixture silently loses the tombstone"
-        );
-
-        // A WHOLE MODEL withdrawn as well, so the fixture carries a RETIRED
-        // row. The `retired` array was added for a consumer whose roster went
-        // stale on an upstream rename, and it appeared nowhere in these bytes
-        // — the field exists precisely so a named read of a retired model is
-        // distinguishable from a read of an unknown one, and neither shape was
-        // pinned.
-        let models = doc["poe"]["models"]
-            .as_object_mut()
-            .expect("poe publishes models");
-        assert!(
-            models.remove("google/veo-3").is_some(),
-            "the model being withdrawn must exist first, or the retirement is a \
-             no-op and the case below reads an unknown model instead"
-        );
-        assert!(
-            !models.is_empty(),
-            "the provider must keep a model, or this withdraws the PROVIDER too \
-             and the read refuses for a different reason than the one pinned"
-        );
-        serde_json::to_string(&doc).expect("the edited document serialises")
-    };
+            .unwrap()
+            .remove("write")
+            .is_some(),
+        "the upstream must publish cache write first or the second ingest cannot withdraw it"
+    );
+    row.insert("cost".into(), to_raw_value(&cost).unwrap());
+    let withdrawn = to_raw_value(&row).unwrap();
+    *flash = &withdrawn;
     let obs = store
         .record_observation(&NewObservation {
             source: SourceId::ModelsDev,
@@ -2816,10 +2745,8 @@ pub(super) fn store() -> (CatalogStore, tempfile::TempDir) {
             detail: None,
         })
         .unwrap();
-    let catalog = normalize_legacy_models_dev_for_tests(withdrawn.as_bytes())
-        .expect("the withdrawn document normalises")
-        .catalog;
-    let plan = plan_ingest(
+    let catalog = fixture_catalog(&doc);
+    let mut plan = plan_ingest(
         &store,
         &catalog,
         Timestamp(1_500),
@@ -2835,6 +2762,39 @@ pub(super) fn store() -> (CatalogStore, tempfile::TempDir) {
          new: got {} eras",
         plan.eras.len()
     );
+    // Full-document absence predates models.dev v2 releases; the parser only returns present rows.
+    assert!(store
+        .model_is_known(SourceId::ModelsDev, "poe", "google/veo-3")
+        .unwrap());
+    assert!(doc["poe"]
+        .models
+        .contains_key("stabilityai/stablediffusionxl"));
+    plan.eras.push(NewEra {
+        source: SourceId::ModelsDev,
+        provider_id: "poe".into(),
+        model_id: "google/veo-3".into(),
+        fact_key: FactKey::existence(),
+        value_json: Existence::Absent.as_json().into(),
+        boundary_at: Timestamp(1_500),
+        boundary_kind: BoundaryKind::Observed,
+        observation_id: Some(obs),
+    });
+    // Provider-origin connection facts predate the per-model API entries in models.dev v2.
+    for (key, value) in [
+        ("wire.api", "https://provider.example/v1/"),
+        ("wire.npm", "@sdk/provider"),
+    ] {
+        plan.eras.push(NewEra {
+            source: SourceId::ModelsDev,
+            provider_id: "zai".into(),
+            model_id: "synthetic-glm-free".into(),
+            fact_key: FactKey::from_stored(key.into()),
+            value_json: json!({"value":value,"from":"provider"}).to_string(),
+            boundary_at: Timestamp(1_000),
+            boundary_kind: BoundaryKind::Seed,
+            observation_id: None,
+        });
+    }
     store.append_eras(&plan.eras).unwrap();
 
     // THE CURATED PLAN PRICES, applied exactly as boot applies them.
@@ -3799,13 +3759,38 @@ fn anthropic_gateway_store() -> (CatalogStore, tempfile::TempDir) {
         },
     })
     .unwrap();
-    // Cover every upstream Anthropic row, not just the golden excerpt: gateway
-    // billing must preserve each published card, including its tier variants.
-    let seed: serde_json::Value = serde_json::from_str(legacy_seed()).unwrap();
-    let upstream = serde_json::json!({"anthropic": seed["anthropic"]});
-    let catalog = normalize_legacy_models_dev_for_tests(&serde_json::to_vec(&upstream).unwrap())
-        .unwrap()
-        .catalog;
+    // Cover every Anthropic seed row, not just the golden excerpt. The two
+    // pricing witnesses use cards without regional conditions so the gateway
+    // comparison includes actual context, fast-mode, and cache lifetime rates.
+    let seed = seed_providers();
+    let mut anthropic: FixtureProvider<'_> = serde_json::from_str(seed["anthropic"].get()).unwrap();
+    let witnesses = [
+        (
+            "claude-haiku-5-5",
+            r#"{"text":{
+            "input":{"price":0.1,"cache":{"read":0.01,"write":{"5m":0.125,"1h":0.2}},
+                "overrides":[{"when":{"context":{"gt":100000}},"price":0.5,"cache":{"read":0.05,"write":{"5m":0.625,"1h":1}}}]},
+            "output":{"price":0.5,"overrides":[{"when":{"context":{"gt":100000}},"price":2.5}]}
+        },"web_search":{"price":10}}"#,
+        ),
+        (
+            "claude-opus-5-5",
+            r#"{"text":{
+            "input":{"price":4,"cache":{"read":0.2,"write":{"5m":5,"1h":8}}},"output":{"price":20}
+        },"web_search":{"price":10},"multipliers":[{"when":{"service_tier":{"equals":"fast"}},"factor":{"text":2}}]}"#,
+        ),
+    ];
+    let rows = witnesses.map(|(id, cost)| {
+        let mut fields: BTreeMap<String, Box<RawValue>> =
+            serde_json::from_str(anthropic.models[id].get()).unwrap();
+        fields.insert("cost".into(), RawValue::from_string(cost.into()).unwrap());
+        (id, to_raw_value(&fields).unwrap())
+    });
+    for (id, row) in &rows {
+        anthropic.models.insert((*id).into(), row);
+    }
+    let upstream = BTreeMap::from([("anthropic", anthropic)]);
+    let catalog = normalize(&serde_json::to_vec(&upstream).unwrap());
     let plan = plan_ingest(&store, &catalog, Timestamp(1_000), BoundaryKind::Seed, None).unwrap();
     store.append_eras(&plan.eras).unwrap();
     (store, dir)
@@ -3891,7 +3876,7 @@ fn anthropic_gateway_preserves_every_api_card_except_the_credential_endpoint() {
     }
     assert!(
         tier && fast && ttl,
-        "the control must include context, fast-mode and TTL rates"
+        "the control must include context ({tier}), fast-mode ({fast}) and TTL ({ttl}) rates"
     );
     assert_eq!(
         serde_json::to_vec(&gateway["models"]).unwrap(),
