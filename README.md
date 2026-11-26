@@ -22,7 +22,21 @@ every start it writes its backup descriptor, `engram-catalog.json`, beside
 | `fusiform-cli` | the `ck-models` operator CLI, run as `ck models <verb>` |
 | `fusiform-testkit` | shared test helpers; never linked into a binary |
 
-## Build and test
+## Install
+
+On supported macOS and Linux targets, install the module and the `ck models`
+CLI with:
+
+```sh
+ck setup fusiform
+```
+
+Setup uses the public CortexKit release index, so the first release must be
+published and indexed before this command can install Fusiform. On Windows,
+use the source build below until the native test suite has passed and Windows
+archives are published.
+
+## Build and test from source
 
 Everything below needs only a Rust toolchain. Every dependency, including the
 CortexKit crates, comes from crates.io at the versions in `Cargo.lock`, so the
@@ -42,10 +56,9 @@ and tests that read a full captured models.dev document do nothing unless
 `FUSIFORM_FULL_PAYLOAD` names that file. When unset they print a skip notice
 and pass. CI sets neither.
 
-fusiform runs on Windows, Linux and macOS. The CortexKit installer
-(`ck setup`) does not install it yet, and it is not in the public release
-index, so today it is built from source on any of them; the scripts below are
-maintainer tools.
+The source build works on macOS, Linux and Windows and puts `ck-fusiform`
+and `ck-models` (with `.exe` on Windows) in `target/release/`. The scripts
+below are maintainer tools.
 
 - `scripts/release-build.sh` builds release binaries with the commit stamped
   in and refuses a dirty tree. It runs on every platform.

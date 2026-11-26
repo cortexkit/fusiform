@@ -67,9 +67,16 @@ on_exit() {
 }
 trap on_exit EXIT
 revision_pattern='\(([0-9a-f]{40})\)'
+suffix=""
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) suffix=.exe ;;
+esac
+paths=()
 for bin in ck-fusiform ck-models; do
-  link="$probe_dir/ckdev-${bin#ck-}"
-  ln "./target/release/$bin" "$link" 2>/dev/null || cp "./target/release/$bin" "$link"
+  built="target/release/$bin$suffix"
+  paths+=("$built")
+  link="$probe_dir/ckdev-${bin#ck-}$suffix"
+  ln "$built" "$link" 2>/dev/null || cp "$built" "$link"
   if ! version=$("$link" --version); then
     echo "release-build.sh: $bin version probe failed" >&2
     exit 1
@@ -89,10 +96,10 @@ echo "sha256:"
 # running on Linux. `stage.sh` is a different case and refuses outright: it
 # signs, and `codesign` has no counterpart to fall back to.
 if command -v shasum >/dev/null 2>&1; then
-  shasum -a 256 target/release/ck-fusiform target/release/ck-models \
+  shasum -a 256 "${paths[@]}" \
     | sed 's|target/release/||'
 elif command -v sha256sum >/dev/null 2>&1; then
-  sha256sum target/release/ck-fusiform target/release/ck-models \
+  sha256sum "${paths[@]}" \
     | sed 's|target/release/||'
 else
   # Refuse rather than print nothing: a provenance block that silently omits
