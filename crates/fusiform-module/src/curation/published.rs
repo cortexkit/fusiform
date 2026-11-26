@@ -987,11 +987,29 @@ mod tests {
         let mut upstream = Upstream::new();
         let aliases =
             curate::aliases::load_reporting_rejects(&documents["model-aliases"].to_string()).0;
-        for row in documents["login-methods"]["models"].as_array().unwrap() {
-            let id = (
-                row["provider_id"].as_str().unwrap().to_owned(),
-                row["model_id"].as_str().unwrap().to_owned(),
-            );
+        // The shipped login-methods and quota-pools documents name upstream
+        // rows; this stand-in upstream must carry each of them.
+        let login_ids = documents["login-methods"]["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                (
+                    row["provider_id"].as_str().unwrap().to_owned(),
+                    row["model_id"].as_str().unwrap().to_owned(),
+                )
+            });
+        let pool_ids = documents["quota-pools"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|entry| entry["models"].as_array().unwrap())
+            .map(|model| {
+                let (provider, model) = model.as_str().unwrap().split_once('/').unwrap();
+                (provider.to_owned(), model.to_owned())
+            })
+            .collect::<Vec<_>>();
+        for id in login_ids.chain(pool_ids) {
             if aliases.contains_key(&id) {
                 continue;
             }
