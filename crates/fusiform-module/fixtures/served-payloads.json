@@ -1591,6 +1591,271 @@
       "source": "models.dev"
     }
   },
+  "catalog.get — Gemini 4 Hydrogen full row": {
+    "request": {
+      "arguments": {
+        "model_id": "gemini-4-hydrogen",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1794960000000,
+          "established_by": "fusiform",
+          "fact_key": "capability.reasoning_default",
+          "model": "google/gemini-4-hydrogen",
+          "model_id": "gemini-4-hydrogen",
+          "notes": "Served only on this first-party row: resellers and alias routes reaching the model another way may apply a different default.",
+          "provider_id": "google",
+          "quote": "What's new in Gemini 4 Hydrogen: \"The model defaults to `high` and introduces `xhigh`.\" The thinking guide's Default Thinking table lists `gemini-4-hydrogen` as \"On (high)\".",
+          "reason": "models.dev publishes no default reasoning effort. Google documents the thinking_level the Gemini API applies to this model when a request omits it, so a runner can send it explicitly.",
+          "replaces": null,
+          "review_by_ms": 1800144000000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/whats-new-gemini-4-hydrogen (accessed 2026-11-18); https://ai.google.dev/gemini-api/docs/thinking (accessed 2026-11-18)",
+          "value": {
+            "type": "effort",
+            "value": "high"
+          }
+        },
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "google/gemini-4-hydrogen",
+          "model_id": "*",
+          "provider_id": "google",
+          "quote": "Gemini Developer API pricing: \"Output price (including thinking tokens)\". Gemini thinking: \"When thinking is turned on, response pricing is the sum of output tokens and thinking tokens.\"",
+          "reason": "Google includes thinking tokens in its Gemini output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing; https://ai.google.dev/gemini-api/docs/thinking#pricing (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
+      "models": {
+        "google/gemini-4-hydrogen": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "audio",
+            "image",
+            "pdf",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_default": {
+            "type": "effort",
+            "value": "high"
+          },
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ]
+            }
+          ],
+          "capability.structured_output": true,
+          "capability.temperature": true,
+          "capability.tool_call": true,
+          "existence": "present",
+          "limit.audio_tokens_per_second": 31,
+          "limit.context": 1048576,
+          "limit.document_bytes": 50000000,
+          "limit.document_pages": 1000,
+          "limit.images_per_request": 3600,
+          "limit.output": 65536,
+          "limit.temperature_max": 2.0,
+          "limit.temperature_min": 0.0,
+          "model.canonical_id": "google/gemini-4-hydrogen",
+          "model.family": "gemini",
+          "model.lineage": "gemini",
+          "model.name": "Gemini 4 Hydrogen",
+          "model.open_weights": false,
+          "model.status": null,
+          "model.type": "chat",
+          "provider.name": "Google",
+          "rate.cache_read": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 75000000
+          },
+          "rate.cache_read.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 37500000
+          },
+          "rate.cache_read.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 135000000
+          },
+          "rate.cached_input_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 75000000
+          },
+          "rate.cached_input_audio.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 37500000
+          },
+          "rate.cached_input_audio.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 135000000
+          },
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1500000000
+          },
+          "rate.input.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 750000000
+          },
+          "rate.input.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2700000000
+          },
+          "rate.input_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 1500000000
+          },
+          "rate.input_audio.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 750000000
+          },
+          "rate.input_audio.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2700000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 7500000000
+          },
+          "rate.output.mode.flex": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3750000000
+          },
+          "rate.output.mode.priority": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 13500000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
+          },
+          "wire.api": {
+            "from": "model",
+            "value": "https://generativelanguage.googleapis.com/v1beta"
+          },
+          "wire.family": "google.generate_content",
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/google"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
   "catalog.get — Gemini Flash Image alias included as retired": {
     "request": {
       "arguments": {
@@ -1629,6 +1894,129 @@
           "retired_at_ms": 1795478400000
         }
       ],
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — Gemini Flash Image full row": {
+    "request": {
+      "arguments": {
+        "model_id": "gemini-3.1-flash-image",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "fact_overrides": [
+        {
+          "established_at_ms": 1795564800000,
+          "established_by": "fusiform",
+          "fact_key": "rate.reasoning",
+          "model": "google/gemini-3.1-flash-image",
+          "model_id": "*",
+          "provider_id": "google",
+          "quote": "Gemini Developer API pricing: \"Output price (including thinking tokens)\". Gemini thinking: \"When thinking is turned on, response pricing is the sum of output tokens and thinking tokens.\"",
+          "reason": "Google includes thinking tokens in its Gemini output price.",
+          "replaces": null,
+          "review_by_ms": 1800748800000,
+          "source_ref": "https://ai.google.dev/gemini-api/docs/pricing; https://ai.google.dev/gemini-api/docs/thinking#pricing (accessed 2026-11-25)",
+          "value": {
+            "key": "rate.output",
+            "state": "billed_as"
+          }
+        }
+      ],
+      "models": {
+        "google/gemini-3.1-flash-image": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "image",
+            "pdf",
+            "text",
+            "video"
+          ],
+          "capability.output_modalities": [
+            "image",
+            "text"
+          ],
+          "capability.reasoning": true,
+          "capability.reasoning_options": [
+            {
+              "type": "effort",
+              "values": [
+                "minimal",
+                "high"
+              ]
+            }
+          ],
+          "capability.temperature": true,
+          "capability.tool_call": false,
+          "existence": "present",
+          "limit.context": 131072,
+          "limit.document_bytes": 50000000,
+          "limit.document_pages": 1000,
+          "limit.images_per_request": 3600,
+          "limit.output": 32768,
+          "limit.temperature_max": 2.0,
+          "limit.temperature_min": 0.0,
+          "model.canonical_id": "google/gemini-3.1-flash-image",
+          "model.family": "nano-banana",
+          "model.lineage": "gemini",
+          "model.name": "Nano Banana 2",
+          "model.open_weights": false,
+          "model.status": "deprecated",
+          "model.type": "image",
+          "provider.name": "Google",
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 500000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 3000000000
+          },
+          "rate.output_image": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 60000000000
+          },
+          "rate.reasoning": {
+            "key": "rate.output",
+            "state": "billed_as"
+          },
+          "wire.api": {
+            "from": "model",
+            "value": "https://generativelanguage.googleapis.com/v1beta"
+          },
+          "wire.family": "openai.images",
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/google"
+          },
+          "wire.shape": {
+            "from": "model",
+            "value": "images"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
       "source": "models.dev"
     }
   },
@@ -2154,6 +2542,88 @@
               "policy": "models-dev-usd-v1"
             },
             "units": 21000000000
+          },
+          "wire.api": {
+            "from": "model",
+            "value": "https://generativelanguage.googleapis.com/v1beta"
+          },
+          "wire.family": "google.generate_content",
+          "wire.npm": {
+            "from": "model",
+            "value": "@ai-sdk/google"
+          }
+        }
+      },
+      "resolved_at_ms": -1,
+      "source": "models.dev"
+    }
+  },
+  "catalog.get — Gemini Transcribe full row": {
+    "request": {
+      "arguments": {
+        "model_id": "gemini-3.5-transcribe",
+        "provider_id": "google"
+      },
+      "name": "catalog.get"
+    },
+    "response": {
+      "catalog_version": 0,
+      "models": {
+        "google/gemini-3.5-transcribe": {
+          "capability.attachment": true,
+          "capability.input_modalities": [
+            "audio"
+          ],
+          "capability.output_modalities": [
+            "text"
+          ],
+          "capability.reasoning": false,
+          "capability.reasoning_options": null,
+          "capability.temperature": true,
+          "capability.tool_call": false,
+          "existence": "present",
+          "limit.audio_tokens_per_second": 25,
+          "limit.context": 98304,
+          "limit.output": 32768,
+          "limit.temperature_max": 2.0,
+          "limit.temperature_min": 0.0,
+          "model.canonical_id": "google/gemini-3.5-transcribe",
+          "model.family": "gemini-transcribe",
+          "model.lineage": "gemini",
+          "model.name": "Gemini 3.5 Transcribe",
+          "model.open_weights": false,
+          "model.status": null,
+          "model.type": "transcription",
+          "provider.name": "Google",
+          "rate.input": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2000000000
+          },
+          "rate.input_audio": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 2000000000
+          },
+          "rate.output": {
+            "currency": "USD",
+            "exponent": 9,
+            "state": "priced",
+            "unit_provenance": {
+              "kind": "assumed_by_policy",
+              "policy": "models-dev-usd-v1"
+            },
+            "units": 12000000000
           },
           "wire.api": {
             "from": "model",

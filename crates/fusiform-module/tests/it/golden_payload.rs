@@ -894,6 +894,8 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
         ("openai", "gpt-live-transcribe"),
         ("google", "gemini-3.5-transcribe-live"),
         ("google", "gemini-3.1-flash-image"),
+        ("google", "gemini-4-hydrogen"),
+        ("google", "gemini-3.5-transcribe"),
     ];
     let (v2, _v2_dir) = super::media_catalog::v2_seed_store(&v2_rows);
     for (label, arguments) in [
@@ -908,6 +910,20 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
         (
             "catalog.get — Gemini Flash Image split rates",
             serde_json::json!({"provider_id":"google","model_id":"gemini-3.1-flash-image","fact_prefixes":["rate."]}),
+        ),
+        // Media engines read the whole row for one exact model, endpoint
+        // included, so these three cases pin that full shape.
+        (
+            "catalog.get — Gemini Flash Image full row",
+            serde_json::json!({"provider_id":"google","model_id":"gemini-3.1-flash-image"}),
+        ),
+        (
+            "catalog.get — Gemini 4 Hydrogen full row",
+            serde_json::json!({"provider_id":"google","model_id":"gemini-4-hydrogen"}),
+        ),
+        (
+            "catalog.get — Gemini Transcribe full row",
+            serde_json::json!({"provider_id":"google","model_id":"gemini-3.5-transcribe"}),
         ),
         (
             "catalog.get — Gemini Flash Image alias included as retired",
