@@ -898,6 +898,13 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
         ("google", "gemini-3.5-transcribe"),
     ];
     let (v2, _v2_dir) = super::media_catalog::v2_seed_store(&v2_rows);
+    // The Opus and Neon aliases need their upstream targets present; the
+    // curated-wire store above carries neither.
+    let alias_targets = [
+        ("anthropic", "claude-opus-5-5"),
+        ("google", "gemini-4-neon"),
+    ];
+    let (targets, _targets_dir) = super::media_catalog::v2_seed_store(&alias_targets);
     for (label, arguments) in [
         (
             "catalog.get — GPT Image Flare",
@@ -982,6 +989,14 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
             serde_json::json!({"provider_id":"google","model_id":"antigravity-claude-sonnet-5-5"}),
         ),
         (
+            "catalog.get — Claude Opus alias login methods",
+            serde_json::json!({"provider_id":"google","model_id":"antigravity-claude-opus-5-5"}),
+        ),
+        (
+            "catalog.get — Gemini Neon alias login methods",
+            serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-4-neon"}),
+        ),
+        (
             "catalog.get — retired alias successor",
             serde_json::json!({"provider_id":"google","model_id":"antigravity-gemini-3.7-flash","include_retired":true}),
         ),
@@ -1007,6 +1022,11 @@ fn render_curated_wire() -> serde_json::Map<String, serde_json::Value> {
             .any(|(p, m)| arguments["provider_id"] == *p && arguments["model_id"] == *m)
         {
             &v2
+        } else if ["antigravity-claude-opus-5-5", "antigravity-gemini-4-neon"]
+            .iter()
+            .any(|m| arguments["model_id"] == *m)
+        {
+            &targets
         } else {
             &store
         };
