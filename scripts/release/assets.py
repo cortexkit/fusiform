@@ -14,7 +14,7 @@ from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 
 BINARIES = ("ck-fusiform", "ck-models")
-TARGETS = ("darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64", "windows-x64")
+TARGETS = ("darwin-arm64", "linux-x64", "linux-arm64", "windows-x64", "windows-arm64")
 TRIPLET = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 
 
@@ -115,8 +115,8 @@ def assemble(args):
                 archive_member(archive, target, binary)
                 if archive.testzip() is not None:
                     raise ValueError(f"{path}: ZIP integrity check failed")
-            # All targets are verified even when Windows is not yet released.
-            if target != "windows-x64" or args.dry_run or args.publish_windows:
+            # Verify both Windows targets even when they are withheld from publication.
+            if not target.startswith("windows-") or args.dry_run or args.publish_windows:
                 shutil.copyfile(path, args.output / path.name)
                 shutil.copyfile(sidecar, args.output / sidecar.name)
 

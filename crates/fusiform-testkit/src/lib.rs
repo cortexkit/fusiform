@@ -13,7 +13,8 @@ use std::path::{Path, PathBuf};
 /// executes.
 ///
 /// It is `$TMPDIR` when that is set, absolute, and not under macOS's
-/// per-user `/var/folders` area; otherwise `/tmp`. Two constraints decide it:
+/// per-user `/var/folders` area. The fallback is the system temp directory on
+/// Windows and `/tmp` on Unix. Two constraints decide the Unix choice:
 /// - Inside a sandboxed worker, writes are allowed only in the checkout, the
 ///   task's own `$TMPDIR` and build caches, so a fixed `/tmp` path fails there.
 /// - On a Mac outside the sandbox, `$TMPDIR` is under `/var/folders`, where
@@ -29,12 +30,18 @@ pub fn exec_scratch_base() -> PathBuf {
 /// [`exec_scratch_base`] for a given `$TMPDIR` value, so the rule can be tested
 /// without changing the process environment.
 pub fn exec_scratch_base_from(tmpdir: Option<&OsStr>) -> PathBuf {
-    let fallback = PathBuf::from("/tmp");
+    let fallback = || {
+        if cfg!(windows) {
+            std::env::temp_dir()
+        } else {
+            PathBuf::from("/tmp")
+        }
+    };
     let Some(raw) = tmpdir.map(Path::new) else {
-        return fallback;
+        return fallback();
     };
     if !raw.is_absolute() {
-        return fallback;
+        return fallback();
     }
     // Canonicalized so a symlink into `/var/folders` (and `/var` itself, which
     // is a symlink to `/private/var` on macOS) is still caught. A path that
@@ -44,7 +51,7 @@ pub fn exec_scratch_base_from(tmpdir: Option<&OsStr>) -> PathBuf {
         .iter()
         .any(|p| p.starts_with("/var/folders") || p.starts_with("/private/var/folders"));
     if under_var_folders {
-        fallback
+        fallback()
     } else {
         raw.to_path_buf()
     }
@@ -130,23 +137,27 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn executables_never_go_under_var_folders() {
+    fn executables_use_an_absolute_tmpdir_or_platform_fallback() {
         let base = |v: Option<&str>| exec_scratch_base_from(v.map(OsStr::new));
-        // Control: an ordinary absolute TMPDIR, such as a worker's per-task
-        // folder, is used as given. Without it, the assertions below would
-        // also pass for a function that always returns /tmp.
-        assert_eq!(
-            base(Some("/srv/worker/task-tmp")),
-            PathBuf::from("/srv/worker/task-tmp")
-        );
-        // A Mac head's default TMPDIR, in both spellings, falls back to /tmp.
-        assert_eq!(base(Some("/var/folders/ab/cd/T")), PathBuf::from("/tmp"));
-        assert_eq!(
-            base(Some("/private/var/folders/ab/cd/T")),
+        let fallback = if cfg!(windows) {
+            std::env::temp_dir()
+        } else {
             PathBuf::from("/tmp")
-        );
-        // Unset or relative values fall back too.
-        assert_eq!(base(None), PathBuf::from("/tmp"));
-        assert_eq!(base(Some("relative/tmp")), PathBuf::from("/tmp"));
+        };
+        // The override must be used as given, rather than always falling back.
+        let custom = fallback.join("fusiform-custom-tmp");
+        assert_eq!(exec_scratch_base_from(Some(custom.as_os_str())), custom);
+        assert_eq!(base(None), fallback);
+        assert_eq!(base(Some("relative/tmp")), fallback);
+    }
+
+    // The two spellings of macOS's temp area are absolute only on Unix.
+    #[cfg(unix)]
+    #[test]
+    fn executables_never_go_under_var_folders() {
+        let base = |v: &str| exec_scratch_base_from(Some(OsStr::new(v)));
+        // The macOS default TMPDIR, in both spellings, falls back to /tmp.
+        assert_eq!(base("/var/folders/ab/cd/T"), PathBuf::from("/tmp"));
+        assert_eq!(base("/private/var/folders/ab/cd/T"), PathBuf::from("/tmp"));
     }
 }

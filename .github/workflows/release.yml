@@ -17,9 +17,9 @@ concurrency:
 env:
   # Set to the oldest public core that accepts Fusiform's registration.
   FUSIFORM_REQUIRES_CORE: ''
-  # Turn on only after the suite has passed natively on Windows. Missing
-  # Windows archives make ck setup report release-incomplete on that target.
-  FUSIFORM_PUBLISH_WINDOWS: 'false'
+  # Both Windows targets must pass their native test suite before packaging.
+  # Without their archives, ck setup reports release-incomplete on Windows.
+  FUSIFORM_PUBLISH_WINDOWS: 'true'
 
 jobs:
   verify:
@@ -93,14 +93,15 @@ jobs:
         include:
           - target: darwin-arm64
             runner: macos-latest
-          - target: darwin-x64
-            runner: macos-15-intel
           - target: linux-x64
             runner: ubuntu-latest
           - target: linux-arm64
             runner: ubuntu-24.04-arm
           - target: windows-x64
             runner: windows-latest
+          - target: windows-arm64
+            runner: windows-11-arm
+            toolchain: stable-aarch64-pc-windows-msvc
     env:
       RELEASE_TARGET: ${{ matrix.target }}
       RELEASE_REVISION: ${{ needs.verify.outputs.revision }}
@@ -115,6 +116,8 @@ jobs:
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.toolchain || 'stable' }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -126,6 +129,17 @@ jobs:
             *) echo "::error::$RELEASE_TARGET cannot be built natively on $RUNNER_ARCH"; exit 1 ;;
           esac
           bash scripts/release-build.sh
+
+      - name: Test natively on Windows
+        if: runner.os == 'Windows'
+        run: |
+          # An ARM64 runner can also run x64 executables under emulation.
+          host=$(rustc --print host-tuple | tr -d '\r')
+          case "${RELEASE_TARGET}:$host" in
+            windows-arm64:aarch64-pc-windows-msvc|windows-x64:x86_64-pc-windows-msvc) ;;
+            *) echo "::error::$RELEASE_TARGET requires a native Rust toolchain, found $host"; exit 1 ;;
+          esac
+          cargo test --locked --workspace --all-targets
 
       - name: Import Developer ID certificate
         if: runner.os == 'macOS'

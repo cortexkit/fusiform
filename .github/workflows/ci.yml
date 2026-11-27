@@ -130,9 +130,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Linux-only: fusiform has no platform-specific code paths. It is domain
-  # logic, SQLite through cortexkit-store, and an HTTP fetch; the wire layer
-  # talks to the subc daemon through the SDK.
   test:
     name: Test (ubuntu)
     runs-on: ubuntu-latest
@@ -257,3 +254,55 @@ jobs:
       # Fetch depth 0 above so origin/master resolves for the comparison.
       - name: Served schema version discipline
         run: ./scripts/check-wire-crate-version.sh origin/master
+
+  test-windows:
+    name: Test (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            runner: windows-latest
+            host: x86_64-pc-windows-msvc
+          - target: windows-arm64
+            runner: windows-11-arm
+            host: aarch64-pc-windows-msvc
+    steps:
+      - name: Checkout fusiform
+        uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-${{ matrix.host }}
+          components: clippy, rustfmt
+
+      - name: Require the native Rust toolchain
+        env:
+          EXPECTED_HOST: ${{ matrix.host }}
+        run: |
+          $rustHost = rustc --print host-tuple
+          if ($LASTEXITCODE -ne 0 -or $rustHost -ne $env:EXPECTED_HOST) {
+            throw "Expected native Rust host $env:EXPECTED_HOST, found $rustHost"
+          }
+
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.target }}-cargo-test-${{ hashFiles('**/Cargo.lock', 'Cargo.toml') }}
+          restore-keys: |
+            ${{ matrix.target }}-cargo-test-
+
+      - name: Format check
+        run: cargo --locked fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --workspace --all-targets

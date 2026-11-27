@@ -111,15 +111,28 @@ fn ckdev_link(built: &std::path::Path, scratch: &std::path::Path) -> std::path::
     link
 }
 
-#[cfg(unix)]
 #[test]
-#[should_panic(expected = "sleep version probe exceeded its subprocess deadline")]
 fn a_hung_version_probe_is_killed_at_its_deadline() {
-    // exec leaves no grandchild behind when the deadline kills the command.
-    bounded_output(
-        Command::new("sh").args(["-c", "exec sleep 60"]),
-        Duration::from_millis(100),
-        "sleep version probe",
+    // Run this test as the sleeping child so killing it leaves no shell or
+    // grandchild behind, on either Windows or Unix.
+    const CHILD: &str = "FUSIFORM_SLEEP_VERSION_PROBE";
+    if std::env::var_os(CHILD).is_some() {
+        std::thread::sleep(Duration::from_secs(60));
+        return;
+    }
+    let panic = std::panic::catch_unwind(|| {
+        bounded_output(
+            Command::new(std::env::current_exe().expect("path to the test binary"))
+                .args(["--exact", "a_hung_version_probe_is_killed_at_its_deadline"])
+                .env(CHILD, "1"),
+            Duration::from_millis(100),
+            "sleep version probe",
+        );
+    })
+    .expect_err("the sleeping process must hit the deadline");
+    assert_eq!(
+        panic.downcast_ref::<String>().map(String::as_str),
+        Some("sleep version probe exceeded its subprocess deadline"),
     );
 }
 

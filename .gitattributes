@@ -1,0 +1,2 @@
+# The served-payload golden test compares serialized bytes, including newlines.
+/crates/fusiform-module/fixtures/served-payloads.json text eol=lf

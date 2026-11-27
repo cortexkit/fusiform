@@ -29,17 +29,17 @@ every start it writes its backup descriptor, `engram-catalog.json`, beside
 
 ## Install
 
-On supported macOS and Linux targets, install the module and the `ck models`
-CLI with:
+Install the module and the `ck models` CLI with:
 
 ```sh
 ck setup fusiform
 ```
 
 Setup uses the public CortexKit release index, so the first release must be
-published and indexed before this command can install Fusiform. On Windows,
-use the source build below until the native test suite has passed and Windows
-archives are published.
+published and indexed before this command can install Fusiform. Releases target
+Apple silicon macOS (`darwin-arm64`), Linux (`linux-x64`, `linux-arm64`), and
+Windows (`windows-x64`, `windows-arm64`). Both Windows archives are built and
+tested natively before packaging.
 
 ## Build and test from source
 
