@@ -86,7 +86,9 @@ jobs:
     name: Build ${{ matrix.target }}
     needs: verify
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    # Windows legs run the whole test suite before a release build; a cold
+    # Windows x64 test run alone took about 20 minutes.
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
