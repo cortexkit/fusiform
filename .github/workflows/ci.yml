@@ -258,7 +258,9 @@ jobs:
   test-windows:
     name: Test (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    # A cold Windows x64 run measured 20 minutes, nine of them building and the
+    # module's own suite alone 6 minutes; 45 leaves room for a busy runner.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
