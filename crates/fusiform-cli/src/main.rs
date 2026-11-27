@@ -4070,14 +4070,16 @@ mod connection_discovery_tests {
             "a named path must be the ONLY candidate: {got:?}"
         );
 
-        // CONTROL: without an explicit path the helper really does discover
-        // several, so the assertion above cannot pass by the ladder being
-        // empty for every input.
+        // CONTROL: without an explicit path the helper discovers candidates of
+        // its own, so the assertion above cannot pass by the helper returning
+        // the same list for every input. The number of rungs is the platform's
+        // business: Unix offers several, while Windows has a single one in the
+        // temp folder.
         let discovered = subc_client_rs::discovery_candidates(None, None);
         assert!(
-            discovered.len() > 1,
-            "discovery must offer several rungs, else the exclusivity assertion \
-             above is vacuous: {discovered:?}"
+            !discovered.is_empty() && !discovered.contains(&explicit),
+            "discovery must offer its own candidates, else the exclusivity \
+             assertion above is vacuous: {discovered:?}"
         );
     }
 }
