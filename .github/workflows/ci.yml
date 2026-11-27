@@ -134,8 +134,9 @@ jobs:
     name: Test (ubuntu)
     runs-on: ubuntu-latest
     # A wedged test must surface as a fast red run rather than burning the
-    # runner for the 6-hour Actions default. Healthy runs finish in minutes.
-    timeout-minutes: 20
+    # runner for the 6-hour Actions default. A healthy run takes about 17
+    # minutes, and restoring and saving the build cache can add 6 more.
+    timeout-minutes: 35
     steps:
       - name: Checkout fusiform
         uses: actions/checkout@v5
