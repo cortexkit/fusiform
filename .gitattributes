@@ -1,2 +1,5 @@
-# The served-payload golden test compares serialized bytes, including newlines.
-/crates/fusiform-module/fixtures/served-payloads.json text eol=lf
+# Check out every text file with LF line endings on every platform. Git for
+# Windows defaults to converting LF to CRLF on checkout, and many tests compare
+# committed fixtures and golden files byte for byte against what the code
+# emits, which is always LF. Binary files are left alone by `text=auto`.
+* text=auto eol=lf
