@@ -57,8 +57,8 @@ const TEMP_FILE_NAME: &str = ".engram-catalog.json.tmp";
 pub enum CatalogWrite {
     /// No descriptor existed; one was written.
     Created,
-    /// A descriptor with exactly these bytes already existed. Only its mode was
-    /// set, to 0600.
+    /// A descriptor with exactly these bytes already existed. On Unix, only its
+    /// mode was set, to 0600.
     Unchanged,
     /// A descriptor with different bytes existed and was replaced. `old_len` is
     /// `None` when the old file could not be read to measure it.
@@ -95,12 +95,14 @@ fn step_err(step: &'static str, path: &Path) -> impl FnOnce(io::Error) -> Catalo
 /// `dir` is the directory holding the store, so the descriptor's relative entry
 /// path `store.db` resolves to the database actually in use.
 ///
-/// When a descriptor with identical bytes is already there, its mode is set to
-/// 0600 and nothing else is touched: rewriting it would change its modification
-/// time on every start for no reason. Otherwise the bytes go to a temporary file
-/// in the same directory, which is flushed to disk, set to 0600, renamed over
-/// the target, and read back and compared. Any failure before the rename removes
-/// the temporary file, so a failed write never leaves a partial descriptor.
+/// A descriptor with identical bytes is not rewritten, so its modification
+/// time stays the same. Otherwise the bytes go to a temporary file in the same
+/// directory, which is flushed to disk, renamed over the target, and read back
+/// and compared. Any failure before the rename removes the temporary file, so a
+/// failed write never leaves a partial descriptor.
+///
+/// On Unix the descriptor is kept at mode 0600. On Windows a new file inherits
+/// the per-user data folder's ACL and an existing ACL is left alone.
 pub fn write_catalog(dir: &Path) -> Result<CatalogWrite, CatalogWriteError> {
     let target = dir.join(CATALOG_FILE_NAME);
 
@@ -108,10 +110,9 @@ pub fn write_catalog(dir: &Path) -> Result<CatalogWrite, CatalogWriteError> {
     // many bytes. `Some(None)`: replacing a file that could not be read.
     let replacing = match fs::read(&target) {
         Ok(existing) if existing == CATALOG_BYTES => {
-            // Identical bytes say nothing about the mode. A descriptor placed by
-            // hand or restored from a backup can match and still be readable by
-            // every user on the machine, and it is a precise map of which files
-            // here are worth taking, so it gets the same 0600 as the store.
+            // On Unix, a descriptor placed by hand or restored from a backup can
+            // match and still be readable by everyone. It maps which files here
+            // are worth taking, so it gets the same 0600 as the store.
             set_private(&target).map_err(step_err("could not set the mode of", &target))?;
             return Ok(CatalogWrite::Unchanged);
         }
@@ -185,8 +186,8 @@ pub fn write_catalog(dir: &Path) -> Result<CatalogWrite, CatalogWriteError> {
     })
 }
 
-/// Create the temporary file fresh, write the descriptor, flush it to disk and
-/// set it to 0600. The caller removes the file if this fails.
+/// Create the temporary file fresh, write the descriptor and flush it to disk.
+/// The caller removes the file if this fails.
 fn write_temp(temp: &Path) -> Result<(), CatalogWriteError> {
     // A leftover from a crashed start is removed first, so the create below can
     // insist on a new file rather than writing through whatever is there.
@@ -202,6 +203,7 @@ fn write_temp(temp: &Path) -> Result<(), CatalogWriteError> {
 
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
+    // On Windows, the per-user data folder supplies the inherited ACL at creation.
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -216,12 +218,12 @@ fn write_temp(temp: &Path) -> Result<(), CatalogWriteError> {
         .map_err(step_err("could not write the temporary descriptor", temp))?;
     file.sync_all()
         .map_err(step_err("could not flush the temporary descriptor", temp))?;
-    // Set explicitly as well: the creation mode above is only an upper bound
-    // filtered through the umask, and the result has to be exactly 0600.
+    // On Unix the umask can narrow the creation mode, so set exactly 0600 here.
     set_private(temp).map_err(step_err("could not set the mode of", temp))?;
     Ok(())
 }
 
+// Windows relies on the per-user data folder's inherited ACL, not a mode to tighten.
 #[cfg(unix)]
 fn set_private(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;

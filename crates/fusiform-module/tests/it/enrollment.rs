@@ -3,13 +3,10 @@
 //! Engram, the fleet's backup owner, only captures a module whose directory
 //! holds an `engram-catalog.json`. These tests drive the same library function
 //! the daemon calls at startup, against real directories, because every
-//! property that matters here — exact bytes, mode, no partial file — is a
+//! property that matters here — exact bytes, permissions, no partial file — is a
 //! property of the filesystem rather than of a return value.
 
-#![cfg(unix)]
-
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
@@ -21,11 +18,19 @@ use fusiform_module::{health, signals::Signals};
 use fusiform_store::CatalogStore;
 use subc_protocol::session::HealthStatus;
 
+// Windows uses inherited ACLs rather than Unix permission bits.
+#[cfg(unix)]
 fn mode(path: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt as _;
+
     fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
 
+// Windows uses inherited ACLs rather than Unix permission bits.
+#[cfg(unix)]
 fn chmod(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt as _;
+
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
 }
 
@@ -40,7 +45,7 @@ fn extra_entries(dir: &Path, expected: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn a_fresh_directory_gets_the_exact_bytes_at_mode_0600() {
+fn a_fresh_directory_gets_the_exact_bytes_and_no_temporary_file() {
     let dir = tempfile::tempdir().unwrap();
     let outcome = write_catalog(dir.path()).unwrap();
     assert_eq!(outcome, CatalogWrite::Created);
@@ -55,6 +60,7 @@ fn a_fresh_directory_gets_the_exact_bytes_at_mode_0600() {
     ))
     .unwrap();
     assert_eq!(fs::read(&target).unwrap(), repo);
+    #[cfg(unix)]
     assert_eq!(mode(&target), 0o600);
     assert!(
         extra_entries(dir.path(), &[CATALOG_FILE_NAME]).is_empty(),
@@ -63,10 +69,11 @@ fn a_fresh_directory_gets_the_exact_bytes_at_mode_0600() {
 }
 
 #[test]
-fn an_identical_file_is_left_alone_and_its_mode_tightened() {
+fn an_identical_file_is_not_rewritten() {
     let dir = tempfile::tempdir().unwrap();
     let target = dir.path().join(CATALOG_FILE_NAME);
     fs::write(&target, CATALOG_BYTES).unwrap();
+    #[cfg(unix)]
     chmod(&target, 0o644);
 
     // Backdated, so a rewrite would show as a changed mtime even on a
@@ -79,6 +86,7 @@ fn an_identical_file_is_left_alone_and_its_mode_tightened() {
         .set_modified(old)
         .unwrap();
     let before = fs::metadata(&target).unwrap().modified().unwrap();
+    #[cfg(unix)]
     let inode_before = std::os::unix::fs::MetadataExt::ino(&fs::metadata(&target).unwrap());
 
     let outcome = write_catalog(dir.path()).unwrap();
@@ -90,11 +98,13 @@ fn an_identical_file_is_left_alone_and_its_mode_tightened() {
         before,
         "an identical file is not rewritten"
     );
+    #[cfg(unix)]
     assert_eq!(
         std::os::unix::fs::MetadataExt::ino(&meta),
         inode_before,
         "an identical file is not replaced by a rename either"
     );
+    #[cfg(unix)]
     assert_eq!(
         mode(&target),
         0o600,
@@ -108,6 +118,7 @@ fn a_differing_file_is_replaced() {
     let target = dir.path().join(CATALOG_FILE_NAME);
     let edited = b"{\"schema_version\": 1, \"module_id\": \"fusiform\", \"entries\": []}";
     fs::write(&target, edited).unwrap();
+    #[cfg(unix)]
     chmod(&target, 0o644);
 
     let outcome = write_catalog(dir.path()).unwrap();
@@ -119,6 +130,7 @@ fn a_differing_file_is_replaced() {
         }
     );
     assert_eq!(fs::read(&target).unwrap(), CATALOG_BYTES);
+    #[cfg(unix)]
     assert_eq!(mode(&target), 0o600);
     assert!(extra_entries(dir.path(), &[CATALOG_FILE_NAME]).is_empty());
 }
@@ -127,6 +139,8 @@ fn a_differing_file_is_replaced() {
 ///
 /// They do not for root, so a test relying on an unwritable directory would
 /// pass for the wrong reason there. Checked by trying, not by asking the uid.
+// Only Unix tests use 0500 to deny directory writes.
+#[cfg(unix)]
 fn permissions_are_enforced(dir: &Path) -> bool {
     let probe = dir.join("probe");
     match fs::write(&probe, b"x") {
@@ -138,18 +152,77 @@ fn permissions_are_enforced(dir: &Path) -> bool {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn a_descriptor_inherits_the_private_data_directory_acl_and_keeps_its_acl() {
+    use fusiform_testkit::windows_acl;
+
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join(CATALOG_FILE_NAME);
+    windows_acl::run(
+        dir.path(),
+        r#"
+$path = $env:FUSIFORM_TEST_ACL_PATH
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$acl = [IO.Directory]::GetAccessControl($path)
+$acl.SetSecurityDescriptorSddlForm(('D:P(A;OICI;FA;;;{0})' -f $sid), 'Access')
+[IO.Directory]::SetAccessControl($path, $acl)
+"#,
+    );
+
+    assert_eq!(write_catalog(dir.path()).unwrap(), CatalogWrite::Created);
+    let before = windows_acl::run(
+        &target,
+        r#"
+$path = $env:FUSIFORM_TEST_ACL_PATH
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+$acl = [IO.File]::GetAccessControl($path)
+$rules = $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])
+if ($rules.Count -ne 1 -or $rules[0].IdentityReference -ne $sid -or
+    $rules[0].AccessControlType -ne 'Allow' -or $rules[0].FileSystemRights -ne 'FullControl' -or
+    !$rules[0].IsInherited) {
+    throw ('Expected exactly one inherited FullControl rule for {0}, got {1}' -f $sid, $acl.Sddl)
+}
+# Make the existing rule explicit without granting anyone else access. This
+# makes a reset to inherited permissions visible when enrollment runs again.
+$acl.SetAccessRuleProtection($true, $true)
+[IO.File]::SetAccessControl($path, $acl)
+[IO.File]::GetAccessControl($path).GetSecurityDescriptorSddlForm('Access')
+"#,
+    );
+    assert_eq!(write_catalog(dir.path()).unwrap(), CatalogWrite::Unchanged);
+    let after = windows_acl::run(
+        &target,
+        "[IO.File]::GetAccessControl($env:FUSIFORM_TEST_ACL_PATH).GetSecurityDescriptorSddlForm('Access')",
+    );
+    assert_eq!(after, before, "an identical descriptor keeps its ACL");
+}
+
+#[cfg(windows)]
+fn deny_directory_writes(dir: &Path) {
+    fusiform_testkit::windows_acl::set_file_creation_denied(dir, true);
+    let err = fs::write(dir.join("probe"), b"x").expect_err("new files must be denied");
+    assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+}
+
 #[test]
 fn an_unwritable_directory_is_an_error_and_leaves_no_temp_file() {
     let dir = tempfile::tempdir().unwrap();
-    chmod(dir.path(), 0o500);
-    if !permissions_are_enforced(dir.path()) {
-        chmod(dir.path(), 0o700);
-        eprintln!("skipped: this process can write a 0500 directory (running as root?)");
-        return;
+    #[cfg(unix)]
+    {
+        chmod(dir.path(), 0o500);
+        if !permissions_are_enforced(dir.path()) {
+            chmod(dir.path(), 0o700);
+            eprintln!("skipped: this process can write a 0500 directory (running as root?)");
+            return;
+        }
     }
+    #[cfg(windows)]
+    deny_directory_writes(dir.path());
 
     let result = write_catalog(dir.path());
     let entries = extra_entries(dir.path(), &[]);
+    #[cfg(unix)]
     chmod(dir.path(), 0o700);
 
     let err = result.expect_err("writing into a read-only directory must fail");
@@ -223,13 +296,19 @@ fn a_failed_startup_write_makes_health_degraded_not_failing() {
     let signals = Signals::new();
     signals.store_opened();
 
-    chmod(dir.path(), 0o500);
-    if !permissions_are_enforced(dir.path()) {
-        chmod(dir.path(), 0o700);
-        eprintln!("skipped: this process can write a 0500 directory (running as root?)");
-        return;
+    #[cfg(unix)]
+    {
+        chmod(dir.path(), 0o500);
+        if !permissions_are_enforced(dir.path()) {
+            chmod(dir.path(), 0o700);
+            eprintln!("skipped: this process can write a 0500 directory (running as root?)");
+            return;
+        }
     }
+    #[cfg(windows)]
+    deny_directory_writes(dir.path());
     write_beside_store(store.path(), &signals);
+    #[cfg(unix)]
     chmod(dir.path(), 0o700);
 
     assert!(signals.catalog_write_did_fail());

@@ -9,6 +9,52 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+#[cfg(windows)]
+pub mod windows_acl {
+    use std::path::Path;
+    use std::process::Command;
+
+    /// Run a test ACL operation using Windows PowerShell's .NET ACL APIs.
+    pub fn run(path: &Path, script: &str) -> String {
+        let output = Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg(format!("$ErrorActionPreference = 'Stop'; {script}"))
+            .env("FUSIFORM_TEST_ACL_PATH", path)
+            .output()
+            .expect("run Windows PowerShell");
+        assert!(
+            output.status.success(),
+            "ACL operation on {} failed: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    }
+
+    /// Toggle a denial of new files in an owned scratch directory. The rule
+    /// does not change children's ACLs or prevent the directory's removal.
+    pub fn set_file_creation_denied(path: &Path, denied: bool) {
+        let edit = if denied {
+            "$acl.AddAccessRule($rule)"
+        } else {
+            "$acl.RemoveAccessRuleSpecific($rule)"
+        };
+        run(
+            path,
+            &format!(
+                r#"
+$path = $env:FUSIFORM_TEST_ACL_PATH
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+$acl = [IO.Directory]::GetAccessControl($path)
+$rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, 'CreateFiles', 'Deny')
+{edit}
+[IO.Directory]::SetAccessControl($path, $acl)
+"#
+            ),
+        );
+    }
+}
+
 /// The base directory for scratch copies or links of built binaries that a test
 /// executes.
 ///
@@ -151,7 +197,7 @@ mod tests {
         assert_eq!(base(Some("relative/tmp")), fallback);
     }
 
-    // The two spellings of macOS's temp area are absolute only on Unix.
+    // The macOS executable quarantine workaround has no Windows counterpart.
     #[cfg(unix)]
     #[test]
     fn executables_never_go_under_var_folders() {

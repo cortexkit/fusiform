@@ -4030,12 +4030,29 @@ mod tests {
 mod connection_discovery_tests {
     use super::*;
 
+    // Windows paths use UTF-16 code units rather than Unix path bytes.
     #[cfg(unix)]
     #[test]
     fn an_explicit_connection_path_keeps_its_os_bytes() {
         use std::os::unix::ffi::OsStringExt as _;
 
         let path = OsString::from_vec(b"/dev/null/\xff".to_vec());
+        let args = parse_args([
+            "ck-models".into(),
+            "status".into(),
+            "--subc".into(),
+            path.clone(),
+        ])
+        .unwrap();
+        assert_eq!(args.connection_file, Some(PathBuf::from(path)));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_explicit_connection_path_keeps_its_unpaired_surrogate() {
+        use std::os::windows::ffi::OsStringExt as _;
+
+        let path = OsString::from_wide(&[b'C' as u16, b':' as u16, b'\\' as u16, 0xD800]);
         let args = parse_args([
             "ck-models".into(),
             "status".into(),

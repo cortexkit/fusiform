@@ -190,7 +190,6 @@ fn the_cli_answers_version_with_no_arguments_and_no_daemon() {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn probes_are_only_recognized_at_the_command_position() {
     let binary = env!("CARGO_BIN_EXE_ck-models");
@@ -210,6 +209,7 @@ fn probes_are_only_recognized_at_the_command_position() {
     }
 }
 
+// Unix arguments can contain arbitrary bytes; Windows uses UTF-16 code units.
 #[cfg(unix)]
 #[test]
 fn non_utf8_paths_reach_connection_handling_and_text_values_are_rejected() {
@@ -245,7 +245,37 @@ fn non_utf8_paths_reach_connection_handling_and_text_values_are_rejected() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(windows)]
+#[test]
+fn unpaired_surrogates_reach_connection_handling_but_are_rejected_in_text() {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt as _;
+
+    let binary = env!("CARGO_BIN_EXE_ck-models");
+    let dir = tempfile::tempdir().unwrap();
+    let non_unicode = OsString::from_wide(&[0xD800]);
+    let output = Command::new(binary)
+        .args(["status", "--subc"])
+        .arg(dir.path().join(&non_unicode))
+        .output()
+        .unwrap();
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{diagnostic}");
+    assert!(diagnostic.contains("could not reach subc"), "{diagnostic}");
+
+    let output = Command::new(binary)
+        .args(["get", "--provider"])
+        .arg(non_unicode)
+        .output()
+        .unwrap();
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{diagnostic}");
+    assert!(
+        diagnostic.contains("--provider") && diagnostic.contains("UTF-8"),
+        "{diagnostic}"
+    );
+}
+
 #[test]
 fn closed_stdout_is_a_clean_exit() {
     for flag in ["--version", "--ck-domain", "--help"] {

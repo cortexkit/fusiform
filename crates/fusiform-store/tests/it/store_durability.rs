@@ -8,19 +8,17 @@
 //!
 //! # Why every attempt failed
 //!
-//! **Permission checks happen at `open(2)`, not at `write(2)`.** SQLite holds a
-//! file descriptor from before any permission change, so nothing done to the
-//! directory or the file afterwards can affect writes through it. Confirmed
-//! rather than assumed: a NEW open in the same read-only directory fails with
-//! `PermissionDenied` while the live connection keeps committing.
+//! **Changing permissions does not revoke already open handles.** A new open
+//! in the same directory fails after denying file creation (by mode on Unix,
+//! by ACL on Windows), while the live connection keeps committing.
 //!
 //! **Deleting the file does not work** for the same reason — the writes land on
 //! the unlinked inode, which still exists while the descriptor is open.
 //!
-//! **The writer lease is exclusive and in-memory.** A second instance cannot
-//! steal it (its open is refused), and deleting or overwriting the lease FILE
-//! does not affect the holder, because the fence is an in-process epoch check
-//! rather than a per-write disk read.
+//! **The writer lease is exclusive and tied to an open handle.** A second
+//! instance cannot steal it (its open is refused). Removing the lease pathname
+//! or writing a different file at that path does not stop the existing holder
+//! from committing: the write fence checks the epoch in the database.
 //!
 //! So a write failure in this store requires a genuine I/O error — a full disk,
 //! failing hardware — which is not reachable without fault injection at the VFS
@@ -47,11 +45,19 @@ fn observation(at: i64) -> NewObservation {
     }
 }
 
+// Windows has no chmod mode bits; it uses an ACL or the file's read-only attribute.
 #[cfg(unix)]
 fn chmod(path: &std::path::Path, mode: u32) {
     use std::os::unix::fs::PermissionsExt;
     let mut perms = std::fs::metadata(path).unwrap().permissions();
     perms.set_mode(mode);
+    std::fs::set_permissions(path, perms).unwrap();
+}
+
+#[cfg(windows)]
+fn set_readonly(path: &std::path::Path, readonly: bool) {
+    let mut perms = std::fs::metadata(path).unwrap().permissions();
+    perms.set_readonly(readonly);
     std::fs::set_permissions(path, perms).unwrap();
 }
 
@@ -61,7 +67,6 @@ fn chmod(path: &std::path::Path, mode: u32) {
 /// Each step is a real operational event: a cleanup script, a permissions
 /// hardening pass, a partial restore. None of them should silently stop a
 /// running module from recording what it observed.
-#[cfg(unix)]
 #[test]
 fn a_live_store_survives_the_data_directory_being_tampered_with() {
     let dir = tempfile::tempdir().unwrap();
@@ -80,51 +85,74 @@ fn a_live_store_survives_the_data_directory_being_tampered_with() {
         .record_observation(&observation(1_000))
         .expect("a healthy store writes");
 
-    // The directory goes read-only.
+    // Deny the creation of new files in the directory.
+    #[cfg(unix)]
     chmod(dir.path(), 0o500);
+    #[cfg(windows)]
+    {
+        fusiform_testkit::windows_acl::set_file_creation_denied(dir.path(), true);
+        let err = std::fs::File::create(dir.path().join("probe"))
+            .expect_err("the directory ACL must deny a new file");
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
     store
         .record_observation(&observation(2_000))
-        .expect("a read-only directory must not stop a live writer: the fd predates it");
+        .expect("a read-only directory must not stop a live writer with open handles");
 
-    // A NEW open in the same directory fails, which is what proves the
-    // explanation above rather than leaving it a plausible story.
-    let blocked = CatalogStore::open(&StorageDescriptor {
-        module_id: "other".to_string(),
-        storage_namespace: "default".to_string(),
-        isolation: Isolation::Module,
-        backend: StorageBackend::Sqlite {
-            path: dir
-                .path()
-                .join("elsewhere.db")
-                .to_string_lossy()
-                .to_string(),
-        },
-    });
-    assert!(
-        blocked.is_err(),
-        "a NEW open in a read-only directory must fail \u{2014} otherwise the \
-         permission change did nothing at all and this test proves nothing"
-    );
-    chmod(dir.path(), 0o700);
+    // Windows probes file creation directly because opening a store can change the directory ACL.
+    #[cfg(unix)]
+    {
+        let blocked = CatalogStore::open(&StorageDescriptor {
+            module_id: "other".to_string(),
+            storage_namespace: "default".to_string(),
+            isolation: Isolation::Module,
+            backend: StorageBackend::Sqlite {
+                path: dir
+                    .path()
+                    .join("elsewhere.db")
+                    .to_string_lossy()
+                    .to_string(),
+            },
+        });
+        assert!(
+            blocked.is_err(),
+            "a NEW open in a read-only directory must fail \u{2014} otherwise the \
+             permission change did nothing at all and this test proves nothing"
+        );
+        chmod(dir.path(), 0o700);
+    }
+    #[cfg(windows)]
+    fusiform_testkit::windows_acl::set_file_creation_denied(dir.path(), false);
 
     // The database file itself goes read-only.
+    #[cfg(unix)]
     chmod(&path, 0o400);
+    #[cfg(windows)]
+    set_readonly(&path, true);
     store
         .record_observation(&observation(3_000))
         .expect("a read-only file must not stop a live writer, for the same reason");
+    #[cfg(unix)]
     chmod(&path, 0o600);
+    #[cfg(windows)]
+    set_readonly(&path, false);
 
-    // The lease file is deleted underneath the holder.
+    // Remove the lease pathname underneath the holder.
     let lease = std::fs::read_dir(dir.path())
         .unwrap()
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .find(|p| p.extension().is_some_and(|x| x == "lease"))
         .expect("the store takes a lease");
+    #[cfg(unix)]
     std::fs::remove_file(&lease).unwrap();
+    // Move it aside so the old name is free even if Windows defers removal
+    // of the open file until the last handle closes.
+    #[cfg(windows)]
+    std::fs::rename(&lease, dir.path().join("displaced-lease")).unwrap();
     store
         .record_observation(&observation(4_000))
-        .expect("the fence is an in-process epoch check, not a per-write disk read");
+        .expect("the write fence does not depend on the lease pathname");
 
     // And rewritten to name a different holder.
     std::fs::write(&lease, br#"{"holder":"someone-else","pid":1}"#).unwrap();

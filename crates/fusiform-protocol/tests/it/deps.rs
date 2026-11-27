@@ -116,13 +116,22 @@ fn dependency_tree() -> String {
     String::from_utf8(out.stdout).expect("cargo tree emits utf8")
 }
 
-#[cfg(unix)]
 #[test]
 #[should_panic(expected = "sleep dependency probe exceeded its subprocess deadline")]
 fn a_hung_dependency_probe_is_killed_at_its_deadline() {
-    // exec leaves no grandchild behind when the deadline kills the command.
+    const CHILD: &str = "FUSIFORM_SLEEP_DEPENDENCY_PROBE";
+    if std::env::var_os(CHILD).is_some() {
+        std::thread::sleep(Duration::from_secs(60));
+        return;
+    }
+    // Only the test process sleeps, so killing it leaves no grandchild behind.
     bounded_output(
-        Command::new("sh").args(["-c", "exec sleep 60"]),
+        Command::new(std::env::current_exe().expect("path to the test binary"))
+            .args([
+                "--exact",
+                "deps::a_hung_dependency_probe_is_killed_at_its_deadline",
+            ])
+            .env(CHILD, "1"),
         Duration::from_millis(100),
         "sleep dependency probe",
     );
