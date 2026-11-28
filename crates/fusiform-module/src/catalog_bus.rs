@@ -65,7 +65,11 @@ impl EventPublisher for CatalogBus {
 /// Publish only a newly read high-water mark, with bounded retries and a poll
 /// backstop. Notifications carry only the version number, not catalog data,
 /// so a delayed wake cannot replay old facts.
-/// Older daemons that omit `expected_back` stay on the short retry schedule.
+///
+/// A refused route open carries the daemon's `expected_back` verdict: whether
+/// the bus module is expected to come back (restarting) or is not installed or
+/// disabled (`false`). Only `false` moves the publisher to the long retry
+/// schedule. Older daemons that omit the verdict stay on the short schedule.
 pub async fn run_publisher(
     store: Arc<CatalogStore>,
     signals: Arc<Signals>,

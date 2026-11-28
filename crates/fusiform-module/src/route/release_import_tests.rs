@@ -734,8 +734,9 @@ fn release_import_classifies_every_store_table() {
     let excluded = BTreeSet::from([
         // SQLite sequences are regenerated as the original ids are inserted.
         "sqlite_sequence",
-        // Schema, write fence, owner, and catalog version belong to each
-        // database.
+        // Each database keeps its own copy of these: the schema versions, the
+        // epoch that refuses writes from a superseded writer, the owning
+        // module's identity, and the catalog version.
         "cortexkit_schema_version",
         "cortexkit_fence",
         "cortexkit_owner",
