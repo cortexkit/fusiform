@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 struct Fake {
     attempts: Mutex<Vec<(String, Value)>>,
     failures_left: AtomicUsize,
+    refusal: Option<(&'static str, Option<bool>)>,
     blocked: bool,
 }
 
@@ -25,6 +26,13 @@ impl EventPublisher for Arc<Fake> {
         }
         if self.failures_left.load(Ordering::Relaxed) > 0 {
             self.failures_left.fetch_sub(1, Ordering::Relaxed);
+            if let Some((code, expected_back)) = self.refusal {
+                return Err(cortexkit_bus_client::Error::RouteRefused {
+                    code: code.into(),
+                    expected_back,
+                }
+                .into());
+            }
             return Err(std::io::Error::other("synthetic publish failure").into());
         }
         Ok(())
@@ -249,8 +257,20 @@ async fn coalesces_advances_and_never_republishes_a_high_water_mark() {
 
 #[tokio::test(start_paused = true)]
 async fn retries_with_capped_backoff_and_reads_the_newest_version() {
+    assert_short_retries(None, "synthetic publish failure").await;
+    assert_short_retries(
+        Some(("target_unavailable", None)),
+        "ck-bus route refused: target_unavailable (unknown whether ck-bus is expected back)",
+    )
+    .await;
+}
+
+async fn assert_short_retries(refusal: Option<(&'static str, Option<bool>)>, last_error: &str) {
     let (store, _dir) = store();
-    let fake = Arc::new(Fake::default());
+    let fake = Arc::new(Fake {
+        refusal,
+        ..Fake::default()
+    });
     fake.failures_left.store(8, Ordering::Relaxed);
     let signals = Arc::new(Signals::new());
     let task = tokio::spawn(run_publisher(store.clone(), signals.clone(), fake.clone()));
@@ -276,10 +296,49 @@ async fn retries_with_capped_backoff_and_reads_the_newest_version() {
     assert_eq!(fake.versions(), [0, 200, 200, 200, 200, 200, 200, 200, 200]);
     assert_eq!(signals.bus_published_version(), Some(200));
     assert_eq!(signals.bus_publish_failures(), 8);
-    assert_eq!(
-        signals.bus_last_error().as_deref(),
-        Some("synthetic publish failure")
-    );
+    assert_eq!(signals.bus_last_error().as_deref(), Some(last_error));
+    task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn absent_bus_uses_long_backoff_and_success_resets_it() {
+    let (store, _dir) = store();
+    let fake = Arc::new(Fake {
+        refusal: Some(("target_unavailable", Some(false))),
+        ..Fake::default()
+    });
+    fake.failures_left.store(7, Ordering::Relaxed);
+    let signals = Arc::new(Signals::new());
+    let task = tokio::spawn(run_publisher(store.clone(), signals.clone(), fake.clone()));
+    settle().await;
+    assert_eq!(fake.versions(), [0]);
+    grade(&store, 100);
+
+    for (index, seconds) in [30, 60, 120, 240, 480, 900, 900].into_iter().enumerate() {
+        tokio::time::advance(Duration::from_millis(seconds * 1000 - 1)).await;
+        settle().await;
+        assert_eq!(
+            fake.versions().len(),
+            index + 1,
+            "the retry must wait the full {seconds} s"
+        );
+        tokio::time::advance(Duration::from_millis(1)).await;
+        settle().await;
+        assert_eq!(fake.versions().len(), index + 2);
+    }
+    assert_eq!(signals.bus_published_version(), Some(100));
+    assert_eq!(signals.bus_publish_failures(), 7);
+
+    fake.failures_left.store(1, Ordering::Relaxed);
+    grade(&store, 200);
+    settle().await;
+    assert_eq!(fake.versions().len(), 9);
+    tokio::time::advance(Duration::from_millis(29_999)).await;
+    settle().await;
+    assert_eq!(fake.versions().len(), 9);
+    tokio::time::advance(Duration::from_millis(1)).await;
+    settle().await;
+    assert_eq!(signals.bus_published_version(), Some(200));
     task.abort();
 }
 

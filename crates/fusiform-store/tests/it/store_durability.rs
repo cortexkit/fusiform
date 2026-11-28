@@ -99,28 +99,26 @@ fn a_live_store_survives_the_data_directory_being_tampered_with() {
         .record_observation(&observation(2_000))
         .expect("a read-only directory must not stop a live writer with open handles");
 
-    // Windows probes file creation directly because opening a store can change the directory ACL.
+    // A new open needs to create a lease and database. It must not clear an
+    // existing deny while securing the directory on Windows.
+    let blocked = CatalogStore::open(&StorageDescriptor {
+        module_id: "other".to_string(),
+        storage_namespace: "default".to_string(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite {
+            path: dir
+                .path()
+                .join("elsewhere.db")
+                .to_string_lossy()
+                .to_string(),
+        },
+    });
+    assert!(
+        blocked.is_err(),
+        "a new store must not open when the directory denies file creation"
+    );
     #[cfg(unix)]
-    {
-        let blocked = CatalogStore::open(&StorageDescriptor {
-            module_id: "other".to_string(),
-            storage_namespace: "default".to_string(),
-            isolation: Isolation::Module,
-            backend: StorageBackend::Sqlite {
-                path: dir
-                    .path()
-                    .join("elsewhere.db")
-                    .to_string_lossy()
-                    .to_string(),
-            },
-        });
-        assert!(
-            blocked.is_err(),
-            "a NEW open in a read-only directory must fail \u{2014} otherwise the \
-             permission change did nothing at all and this test proves nothing"
-        );
-        chmod(dir.path(), 0o700);
-    }
+    chmod(dir.path(), 0o700);
     #[cfg(windows)]
     fusiform_testkit::windows_acl::set_file_creation_denied(dir.path(), false);
 

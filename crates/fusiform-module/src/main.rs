@@ -663,6 +663,7 @@ mod store_boot_tests {
                 subc_capabilities: Vec::new(),
                 storage: Some(serde_json::to_value(descriptor).unwrap()),
                 machine_id: None,
+                resume_token: None,
             })
             .await;
 

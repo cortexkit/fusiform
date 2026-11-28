@@ -3,13 +3,18 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use cortexkit_bus_client::{BusClient, BusClientOptions};
+use cortexkit_bus_client::{BusClient, BusClientOptions, Error as BusError};
 use fusiform_store::CatalogStore;
 use subc_client_rs::{ConsumerOptions, SubcConsumer};
+use subc_protocol::error_codes::TARGET_UNAVAILABLE;
 
 use crate::signals::Signals;
 
 const RECHECK: Duration = Duration::from_secs(60);
+const TRANSIENT_RETRY: Duration = Duration::from_secs(1);
+const TRANSIENT_CAP: Duration = Duration::from_secs(60);
+const ABSENT_RETRY: Duration = Duration::from_secs(30);
+const ABSENT_CAP: Duration = Duration::from_secs(15 * 60);
 type PublishError = Box<dyn std::error::Error + Send + Sync>;
 
 /// The task owns the transport, so no writer or tool handler can wait on it.
@@ -60,13 +65,15 @@ impl EventPublisher for CatalogBus {
 /// Publish only a newly read high-water mark, with bounded retries and a poll
 /// backstop. Notifications carry only the version number, not catalog data,
 /// so a delayed wake cannot replay old facts.
+/// Older daemons that omit `expected_back` stay on the short retry schedule.
 pub async fn run_publisher(
     store: Arc<CatalogStore>,
     signals: Arc<Signals>,
     mut publisher: impl EventPublisher,
 ) {
     let mut published = None;
-    let mut backoff = Duration::from_secs(1);
+    let mut transient_backoff = TRANSIENT_RETRY;
+    let mut absent_backoff = ABSENT_RETRY;
     loop {
         let result = match store.catalog_version() {
             Ok(version) if published.is_none_or(|last| version > last) => {
@@ -86,12 +93,20 @@ pub async fn run_publisher(
         };
         if let Err(error) = result {
             signals.bus_publish_failed(&error);
+            let (delay, cap) = match error.downcast_ref::<BusError>() {
+                Some(BusError::RouteRefused {
+                    code,
+                    expected_back: Some(false),
+                }) if code == TARGET_UNAVAILABLE => (&mut absent_backoff, ABSENT_CAP),
+                _ => (&mut transient_backoff, TRANSIENT_CAP),
+            };
             // Write notifications must not bypass backoff during an outage.
-            tokio::time::sleep(backoff).await;
-            backoff = (backoff * 2).min(RECHECK);
+            tokio::time::sleep(*delay).await;
+            *delay = (*delay * 2).min(cap);
             continue;
         }
-        backoff = Duration::from_secs(1);
+        transient_backoff = TRANSIENT_RETRY;
+        absent_backoff = ABSENT_RETRY;
         tokio::select! {
             () = store.catalog_changed() => {},
             () = tokio::time::sleep(RECHECK) => {},

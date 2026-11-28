@@ -18,7 +18,7 @@ Tables, as shipped: `observation`, `era`, `catalog_version`,
 `effort_grade_era`, `workload_effort_era`, `override_grade_era`,
 `override_effort_grade_era`, `override_workload_effort_era`, `override_mark_era`,
 `store_release`, `store_document_era`,
-`cortexkit_schema_version`, `cortexkit_fence`.
+`cortexkit_schema_version`, `cortexkit_fence`, `cortexkit_owner`.
 
 - `observation`, `era`, `catalog_version`, `observation_artifact_event`,
   `plan_price_era`, `curated_model_era`, `quality_grade_era`, `model_mark_era`,
@@ -29,6 +29,8 @@ Tables, as shipped: `observation`, `era`, `catalog_version`,
 - `cortexkit_fence` belongs to the store crate and is created on the first
   fenced write, not at open. A store that has been opened and never written to
   does not have it, and that is not a fault.
+- `cortexkit_owner` belongs to the store crate and records the module ID and
+  storage namespace. A writer open with a different owner is refused.
 
 The list above is held against a real store in both directions by
 `schema_doc::the_design_note_names_the_tables_that_exist`: a table the store

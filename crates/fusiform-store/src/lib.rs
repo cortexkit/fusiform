@@ -75,7 +75,9 @@ static NEXT_STORE_INSTANCE: AtomicU64 = AtomicU64::new(1);
 /// What went wrong, at the domain's level rather than the driver's.
 #[derive(Debug)]
 pub enum CatalogError {
-    Store(StoreError),
+    // Keep the backend's owner and lease diagnostics out of the inline error
+    // size carried by every catalog result.
+    Store(Box<StoreError>),
     /// A write was rejected because a newer writer owns the database.
     ///
     /// Distinct from a generic backend error because it has a specific correct
@@ -144,7 +146,7 @@ impl From<StoreError> for CatalogError {
         // caller to detect by matching on a string.
         match e {
             StoreError::Fenced { .. } => CatalogError::Fenced,
-            other => CatalogError::Store(other),
+            other => CatalogError::Store(Box::new(other)),
         }
     }
 }
