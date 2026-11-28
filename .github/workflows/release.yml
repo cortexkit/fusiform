@@ -15,8 +15,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Set to the oldest public core that accepts Fusiform's registration.
-  FUSIFORM_REQUIRES_CORE: ''
+  # The oldest public core that accepts Fusiform's registration: the core
+  # release that installs the message bus, which Fusiform publishes to.
+  FUSIFORM_REQUIRES_CORE: '0.24.8'
   # Both Windows targets must pass their native test suite before packaging.
   # Without their archives, ck setup reports release-incomplete on Windows.
   FUSIFORM_PUBLISH_WINDOWS: 'true'
