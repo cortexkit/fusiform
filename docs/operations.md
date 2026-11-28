@@ -32,6 +32,11 @@ The supervisor's health report for the module (see
 [`module-surface.md`](module-surface.md) §6) answers whether it is running and
 fresh; `status` answers what it has been doing.
 
+The `ck models status` bus line shows publication progress and past errors, not
+live connectivity. For a continuous outage of at least 60 seconds, look for
+`bus_unreachable` in the supervisor's module health report. Catalog reads still
+work; reconnect clears the bus reason even if no new version has been published.
+
 An `implausible` failure means a safety check refused to write the document.
 Read the poll detail to distinguish an unexpected catalog shrink from a clock
 that moved backwards. Fusiform keeps serving the previous catalog. A

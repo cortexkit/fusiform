@@ -21,9 +21,11 @@
 
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use fusiform_core::FailureClass;
 use fusiform_store::CatalogStore;
+use tokio::time::Instant;
 
 /// No failure in the current streak.
 const CLASS_NONE: u64 = 0;
@@ -176,6 +178,9 @@ pub struct Signals {
     bus_published_version: AtomicI64,
     bus_publish_failures: AtomicU64,
     bus_last_error: arc_swap::ArcSwapOption<String>,
+    process_start: Instant,
+    /// Monotonic nanoseconds since process start, or BUS_CONNECTED.
+    bus_unreachable_since: AtomicU64,
     normalization_findings: arc_swap::ArcSwapOption<fusiform_protocol::NormalizationFindingsWire>,
 }
 
@@ -190,6 +195,7 @@ pub struct StoreQuickCheck {
 /// A value meaning "never happened", chosen so ordinary arithmetic on it is
 /// obviously wrong rather than subtly plausible.
 const NEVER: i64 = i64::MIN;
+const BUS_CONNECTED: u64 = u64::MAX;
 
 impl Default for Signals {
     fn default() -> Self {
@@ -230,8 +236,16 @@ impl Signals {
             bus_published_version: AtomicI64::new(NEVER),
             bus_publish_failures: AtomicU64::new(0),
             bus_last_error: arc_swap::ArcSwapOption::empty(),
+            process_start: Instant::now(),
+            bus_unreachable_since: AtomicU64::new(0),
             normalization_findings: arc_swap::ArcSwapOption::empty(),
         }
+    }
+
+    /// Include daemon startup before the signals were constructed in the bus age.
+    pub fn with_process_start(mut self, process_start: Instant) -> Self {
+        self.process_start = process_start;
+        self
     }
 
     /// Keep the configured URL even while requests are served from the seed.
@@ -332,6 +346,32 @@ impl Signals {
     /// Keep the last observed error even after recovery, like the failure count.
     pub fn bus_last_error(&self) -> Option<String> {
         self.bus_last_error.load().as_deref().cloned()
+    }
+
+    pub(crate) fn bus_connected(&self) {
+        self.bus_unreachable_since
+            .store(BUS_CONNECTED, Ordering::Relaxed);
+    }
+
+    pub(crate) fn bus_disconnected(&self) {
+        let _ = self.bus_unreachable_since.compare_exchange(
+            BUS_CONNECTED,
+            self.process_elapsed_ns(Instant::now()),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+    }
+
+    pub(crate) fn bus_unreachable_age(&self, now: Instant) -> Option<Duration> {
+        let since = self.bus_unreachable_since.load(Ordering::Relaxed);
+        (since != BUS_CONNECTED)
+            .then(|| Duration::from_nanos(self.process_elapsed_ns(now).saturating_sub(since)))
+    }
+
+    fn process_elapsed_ns(&self, now: Instant) -> u64 {
+        now.saturating_duration_since(self.process_start)
+            .as_nanos()
+            .min(u128::from(BUS_CONNECTED - 1)) as u64
     }
 
     pub(crate) fn set_normalization_findings(

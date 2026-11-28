@@ -26,6 +26,7 @@ use seed_fallback::SeedFallback;
 use subc_client_rs::{async_trait, HandlerOutcome, ModuleHandler, RequestCtx};
 use subc_protocol::session::HealthReport;
 use subc_protocol::ModuleHelloAckBody;
+use tokio::time::Instant;
 
 use fusiform_store::CatalogStore;
 
@@ -43,6 +44,7 @@ use fusiform_module::store_poll::StorePoller;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let process_start = Instant::now();
     // Answered BEFORE any argument validation, and before the subc connection
     // arg is required.
     //
@@ -74,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Ok(());
     }
 
-    let handler = Fusiform::with_settings(Settings::load()?);
+    let handler = Fusiform::with_settings(Settings::load()?, process_start);
     subc_client_rs::serve(fusiform_module::manifest(), handler).await?;
     Ok(())
 }
@@ -94,11 +96,12 @@ struct Fusiform {
 }
 
 impl Fusiform {
-    fn with_settings(settings: Settings) -> Self {
+    fn with_settings(settings: Settings, process_start: Instant) -> Self {
         let signals = match &settings.source {
             Source::ModelsDev => Signals::new(),
             Source::Store { url, .. } => Signals::for_store(url.clone()),
-        };
+        }
+        .with_process_start(process_start);
         Self {
             signals: Arc::new(signals),
             store: Mutex::new(None),
@@ -635,12 +638,15 @@ mod store_boot_tests {
     #[tokio::test]
     async fn store_cursor_read_failure_before_install_is_failing() {
         let dir = tempfile::tempdir().unwrap();
-        let mut module = Fusiform::with_settings(Settings {
-            source: Source::Store {
-                url: "https://example.test/".into(),
-                keys: Vec::new(),
+        let mut module = Fusiform::with_settings(
+            Settings {
+                source: Source::Store {
+                    url: "https://example.test/".into(),
+                    keys: Vec::new(),
+                },
             },
-        });
+            Instant::now(),
+        );
         module.after_store_check = Some(|store| {
             // Opening also reads the cursor. Fail only the later startup read.
             rusqlite::Connection::open(store.path())

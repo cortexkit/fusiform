@@ -5,6 +5,7 @@ use cortexkit_store_types::{Isolation, StorageBackend, StorageDescriptor};
 use fusiform_core::{BoundaryKind, Timestamp};
 use fusiform_store::{FactKey, NewEra, QualityGrade};
 use serde_json::{json, Value};
+use subc_protocol::session::HealthStatus;
 
 #[derive(Default)]
 struct Fake {
@@ -343,6 +344,219 @@ async fn absent_bus_uses_long_backoff_and_success_resets_it() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn bus_unreachable_degrades_at_sixty_seconds_and_recovers() {
+    let (store, _dir) = store();
+    let fake = Arc::new(Fake {
+        refusal: Some(("target_unavailable", Some(false))),
+        ..Fake::default()
+    });
+    fake.failures_left.store(2, Ordering::Relaxed);
+    let signals = Arc::new(Signals::new());
+    signals.store_opened();
+    signals.observed(100);
+    let task = tokio::spawn(run_publisher(store, signals.clone(), fake.clone()));
+    settle().await;
+    tokio::time::advance(Duration::from_secs(30)).await;
+    settle().await;
+    assert_eq!(signals.bus_publish_failures(), 2);
+
+    tokio::time::advance(Duration::from_secs(29)).await;
+    assert_eq!(
+        crate::health::report(&signals, 100).status,
+        HealthStatus::Ok
+    );
+    tokio::time::advance(Duration::from_secs(1)).await;
+    let health = crate::health::report(&signals, 100);
+    assert_eq!(health.status, HealthStatus::Degraded);
+    assert!(health.detail.unwrap().starts_with("bus_unreachable:"));
+    assert_eq!(
+        health.metrics.unwrap()["process_bus_unreachable_age_ms"],
+        60_000
+    );
+
+    tokio::time::advance(Duration::from_secs(30)).await;
+    settle().await;
+    assert_eq!(signals.bus_published_version(), Some(0));
+    let health = crate::health::report(&signals, 100);
+    assert_eq!(health.status, HealthStatus::Ok);
+    assert_eq!(
+        health
+            .metrics
+            .unwrap()
+            .get("process_bus_unreachable_age_ms"),
+        Some(&Value::Null)
+    );
+    task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn bus_unreachable_brief_startup_failure_does_not_degrade() {
+    let (store, _dir) = store();
+    let fake = Arc::new(Fake::default());
+    fake.failures_left.store(1, Ordering::Relaxed);
+    let signals = Arc::new(Signals::new());
+    signals.store_opened();
+    signals.observed(100);
+    let task = tokio::spawn(run_publisher(store, signals.clone(), fake));
+    settle().await;
+    assert_eq!(signals.bus_publish_failures(), 1);
+    assert_eq!(
+        crate::health::report(&signals, 100).status,
+        HealthStatus::Ok
+    );
+
+    tokio::time::advance(TRANSIENT_RETRY).await;
+    settle().await;
+    assert_eq!(signals.bus_published_version(), Some(0));
+    tokio::time::advance(RECHECK).await;
+    assert_eq!(
+        crate::health::report(&signals, 100).status,
+        HealthStatus::Ok
+    );
+    task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn bus_unreachable_counts_startup_even_before_the_first_attempt_finishes() {
+    let process_start = tokio::time::Instant::now();
+    tokio::time::advance(Duration::from_secs(10)).await;
+    let (store, _dir) = store();
+    let signals = Arc::new(Signals::new().with_process_start(process_start));
+    signals.observed(100);
+    let fake = Arc::new(Fake {
+        blocked: true,
+        ..Fake::default()
+    });
+    let task = tokio::spawn(run_publisher(store, signals.clone(), fake.clone()));
+    settle().await;
+    assert_eq!(fake.versions(), [0]);
+    tokio::time::advance(Duration::from_secs(50)).await;
+    assert_eq!(signals.bus_publish_failures(), 0);
+    assert_eq!(signals.bus_published_version(), None);
+    let health = crate::health::report(&signals, 100);
+    assert_eq!(health.status, HealthStatus::Failing);
+    let detail = health.detail.unwrap();
+    assert!(detail.starts_with("store is not open"));
+    assert!(detail.contains("bus_unreachable:"));
+
+    signals.store_opened();
+    assert_eq!(
+        crate::health::report(&signals, 100).status,
+        HealthStatus::Degraded
+    );
+    task.abort();
+}
+
+struct WatchedFake {
+    publisher: Arc<Fake>,
+    replacements: watch::Receiver<u64>,
+    state: Arc<Mutex<watch::Receiver<NatsConnectionState>>>,
+}
+
+#[async_trait]
+impl EventPublisher for WatchedFake {
+    async fn connect(
+        &mut self,
+        signals: Arc<Signals>,
+    ) -> Result<Option<ConnectionMonitor>, PublishError> {
+        let state = Arc::clone(&self.state);
+        Ok(Some(Box::pin(watch_connection(
+            signals,
+            self.replacements.clone(),
+            move || state.lock().unwrap().clone(),
+        ))))
+    }
+
+    async fn publish(&mut self, msg_id: &str, body: Vec<u8>) -> Result<(), PublishError> {
+        self.publisher.publish(msg_id, body).await
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn bus_unreachable_tracks_idle_disconnect_reconnect_and_replacement() {
+    use NatsConnectionState::{Closed, Connected, Disconnected};
+
+    let (store, _dir) = store();
+    let fake = Arc::new(Fake::default());
+    let signals = Arc::new(Signals::new());
+    signals.store_opened();
+    signals.observed(100);
+    let (state_tx, state_rx) = watch::channel(Connected);
+    let state = Arc::new(Mutex::new(state_rx));
+    let (replace, replacements) = watch::channel(0);
+    let task = tokio::spawn(run_publisher(
+        store,
+        signals.clone(),
+        WatchedFake {
+            publisher: fake.clone(),
+            replacements,
+            state: state.clone(),
+        },
+    ));
+    settle().await;
+    tokio::time::advance(RECHECK).await;
+    assert_eq!(
+        crate::health::report(&signals, 100).status,
+        HealthStatus::Ok
+    );
+
+    state_tx.send_replace(Disconnected);
+    settle().await;
+    tokio::time::advance(Duration::from_secs(59)).await;
+    assert_eq!(
+        crate::health::report(&signals, 100).status,
+        HealthStatus::Ok
+    );
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert_eq!(
+        crate::health::report(&signals, 100).status,
+        HealthStatus::Degraded
+    );
+
+    state_tx.send_replace(Connected);
+    settle().await;
+    assert_eq!(
+        crate::health::report(&signals, 100).status,
+        HealthStatus::Ok
+    );
+    state_tx.send_replace(Closed);
+    settle().await;
+    tokio::time::advance(RECHECK).await;
+    assert_eq!(
+        crate::health::report(&signals, 100).status,
+        HealthStatus::Degraded
+    );
+
+    let (replacement_tx, replacement_rx) = watch::channel(Connected);
+    *state.lock().unwrap() = replacement_rx;
+    replace.send_replace(1);
+    settle().await;
+    assert_eq!(
+        crate::health::report(&signals, 100).status,
+        HealthStatus::Ok
+    );
+
+    drop(replacement_tx);
+    settle().await;
+    tokio::time::advance(RECHECK).await;
+    assert_eq!(
+        crate::health::report(&signals, 100).status,
+        HealthStatus::Degraded
+    );
+    assert_eq!(
+        fake.versions(),
+        [0],
+        "connection changes must not republish the current version"
+    );
+    assert_eq!(
+        signals.bus_publish_failures(),
+        0,
+        "idle disconnects were not publish attempts"
+    );
+    task.abort();
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_unsignalled_advance_is_found_by_the_periodic_check() {
     let (store, _dir) = store();
     let fake = Arc::new(Fake::default());
@@ -428,7 +642,9 @@ async fn tool_reply_does_not_wait_for_the_bus_and_status_exposes_counters() {
     signals.observed(100);
     let before = crate::health::report(&signals, 100).status;
     signals.bus_published(123);
+    signals.bus_connected();
     signals.bus_publish_failed(&std::io::Error::other("synthetic status error"));
+    signals.bus_disconnected();
     let response = crate::serve_request(
         store,
         signals.clone(),
@@ -445,7 +661,7 @@ async fn tool_reply_does_not_wait_for_the_bus_and_status_exposes_counters() {
     let health = crate::health::report(&signals, 100);
     assert_eq!(
         health.status, before,
-        "bus failures cannot degrade serving health"
+        "a fresh bus failure is inside the health grace period"
     );
     let metrics = serde_json::to_value(health).unwrap();
     assert_eq!(metrics["metrics"]["process_bus_published_version"], 123);

@@ -587,6 +587,7 @@ dependencies = [
  "async-trait",
  "blake3",
  "cortexkit-bus-client",
+ "cortexkit-bus-nats",
  "cortexkit-store-types",
  "fusiform-core",
  "fusiform-curate",

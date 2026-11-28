@@ -184,8 +184,8 @@ fn a_fresh_install_still_reports_no_write() {
 /// The defect was not either value: it was that every test used `Default` and
 /// production used `new()`, so the sentinel under test was never the sentinel
 /// that ships. A test can only catch what it constructs.
-#[test]
-fn the_two_constructors_agree_about_never() {
+#[tokio::test(start_paused = true)]
+async fn the_two_constructors_agree_about_never() {
     let now = 10 * HOUR;
     let from_new = health::report(&Signals::new(), now).metrics.unwrap();
     let from_default = health::report(&Signals::default(), now).metrics.unwrap();
@@ -340,6 +340,7 @@ fn the_metric_names_are_pinned() {
         "process_bus_last_error",
         "process_bus_publish_failures",
         "process_bus_published_version",
+        "process_bus_unreachable_age_ms",
         "process_consecutive_failures",
         "process_consecutive_unpersisted_polls",
         "process_poll_attempts",

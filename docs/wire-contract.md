@@ -1290,8 +1290,10 @@ corrections, and artifact marks or retractions do not advance it. Use
 `catalog_version` when an older producer does not report
 `rates_version` (decoded as zero).
 
-The three bus fields are also health metrics and never make health Degraded.
-Older responses decode with null versions/errors and a zero failure count.
+The three bus fields also appear as process-scoped health metrics. They do not
+report current connectivity; see [`module-surface.md`](module-surface.md) §6
+for the `bus_unreachable` health reason. Older responses decode with null
+versions/errors and a zero failure count.
 
 ### Catalog-change event
 

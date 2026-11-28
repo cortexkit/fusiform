@@ -11,9 +11,9 @@
 //!
 //! - **Ok** — fusiform observed the upstream recently enough that its catalog
 //!   is current, and it can answer reads.
-//! - **Degraded** — fusiform can answer reads, but its knowledge is aging or
-//!   the startup page check did not pass. Serving continues; the detail names
-//!   the problem and the operator's next step. This is not a dispatch outage;
+//! - **Degraded** — fusiform can answer reads, but its knowledge is aging, a
+//!   startup check failed, or bus notifications are unavailable. Serving
+//!   continues and the detail names the problem. This is not a dispatch outage;
 //!   escalating it as one trains an operator to ignore it.
 //! - **Failing** — fusiform cannot do its job at all: no store, so no read can
 //!   be answered. This is dispatch impairment and is the only state that should
@@ -22,6 +22,8 @@
 //! Fusiform is unusual among modules in that stale data is its main failure
 //! mode and is *not* an outage — a catalog nobody can read is far worse than
 //! one that is six hours old.
+
+use std::time::Duration;
 
 use subc_protocol::session::{HealthReport, HealthStatus};
 
@@ -65,6 +67,11 @@ const STORE_HEAD_STALE_AFTER_MS: i64 = 4 * crate::store_poll::POLL_INTERVAL_MS;
 /// In-flight polls have not reached a verdict and do not affect this threshold.
 pub const UNRECORDED_TICKS_DEGRADED: u64 = 2;
 
+// Allow a ck-bus restart to finish without briefly degrading the module.
+const BUS_UNREACHABLE_AFTER: Duration = Duration::from_secs(60);
+const BUS_UNREACHABLE_DETAIL: &str =
+    "bus_unreachable: catalog change notifications cannot reach ck-bus; catalog reads are unaffected";
+
 /// What health says when the backup enrollment descriptor was not written.
 pub const CATALOG_WRITE_FAILED_DETAIL: &str =
     "the backup enrollment descriptor (engram-catalog.json) could not be \
@@ -74,9 +81,8 @@ pub const CATALOG_WRITE_FAILED_DETAIL: &str =
 
 /// Build a health report from mechanical signals alone.
 ///
-/// `now_ms` is passed in rather than read from the clock inside, so the
-/// arithmetic is testable at an exact instant. A health path that reads the
-/// clock itself can only be tested by sleeping.
+/// `now_ms` is the wall time for catalog history. Bus outage age uses the
+/// monotonic clock so wall time corrections cannot advance or postpone it.
 pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
     let mut report = serving_report(signals, now_ms);
     if let Some(error) = signals.store_poll_error() {
@@ -116,6 +122,22 @@ pub fn report(signals: &Signals, now_ms: i64) -> HealthReport {
         report.detail = Some(match report.detail.take() {
             Some(d) if report.status != HealthStatus::Ok => format!("{d}; also, {detail}"),
             _ => detail,
+        });
+        if report.status == HealthStatus::Ok {
+            report.status = HealthStatus::Degraded;
+        }
+    }
+    let bus_age = signals.bus_unreachable_age(tokio::time::Instant::now());
+    if let Some(metrics) = &mut report.metrics {
+        metrics["process_bus_unreachable_age_ms"] =
+            serde_json::json!(bus_age.map(|age| age.as_millis()));
+    }
+    if bus_age.is_some_and(|age| age >= BUS_UNREACHABLE_AFTER) {
+        report.detail = Some(match report.detail.take() {
+            Some(d) if report.status != HealthStatus::Ok => {
+                format!("{d}; also, {BUS_UNREACHABLE_DETAIL}")
+            }
+            _ => BUS_UNREACHABLE_DETAIL.to_string(),
         });
         if report.status == HealthStatus::Ok {
             report.status = HealthStatus::Degraded;
